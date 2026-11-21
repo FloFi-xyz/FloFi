@@ -117,8 +117,27 @@ export function workflowSequence(workflow: Workflow, lint: (workflow: Workflow) 
  * alone. Others (positions, the Solana composition, fork and engineering paths) are not offered in a sequence: the owner is told which step.
  */
 export const SEQUENCE_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'solana-transfer', 'transfer', 'supply', 'uniswap-pool', 'solana-pool']);
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the owner-wallet runtimes of a SINGLE EVM card whose action FloFi's user-funded execution groups
+ * build (`workflow-runs/execution-groups.ts` USER_FUNDED_BUILDABLE eip155): a catalog swap, a certified Router bridge, a transfer, an Aave supply /
+ * borrow / repay / withdraw. Such a card is offered the Editor's one-confirmation run (its Review still decides; anything it cannot batch keeps
+ * the card's own flow). The universal Router, Uniswap positions and Solana cards keep their own flow (Solana cards already sign once).
+ */
+export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'transfer', 'supply']);
+/**
+ * Whether a single card that took the whole-workflow path goes back to its own flow: never once its run started (a started run always stays); when
+ * its Review is not one grouped interaction or refuses the batch (its own flow re-checks, simulates and reviews it and shows its own errors); and
+ * when the Review could not answer at all (rate limited, an RPC or server failure: final workflow review), since its own flow was always available.
+ */
+export function singleCardFallsBack(run: { readonly started: boolean; readonly review: { readonly mode: string; readonly refusal: unknown } | null;
+  readonly stepByStep: boolean; readonly error: string | null; readonly following: boolean }): boolean {
+  if (run.started) return false;
+  // No connected wallet is not a Review that could not answer: the existing connect reason stays where it is (never a silent flip back and forth).
+  return run.review ? run.review.mode === 'STEP_BY_STEP' || run.review.refusal !== null
+    : run.stepByStep || run.error !== null && run.error !== 'EVM_WALLET_REQUIRED' && !run.following;
+}
 /** Runtimes whose reconciled record proves the delivered amount a funded later step spends (`deliveredByRecord`). */
-export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply']);
+export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply', 'workflow-run']);
 /** The canonical form of a node, to prove an executed step is still exactly what the workflow holds. */
 export const stepNodeKey = (node: Node) => JSON.stringify(node);
 /**
@@ -211,6 +230,21 @@ export function stepRuntimeWorkflow(step: SequenceStep, before: readonly Complet
   return { bound, workflow: boundProjection(step, bound, context, before) };
 }
 
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: what a reconciled workflow-run step received for exactly `output` (native units), from the run's
+ * own reconciled step outcome (`received`, keyed like `delegation/steps.ts` `assetKey`: `<chain>/erc20:<address>`, `<chain>/native:ETH`,
+ * `<chain>/token:<mint>`); null when nothing is proven for exactly that asset.
+ */
+export function deliveredByRun(received: readonly { readonly asset: string; readonly amount: string }[], output: SequenceAsset | null): string | null {
+  if (!output) return null;
+  const evm = output.chainId.startsWith('eip155:');
+  const key = output.address === null ? evm ? `${output.chainId}/native:ETH` : null : `${output.chainId}/${output.chainId.startsWith('solana:') ? 'token' : 'erc20'}:${output.address}`;
+  if (key === null) return null;
+  const same = (asset: string) => evm ? asset.toLowerCase() === key.toLowerCase() : asset === key;
+  const hits = received.filter(item => same(item.asset));
+  return hits.length === 1 && UNITS.test(hits[0]!.amount) ? hits[0]!.amount : null;
+}
+
 /** What a step's reconciled record proves it delivered, in native units of `output`; null when nothing is proven for exactly that asset. */
 export function deliveredByRecord(kind: string, record: unknown, output: SequenceAsset | null): string | null {
   if (!output || !isObject(record)) return null;
@@ -236,6 +270,10 @@ export function deliveredByRecord(kind: string, record: unknown, output: Sequenc
     const units = isObject(observation) && observation.verdict === 'RECONCILED' ? observation.outputReceived : null;
     return same(record.review.chain, token.mint) && token.decimals === output.decimals && typeof units === 'string' && UNITS.test(units) ? units : null;
   }
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card's one-step workflow run (its server-proven record, `editorSingleRunRecord`).
+  if (kind === 'workflow-run' && record.verdict === 'RECONCILED' && Array.isArray(record.received))
+    return deliveredByRun(record.received.filter((item): item is { asset: string; amount: string } => isObject(item) && typeof item.asset === 'string'
+      && typeof item.amount === 'string'), output);
   if (kind === 'supply' && record.verdict === 'RECONCILED' && isObject(record.review) && (record.review.borrow || record.review.withdraw) && Array.isArray(record.observations)) {
     const observation = record.observations.at(-1), units = isObject(observation) && observation.verdict === 'RECONCILED' ? observation.walletDelta : null;
     return same(record.review.chain, record.review.asset) && typeof units === 'string' && UNITS.test(units) ? units : null;

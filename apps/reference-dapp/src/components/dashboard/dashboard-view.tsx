@@ -4,6 +4,7 @@
 import { useLocale } from '../../i18n/locale';
 // Activity/attention structure adapted from the delivery; the canonical shell owns all controls.
 import type { DashboardConnection, DashboardRunView } from '../../lib/dashboard/types';
+import { workflowRunId } from '../../lib/dashboard/run-mapping';
 import { DashboardStatusBadge } from './dashboard-status';
 import { HistoryActions, type HistoryChange } from '../history-actions';
 import { createContext, useContext, useEffect, useId, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -36,6 +37,11 @@ function openRunLink(openRun: (runId: string) => void, runId: string) {
   return (event: MouseEvent<HTMLAnchorElement>) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); openRun(runId); } };
 }
 const runHref = (runId: string) => `/app/dashboard/runs/${encodeURIComponent(runId)}`;
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): a listed single-card attempt (`wfr_`) has no Dashboard record page (its
+ * detail is not found), so its row links to none; its Archive/Delete stay in the row. The current run keeps its own in-app view.
+ */
+const hasRecordPage = (view: DashboardRunView) => view.current || !workflowRunId(view.run.runId);
 function runAction(flow: string) {
   return /crosschain|bridge/.test(flow) ? 'bridge' : /swap|jupiter|cow/.test(flow) ? 'swap'
     : /supply/.test(flow) ? 'supply' : /withdraw/.test(flow) ? 'withdraw' : /repay/.test(flow) ? 'repay'
@@ -71,8 +77,8 @@ function RunCard({ view, openRun, history, attention = false, inHistory = false,
       </button>}
       metadata={(facts.length > 0 || updated) && <>{facts.join(' · ')}{facts.length > 0 && updated ? ' · ' : ''}{updated && <time dateTime={view.run.updatedAt!}>{updated}</time>}</>}>
       <DashboardStatusBadge status={view.status}/>
-      <a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)}
-        aria-label={tr(view.current ? 'View current run: {0}' : 'Open record: {0}', label)}>{tr(view.current ? 'View current run' : 'Open')}</a>
+      {hasRecordPage(view) && <a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)}
+        aria-label={tr(view.current ? 'View current run: {0}' : 'Open record: {0}', label)}>{tr(view.current ? 'View current run' : 'Open')}</a>}
       {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change(view.run.runId)} changed={disposition => history.changed(view.run.runId, disposition)}/>}
     </WorkflowRow>
     <div id={detailsId} className="ux-record-details" hidden={!expanded}>
@@ -107,7 +113,7 @@ function NeedsYouRow({ view, openRun }: { view: DashboardRunView; openRun(runId:
     <div className="ux-row-main"><h3 className="ux-row-name">{label}</h3>
       <p className="ux-row-meta">{tr(view.status)}{updated && <> · <time dateTime={view.run.updatedAt!}>{updated}</time></>}</p></div>
     {/* UX-01: in the row's actions, so it wraps beside or below the name like every other row action. */}
-    <div className="ux-row-actions"><a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)} aria-label={tr('See what to do: {0}', label)}>{tr('See what to do')}</a></div>
+    <div className="ux-row-actions">{hasRecordPage(view) && <a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)} aria-label={tr('See what to do: {0}', label)}>{tr('See what to do')}</a>}</div>
   </div>;
 }
 

@@ -39,6 +39,27 @@ describe('shared Canvas execution controls', () => {
     Object.assign(props.source.state, { busy: true }); read();
     Object.assign(props.source.state, { busy: false }); expect(read().requesting).toBe(false);
   });
+  it('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a store following its submitted request by itself offers no manual check meanwhile', () => {
+    props.progress = { started: true, restored: false, local: true, steps: [{ operations: [{ state: 'pending' }] }] as never, active: null, completed: 0,
+      label: 'Submitted', message: '', state: 'active', runKey: 'run-1', fingerprint: 'run-1', busy: false };
+    const check = vi.fn();
+    props.execution = { ...props.execution, check } as typeof props.execution;
+    Object.assign(props.source.state, { following: true });
+    expect(read()).toMatchObject({ verifying: true, canCheck: false });
+    read().checkStatus();
+    expect(check).not.toHaveBeenCalled();
+    // The follow ended without a final outcome: the existing manual check is the recovery path again (still read-only).
+    Object.assign(props.source.state, { following: false });
+    expect(read()).toMatchObject({ verifying: false, canCheck: true });
+    expect(props.execution.start).not.toHaveBeenCalled();
+  });
+  it('a request of a previous workflow still being followed never blocks a new, separate workflow (HOTFIX-WORKFLOW-CONCURRENCY-001)', () => {
+    // A new workflow: the earlier run is detached from it (Incident F), while the store still follows that earlier request.
+    props.progress = { started: true, restored: false, local: true, steps: [{ operations: [{ state: 'pending' }] }] as never, active: null, completed: 0,
+      label: 'Submitted', message: '', state: 'active', runKey: 'run-1', fingerprint: 'run-1', busy: false, detached: true };
+    Object.assign(props.source.state, { following: true });
+    expect(read()).toMatchObject({ verifying: false, live: null });
+  });
   it('rechecks expiry at the click boundary without asking the wallet', () => {
     const controls = read(); vi.setSystemTime(reviewNow + 120001); controls.request(false);
     expect(props.execution.start).not.toHaveBeenCalled();

@@ -53,7 +53,9 @@ tenant (e.g. a new Preview branch) still inserts.
 
 ## 2. Certificates
 
-`CERTIFIED_FORWARD_MIGRATIONS` in `packages/cloud-runtime/src/migrations.ts`:
+`CERTIFIED_FORWARD_MIGRATIONS` in `packages/cloud-runtime/src/migrations.ts`. While a build still ships the same base, a later forward migration
+**extends** that base's certificate (contiguously) and never edits or removes an identity already certified: 0030, 0031, 0032 and 0033 extended
+the base-28 certificate this way, and `forward-compatibility.test.ts` pins the released identities.
 
 ```ts
 { base: { version: 11, name: 'delegated_execution', sha256: '0c6572af…' },              // the build assessed
@@ -1002,7 +1004,7 @@ The application still ships 0028 for the ordinary deployment migration. Its exac
 2. Before activating 0030, verify that each database consumer and restart path runs the certificate-bearing release. Keep a build with this exact certificate available for rollback. Confirm the intended database and tenant out of band.
 3. From that reviewed checkout, with a direct `DATABASE_MIGRATION_URL` set in the operator environment, run `node apps/reference-dapp/backend/admin-cli.ts finops-sync-migrate --tenant default`. For an isolated preview, pass `--preview-branch <branch>` instead. The command requires exact existing schema 29, validates both SQL digests and the history, and applies only the missing certified migration. A successful repeat applies nothing. Do not edit the ledger or issue ad hoc DDL.
 4. Configure dedicated billing credentials and enable `FLOFI_FINOPS_SYNC=enabled` on the existing worker only after activation. Set the matching `FLOFI_FINOPS_BILLING_TENANT`. The default cadence is 24 hours and `FLOFI_FINOPS_SYNC_HOURS` accepts whole hours from 6 through 168. On the first activation, verify provider scope and currency using the Admin coverage and an independently obtained billing extract.
-5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Once 0031 (§23) is also active, only a build carrying the §23 certificate (0029–0031) is a rollback target. Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.
+5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Once 0031 (§23) is also active, only a build carrying the §23 certificate (0029–0031) is a rollback target; once 0032 (§24) is active, only a build carrying the §24 certificate (0029–0032); once 0033 (§25) is active, only a build carrying the §25 certificate (0029–0033). Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.
 
 ## 23. Certificate 0031_position_history_purge
 
@@ -1045,4 +1047,130 @@ never-authorized simulation deleted through the authenticated owner-history rout
 
 **Activation, rollout and rollback**: [RELEASE-POSITION-PURGE-0031.md](./RELEASE-POSITION-PURGE-0031.md). Not applied anywhere by this build.
 Once 0031 is active, a build carrying only the §22 certificate (0029–0030) refuses the database: §22's rollback targets become builds carrying this
-certificate.
+certificate. Once 0032 (§24) is also active, a build carrying only this section's certificate (0029–0031) refuses the database too: the rollback
+targets then become builds carrying the §24 certificate (0029–0032), and once 0033 (§25) is active, builds carrying the §25 certificate (0029–0033).
+
+## 24. Certificate 0032_single_step_runs
+
+| Base history | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0028 `saved_recipients` plus certified 0029 `finops_ledger`, 0030 `finops_sync` and 0031 `position_history_purge` | 0032 `single_step_runs` | `1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c` |
+
+BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 lets the Editor run ONE financial card as a one-step USER_FUNDED workflow run (one owner confirmation,
+one wallet batch the owner's own wallet authorizes and pays for). 0015's column check limits a run to 2..8 steps, so the database refuses a one-step
+run today. 0032 widens that check and changes nothing else:
+
+- It **widens only `workflow_runs_step_count_check`** (0015's column check, verified by name and definition on a migrated schema-31 database) from
+  `step_count BETWEEN 2 AND 8` to `step_count BETWEEN 1 AND 8`, dropping and re-adding it under the same name in one `ALTER TABLE` statement —
+  the shape 0010/0022/0023 used. No table, column, index, function, trigger, privilege or row is added, changed or removed; every other constraint
+  is byte-identical (proven by a catalog diff).
+- 0015's `workflow_run_transition` trigger is unchanged and already bounds a one-step run: `current_step` starts at 0 and can never reach
+  `step_count` (`NEW.current_step >= OLD.step_count` refuses 1), and `step_count` stays immutable. 0023's group rules (USER_FUNDED only, the
+  owner's own wallet as fee payer) apply unchanged to the single group covering step 0. `workflow_run_steps` (0..7) is unchanged.
+- Every row valid under 0031 is valid under 0032 unchanged, so the `ADD CONSTRAINT` validation scan cannot fail on existing data.
+  `SET LOCAL lock_timeout = '5s'`: the short ACCESS EXCLUSIVE lock on `workflow_runs` waits at most 5 s for an open transaction holding the table,
+  then the migration rolls back completely (proven). While it holds the lock, every read of `workflow_runs` (status polls, owner history, the FinOps
+  report) and every insert into `workflow_run_steps` / `workflow_run_groups` / `workflow_run_events` (their foreign keys need `workflow_runs`) waits
+  for that short transaction and its validation scan. Approval-handoff writes do not.
+
+**Compatibility.** A v28 build carrying this certificate serves schema 32; a build carrying only the previous certificate (0029–0031, i.e. `main`
+before this build) refuses it with `MIGRATION_HISTORY_MISMATCH`, so this build must serve every database consumer before 0032 is applied.
+Builds before this one never create one-step runs: their claim path refuses fewer than two steps (`WORKFLOW_RUN_NOT_SEQUENTIAL`), so nothing they
+write depends on the widened bound. The application enables single-card runs only when the ledger holds exactly this 0032 identity
+(`singleStepRunsSupported`). The v28 runner never changes a database ahead of it, and the ordinary deployment migration still ships schema 28.
+
+**Cold starts on schema 32.** `apps/reference-dapp/backend/schema-compatibility.pg.test.ts` applies the extended certificate (0029–0032). It runs the Railway API, the worker, the real `main.ts` / CLI cold starts and the Vercel paths (embedded runtime, platform state, Developer API, MCP OAuth) on schema 32 (3/3 locally).
+
+**Evidence** (disposable PostgreSQL 16 locally; CI runs PostgreSQL 18): `packages/cloud-runtime/test/certificate-0032.pg.test.ts` — exact bytes and
+certificate (one `ALTER TABLE` and the lock timeout, nothing else), schema 32 served for the v28 build only through it (the previous certificate,
+the empty certificate set and the strict check refuse it; the v28 runner and an edited 0032 change nothing), a catalog diff of exactly one changed
+constraint (columns, other constraints, indexes, functions, triggers and privileges identical), existing 2-, 3- and 8-step runs, steps and groups
+surviving unchanged, a one-step run refused at schema 31 and accepted at schema 32 and driven through 0015's unchanged trigger to COMPLETED,
+0, 9 and −1 steps still refused, a failing 0032 and a lock timeout (a reader holding `workflow_runs`) rolling back completely, and the documented
+emergency reversal restoring the exact schema-31 catalog while no one-step run exists and refusing otherwise. `certificate-0031.pg.test.ts` keeps
+its proofs on the extended certificate. `apps/reference-dapp/backend/single-step-runs-migrate.pg.test.ts` — the operator command refusing
+schemas below 31 (never applying 0029–0031 itself), applying only 0032 on exact schema 31, a rerun applying nothing, and the 0029, 0030 and 0031
+commands applying nothing on schema 32.
+
+**Activation, rollout and rollback**: [RELEASE-SINGLE-STEP-RUNS-0032.md](./RELEASE-SINGLE-STEP-RUNS-0032.md). Not applied anywhere by this build.
+Once 0033 (§25) is also active, a build carrying only this section's certificate (0029–0032) refuses the database: the rollback targets then become
+builds carrying the §25 certificate (0029–0033), and the 0032 emergency reversal refuses while 0033 is the newest migration (0033 is reversed first,
+and only while no attempt was ever deleted).
+
+## 25. Certificate 0033_workflow_run_purge
+
+| Base history | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0028 `saved_recipients` plus certified 0029 `finops_ledger`, 0030 `finops_sync`, 0031 `position_history_purge` and 0032 `single_step_runs` | 0033 `workflow_run_purge` | `26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2` |
+
+BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (owner requirement): a single Editor card runs as a one-step USER_FUNDED workflow run (§24), whose
+records 0015/0023 keep append-only, so an attempt the owner abandoned before anything was sent could only be archived. 0033 lets the **owner** delete
+exactly such an attempt from History, decided by the database under the run's row lock, and changes nothing else:
+
+- **Two new tables.** `workflow_run_purge_audit`, the identity tombstone (tenant, run id, handoff id, the EVM owner, the shape, the final state,
+  the run's creation time, the number of events deleted, when; no strategy, amount, recipient, hash, code or signature), immutable through the
+  existing `reject_append_only_mutation()` (one new trigger on it). `workflow_run_purge_permits`, a transaction-scoped private capability with a
+  foreign key to the tombstone. `REVOKE ALL … FROM PUBLIC` on both. The tombstone's foreign key to `tenants` takes a short SHARE ROW EXCLUSIVE lock
+  during activation, as §22's did; a conflicting tenant write can delay activation by up to five seconds, then the migration rolls back (proven).
+- **One redefined function body: `workflow_run_append_only()`** (0015). `CREATE OR REPLACE`, same signature, same EXECUTE privilege (a trigger
+  function cannot be called directly), now `SECURITY DEFINER` with `SET search_path = pg_catalog, public, pg_temp` so the private permit table is
+  read whoever deletes. It keeps 0015's exact refusal — `WORKFLOW_RUN_RECORD_APPEND_ONLY`, SQLSTATE `23000` — for every UPDATE and every DELETE,
+  except a DELETE of a row of exactly the run a permit names inside the very transaction holding that permit (`txid_current()`). Its four triggers
+  (0015's three, 0023's one) are untouched. This is 0031's precedent (a redefined body behind an unchanged signature): **compatible with the v28
+  build**, because no v28 code path ever deletes or updates a workflow-run record — every such statement fails before and after 0033 with the same
+  message and SQLSTATE (proven for each of the four tables and for UPDATE of an event), and a v28 build never creates a permit.
+- **One new function: `purge_unsubmitted_workflow_run(tenant, owner, id) RETURNS jsonb`**, `SECURITY DEFINER`, the same `search_path`, EXECUTE revoked
+  from PUBLIC (the owner role only). It locks the run (as every run-store write), its steps and groups (as cancellation), the approval handoff, the
+  run's `workflow-run.advance` work items, then the tenant's privacy lock (as legal-hold placement and erasure), and answers a closed result:
+  `{"ok":true,"disposition":"DELETED"}` (also on an idempotent repeat: the tombstone), `{"ok":false,"code":"RUN_NOT_FOUND"}` (no such run of this
+  owner in this tenant), or `{"ok":false,"code":"RUN_DELETE_REFUSED"}` with reason `EXECUTION_ACTIVITY`, `AUTHORIZATION`, `DEPENDENCY` or none
+  (operator records: a legal hold, a Support text; open or structurally ineligible runs). Deletable are only a one-step `EDITOR_SESSION` run of an
+  EVM owner, never authorized or completed, whose handoff is this owner's own Editor claim (SEQUENTIAL, no bound execution runs), in one of two
+  shapes, each checked against the run's **whole** append-only history through a closed allowlist of the exact event forms the run store writes
+  (kind, step index, code and detail keys; anything else refuses):
+  - `NO_WALLET_REQUEST` — CANCELLED, FAILED or EXPIRED before any wallet request existed: mode none or USER_FUNDED, at most one EVM wallet-batch
+    group that was never prepared, authorized, submitted or reconciled (BLOCKED or SKIPPED, no artifact), events only `RUN_CREATED`, `MODE_CHOSEN`,
+    `GROUP_STATE` BLOCKED/SKIPPED, `STEP_STATE` BLOCKED/SKIPPED, `RUN_STATE` HALTED/FAILED/EXPIRED and `RUN_CANCELLED`, consistent with the final state;
+  - `WALLET_REJECTED_VERIFIED` — CANCELLED after the owner's wallet rejected the one wallet batch: the group SKIPPED `WALLET_REQUEST_REJECTED` with an
+    unsponsored artifact prepared once (no `superseded`, no sponsorship, 1–16 calls none with native value, the owner's recorded nonce and block),
+    no answer, submission or outcome; the step SKIPPED `WALLET_REQUEST_REJECTED`; events exactly `RUN_CREATED`, `MODE_CHOSEN`, one `GROUP_STATE`
+    PREPARED, one or more `GROUP_WALLET_DECLINED` and exactly one `GROUP_DECLINE_VERIFIED` (both naming that artifact's request id and preparation
+    time; the verification also its recorded nonce and block, and a later or equal end block), `GROUP_STATE` and `STEP_STATE` SKIPPED
+    `WALLET_REQUEST_REJECTED`, and `RUN_CANCELLED`, in that order. The application writes `GROUP_DECLINE_VERIFIED` only after its own chain reads
+    proved the batch was never sent (`apps/reference-dapp/src/user-funded/decline-proof.ts`); the database trusts that event (only the application
+    writes events) and does not read the chain.
+  It also refuses when a delegated authorization or execution, a developer approval, a bound execution run, a LEASED advance item, any other open
+  work item naming the run, a live approval signing session, an active legal hold (TENANT, or RUN naming the run or its handoff) or a Support text
+  about the run exists. On success it writes the tombstone and the permit, deletes the run's events, groups, steps and run, the permit, then the
+  approval handoff (after the run: its foreign key), the run's READY/DONE/DEAD advance items and its History archive marker, in one transaction;
+  a foreign-key violation from a concurrent dependency rolls all of it back into a generic refusal. Deleting the handoff makes the approval link
+  unclaimable (`HANDOFF_NOT_FOUND`) and any re-creation of a run for it fail its foreign key; the tombstone makes a repeat idempotent.
+- Migrations 0015, 0016 and 0023 are immutable and unchanged; no existing table, column, constraint, index, trigger, privilege or row changes
+  (proven by a catalog diff). `SET LOCAL lock_timeout = '5s'`.
+
+**Compatibility.** A v28 build carrying this certificate serves schema 33; a build carrying only the previous certificate (0029–0032) refuses it
+with `MIGRATION_HISTORY_MISMATCH`, so this build must serve every database consumer before 0033 is applied. Owner history calls the procedure only
+when the ledger holds exactly this 0033 identity (`packages/cloud-runtime/src/owner-history.ts`); without it a workflow run keeps today's refusal.
+The application starts single-card runs only where both 0032 and this 0033 are active (`singleStepRunsSupported`), so an attempt the wallet
+rejected is always deletable where one can exist. Privacy access and erasure find Support texts about a deleted attempt through the tombstone
+(`apps/reference-dapp/src/admin/privacy-ops.ts`). The v28 runner never changes a database ahead of it, and the ordinary deployment migration
+still ships schema 28.
+
+**Cold starts on schema 33.** `apps/reference-dapp/backend/schema-compatibility.pg.test.ts` applies the extended certificate (0029–0033) and runs
+the Railway API, the worker, the real `main.ts` / CLI cold starts and the Vercel paths on schema 33 (3/3 locally).
+
+**Evidence** (disposable PostgreSQL 16 locally; CI runs PostgreSQL 18): `packages/cloud-runtime/test/certificate-0033.pg.test.ts` — exact bytes,
+top-level statements and certificate; schema 33 served for the v28 build only through it (the previous certificate, no certificate and the strict
+check refuse it; the v28 runner and an edited 0033 change nothing); the catalog diff (two tables with exactly their columns, constraints and
+indexes, one trigger on the tombstone, one new function without PUBLIC EXECUTE, one redefined function, nothing removed or otherwise changed);
+rows surviving; plain DELETE on each workflow-run table and UPDATE of an event refused with 0015's error after 0033; a permit of another
+transaction or for another run unlocking nothing, UPDATE refused even inside a permitted transaction, the tombstone immutable, no permit left
+behind; a failing 0033 and a lock timeout (a writer holding `tenants`) rolling back completely; and the documented reversal restoring the exact
+schema-32 catalog (`md5(pg_get_functiondef('workflow_run_append_only()'))` included) only while no attempt was deleted and only on 0033 as head,
+with the 0032 reversal refusing while 0033 is head. `apps/reference-dapp/backend/owner-history.pg.test.ts` — records written by the real workflow-run
+store: both shapes deleted through owner history and the authenticated route; every refusal of the shared contract; the deletion complete (rows,
+handoff, work items, archive marker), idempotent, visible as DELETED and unarchivable; concurrent deletions; a deletion racing a cancellation and
+a group transition; schema 32 without 0033 still refusing; privacy access and erasure through the tombstone.
+`apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts` — the operator command.
+
+**Activation, rollout and rollback**: [RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md). Not applied anywhere by this build.

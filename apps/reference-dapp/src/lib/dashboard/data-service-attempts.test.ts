@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cloudApiBaseUrl, callCloudFlow } from '../../server/cloud-api-client';
 import { currentWalletPrincipal, currentWalletPrincipals } from '../../server/session-principal';
-import { loadDashboardSnapshot } from './data-service';
+import { loadDashboardRunDetail, loadDashboardSnapshot } from './data-service';
 import { dashboardRunIndex } from './run-mapping';
 
 vi.mock('../../server/cloud-api-client', () => ({ cloudApiBaseUrl: vi.fn(), callCloudFlow: vi.fn() }));
@@ -99,5 +99,28 @@ describe('Issue #149: Dashboard list attempt evidence', () => {
       ['settled', false, false], ['fast', false, true], ['hung', true, false]]);
     const views = Object.fromEntries(dashboardRunIndex(account, snapshot.runs, null).map(view => [view.run.runId, view.status]));
     expect(views).toMatchObject({ settled: 'Completed', fast: 'Not started', hung: 'Unresolved' });
+  });
+});
+
+// BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): a listed single-card attempt (`wfr_`) has no execution record behind
+// `/v1/runs/:id`, so neither the list nor the record page ever reads one per run; its summary is its own truth.
+describe('single-card attempts are never read per run', () => {
+  const wfr = 'wfr_' + 'b'.repeat(26);
+  const attempt = (status: string) => ({ runId: wfr, workflowId: '', ownerAccount: account, flow: 'arbitrum-swap', status, provenance: 'WORKFLOW_RUN', hasEvidence: false });
+  it.each(['CANCELLED', 'EXPIRED', 'FAILED', 'PENDING', 'COMPLETED'])('a %s attempt is listed without an attempt read, beside an execution record that is read', async status => {
+    const transport = setup({ 'aave-authorized': { ...summary('aave-authorized', 'AUTHORIZED'), attempts: [] } }, [attempt(status), summary('aave-authorized', 'AUTHORIZED')]);
+    const snapshot = await loadDashboardSnapshot(account);
+    expect(snapshot.connection).toBe('CONNECTED');
+    expect(transport.mock.calls.map(([url]) => (url as URL).pathname).sort()).toEqual(['/v1/runs', '/v1/runs/aave-authorized']);
+    const listed = snapshot.runs.find(run => run.runId === wfr)!;
+    expect(listed).toMatchObject({ runId: wfr, provenance: 'WORKFLOW_RUN', status });
+    expect(listed).not.toHaveProperty('attempts'); expect(listed).not.toHaveProperty('attemptsUnavailable');
+  });
+  it('its record page is not found without a read; an execution record is still read', async () => {
+    const transport = setup({}, []);
+    expect(await loadDashboardRunDetail(account, wfr)).toEqual({ connection: 'NOT_FOUND', account, detail: null });
+    expect(transport).not.toHaveBeenCalled();
+    await loadDashboardRunDetail(account, 'aave-authorized');
+    expect(transport.mock.calls.map(([url]) => (url as URL).pathname)).toContain('/v1/runs/aave-authorized');
   });
 });

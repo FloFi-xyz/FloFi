@@ -1782,6 +1782,14 @@
       "path": "apps/reference-dapp/backend/uniswap-position-purge.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.certificate-0032.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0032.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.single-step-runs-migrate.pg": {
+      "path": "apps/reference-dapp/backend/single-step-runs-migrate.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.components.app-shell-position-simulation": {
       "path": "apps/reference-dapp/src/components/app-shell-position-simulation.test.tsx",
       "stage": "unit"
@@ -1837,6 +1845,58 @@
     "app.domain.execution-receipt": {
       "path": "apps/reference-dapp/src/domain/execution-receipt.test.ts",
       "stage": "unit"
+    },
+    "app.editor.single-card-run.pg": {
+      "path": "apps/reference-dapp/src/editor/single-card-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.editor.single-card-review": {
+      "path": "apps/reference-dapp/src/editor/single-card-review.test.ts",
+      "stage": "unit"
+    },
+    "app.editor.single-card-strategy": {
+      "path": "apps/reference-dapp/src/editor/single-card-strategy.test.ts",
+      "stage": "unit"
+    },
+    "app.components.editor-workflow-run-single-card": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.single-card.test.ts",
+      "stage": "unit"
+    },
+    "app.state.supply-store": {
+      "path": "apps/reference-dapp/src/state/supply-store.test.tsx",
+      "stage": "unit"
+    },
+    "app.state.robinhood-transfer-store": {
+      "path": "apps/reference-dapp/src/state/robinhood-transfer-store.test.tsx",
+      "stage": "unit"
+    },
+    "app.e2e.editor-single-card": {
+      "path": "apps/reference-dapp/e2e/editor-single-card.spec.ts",
+      "stage": "browser"
+    },
+    "app.user-funded.decline-proof": {
+      "path": "apps/reference-dapp/src/user-funded/decline-proof.test.ts",
+      "stage": "unit"
+    },
+    "app.state.router-store": {
+      "path": "apps/reference-dapp/src/state/router-store.test.tsx",
+      "stage": "unit"
+    },
+    "cloud-runtime.certificate-0033.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0033.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.workflow-run-purge-migrate.pg": {
+      "path": "apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.list-runs-single-card.pg": {
+      "path": "packages/cloud-runtime/test/list-runs-single-card.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.owner-history.pg": {
+      "path": "apps/reference-dapp/backend/owner-history.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -2015,7 +2075,12 @@
     "app.components.review-summary-panel-position",
     "app.server.base-position-harness",
     "app.domain.liquidity-position-declined",
-    "app.server.defi-positions-cache"
+    "app.server.defi-positions-cache",
+    "app.editor.single-card-review",
+    "app.editor.single-card-strategy",
+    "app.components.editor-workflow-run-single-card",
+    "app.user-funded.decline-proof",
+    "app.state.router-store"
   ],
   "modules": [
     {
@@ -2534,7 +2599,9 @@
         "app.admin.finops-sync.pg",
         "app.e2e.admin-console",
         "app.backend.plain-node-closure",
-        "app.backend.uniswap-position-purge.pg"
+        "app.backend.uniswap-position-purge.pg",
+        "app.backend.single-step-runs-migrate.pg",
+        "app.backend.workflow-run-purge-migrate.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
@@ -3576,7 +3643,8 @@
         "packages/cloud-runtime/migrations/0028_saved_recipients.sql",
         "packages/cloud-runtime/src/owner-history.ts",
         "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql",
-        "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql"
+        "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql",
+        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.reversal.sql"
       ],
       "suites": [
         "app.learning.automatic",
@@ -3595,7 +3663,12 @@
         "app.admin.support-privacy.pg",
         "app.backend.nonce-conflict-cloud.pg",
         "cloud-runtime.certificate-0031.pg",
-        "app.backend.uniswap-position-purge.pg"
+        "app.backend.uniswap-position-purge.pg",
+        "cloud-runtime.certificate-0032.pg",
+        "app.backend.single-step-runs-migrate.pg",
+        "cloud-runtime.certificate-0033.pg",
+        "app.backend.workflow-run-purge-migrate.pg",
+        "app.backend.owner-history.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -3678,7 +3751,10 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "cloud-runtime.certificate-0031.pg"
+        "cloud-runtime.certificate-0031.pg",
+        "cloud-runtime.certificate-0032.pg",
+        "cloud-runtime.certificate-0033.pg",
+        "cloud-runtime.list-runs-single-card.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4029,7 +4105,8 @@
         "app.e2e.chat-liquidity-positions",
         "app.e2e.orca-position-management",
         "app.e2e.simulate-panel-disclosure",
-        "app.e2e.dashboard-run-details"
+        "app.e2e.dashboard-run-details",
+        "app.components.editor-workflow-run-single-card"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -5062,7 +5139,11 @@
         "app.editor.workflow-strategy",
         "app.workflow-runs.confirm-run.pg",
         "cloud-runtime.editor-requester-migration.pg",
-        "app.editor.chat-canvas-parity"
+        "app.editor.chat-canvas-parity",
+        "app.editor.single-card-run.pg",
+        "app.editor.single-card-review",
+        "app.editor.single-card-strategy",
+        "app.e2e.editor-single-card"
       ],
       "gaps": [
         "The browser suite certifies the Editor's \"Run workflow\" on loopback with a passive wallet up to the pending EDITOR_SESSION approval on /approve; the claim by an account wallet and the run to completion are certified on disposable PostgreSQL with MOCKED owner flow runs (editor-run.pg), never as a public execution.",
@@ -7316,7 +7397,8 @@
         "apps/reference-dapp/src/server/learning-web.ts",
         "apps/reference-dapp/src/server/owner-history.ts",
         "apps/reference-dapp/src/server/postgres-config.ts",
-        "apps/reference-dapp/src/server/saved-workflow-store.ts"
+        "apps/reference-dapp/src/server/saved-workflow-store.ts",
+        "apps/reference-dapp/src/server/workflow-run-history.ts"
       ],
       "suites": [
         "app.learning.automatic",
@@ -7324,7 +7406,8 @@
         "app.learning.learning.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "app.backend.owner-history.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -7952,7 +8035,8 @@
         "reference-executor.bridge",
         "reference-reconciler.bridge",
         "app.state.settlement-sync",
-        "app.domain.execution-ux-reliability"
+        "app.domain.execution-ux-reliability",
+        "app.state.router-store"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -8006,7 +8090,8 @@
         "reference-compiler.borrow",
         "reference-compiler.repay",
         "reference-compiler.supply",
-        "reference-compiler.withdraw"
+        "reference-compiler.withdraw",
+        "app.state.supply-store"
       ],
       "gaps": [
         "Live Aave positions and real-wallet state transitions require separate acceptance on supported networks."
@@ -8124,7 +8209,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.state.robinhood-transfer-store"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -8245,7 +8331,8 @@
         "apps/reference-dapp/src/user-funded/circle-facts.ts",
         "apps/reference-dapp/src/user-funded/circle-gas.ts",
         "apps/reference-dapp/src/user-funded/gasless-groups.ts",
-        "apps/reference-dapp/src/workflow-runs/owner-step-circle.ts"
+        "apps/reference-dapp/src/workflow-runs/owner-step-circle.ts",
+        "apps/reference-dapp/src/user-funded/decline-proof.ts"
       ],
       "suites": [
         "app.user-funded.groups",
@@ -8271,7 +8358,12 @@
         "app.workflow-runs.flofi-wallet-circle-run.pg",
         "app.workflow-runs.kora-gas-run.pg",
         "app.components.flofi-wallet-circle-flow",
-        "app.components.workflow-run-panel-flofi-circle"
+        "app.components.workflow-run-panel-flofi-circle",
+        "app.editor.single-card-run.pg",
+        "app.editor.single-card-review",
+        "app.components.editor-workflow-run-single-card",
+        "app.e2e.editor-single-card",
+        "app.user-funded.decline-proof"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
@@ -8709,7 +8801,9 @@
         "app.workflow-runs.execution-groups",
         "app.workflow-runs.received-amounts",
         "app.workflow-runs.user-funded-run.pg",
-        "app.workflow-runs.delegated-run.pg"
+        "app.workflow-runs.delegated-run.pg",
+        "app.editor.single-card-run.pg",
+        "app.editor.single-card-strategy"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -8967,6 +9061,13 @@
     "app.admin.finops-sync.pg",
     "app.admin.support.historical-reconciliation.pg",
     "cloud-runtime.certificate-0031.pg",
-    "app.backend.uniswap-position-purge.pg"
+    "app.backend.uniswap-position-purge.pg",
+    "cloud-runtime.certificate-0032.pg",
+    "app.backend.single-step-runs-migrate.pg",
+    "app.editor.single-card-run.pg",
+    "cloud-runtime.certificate-0033.pg",
+    "app.backend.workflow-run-purge-migrate.pg",
+    "cloud-runtime.list-runs-single-card.pg",
+    "app.backend.owner-history.pg"
   ]
 }

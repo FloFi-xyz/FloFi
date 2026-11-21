@@ -110,20 +110,31 @@ function requesterValid(requester: ApprovalRequester): boolean {
 /**
  * A PENDING handoff for this requester, or a classified refusal: the composition's code (with issues), a gate reason (with every
  * gate fact), `REVIEW_BLOCKED`, `HANDOFF_RATE_LIMITED` or `HANDOFF_PENDING_LIMIT`.
+ *
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: `singleStepRun` hands a ONE-step workflow off as a workflow run of that step (a SEQUENTIAL plan of
+ * one step, so its run reaches the user-funded execution groups: one atomic wallet batch with any exact approval folded in). Only the Editor's
+ * own requester may ask for it (`EDITOR_SESSION`, on a deployment whose database accepts one-step runs); any other requester is refused, so every
+ * external surface keeps its one-step SINGLE_FLOW contract. The stored strategy and hash are the step's own either way (a one-step workflow
+ * composes to the same strategy and hash as its step).
  */
-export async function requestApproval(deps: ApprovalDeps, requester: ApprovalRequester, strategy: unknown, workflowHash: string) {
+export async function requestApproval(deps: ApprovalDeps, requester: ApprovalRequester, strategy: unknown, workflowHash: string,
+  options: { readonly singleStepRun?: boolean } = {}) {
   // A surface may only mint links for the requester kinds its scheme serves, for a requester the store can persist.
   if (!deps.scheme.kinds.includes(requester.kind) || !requesterValid(requester)) return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
+  if (options.singleStepRun && requester.kind !== 'EDITOR_SESSION') return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
   const workflow = composeWorkflowBound(strategy, workflowHash);
   if (!workflow.ok) return { ok: false, code: workflow.code, extra: { issues: workflow.issues } } satisfies Failure;
+  // A one-step run is only ever a run of exactly one step (a longer workflow is a sequence anyway).
+  if (options.singleStepRun && workflow.steps.length !== 1) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' } satisfies Failure;
+  const sequence = workflow.steps.length > 1 || options.singleStepRun === true;
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product hands off mainnet workflows only; a test network is never mapped to its mainnet.
   const test = networkScope() === 'ENGINEERING' ? [] : strategyTestNetworks(workflow);
   if (test.length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE, extra: { issues: test.map(t => ({ path: t.path, rule: 'mainnetOnly' })),
     networks: [...new Set(test.map(t => t.network))], mainnets: [...new Set(test.map(t => t.mainnet).filter((m): m is string => m !== null))] } } satisfies Failure;
   // A sequence is handed off only when it is SEQUENTIAL and every step's facts allow it (BUILD-CHAT-E2E-001); every step's facts are reported.
-  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy);
+  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy, { run: sequence });
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason!, extra: { gates: gateView(gates), executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView) } } satisfies Failure;
-  const composition = workflow.steps[0]!, sequence = workflow.steps.length > 1;
+  const composition = workflow.steps[0]!;
   // Every step's review is checked; a blocker in any step refuses the whole workflow before anything is stored.
   const findings = workflow.steps.map(handoffFindings), blockers = findings.flatMap((f, index) => f.blockers.map(b => ({ ...b, step: index })));
   const preExecution = [...new Set(findings.flatMap(f => f.preExecution))];
@@ -148,7 +159,7 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
     expiresAt: expiresAt.toISOString(), status: 'PENDING', networkEnvironment: gates.plan.networkEnvironment, fundsClass: gates.plan.fundsClass,
     executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView), authority: AUTHORITY_NONE, requires: [...APPROVAL_REQUIRES],
     walletNamespace: planNamespace(gates.plan), walletNamespaces: planNamespaces(gates.plan), gates: gateView(gates),
-    summary: sequence ? workflow.steps.map((c, i) => `${i + 1}. ${c.summary}`).join('\n') : composition.summary,
+    summary: workflow.steps.length > 1 ? workflow.steps.map((c, i) => `${i + 1}. ${c.summary}`).join('\n') : composition.summary,
     // BUILD-CHAT-E2E-001: before anything executes, how many authorizations each mode needs (the owner's own grants decide the rest in FloFi).
     // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the same user-funded plan /approve offers (wallet capabilities assumed until the owner's browser reports them).
     ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, delegation, undefined, userFundedFacts ? { facts: userFundedFacts } : undefined) } : {},
@@ -195,7 +206,8 @@ export async function verifyHandoff(h: HandoffRecord, runtime: EngineRuntime, po
   // BUILD-FLOFI-MAINNET-PRODUCT-001: a proposal made for a test network before FloFi became Mainnet-only stays readable but is never loaded,
   // claimed, simulated or signed in the public product (and never re-networked): the owner asks for a new mainnet proposal.
   if (networkScope() !== 'ENGINEERING' && strategyTestNetworks(workflow).length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE };
-  const gates = await evaluateWorkflowGates(workflow, runtime, policy);
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a stored SEQUENTIAL plan is re-verified as a workflow run (also an Editor run of one step).
+  const gates = await evaluateWorkflowGates(workflow, runtime, policy, { run: h.plan.kind === 'SEQUENTIAL' });
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason! };
   return { ok: true, composition: workflow.steps[0]!, workflow, gates };
 }

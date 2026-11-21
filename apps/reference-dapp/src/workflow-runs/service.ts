@@ -24,10 +24,11 @@ import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
 import type { GrantView } from '../delegation/authority.ts';
 import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from './authorization-plan.ts';
-import type { RunRecord, RunStepRecord, WorkflowRunStore } from './pg-store.ts';
+import type { RunRecord, RunStepRecord, VerifiedDecline, WorkflowRunStore } from './pg-store.ts';
+import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { stopRunFromCurrent } from './user-funded-pass.ts';
-import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, walletBatchUnanswered } from './state-machine.ts';
+import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
@@ -65,9 +66,18 @@ export function assertRunWallets(run: RunRecord, wallets: readonly WalletRef[]):
     if (!wallets.some(w => w.namespace === namespace && w.address === address)) refuse(wallets.some(w => w.namespace === namespace) ? 'WORKFLOW_RUN_OWNER_MISMATCH' : proofCode(namespace));
 }
 
-/** The run of a claimed SEQUENTIAL handoff (created once; only for the same proven wallets). */
+/**
+ * The run of a claimed SEQUENTIAL handoff (created once; only for the same proven wallets). BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of
+ * ONE step exists only for the Editor's own single-card handoff (`requestApproval`'s `singleStepRun`, EDITOR_SESSION only; its row needs migration
+ * 0032). Every other requester's run still needs at least two steps.
+ */
 export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, workflow: WorkflowComposition, wallets: readonly WalletRef[]): Promise<RunRecord> {
-  if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < 2 || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
+  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' ? 1 : 2;
+  if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < minimumSteps || h.plan.steps.length !== workflow.steps.length
+    || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
+  // A database without migration 0032 refuses the row by its CHECK: refused here with a closed code first (e.g. a one-step handoff issued before an
+  // emergency reversal of 0032), never a raw constraint violation.
+  if (workflow.steps.length === 1 && !await deps.store.singleStepRuns().catch(() => false)) refuse('WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED');
   const bound: Partial<Record<WalletRef['namespace'], string>> = {};
   for (const namespace of planNamespaces(h.plan)) bound[namespace] = (wallets.find(w => w.namespace === namespace) ?? refuse(proofCode(namespace))).address;
   const primary = planNamespace(h.plan), owner = { namespace: primary, address: bound[primary]! };
@@ -84,7 +94,8 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
 export async function ownerAuthorizationPlan(deps: WorkflowRunDeps, run: RunRecord, wallets?: WalletProfile): Promise<AuthorizationPlan> {
   const workflow = composeWorkflowBound(run.strategy, run.workflowHash);
   if (!workflow.ok) return refuse('WORKFLOW_RUN_STALE');
-  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policyFor(run.requester.kind));
+  // A run is always evaluated as a run (also the Editor's run of one step: its per-step facts and the workflow-run gate).
+  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policyFor(run.requester.kind), { run: true });
   const grants = deps.delegationFacts && deps.grantsOf ? await deps.grantsOf(run.owner) : null;
   return authorizationPlan(workflow, gates, deps.delegationFacts, grants ? { grants, now: deps.now().getTime() } : undefined,
     deps.userFundedFacts ? { facts: deps.userFundedFacts, ...wallets ? { wallets } : {}, evmOwner: run.wallets.eip155 ?? null } : undefined);
@@ -149,9 +160,61 @@ export async function observeRun(deps: WorkflowRunDeps, run: RunRecord, wallets:
 }
 
 /** The owner ends a run that cannot continue (HALTED), or one that never submitted anything; remaining steps are SKIPPED. */
-export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED'): Promise<RunRecord> {
+export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED', options: {
+  /**
+   * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): end the run only when every unanswered wallet batch of it is a rejection the
+   * server proved, from the chain, was never sent (History's Delete of a rejected attempt); otherwise refuse and change nothing.
+   */
+  readonly onlyIfDeclineVerified?: boolean } = {}): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  return deps.store.cancel(run.runId, run.version, code, deps.now());
+  const { verified, unanswered } = await verifiedDeclinesOf(deps, run);
+  if (options.onlyIfDeclineVerified && (unanswered === 0 || verified.size !== unanswered)) refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+  return deps.store.cancel(run.runId, run.version, code, deps.now(), { verifiedDeclines: verified, onlyIfDeclineVerified: options.onlyIfDeclineVerified === true });
+}
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's browser reports that the wallet rejected group `groupIndex`'s batch
+ * `requestId` (EIP-1193 4001). An append-only fact for exactly the current preparation; no state changes and nothing is proven by it alone.
+ */
+export async function recordWalletDecline(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, requestId: string): Promise<void> {
+  assertRunWallets(run, wallets);
+  if (!Number.isInteger(groupIndex) || groupIndex < 0 || !/^0x[0-9a-f]{64}$/i.test(requestId)) refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  const g = (await deps.store.groups(run.runId)).find(x => x.groupIndex === groupIndex) ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const preparedAt = (g.prepared as { readonly preparedAt?: unknown } | null)?.preparedAt;
+  if (typeof preparedAt !== 'string') refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  await deps.store.recordDecline(run.runId, groupIndex, requestId, preparedAt as string);
+}
+/**
+ * The run's unanswered wallet batches past their on-chain deadline that the owner's wallet rejected (a GROUP_WALLET_DECLINED fact for exactly
+ * the current, only preparation), each proven from the chain never sent (`proveDeclinedBatchUnsent`). Any doubt leaves a batch out: it is then
+ * ended with its outcome unknown, exactly as before.
+ */
+const DECLINE_PROOF_RETRY_MS = 60_000;
+const recentUnproven = new Map<string, number>();
+async function verifiedDeclinesOf(deps: WorkflowRunDeps, run: RunRecord): Promise<{ readonly verified: ReadonlyMap<number, VerifiedDecline>; readonly unanswered: number }> {
+  const verified = new Map<number, VerifiedDecline>();
+  if (run.mode !== 'USER_FUNDED') return { verified, unanswered: 0 };
+  const groups = (await deps.store.groups(run.runId)).filter(g => g.state === 'PREPARED' && walletBatchUnanswered(g));
+  if (!groups.length || !deps.userFunded) return { verified, unanswered: groups.length };
+  const events = await deps.store.events(run.runId, 1_000);
+  for (const g of groups) {
+    const prepared = (g.prepared ?? {}) as { readonly request?: { readonly id?: unknown }; readonly preparedAt?: unknown };
+    const requestId = prepared.request?.id, preparedAt = prepared.preparedAt;
+    if (g.strategy !== 'EVM_WALLET_BATCH' || typeof requestId !== 'string' || typeof preparedAt !== 'string' || !g.validUntil) continue;
+    const of = (kind: string) => events.filter(e => e.kind === kind && e.detail?.group === g.groupIndex);
+    if (of('GROUP_PREPARED_AGAIN').length || !of('GROUP_WALLET_DECLINED').some(e => e.detail?.requestId === requestId && e.detail?.preparedAt === preparedAt)) continue;
+    const settledAt = new Date(new Date(g.validUntil).getTime() + WALLET_BATCH_SETTLE_MS);
+    // Security review: one chain proof per preparation per minute and process; a repeat within it is simply not proven (nothing changes).
+    const key = `${run.runId}:${g.groupIndex}:${preparedAt}`, last = recentUnproven.get(key), now = deps.now().getTime();
+    if (last !== undefined && now - last < DECLINE_PROOF_RETRY_MS) continue;
+    const proof = await proveDeclinedBatchUnsent(deps.userFunded.evm(g.chain), g.prepared, settledAt, deps.now());
+    if (proof.proven) verified.set(g.groupIndex, { requestId, preparedAt, ownerNonce: proof.ownerNonce, fromBlock: proof.fromBlock, toBlock: proof.toBlock });
+    else {
+      if (recentUnproven.size >= 1_000) recentUnproven.clear();
+      recentUnproven.set(key, now);
+      deps.log('workflow_run.decline_unproven', { runId: run.runId, group: g.groupIndex, reason: proof.reason });
+    }
+  }
+  return { verified, unanswered: groups.length };
 }
 
 const groupAt = (groups: readonly GroupRecord[], step: number) => groups.find(x => x.stepFrom <= step && step <= x.stepTo);
@@ -655,7 +718,7 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   if (stoppedUnanswered(g)) {
     const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
     if (!verified.ok) return refuse(verified.code);
-    return batchAnsweredAfterStop(deps, run, g, { batchId: String(verified.value.batchId) });
+    return await batchAnsweredAfterStop(deps, run, g, { batchId: String(verified.value.batchId) });
   }
   if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   // A wallet batch's answer arrives AFTER the wallet sent it: refusing a late one would only lose track of a batch already on chain (the chain
@@ -704,7 +767,7 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
     const latest = (await deps.store.groups(run.runId))[groupIndex];
     if (latest && answeredOnce(latest)) return answeredAgain(deps, run, latest, answer);
     if (latest && g.strategy === 'EVM_WALLET_BATCH' && stoppedUnanswered(latest))
-      return batchAnsweredAfterStop(deps, run, latest, { batchId: String(verified.value.batchId) });
+      return await batchAnsweredAfterStop(deps, run, latest, { batchId: String(verified.value.batchId) });
     return refuse('WORKFLOW_RUN_CHANGED');
   }
   await advanceRun(runnerDeps(deps), run.runId);
@@ -741,21 +804,29 @@ function batchAnswerMismatch(deps: WorkflowRunDeps, run: RunRecord, g: GroupReco
  * or SKIPPED when the run ended, both marked WALLET_BATCH_OUTCOME_UNKNOWN. An answer the owner's browser reports for it now cannot be recorded
  * (the group is closed: the run stopped, and a skipped group never changes again), yet it says the batch may well have executed.
  */
-const stoppedUnanswered = (g: GroupRecord) => (g.state === 'BLOCKED' || g.state === 'SKIPPED') && g.code === WALLET_BATCH_OUTCOME_UNKNOWN && walletBatchUnanswered(g);
+// BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): a group ended as a verified rejection (WALLET_REQUEST_REJECTED) is stopped
+// unanswered too: an answer for it is the strongest sign the proof was wrong, so it is refused, logged and kept as a fact (never dropped).
+const stoppedUnanswered = (g: GroupRecord) => (g.state === 'BLOCKED' || g.state === 'SKIPPED')
+  && (g.code === WALLET_BATCH_OUTCOME_UNKNOWN || g.code === WALLET_REQUEST_REJECTED) && walletBatchUnanswered(g);
 /**
  * The owner's browser answered (a batch id, its transactions, or the wallet's "not sent") for a group stopped while its batch was unanswered:
  * never dropped silently behind the group's state. Nothing is recorded; the answer is logged (whether its batch id is the one FloFi handed out,
  * how many transactions it reported) and refused WALLET_BATCH_ANSWERED_AFTER_STOP, so the owner is told the batch may have executed and to check
  * the wallet's activity.
  */
-function batchAnsweredAfterStop(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord,
-  answer: { readonly batchId?: string; readonly hashes?: number; readonly notSent?: boolean }): never {
+async function batchAnsweredAfterStop(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord,
+  answer: { readonly batchId?: string; readonly hashes?: number; readonly notSent?: boolean }): Promise<never> {
   // Every preparation of a group carries the same EIP-5792 id (`walletBatchId`); a group that kept only earlier preparations has no request of its own.
   const requested = (g.prepared as { request?: { id?: unknown } } | null)?.request?.id;
   const handedOut = typeof requested === 'string' ? requested : walletBatchId(run.runId, g.groupIndex);
   deps.log('workflow_run.batch_answer_after_stop', { run: run.runId, group: g.groupIndex, state: g.state,
     batchIdMatches: answer.batchId === undefined ? null : answer.batchId.toLowerCase() === handedOut.toLowerCase(), hashes: answer.hashes ?? null,
     notSent: answer.notSent ?? null });
+  // An answer that contradicts a verified rejection is kept as an append-only fact: History can then never delete the attempt (0033's closed
+  // allowlist refuses any event it does not name). Recording it never changes the refusal.
+  if (g.code === WALLET_REQUEST_REJECTED)
+    await deps.store.recordAnswerAfterStop(run.runId, g.groupIndex, { batchIdReported: answer.batchId !== undefined, hashes: answer.hashes ?? null,
+      notSent: answer.notSent ?? null }).catch(() => deps.log('workflow_run.answer_after_stop_unrecorded', { run: run.runId, group: g.groupIndex }));
   return refuse('WALLET_BATCH_ANSWERED_AFTER_STOP');
 }
 /**
@@ -771,7 +842,7 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
   const g = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (g.strategy !== 'EVM_WALLET_BATCH') refuse('WORKFLOW_RUN_GROUP_NOT_BATCH');
   if (notSent === true) {
-    if (stoppedUnanswered(g)) return batchAnsweredAfterStop(deps, run, g, { hashes: 0, notSent: true });
+    if (stoppedUnanswered(g)) return await batchAnsweredAfterStop(deps, run, g, { hashes: 0, notSent: true });
     if (g.state !== 'AUTHORIZED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
     // Only the report whose write moved exactly the AUTHORIZED group this report read (its row version) stops its steps and the run. A concurrent
     // report of its transactions that won (SUBMITTED: they are on their way and must be reconciled) is never followed by blocked steps and a
@@ -792,7 +863,7 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
   if (hashes.some(h => used.has(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
   // One transaction reported twice is still one transaction (a wallet may repeat a receipt): never counted twice against the batch's calls.
   const reported = [...new Set(hashes.map(h => h.toLowerCase()))];
-  if (stoppedUnanswered(g)) return batchAnsweredAfterStop(deps, run, g, { hashes: reported.length, notSent: false });
+  if (stoppedUnanswered(g)) return await batchAnsweredAfterStop(deps, run, g, { hashes: reported.length, notSent: false });
   const current = g.state !== 'AUTHORIZED' ? g : await deps.store.groupTransition(run.runId, groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: { kind: 'EVM_WALLET_BATCH',
     batchId: String(g.authorization?.batchId ?? ''), hashes: reported, submittedAt: deps.now().toISOString() } }) ?? (await deps.store.groups(run.runId))[groupIndex]!;
   // A report for a group already answered (a retry, a concurrent report that won, or a group that since FAILED on chain, was BLOCKED because the

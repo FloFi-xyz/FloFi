@@ -104,6 +104,17 @@ export function editorApprovalContributor(env: Env, seams: EditorContributorSeam
   };
 }
 
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (final security review): a failed in-place Authorize withdraws the account's own Editor handoff only
+ * while NO workflow run exists for it (a refused claim, a run row the database refused). A run, live or ended, keeps its handoff as its record and
+ * its count against the pending limit (one that could not be ended is left to its run and its expiry). The requester scope is this account's own:
+ * another account's or another requester kind's handoff is never touched. Returns whether it was withdrawn.
+ */
+export async function withdrawUnstartedHandoff(deps: { readonly handoffs: Pick<ApprovalDeps['handoffs'], 'revokeForRequester'>;
+  readonly runFor: (handoffId: string) => Promise<unknown> }, accountId: string, approvalId: string, now: Date): Promise<boolean> {
+  if (!ACCOUNT_ID.test(accountId) || await deps.runFor(approvalId) !== null) return false;
+  return (await deps.handoffs.revokeForRequester(approvalId, editorScope(accountId), now))?.status === 'REVOKED';
+}
 export type EditorRunStarted = { readonly approvalId: string; readonly approvalUrl: string; readonly expiresAt: string; readonly stepCount: number;
   readonly walletNamespaces: readonly string[]; readonly authority: 'NONE' };
 export type EditorRunResult = { readonly ok: true; readonly value: EditorRunStarted } | { readonly ok: false; readonly code: string; readonly step?: number };
@@ -114,19 +125,26 @@ export type EditorRunResult = { readonly ok: true; readonly value: EditorRunStar
  * SEQUENTIAL plan. Returns the approval link (authority NONE) for the owner's own browser to open; nothing is claimed, signed or submitted.
  */
 export async function startEditorRun(deps: Omit<ApprovalDeps, 'policy' | 'rules' | 'scheme'> & { readonly config: Extract<EditorRunConfig, { enabled: true }> },
-  accountId: string, workflow: unknown): Promise<EditorRunResult> {
+  accountId: string, workflow: unknown, options: {
+    /**
+     * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the Editor's in-place single-card run — ONE financial card handed off as a workflow run of that
+     * one step (a SEQUENTIAL plan of one step), so it executes as a user-funded execution group. Only the in-place Authorize sets it, and only
+     * once the deployment's database accepts one-step runs (migration 0032; checked by the caller). Never the "Run workflow" hand-off.
+     */
+    readonly singleStepRun?: boolean } = {}): Promise<EditorRunResult> {
   if (!ACCOUNT_ID.test(accountId)) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
-  const converted = editorWorkflowStrategy(workflow);
+  const single = options.singleStepRun === true;
+  const converted = editorWorkflowStrategy(workflow, { singleStep: single });
   if (!converted.ok) return converted;
-  // Only a multi-step workflow is handed to a run (a SEQUENTIAL plan needs at least two steps). Checked before anything is stored, so a refusal
-  // never leaves a PENDING approval counting against the account's pending and hourly limits.
+  // Only a multi-step workflow is handed to a run (a SEQUENTIAL plan needs at least two steps), or exactly one step for the single-card run. Checked
+  // before anything is stored, so a refusal never leaves a PENDING approval counting against the account's pending and hourly limits.
   const composed = composeWorkflowBound(converted.strategy, converted.workflowHash);
-  if (composed.ok && composed.steps.length < 2) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
+  if (composed.ok && (single ? composed.steps.length !== 1 : composed.steps.length < 2)) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
   const result = await requestApproval({ ...deps, origin: deps.config.origin, scheme: editorApprovalScheme(deps.config.key), policy: deps.config.policy,
-    rules: EDITOR_HANDOFF_RULES }, editorRequester(accountId), converted.strategy, converted.workflowHash);
+    rules: EDITOR_HANDOFF_RULES }, editorRequester(accountId), converted.strategy, converted.workflowHash, single ? { singleStepRun: true } : {});
   if (!result.ok) return { ok: false, code: result.code };
   const value = result.value;
-  // Only a multi-step workflow is handed to the run; a one-step plan keeps its own per-flow execution path (never reached: 2..8 steps only).
+  // Only a run plan is handed to the run (2..8 steps, or the single-card run's one step); any other plan keeps its own per-flow path (not reached).
   if (value.executionPlan !== 'SEQUENTIAL') {
     await deps.handoffs.revokeForRequester(value.approvalId, editorScope(accountId), deps.now).catch(() => null);
     return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };

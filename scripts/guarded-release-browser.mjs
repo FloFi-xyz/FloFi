@@ -155,6 +155,14 @@ const definitions = [
   ['editor-wallet-batch', ['editor-wallet-batch.spec.ts', 'editor-stages-review.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY',
     GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_USER_FUNDED_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the same user-funded harness with FLOFI_E2E_SINGLE_CARD — its database migrated through the certified
+  // forward migrations up to `single_step_runs` (0029–0032, as an operator release leaves it) and its server without the local-fork runtime, as a
+  // deployment — so ONE Base swap card is authorized with exactly ONE wallet_sendCalls (counted at the wallet double), reconciled by itself and
+  // never resent; a declined batch is never retried and a wallet without atomic batching keeps the card's own flow. editor-wallet-batch keeps the
+  // shipped schema.
+  ['editor-single-card', ['editor-single-card.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY',
+    GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_USER_FUNDED_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled', FLOFI_E2E_SINGLE_CARD: 'MOCKED_LOOPBACK_ONLY',
+    TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['approve-workflow-run', ['approve-workflow-run.spec.ts', 'editor-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
     FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
@@ -299,7 +307,7 @@ for (const [index, name] of selection.entries()) {
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
     'FLOFI_FLIGHT_TEAM_E2E', 'FLOFI_FLIGHT_TEAM_CLOCK', 'FLOFI_FLIGHT_TEAM_ACCOUNTS', 'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS', 'FLOFI_E2E_NETWORK_SCOPE', 'FLOFI_NETWORK_SCOPE',
-    'FLOFI_USER_FUNDED_E2E', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL', 'FLOFI_ORCA_POSITIONS_E2E',
+    'FLOFI_USER_FUNDED_E2E', 'FLOFI_E2E_SINGLE_CARD', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL', 'FLOFI_ORCA_POSITIONS_E2E',
     'GRYLOO_ORCA_MAINNET_JOURNAL',
     // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: local visual-evidence switches never reach a certifying profile.
     'FLOFI_UX_EVIDENCE_DIR', 'FLOFI_UX_EVIDENCE_LANG', 'FLOFI_UX_EVIDENCE_PREFIX']) delete env[key];

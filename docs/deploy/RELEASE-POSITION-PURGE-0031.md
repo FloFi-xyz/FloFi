@@ -69,7 +69,9 @@ purged identity can never be recreated (`EXECUTION_DELETED`).
 
 - **Before activation:** any build is a rollback target exactly as before (schema unchanged).
 - **After activation, application rollback:** only to a build carrying this certificate (this release or later). An older build refuses schema 31
-  (`MIGRATION_HISTORY_MISMATCH`) and must not be deployed. Financial observation and reconciliation continue throughout.
+  (`MIGRATION_HISTORY_MISMATCH`) and must not be deployed. Financial observation and reconciliation continue throughout. Once 0032 is also active
+  ([RELEASE-SINGLE-STEP-RUNS-0032.md](./RELEASE-SINGLE-STEP-RUNS-0032.md)), only a build carrying the 0029–0032 certificate is a rollback target;
+  once 0033 is active ([RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md)), only a build carrying the 0029–0033 certificate.
 - **Stop new deletions without touching the schema:** set the existing `FLOFI_OWNER_HISTORY=read-only` (deletions and archives answer
   `HISTORY_READ_ONLY`; no record changes). This build changes no environment variable; this is the existing switch.
 - **Emergency reversal (owner decision, last resort):** run `RELEASE-POSITION-PURGE-0031.reversal.sql` in one transaction with the migration
@@ -82,3 +84,10 @@ purged identity can never be recreated (`EXECUTION_DELETED`).
 
 Local evidence only: disposable PostgreSQL 16 (CI runs PostgreSQL 18 in the certification pipeline). No production, preview or Neon database was
 touched; no migration was applied outside disposable test databases; no environment variable, gate or fee policy changed.
+
+> **Note (BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001):** the 0031 reversal refuses unless 0031 is the newest migration. Once 0032
+> `single_step_runs` is applied and one single-card run exists, 0032 can no longer be reversed, so 0031 becomes irreversible too. Single-card runs
+> start only where 0033 `workflow_run_purge` is active as well; once an owner deleted one attempt under 0033 (its tombstone is permanent), 0033
+> can no longer be reversed either, and with it neither 0032 nor 0031. Workflow-run records are deleted only by 0033's guarded procedure, never by
+> hand. See [RELEASE-SINGLE-STEP-RUNS-0032.md](./RELEASE-SINGLE-STEP-RUNS-0032.md) and
+> [RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md).

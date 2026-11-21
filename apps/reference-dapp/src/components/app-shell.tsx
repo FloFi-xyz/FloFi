@@ -9,7 +9,7 @@ import type { LiquidityPositionPoolInput } from '../domain/commands';
 import { flightWalletAccess } from '../app/flight-wallet-action';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
-import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
+import { compositionWorkflow, deliveredByRun, DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES, singleCardFallsBack, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { universalBridgeDetails } from '../domain/universal-bridge-authoring';
 import { routerDetails } from '../domain/router-authoring';
 import { ownerByRecord } from '../domain/sequence-restore';
@@ -510,7 +510,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const currentSimulationRequest = useRef(simulationRequest);
   currentSimulationRequest.current = simulationRequest;
   // P0: Flight first, for the same wallet the API binds; the runtime simulates only when that wallet may act (a refusal is a value, not a throw).
-  const simulateAgain = async (): Promise<void> => {
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (final wallet-execution review): the simulation FloFi starts by itself is non-interactive — the Router
+  // and Transfer stores never open the wallet selector or ask for a sign-in then (their inline error instead); every other runtime's simulation is
+  // read-only already. Only an explicit `{ quiet: true }` selects it (an event object passed by a click never does).
+  const simulateQuietly = simulationSource.kind === 'transfer' ? () => transfer.simulate({ interactive: false })
+    : simulationSource.kind === 'router' ? () => refreshBridgeAfterApproval(routerState.record, runtimeWorkflow, routerState.retired) ? routerState.refresh() : routerState.simulate({ interactive: false })
+    : simulateRuntime;
+  const simulateAgain = async (options?: { readonly quiet?: true }): Promise<void> => {
     if (preflight.current) return; // a click while Flight is being asked starts nothing more
     // P0 hotfix (execution continuity): a finished sequence has no step left to simulate; its last step is never simulated (or offered) again.
     if (sequence?.finished) return;
@@ -532,7 +538,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       if (flightSigner && access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code, workflowId: state.workflow.workflowId }); return; }
       setFlightBlock(null);
       // Started before the lock lifts, so the runtime's own busy state takes over in the same update (no enabled gap between the two).
-      simulation = Promise.resolve(simulateRuntime());
+      simulation = Promise.resolve(options?.quiet === true ? simulateQuietly() : simulateRuntime());
     } finally { preflight.current = false; setPreflighting(false); }
     await simulation;
   };
@@ -570,11 +576,54 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // fallback when the whole-workflow Review says a step needs its own flow (and why), or when this deployment does not offer it.
   const localSequenceStarted = Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started
     || Boolean(sequence && (sequence.cursor > 0 || sequence.completed.length > 0));
-  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
-    enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE EVM financial card whose action FloFi's user-funded execution groups build (a catalog swap, a
+  // certified Router bridge, a transfer, an Aave supply / borrow / repay / withdraw) runs through the SAME whole-workflow path as a multi-step
+  // workflow: one Authorize, ONE wallet confirmation (an atomic batch with any exact approval folded in, only where the allowance is short), then
+  // automatic reconciliation. Only where the deployment's database accepts one-step runs (the hook's availability); otherwise, and whenever its
+  // Review shows the card cannot run as one confirmation, the card keeps its own flow exactly as before.
+  const singleCardRun = !sequence && soleAction.length === 1 && SINGLE_CARD_RUNTIMES.includes(runtime.kind ?? '') && soleAction[0]!.chainId.startsWith('eip155:')
+    && !compositionWorkflow(state.workflow);
+  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account, single: singleCardRun,
+    enabled: (Boolean(sequence) || singleCardRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+  // A single card goes back to its own flow when its Review is not one grouped interaction, refuses the batch, or could not answer at all
+  // (`singleCardFallsBack`); a started run of it always stays here.
+  const singleCardReview = singleCardRun ? workflowRunHere.review : null;
+  const singleCardFallback = singleCardRun && singleCardFallsBack({ ...workflowRunHere, review: singleCardReview });
   // The whole-workflow path is primary until its Review shows this workflow must run step by step (it cannot be grouped, the RPC cannot simulate
   // it, or the path cannot run here); a safety refusal keeps it primary, so the workflow is fixed before anything runs (a started run always is).
-  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.stepByStep);
+  // A run of this workflow (started here, or followed after a reload) always dominates: whatever the deployment's availability answers (an expired
+  // account session, before the answer arrives), the workflow is never offered again through its per-step or own-card path.
+  const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
+  // A single card back on its own flow shows only that flow (its own Review and wording): never the whole-workflow Review or a second primary action
+  // beside it (final frontend-ux review). A started run of it always stays shown.
+  const groupedShown = workflowRunHere.visible && !singleCardFallback;
+  // A single card that falls back to its own flow right after its Review continues there at once (read-only: its own fresh simulation, which never
+  // opens the wallet selector or a sign-in: `simulateQuietly`). The owner's Simulate click already asked for it; a flow whose simulation needs a
+  // wallet sign-in (the Router without a session, the universal Router) waits for the owner's own click.
+  const singleFallbackKey = singleCardFallback && (singleCardReview || workflowRunHere.error) ? `${state.workflow.workflowId}:${state.workflow.revision}` : null;
+  const singleFallbackSimulated = useRef<string | null>(null);
+  useEffect(() => {
+    if (!singleFallbackKey || singleFallbackSimulated.current === singleFallbackKey) return;
+    if (walletIssue || networkAction || simulationDisabled || !actionable || lifecycleState.invalidWorkflow) return;
+    if (canvasAction.kind !== 'simulate' || canvasAction.disabled || simulationSource.state.busy) return;
+    if (simulationSource.kind === 'universal' || !connectedWallet.account) return;
+    if (simulationSource.kind === 'router' && routerState.session?.account?.toLowerCase() !== connectedWallet.account.toLowerCase()) return;
+    singleFallbackSimulated.current = singleFallbackKey;
+    void simulateAgain({ quiet: true });
+  }, [singleFallbackKey, walletIssue, Boolean(networkAction), simulationDisabled, lifecycleState.invalidWorkflow, canvasAction.kind, canvasAction.disabled,
+    simulationSource.state.busy, simulationSource.kind, routerState.session?.account, connectedWallet.account]);
+  // A single card's run that completed and reconciled is kept as this workflow's executed first step (as its own flow's run is), so an action added
+  // afterwards is its own next step, never a repeat of this one. Its delivery is what the run reconciled for the card's output asset.
+  const groupedSingleRun = singleCardRun || !sequence && soleAction.length === 1 ? workflowRunHere.run : null;
+  const groupedSingleDone = Boolean(groupedSingleRun && groupedSingleRun.state === 'COMPLETED' && groupedSingleRun.stepCount === 1
+    && groupedSingleRun.steps[0]?.state === 'RECONCILED' && workflowRunHere.authorizedFor?.workflowId === state.workflow.workflowId
+    && workflowRunHere.authorizedFor.revision === state.workflow.revision && !workflowRunHere.following);
+  const groupedSingleDelivered = groupedSingleDone ? deliveredByRun(groupedSingleRun!.steps[0]?.outcome?.received ?? [], stepAssets(soleAction[0]!).output) : null;
+  useEffect(() => {
+    // The wallet that executed it is the run's own (its group's fee payer: the run's bound EVM wallet), never whatever is connected now.
+    if (groupedSingleDone && groupedSingleRun) recordExecutedAction({ received: groupedSingleDelivered, runKey: groupedSingleRun.approvalId, kind: 'workflow-run',
+      owner: groupedSingleRun.groups[0]?.feePayer?.toLowerCase() ?? null });
+  }, [groupedSingleDone, groupedSingleDelivered, groupedSingleRun?.approvalId, recordExecutedAction]);
   // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
   // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own
   // fresh, read-only Review. FloFi prepares it at once — exactly as the chat already does — instead of sending the owner back to "Simulate"; the
@@ -710,7 +759,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedReviewExpired = Boolean(workflowRunHere.review?.validUntil && Date.parse(workflowRunHere.review.validUntil) <= Date.now());
   const groupedRunOpen = Boolean(workflowRunHere.started || workflowRunHere.following);
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
-    {workflowRunHere.started && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
+    {/* A single card shows no workflow-run note (final frontend-ux review): its one action is followed like the card's own flow. */}
+    {workflowRunHere.started && !singleCardRun && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
     <button type="button" className="primary" data-lifecycle-action="workflow-run"
       disabled={(!groupedRunOpen && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
       onClick={() => {
@@ -798,13 +848,18 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // chat's edits follow the same lock (`editingPaused` on the conversation bridge).
   const runOpen = Boolean(workflowRunHere.run && !workflowRunHere.following && (['PENDING', 'RUNNING', 'ATTENTION'].includes(workflowRunHere.run.state)
     || workflowRunHere.run.state === 'HALTED' && workflowRunHere.run.resumable === true));
+  // Final workflow review: this workflow's own run, stored in this browser but not loaded yet (before its first status read, or until the owner signs in
+  // again), also locks it: an edit then could never be reconciled with what the run executed. "Forget this workflow in this browser" releases it.
+  const runUnloaded = workflowRunHere.started && workflowRunHere.unloaded;
   const editingPaused = Boolean(!workflowRunHere.following && ['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) || runOpen
-    || liveExecution && !isFinalExecutionResult(liveExecution));
+    || runUnloaded || liveExecution && !isFinalExecutionResult(liveExecution));
   // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): while editing is paused, the Canvas header states the execution's own status (from the same
   // authoritative lifecycle Execute and the Assistant read), never the authoring state that invites a new simulation.
   const canvasRunStatus = !editingPaused ? null : liveExecution && !isFinalExecutionResult(liveExecution) ? liveExecution.label
     : ['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) ? 'Waiting for your authorization'
-    : workflowRunHere.run && ['ATTENTION', 'HALTED'].includes(workflowRunHere.run.state) ? 'Execution needs attention' : 'Execution in progress';
+    : workflowRunHere.run && ['ATTENTION', 'HALTED'].includes(workflowRunHere.run.state) ? 'Execution needs attention'
+    // Before its first status read answers: loading; once a read could not load it (e.g. the sign-in expired): what the run panel offers.
+    : runUnloaded ? workflowRunHere.error ? 'Load workflow progress' : 'Loading…' : 'Execution in progress';
   const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
     // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.
@@ -822,7 +877,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Review operation and Authorize workflow.')
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
-      connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone, blocker: blockerView, editingPaused,
+      connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone || groupedSingleDone, blocker: blockerView, editingPaused,
       workflowProgress } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).
@@ -830,7 +885,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Board 06: in the chat-first Editor, Execute before anything is authorized shows the whole-workflow Review as the one block beside the cards,
   // with its ONE primary action in the Editor footer (the Review's own Review/Authorize when the whole-workflow path is primary, else the
   // step-by-step path's lifecycle action without its caption). Presentation only: the same handlers, gates and wallet requests as before.
-  const reviewBlock = Boolean(chatFirst && tab === 'Execute' && workflowRunHere.visible && !workflowRunHere.run && !workflowRunHere.started
+  const reviewBlock = Boolean(chatFirst && tab === 'Execute' && groupedShown && !workflowRunHere.run && !workflowRunHere.started
     && !workflowRunHere.following && !workflowRunHere.unloaded && (workflowRunHere.review || workflowRunHere.canReview)
     && !liveExecution && !executionProgress.started && !executionStart.started && !(groupedPrimary ? null : executeContinuation));
   // BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): one live summary of the real workflow (steps and their status, networks, state, what needs
@@ -1036,7 +1091,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         actionInFooter={chatFirst && !groupedPrimary && placement === 'footer'} review={executeReview}
         workflowProgress={workflowProgress} continuation={executeContinuationShown} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
+        workflowRun={groupedShown ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
           facts={<WorkflowTechnicalFacts workflow={state.workflow} context={context}/>}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?

@@ -62,7 +62,7 @@ const approvedSections = {
     },
     {
       "title": "8. How long we keep it",
-      "body": "Beta-list entries are kept until the end of the beta or until you ask for erasure. Retention differs for sessions, security, communications and execution records; the periods for each service are detailed below. Some content-free counters and the suppression digest needed to honour your email opt-out have separate retention periods."
+      "body": "Beta-list entries are kept until the end of the beta or until you ask for erasure. Retention differs for sessions, security, communications and execution records; the periods for each service are detailed below. Execution records are kept as financial records; a single-card attempt FloFi proves was never sent can be deleted from your History (see Execution history and deletion). Some content-free counters and the suppression digest needed to honour your email opt-out have separate retention periods."
     },
     {
       "title": "9. Your rights",
@@ -120,7 +120,7 @@ const approvedSections = {
     },
     {
       "title": "8. Por quanto tempo",
-      "body": "As inscrições na lista beta ficam até o fim do beta ou até você pedir a exclusão. Os prazos variam para sessões, segurança, comunicações e registros de execução; os períodos de cada serviço estão detalhados abaixo. Alguns contadores sem conteúdo e o resumo necessário para respeitar o descadastro de e-mails têm prazos próprios."
+      "body": "As inscrições na lista beta ficam até o fim do beta ou até você pedir a exclusão. Os prazos variam para sessões, segurança, comunicações e registros de execução; os períodos de cada serviço estão detalhados abaixo. Os registros de execução são guardados como registros financeiros; uma tentativa de um único cartão que a FloFi prova nunca ter sido enviada pode ser excluída do seu Histórico (veja Histórico de execuções e exclusão). Alguns contadores sem conteúdo e o resumo necessário para respeitar o descadastro de e-mails têm prazos próprios."
     },
     {
       "title": "9. Seus direitos",
@@ -196,11 +196,16 @@ const sectionsPT: readonly Paragraphs[] = [
     'Prazos propostos: notas e motivos, 12 meses; resumos de busca, 12 meses após o fim do trimestre (destruindo a chave daquele trimestre); o registro de auditoria das ações sobre uma execução acompanha o registro da execução (máximo proposto de 5 anos). Esses prazos e a base legal (legítimo interesse em proteger e dar suporte ao serviço e em responder a contestações sobre execuções) estão em revisão jurídica e ainda não são aplicados automaticamente; até lá, os registros são mantidos. Cópias de segurança do banco de dados guardam dados apagados até o fim da sua própria janela.',
     'Você pode pedir acesso a esses registros, correção (por meio de uma nota de correção), exclusão quando não houver finalidade legítima de guarda (por exemplo, uma disputa em andamento ou obrigação legal) e oposição, escrevendo para flofi.xyz@gmail.com. Cada pedido é verificado e registrado; transações em blockchain pública não podem ser apagadas por ninguém.'
   ] },
+  { title: 'Histórico de execuções e exclusão', id: 'historico-execucoes', paragraphs: [
+    'Os registros de uma execução que você inicia, incluindo uma operação de um único cartão confirmada com uma só aprovação na carteira, são guardados como registros financeiros: carteira, estratégia (ativos, valores e eventual destinatário), estados, códigos e, quando houver, hashes de transação. Seguem o prazo proposto e a revisão jurídica descritos acima para os registros de execução; até lá, são guardados. Arquivar apenas oculta um registro do seu Histórico.',
+    'Excluir no Histórico remove por completo uma tentativa de um único cartão só quando a FloFi consegue provar que nada foi enviado: a tentativa terminou antes de qualquer pedido à carteira, ou a sua carteira recusou o pedido e a FloFi comprovou na blockchain, depois do prazo em que o pedido expira, que ele nunca foi enviado. Qualquer tentativa assinada, enviada, pendente, incerta, parcial ou concluída é mantida como evidência financeira e pode apenas ser arquivada.',
+    'Depois de uma exclusão, a FloFi mantém um registro mínimo e permanente dela (os identificadores da tentativa e da aprovação, o endereço público da carteira, o tipo de exclusão, o estado final e as datas), sem estratégia, valores, destinatários ou hashes, para que a exclusão seja definitiva e para responder a pedidos de titulares. Esse registro está incluído na revisão jurídica acima. As cópias de segurança da base de dados mantêm os dados excluídos até o fim da sua própria janela.'
+  ] },
   { title: 'Segurança e autorização financeira', paragraphs: [
     'O bot apenas prepara propostas. Uma operação exige que o utilizador aceda à FloFi, comprove o controlo da carteira, obtenha uma simulação atualizada, reveja o Strategy Manifest e assine explicitamente na própria carteira. Nenhuma mensagem de Telegram autoriza movimentação de fundos. A partilha do estado de execução de volta ao chat é opcional.'
   ] },
   { title: 'Atualizações', paragraphs: [
-    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 15 de novembro de 2026.'
+    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 21 de novembro de 2026.'
   ] },
 ];
 const sectionsEN: readonly Paragraphs[] = [
@@ -247,11 +252,16 @@ const sectionsEN: readonly Paragraphs[] = [
     'Proposed periods: notes and reasons, 12 months; search fingerprints, 12 months after the quarter ends (by destroying that quarter’s key); the audit record of actions on an execution follows the execution record (proposed maximum of 5 years). These periods and the legal basis (legitimate interest in securing and supporting the service and in answering disputes about executions) are under legal review and are not enforced automatically yet; until then the records are kept. Database backups keep deleted data until their own window passes.',
     'You can request access to these records, correction (through a correcting note), erasure where no legitimate retention purpose applies (for example an open dispute or a legal obligation) and objection by writing to flofi.xyz@gmail.com. Each request is verified and recorded; public blockchain transactions cannot be erased by anyone.'
   ] },
+  { title: 'Execution history and deletion', id: 'execution-history', paragraphs: [
+    'The records of an execution you start, including a single-card operation confirmed with one wallet approval, are kept as financial records: wallet, strategy (assets, amounts and any recipient), states, codes and, where there are any, transaction hashes. They follow the proposed period and legal review described above for execution records; until then they are kept. Archive only hides a record from your History.',
+    'Delete in History removes a single-card attempt entirely only when FloFi can prove nothing was sent: the attempt ended before any wallet request existed, or your wallet rejected the request and FloFi verified on the blockchain, after the request’s expiry, that it was never sent. Any attempt that was signed, sent, pending, uncertain, partial or completed is kept as financial evidence and can only be archived.',
+    'After a deletion, FloFi keeps a minimal, permanent record of it (the attempt and approval identifiers, the public wallet address, the kind of deletion, the final state and the dates), with no strategy, amounts, recipients or hashes, so that the deletion is final and data-subject requests can be answered. That record is part of the legal review above. Database backups keep deleted data until their own window passes.'
+  ] },
   { title: 'Wallet security and financial authorization', paragraphs: [
     'The bot only prepares proposals. Any operation requires the user to open FloFi, prove wallet control, obtain a fresh simulation, review the Strategy Manifest and explicitly sign using their own wallet. No Telegram message can authorize a transfer. Sharing execution status with the chat is optional.'
   ] },
   { title: 'Updates', paragraphs: [
-    'This notice may be updated when features or processing change materially. Reviewed 15 November 2026.'
+    'This notice may be updated when features or processing change materially. Reviewed 21 November 2026.'
   ] },
 ];
 function Policy({ lang, heading, sections }: { lang: 'pt' | 'en'; heading: string; sections: readonly Paragraphs[] }) {

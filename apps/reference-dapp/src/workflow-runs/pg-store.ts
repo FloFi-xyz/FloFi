@@ -11,11 +11,11 @@
  *
  * Every query names the tenant; owner reads name the owner too. Nothing stored here is key material, calldata or a signature.
  */
-import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runtime';
+import { CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS, type Database, type Queryable, type Row } from '@defi-workflow-engine/cloud-runtime';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platform/handoff-store.ts';
-import { WALLET_BATCH_OUTCOME_UNKNOWN, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode, type RunState,
-  type StepState } from './state-machine.ts';
+import { WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_REQUEST_REJECTED, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode,
+  type RunState, type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
 import { plannedGroupCode } from './owner-step-circle.ts';
 import type { TokenFeePaid } from '../user-funded/gas-payer.ts';
@@ -224,8 +224,46 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         return await stepUpdate(tx, runId, stepIndex, [step.state], to, { outcome, code }, 'STEP_STATE', true) ? 'RECORDED' : 'MOVED';
       });
     },
+    /**
+     * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's browser reports that the wallet REJECTED this group's batch
+     * (EIP-1193 4001). Recorded as an append-only fact, never a state change (the owner may still authorize the same request again while it is
+     * valid): only for a wallet batch still PREPARED, unanswered, and exactly the preparation the report names (its EIP-5792 id and preparation
+     * time). The report proves nothing on its own; `user-funded/decline-proof.ts` checks it against the chain before anything relies on it.
+     */
+    recordDecline: (runId: string, groupIndex: number, requestId: string, preparedAt: string) => db.transaction(async tx => {
+      const run = await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
+      if (run.state !== 'RUNNING' || run.mode !== 'USER_FUNDED') refuse(`WORKFLOW_RUN_${run.state}`);
+      const row = (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 FOR UPDATE', [tenantId, runId, groupIndex])).rows[0];
+      const g = row ? groupOf(row) : refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+      const prepared = (g.prepared ?? {}) as { readonly request?: { readonly id?: unknown }; readonly preparedAt?: unknown };
+      if (g.state !== 'PREPARED' || g.strategy !== 'EVM_WALLET_BATCH' || g.authorization !== null || prepared.request?.id !== requestId || prepared.preparedAt !== preparedAt)
+        refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+      // One fact per preparation (security review): a repeated report records nothing more.
+      const known = (await tx.query(`SELECT 1 FROM workflow_run_events WHERE tenant_id = $1 AND run_id = $2 AND kind = 'GROUP_WALLET_DECLINED'
+        AND detail->>'group' = $3 AND detail->>'requestId' = $4 AND detail->>'preparedAt' = $5 LIMIT 1`, [tenantId, runId, String(groupIndex), requestId, preparedAt])).rows.length > 0;
+      if (!known) await event(tx, runId, null, 'GROUP_WALLET_DECLINED', 'WALLET_REQUEST_REJECTED', { group: groupIndex, requestId, preparedAt });
+      return g;
+    }),
+    /**
+     * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): a wallet answer (a batch id, transactions or "not sent") arrived for a group
+     * that ended as a verified rejection. Kept as an append-only fact under the run's lock (any state): the attempt is then never deletable.
+     */
+    recordAnswerAfterStop: (runId: string, groupIndex: number, detail: { readonly batchIdReported: boolean; readonly hashes: number | null; readonly notSent: boolean | null }) =>
+      db.transaction(async tx => {
+        if (!await lockRun(tx, runId)) refuse('WORKFLOW_RUN_NOT_FOUND');
+        await event(tx, runId, null, 'GROUP_ANSWER_AFTER_STOP', 'WALLET_BATCH_ANSWERED_AFTER_STOP', { group: groupIndex, ...detail });
+      }),
     /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */
-    cancel: (runId: string, version: number, code: string, now: Date = new Date()) => db.transaction(async tx => {
+    cancel: (runId: string, version: number, code: string, now: Date = new Date(), options: {
+      /**
+       * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): groups whose rejected batch the server proved, from the chain, was never
+       * sent (`user-funded/decline-proof.ts`). Applied only to exactly that preparation, still unanswered under this lock: the group and its steps
+       * say WALLET_REQUEST_REJECTED (nothing was sent) instead of an unknown outcome, and the proof is kept as an append-only fact. Anything else
+       * is cancelled exactly as before.
+       */
+      readonly verifiedDeclines?: ReadonlyMap<number, VerifiedDecline>;
+      /** End the run only if every unanswered wallet batch is one of `verifiedDeclines` here, under the lock; otherwise refuse and change nothing. */
+      readonly onlyIfDeclineVerified?: boolean } = {}) => db.transaction(async tx => {
       const run = await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
       if (run.version !== version) refuse('WORKFLOW_RUN_CHANGED');
       if (!['PENDING', 'RUNNING', 'HALTED'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.state}`);
@@ -235,25 +273,37 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       const row = (await tx.query(`UPDATE workflow_runs SET state = 'CANCELLED', code = $3, version = version + 1
         WHERE tenant_id = $1 AND run_id = $2 RETURNING *`, [tenantId, runId, code])).rows[0]!;
       // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a user-funded run ends only while no group may be in flight (signed but not reconciled).
-      const unknown = new Set<number>();
+      const outcomeOf = new Map<number, string>();
       if (run.mode === 'USER_FUNDED') {
         const groups = (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index FOR UPDATE', [tenantId, runId])).rows.map(groupOf);
         // The same rule the owner's "End workflow" uses (`groupInFlight`): FloFi never relays a skipped user operation or Solana signature, and
         // the owner is shown how to revoke a signed operation.
         if (groups.some(g => groupInFlight(g, now))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+        if (options.onlyIfDeclineVerified) {
+          const unanswered = groups.filter(g => g.state === 'PREPARED' && walletBatchUnanswered(g));
+          const matches = (g: GroupRecord) => { const v = options.verifiedDeclines?.get(g.groupIndex), p = (g.prepared ?? {}) as { request?: { id?: unknown }; preparedAt?: unknown };
+            return Boolean(v && p.request?.id === v.requestId && p.preparedAt === v.preparedAt); };
+          if (!unanswered.length || !unanswered.every(matches)) refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+        }
         for (const g of groups) if (['PLANNED', 'PREPARED', 'EXPIRED', 'BLOCKED', 'AUTHORIZED'].includes(g.state)) {
           // A wallet batch handed to the owner's wallet whose answer never reached FloFi is past its validity here (else it would be in flight),
           // yet it may have executed before its on-chain deadline: it is still SKIPPED (nothing more of it is sent or taken), but its group and
           // steps say the outcome is unknown, never a plain "not run" (the run's note tells the owner to check the wallet's activity).
-          const skipped = walletBatchUnanswered(g) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
-          if (skipped !== code) for (let i = g.stepFrom; i <= g.stepTo; i++) unknown.add(i);
+          const verified = options.verifiedDeclines?.get(g.groupIndex);
+          const prepared = (g.prepared ?? {}) as { readonly request?: { readonly id?: unknown }; readonly preparedAt?: unknown };
+          const declined = Boolean(verified && g.state === 'PREPARED' && walletBatchUnanswered(g) && prepared.request?.id === verified.requestId
+            && prepared.preparedAt === verified.preparedAt);
+          const skipped = declined ? WALLET_REQUEST_REJECTED : walletBatchUnanswered(g) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
+          if (skipped !== code) for (let i = g.stepFrom; i <= g.stepTo; i++) outcomeOf.set(i, skipped);
+          if (declined) await event(tx, runId, null, 'GROUP_DECLINE_VERIFIED', WALLET_REQUEST_REJECTED, { group: g.groupIndex, requestId: verified!.requestId,
+            preparedAt: verified!.preparedAt, ownerNonce: verified!.ownerNonce, fromBlock: verified!.fromBlock, toBlock: verified!.toBlock });
           await tx.query(`UPDATE workflow_run_groups SET state = 'SKIPPED', code = $4, version = version + 1 WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3`,
             [tenantId, runId, g.groupIndex, skipped]);
           await event(tx, runId, null, 'GROUP_STATE', skipped, { group: g.groupIndex, state: 'SKIPPED' });
         }
       }
       for (const step of steps) if (['PENDING', 'READY', 'BLOCKED'].includes(step.state) || (run.mode === 'USER_FUNDED' && step.state === 'DELEGATED')) {
-        const skipped = unknown.has(step.stepIndex) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
+        const skipped = outcomeOf.get(step.stepIndex) ?? code;
         await tx.query(`UPDATE workflow_run_steps SET state = 'SKIPPED', code = $4, version = version + 1
           WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3`, [tenantId, runId, step.stepIndex, skipped]);
         await event(tx, runId, step.stepIndex, 'STEP_STATE', skipped, { state: 'SKIPPED' });
@@ -383,6 +433,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     },
     /** Schedules (or keeps) the run's advance work item. */
     advanceLater: (runId: string, delayMs = 0) => enqueue(db, runId, delayMs),
+    /** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: whether this database accepts a run of ONE step (migration 0032; `singleStepRunsSupported`). */
+    singleStepRuns: () => singleStepRunsSupported(db),
     /** Open runs whose advance item is missing (defense in depth; the sweep re-arms them). */
     async openWithoutWork(limit = 50): Promise<readonly string[]> {
       return (await db.query(`SELECT r.run_id FROM workflow_runs r WHERE r.tenant_id = $1 AND r.state IN ('RUNNING', 'ATTENTION', 'PENDING')
@@ -392,6 +444,34 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
   };
 }
 export type WorkflowRunStore = ReturnType<typeof createPgWorkflowRunStore>;
+/** A rejected wallet batch the server proved, from the chain, was never sent (`user-funded/decline-proof.ts`), for exactly one preparation. */
+export type VerifiedDecline = { readonly requestId: string; readonly preparedAt: string; readonly ownerNonce: string; readonly fromBlock: string; readonly toBlock: string };
+
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: migration 0032 (`single_step_runs`) widens `workflow_runs.step_count` from 2..8 to 1..8, so the
+ * Editor can run ONE financial card through the user-funded execution groups (one atomic wallet batch). It is certified for the v28 build and
+ * applied by an operator command, never by the deployment's own migration (docs/deploy/RELEASE-SINGLE-STEP-RUNS-0032.md). Until the database
+ * holds exactly that migration — the certified (or, once shipped, the shipped) identity, version, name and SHA-256 — a single card keeps its
+ * own flow: nothing offers a run the database would refuse. Any read failure answers false (fail closed to today's path).
+ */
+export const SINGLE_STEP_RUNS_VERSION = 32;
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion, owner requirement): single-card runs start only where an attempt the wallet
+ * rejected can also be deleted — migration 0033 (`purge_unsubmitted_workflow_run`) must be active together with 0032.
+ */
+export const WORKFLOW_RUN_PURGE_VERSION = 33;
+/** Whether the ledger holds exactly the certified identity (version, name and SHA-256) of migration `version`; false on any doubt or error. */
+async function certifiedMigrationActive(db: Queryable, version: number, name: string): Promise<boolean> {
+  const identity = SHIPPED_MIGRATIONS.find(m => m.version === version) ?? CERTIFIED_FORWARD_MIGRATIONS.flatMap(c => c.migrations).find(m => m.version === version);
+  if (!identity || identity.name !== name) return false;
+  try {
+    const row = (await db.query('SELECT version, name, sha256 FROM schema_migrations WHERE version = $1', [version])).rows[0];
+    return Boolean(row && Number(row.version) === identity.version && row.name === identity.name && row.sha256 === identity.sha256);
+  } catch { return false; }
+}
+export async function singleStepRunsSupported(db: Queryable): Promise<boolean> {
+  return await certifiedMigrationActive(db, SINGLE_STEP_RUNS_VERSION, 'single_step_runs') && await certifiedMigrationActive(db, WORKFLOW_RUN_PURGE_VERSION, 'workflow_run_purge');
+}
 /** What `WorkflowRunStore.atomically` hands its work: one run's reads and compare-and-sets, all inside one transaction under the run lock. */
 export type RunScope = {
   readonly steps: (runId: string) => Promise<readonly RunStepRecord[]>;

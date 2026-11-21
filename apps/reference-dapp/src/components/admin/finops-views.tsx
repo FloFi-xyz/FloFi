@@ -298,7 +298,7 @@ export function FinopsAi({ report, language, mode = 'dashboard' }: { report: Fin
 
 export function FinopsWorkflow({ report, language, mode = 'dashboard' }: { report: FinopsReport; language: Language; mode?: FinopsMode }) {
   const { copy, time, count: fmt } = finopsCopy(language);
-  const { workflow, gas } = report;
+  const { workflow, gas, singleCards } = report;
   return <Section id="finops-workflow" title={copy("Workflow Economics")} description={copy('Canonical multi-step mainnet workflow runs. Status changes use the recorded date. Single-flow and legacy operations are outside this counting cohort.')}>
     {workflow ? <>
       <ol className="admin-finops-lifecycle" aria-label={copy('Workflow lifecycle')}>
@@ -312,10 +312,19 @@ export function FinopsWorkflow({ report, language, mode = 'dashboard' }: { repor
     <Indicators report={report} keys={['directSimulated', 'directCompleted', 'costPerCompleted']} language={language} mode={mode} label={copy('Cost per workflow')}/>
     <p className="admin-diff">{copy('Direct costs are workflow-linked costs only. The fully allocated cost divides every recorded operating cost of the period by the completed workflows.')}</p>
     <TechnicalDetails summary={copy('Gas payer evidence')} {...openIn(mode)}>
-      <p className="admin-diff">{copy('Mainnet batch and user-operation groups use their last recorded update. Single-step and standalone transactions are outside this coverage. FloFi gas expense requires a reconciled debit or invoice.')}</p>
+      <p className="admin-diff">{copy('Mainnet batch and user-operation groups, including one-step single-card runs, use their last recorded update. Standalone transactions are outside this coverage. FloFi gas expense requires a reconciled debit or invoice.')}</p>
       {gas ? <dl className="admin-finops-basis">
         {([['Paid natively by the user', gas.ownerNative], ['Native gas fronted by a third-party relayer', gas.frontedByRelayer],
           ['FloFi sponsorship observed', gas.sponsorObserved], ['Gas payer evidence unresolved', gas.unresolved]] as const)
+          .map(([label, number]) => <div key={label}><dt>{copy(label)}</dt><dd>{fmt(number)}</dd></div>)}
+      </dl> : <p>{copy('Unavailable')}</p>}
+    </TechnicalDetails>
+    {/* BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one-step single-card runs, counted as their own cohort (never as workflows). */}
+    <TechnicalDetails summary={copy('Single-card runs')} {...openIn(mode)}>
+      <p className="admin-diff">{copy('One-step mainnet runs of a single card, with one wallet confirmation. They are single actions, counted separately from workflows.')}</p>
+      {singleCards ? <dl className="admin-finops-basis">
+        {([['Created', singleCards.created], ['Completed and reconciled', singleCards.completed], ['Failed or halted', singleCards.failed],
+          ['Cancelled or expired', singleCards.abandoned]] as const)
           .map(([label, number]) => <div key={label}><dt>{copy(label)}</dt><dd>{fmt(number)}</dd></div>)}
       </dl> : <p>{copy('Unavailable')}</p>}
     </TechnicalDetails>

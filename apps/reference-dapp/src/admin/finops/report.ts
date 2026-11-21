@@ -17,8 +17,15 @@ export type WorkflowEconomics = {
   created: number; completed: number; failed: number; refunded: number; pending: number; abandoned: number; advanced: number; averageSteps: number | null; newest: string | null;
   dimensions: { action: string; network: string; protocol: string; count: number }[];
 };
-async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<WorkflowEconomics> {
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the workflow cohort stays the MULTI-STEP workflows (step_count >= 2): one-step Editor runs of a single
+ * card (migration 0032) are single actions, never counted as workflows (their meaning, average steps and cost per completed workflow stay unchanged).
+ * They are counted as their own cohort instead (final workflow review): they have no execution_runs record, so without it they would be counted nowhere.
+ */
+const COHORT_STEPS = { workflows: 'r.step_count >= 2', 'single-cards': "r.step_count = 1 AND h.requester_kind = 'EDITOR_SESSION'" } as const;
+async function readWorkflowEconomics(host: AdminHost, period: Period, cohort: keyof typeof COHORT_STEPS = 'workflows'): Promise<WorkflowEconomics> {
   // Keep this cohort separate from execution_runs, where each component can also have its own record. Mainnet intent does not prove settlement.
+  const steps = COHORT_STEPS[cohort];
   return host.db.transaction(async tx => {
     await tx.query("SET LOCAL statement_timeout = '4000'");
     const params = [host.tenantId, period.from + 'T00:00:00Z', period.to + 'T00:00:00Z'];
@@ -53,13 +60,14 @@ async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<W
       avg(r.step_count) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3)::float AS average_steps,
       max(r.updated_at) AS newest
       FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
-      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at < $3 AND r.updated_at >= $2`, params);
+      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at < $3 AND r.updated_at >= $2
+        AND ${steps}`, params);
     // The plan already provides bounded operation/network/protocol identifiers. No resource, amount, wallet or transaction is selected.
     const { rows } = await tx.query<{ action: string; network: string; protocol: string; count: number }>(`SELECT
       substr(step->>'action', 1, 48) AS action, substr(step->>'network', 1, 48) AS network, substr(step->>'protocol', 1, 48) AS protocol, count(*)::integer
       FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(h.plan->'steps') = 'array' THEN h.plan->'steps' ELSE '[]'::jsonb END) step
-      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at >= $2 AND r.created_at < $3
+      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at >= $2 AND r.created_at < $3 AND ${steps}
       GROUP BY 1, 2, 3 ORDER BY 4 DESC, 1, 2, 3 LIMIT 100`, params);
     return { created: data!.created, completed: data!.completed, failed: data!.failed, refunded: data!.refunded, pending: data!.pending,
       abandoned: data!.abandoned, advanced: data!.advanced,
@@ -144,7 +152,8 @@ export const REPORT_LIMITATIONS = [
   'An invoice or accounting record also supersedes overlapping provider-reported costs of the same service in any environment. Provider-reported costs are shown as PROVIDER_REPORTED until reconciled.',
   'Missing provider coverage or exchange rates are unavailable. A partial total is the sum of covered amounts. Currency conversion uses the entry’s documented USD per unit rate.',
   'Recorded expenses include invoices and provider-reported costs. Usage and estimates are shown separately from recorded expenses.',
-  'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
+  'Workflow counts cover canonical multi-step mainnet workflow runs; one-step single-card runs are counted separately. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
+  'Single-card attempts an owner deleted from History (never sent: ended before any wallet request, or rejected and proven unsent) leave the single-card counts, including for closed periods; completed runs and costs are unaffected.',
   'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
   'The infrastructure-adjusted result excludes corporate expenses outside the available ledger and is an operating indicator.',
 ] as const;
@@ -152,13 +161,14 @@ export const REPORT_LIMITATIONS = [
 export async function readFinopsReport(host: AdminHost, period: Period, now: Date) {
   const current = finopsPeriod(now, {}).period, previous = finopsPeriod(now, { range: 'previous' }).period;
   const ledgerPromise = readCosts(host, period);
-  const [ledger, month, prior, ai, workflow, sync, integrations, executions, gas] = await Promise.all([
+  const [ledger, month, prior, ai, workflow, sync, integrations, executions, gas, singleCards] = await Promise.all([
     ledgerPromise, samePeriod(current, period) ? ledgerPromise : readCosts(host, current),
     samePeriod(previous, period) ? ledgerPromise : readCosts(host, previous), readAiEconomics(host, period, now).catch(() => null),
     readWorkflowEconomics(host, period).catch(() => null), readSyncState(host).catch(() => []),
     readFinancialSync(host).catch(() => ({ available: false, unreadable: true as const, providers: [] as never[] })),
     readExecutionEconomics(host, period).catch(() => null),
     readGasPayerEvidence(host, period).catch(() => null),
+    readWorkflowEconomics(host, period, 'single-cards').catch(() => null),
   ]);
   const totals = reportedCosts(ledger, period);
   const billing = 'Net scoped provider costs and reconciled invoices, including applicable credits, discounts and taxes.';
@@ -219,7 +229,7 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
       meters: meters.filter(meter => meter.period.from >= period.from && meter.period.to <= period.to) };
   }));
   const selected = new Set((selectRecords(ledger.records)).map(record => record.id));
-  return { period, current, previous, metrics, ai, workflow, sync, integrations: { ...integrations, providers: providerRows }, executions, gas, totals, ledger: { status: ledger.status, complete: ledger.complete,
+  return { period, current, previous, metrics, ai, workflow, singleCards, sync, integrations: { ...integrations, providers: providerRows }, executions, gas, totals, ledger: { status: ledger.status, complete: ledger.complete,
     records: ledger.records.map(row => ({ ...row, selected: selected.has(row.id) })) } };
 }
 export type FinopsReport = Awaited<ReturnType<typeof readFinopsReport>> & { readonly fx?: ReportFxSet };
@@ -311,6 +321,13 @@ export function investorCsv(report: FinopsReport, scenario: Scenario | null = nu
       ['Refunded workflows', workflow.refunded], ['Pending workflows', workflow.pending],
       ['Cancelled or expired', workflow.abandoned], ['Average steps', workflow.averageSteps]] as const) {
       rows.push(['workflows', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Canonical mainnet workflow runs', workflow.newest]);
+    }
+  }
+  if (report.singleCards) {
+    const single = report.singleCards;
+    for (const [label, amount] of [['Created', single.created], ['Completed and reconciled', single.completed], ['Failed or halted', single.failed],
+      ['Refunded', single.refunded], ['Pending', single.pending], ['Cancelled or expired', single.abandoned]] as const) {
+      rows.push(['single-card runs', label, period.from, period.to, amount, 'count', 'PARTIAL', 'One-step single-card mainnet runs, separate from workflows', single.newest]);
     }
   }
   if (report.executions) for (const [label, amount] of Object.entries(report.executions))

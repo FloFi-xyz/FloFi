@@ -11,7 +11,9 @@
  *                    test's own control below, which plays what an EIP-5792 wallet does with `wallet_sendCalls`.
  *   POST /control    test-only JSON-RPC: MOCK_reset(owner, usdcUnits, nativeWei), MOCK_walletBatch(owner, calls) → transaction hash (one
  *                    atomic transaction from the owner's own account, as a 7702 wallet sends it), MOCK_batches, MOCK_simulations,
- *                    MOCK_accountData(owner), MOCK_tokenBalance(token, owner).
+ *                    MOCK_accountData(owner), MOCK_tokenBalance(token, owner), MOCK_receipt(hash). BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001:
+ *                    MOCK_fundToken(token, owner, units) funds a modelled token (e.g. WETH for a WETH → USDC card), MOCK_setAllowance(token,
+ *                    owner, spender, units) sets an existing ERC-20 allowance and MOCK_allowance(token, owner, spender) reads one.
  *
  * The certificate is the per-run loopback certificate playwright.config.ts generates for the read harnesses (FLOFI_SWAP_READ_TLS); the app
  * server trusts it through NODE_EXTRA_CA_CERTS. Evidence produced here is MOCKED, never a public execution.
@@ -35,7 +37,7 @@ const RESERVES = [{ ...reserve(BASE_MAINNET_SWAP.weth), price: 2_500n * 10n ** 8
   { ...reserve(BASE_MAINNET_SWAP.usdc), price: 10n ** 8n, ltvBps: 7_500n, liquidationThresholdBps: 7_800n, decimals: 6 }];
 const create = () => createEvmDouble(8453, () => Math.floor(Date.now() / 1000), { profile: BASE_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
 let chain = create(), batches = 0;
-const ADDRESS = /^0x[0-9a-f]{40}$/;
+const ADDRESS = /^0x[0-9a-f]{40}$/, UNITS = /^(0|[1-9][0-9]{0,77})$/;
 /** The double itself implements `eth_sendRawTransaction` (for other harnesses): on this RPC an owner's send arrives only through /control. */
 const SEND_OR_SIGN = /^(eth_send|eth_sign|personal_|wallet_)/i;
 const replacer = (_: string, value: unknown) => typeof value === 'bigint' ? value.toString() : value;
@@ -70,6 +72,15 @@ createServer({ key: readFileSync(join(directory, 'key.pem')), cert: readFileSync
     else if (method === 'MOCK_accountData') result = chain.control.accountData(String(params[0]));
     else if (method === 'MOCK_tokenBalance') result = chain.control.tokenBalance(String(params[0]), String(params[1]));
     else if (method === 'MOCK_receipt') result = chain.control.receipt(String(params[0]));
+    else if (method === 'MOCK_fundToken') {
+      const [token, owner, units] = params.map(String) as [string, string, string];
+      if (!ADDRESS.test(token.toLowerCase()) || !ADDRESS.test(owner.toLowerCase()) || !UNITS.test(units)) throw new Error('MOCK_FUND_INVALID');
+      chain.control.fundToken(owner, token, BigInt(units));
+    } else if (method === 'MOCK_setAllowance') {
+      const [token, owner, spender, units] = params.map(String) as [string, string, string, string];
+      if (![token, owner, spender].every(a => ADDRESS.test(a.toLowerCase())) || !UNITS.test(units)) throw new Error('MOCK_ALLOWANCE_INVALID');
+      chain.control.setAllowance(token, owner, spender, BigInt(units));
+    } else if (method === 'MOCK_allowance') result = chain.control.allowance(String(params[0]), String(params[1]), String(params[2]));
     else throw new Error('MOCK_CONTROL_DENIED');
     json(200, { jsonrpc: '2.0', id, result });
   } catch (cause) {

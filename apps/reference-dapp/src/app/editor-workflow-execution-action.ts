@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { flightWalletRefusal, withFlightAccess } from '../server/flight-access';
+import { flightWalletRefusal, withFlightAccess, withFlightOwner } from '../server/flight-access';
 /**
  * P0 workflow execution: the Editor runs a multi-step Canvas workflow as ONE workflow run, in place, with the lowest-friction authorization the
  * owner's own wallet really supports (an EIP-5792 atomic batch where it reports one), instead of a sequence of separate per-step flows.
@@ -15,16 +15,19 @@ import { flightWalletRefusal, withFlightAccess } from '../server/flight-access';
  *
  * Every refusal is a closed code. A run that was started but could not reach its wallet request is ended (nothing was signed or sent).
  */
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
-import { readEditorRunConfig } from '../editor/approval';
+import { readEditorRunConfig, startEditorRun, withdrawUnstartedHandoff, type EditorRunStarted } from '../editor/approval';
+import { createPgHandoffStore } from '../platform/index';
+import { EMBEDDED_APPROVAL_PATH } from '../server/embedded-approval';
+import { createPgWorkflowRunStore, singleStepRunsSupported } from '../workflow-runs/pg-store';
 import { bindingOf, runMatchesBinding } from '../editor/authorize-binding';
-import { editorWorkflowStrategy } from '../editor/workflow-strategy';
+import { editorWorkflowStrategy, singleCardRunRecord, type SingleRunRecord } from '../editor/workflow-strategy';
 import { prepareCatalogs } from '../server/editor-catalogs';
 import { platformStateHost } from '../server/platform-state-host';
 import { deploymentEngineRuntime, evaluateGates, fixedWindow, type HandoffPolicy } from '../platform/index';
 import { reviewEditorExecution, type EditorExecutionReview } from '../editor/workflow-execution';
-import { walletProfileOf, workflowRunCancel, workflowRunUserFundedPrepare, workflowRunUserFundedStart, claimApproval, type ClaimedProposal } from '../platform/index';
+import { walletProfileOf, workflowRunCancel, workflowRunStatus, workflowRunUserFundedPrepare, workflowRunUserFundedStart, claimApproval, type ClaimedProposal } from '../platform/index';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { approvalSurface } from '../server/approval-surface';
 import { currentWalletPrincipals } from '../server/session-principal';
@@ -40,8 +43,30 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const REVIEW_LIMIT = 30, REVIEW_WINDOW_SECONDS = 600;
 /** Only the deployment and code facts of a bridge step's gates are read for the Review (the run's start applies its requester's own policy). */
 const REVIEW_GATE_POLICY: HandoffPolicy = { ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' };
-/** Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. */
-export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null }> {
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: whether a Canvas workflow is ONE financial card (the Editor's single-card run). Only a hint for
+ * choosing the path; the workflow itself is re-read and re-validated by `editorWorkflowStrategy`.
+ */
+const financialNodes = (workflow: unknown): readonly { readonly actionType: string; readonly chainId?: unknown }[] => {
+  const nodes = workflow && typeof workflow === 'object' ? (workflow as { nodes?: unknown }).nodes : null;
+  return Array.isArray(nodes) ? nodes.filter((node): node is { actionType: string; chainId?: unknown } => Boolean(node) && typeof node === 'object'
+    && typeof (node as { actionType?: unknown }).actionType === 'string' && !(node as { actionType: string }).actionType.startsWith('mock-')) : [];
+};
+/** ONE financial card (the single-card path: the shell then offers its own flow, or this run). */
+const singleCard = (workflow: unknown): boolean => financialNodes(workflow).length === 1;
+/** The single-card run's scope: ONE EVM card (the user-funded EVM execution groups; a Solana card already signs once through its own flow). */
+const singleEvmCard = (workflow: unknown): boolean => { const nodes = financialNodes(workflow);
+  return nodes.length === 1 && typeof nodes[0]!.chainId === 'string' && nodes[0]!.chainId.startsWith('eip155:'); };
+/** Whether this deployment's database accepts a one-step workflow run (migration 0032, exact identity; any failure: no). */
+const singleStepRunsHere = async (env: NodeJS.ProcessEnv): Promise<boolean> => {
+  try { return await singleStepRunsSupported((await platformStateHost(env)).db); } catch { return false; }
+};
+/**
+ * Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. `singleStep`
+ * (BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001): whether ONE financial card can run that way too — only once the database accepts one-step runs
+ * (migration 0032, applied by an operator); until then a single card keeps its own flow.
+ */
+export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null; readonly singleStep?: boolean }> {
   return withFlightAccess(async () => {
   const env = process.env, editor = readEditorRunConfig(env);
   if (!editor.enabled) return { enabled: false, code: editor.code };
@@ -49,7 +74,8 @@ export async function editorWorkflowExecutionAvailability(): Promise<{ readonly 
   if (!facts.enabled) return { enabled: false, code: facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
   // Without a FloFi account session the run cannot start: the Editor keeps its step-by-step path primary instead of a Review that would refuse.
   const accounts = await accountHost(env).catch(() => null);
-  return await currentAccountSession(accounts, env) ? { enabled: true, code: null } : { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+  if (!await currentAccountSession(accounts, env)) return { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+  return { enabled: true, code: null, singleStep: await singleStepRunsHere(env) };
 
   });
 }
@@ -72,6 +98,9 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
     const host = await platformStateHost(env);
     if (!await fixedWindow(host.db, host.tenantId).allow(`editor-review:${session.accountId}`, REVIEW_LIMIT, REVIEW_WINDOW_SECONDS, new Date()))
       return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE EVM card is reviewed as a run of that one step only where the database accepts such a run.
+    const singleStep = singleEvmCard(workflow) && await singleStepRunsSupported(host.db).catch(() => false);
+    if (singleCard(workflow) && !singleStep) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
     // The workflow's listed tokens resolve exactly as on the Canvas (the run's own start does the same).
     await prepareCatalogs(workflow);
     // ADR-0009: the Review's preparation is a preview (no sponsorship grant), but it says whether FloFi would sponsor the fee (shared state).
@@ -83,12 +112,36 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
       return !gates.supportedByCode.execute ? gates.supportedByCode.reason ?? 'OWNER_EXECUTION_NOT_IMPLEMENTED'
         : !gates.enabledByDeployment.enabled ? gates.enabledByDeployment.reason ?? 'FLOW_NOT_ENABLED' : null;
     };
-    return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date(), stepRefusal });
+    return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date(), stepRefusal,
+      singleStep });
   } catch (cause) { return failure(cause); }
 
   });
 }
 
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the Editor's own one-step run of ONE card, started only from the in-place Authorize below (never
+ * exported as an action: "Run workflow" keeps handing off multi-step workflows only). The same requester, account session, deployment check and
+ * approval service as `startEditorWorkflowRun`; the handoff is a SEQUENTIAL plan of that one step.
+ */
+async function startSingleCardRun(workflow: unknown): Promise<Result<EditorRunStarted>> {
+  const env = process.env, config = readEditorRunConfig(env);
+  if (!config.enabled) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
+  if ((await headers()).get('x-flofi-pathname') === EMBEDDED_APPROVAL_PATH) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
+  const accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
+  if (!session) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+  const host = await platformStateHost(env);
+  return await startEditorRun({ config, origin: config.origin, handoffs: createPgHandoffStore(host.db, host.tenantId), allow: fixedWindow(host.db, host.tenantId).allow,
+    runtime: deploymentEngineRuntime(env), now: new Date() }, session.accountId, workflow, { singleStepRun: true });
+}
+/** Withdraws this account's own Editor handoff only while no workflow run exists for it (`withdrawUnstartedHandoff`: a run keeps its handoff). */
+async function revokeOwnHandoff(approvalId: string): Promise<void> {
+  const env = process.env, accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
+  if (!session) return;
+  const host = await platformStateHost(env);
+  await withdrawUnstartedHandoff({ handoffs: createPgHandoffStore(host.db, host.tenantId), runFor: id => createPgWorkflowRunStore(host.db, host.tenantId).byHandoff(id) },
+    session.accountId, approvalId, new Date());
+}
 export type EditorAuthorization = { readonly approvalId: string; readonly proposal: ClaimedProposal; readonly prepared: PreparedGroupView };
 /**
  * The owner's Authorize: starts the shared workflow run of this Canvas workflow, claims it for the proven wallet, starts it in user-funded mode
@@ -111,9 +164,12 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     if (!wallets.some(w => w.namespace === 'eip155')) return { ok: false, code: 'EVM_WALLET_PROOF_REQUIRED' };
     // The workflow sent is the reviewed one before anything is created (no handoff or run for a workflow that changed since the Review).
     await prepareCatalogs(workflow);
-    const converted = editorWorkflowStrategy(workflow);
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE card runs as a workflow run of that one step only where the database accepts it (0032).
+    const singleStep = singleEvmCard(workflow) && await singleStepRunsHere(process.env);
+    if (singleCard(workflow) && !singleStep) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
+    const converted = editorWorkflowStrategy(workflow, { singleStep });
     if (!converted.ok || converted.workflowHash !== binding.workflowHash) return { ok: false, code: 'EDITOR_EXECUTION_PLAN_CHANGED' };
-    const started = await startEditorWorkflowRun(workflow);
+    const started = singleStep ? await startSingleCardRun(workflow) : await startEditorWorkflowRun(workflow);
     if (!started.ok) return started;
     approvalId = started.value.approvalId;
     const secret = new URL(started.value.approvalUrl).hash.slice(1);
@@ -123,7 +179,9 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     const run = proposal.view.workflowRun?.run;
     const first = run?.groups?.[0];
     // The Editor authorizes in place only a run whose first group is one wallet-grouped interaction; anything else is ended, never half-started.
-    if (!run || run.mode !== 'USER_FUNDED' || !first || !['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'].includes(first.strategy))
+    // A single card's run is one EVM group (its batch, or Circle's operation of the same calls) — nothing else is ever started for it.
+    const grouped = singleStep ? ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION'] : ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'];
+    if (!run || run.mode !== 'USER_FUNDED' || !first || !grouped.includes(first.strategy) || singleStep && run.stepCount !== 1)
       throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
     // Exactly the reviewed workflow and plan: the same canonical workflow hash, the same groups (mechanism and steps) in the same order.
     if (!runMatchesBinding(run, binding)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
@@ -136,9 +194,37 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     // Nothing was signed or sent: a started run that could not reach its wallet request is ended (it stays readable as ended).
     let ended = false;
     if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); ended = true; } catch { /* already ended or not created */ } }
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): a run that could not be ended here keeps its handoff; only when NO run exists
+    // for it (a refused claim, a run row the database refused) is the account's own handoff withdrawn, so it never lingers against the account's
+    // pending limit. Nothing was signed or sent either way.
+    if (approvalId && !ended) await revokeOwnHandoff(approvalId).catch(() => undefined);
     const refused = failure(cause);
     return ended && refused.code === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? { ok: false, code: 'EDITOR_MECHANISM_CHANGED_NOT_STARTED' } : refused;
   }
+
+  });
+}
+
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (workflow review): what a single-card run proves about ONE Canvas card, read as its owner (the run's
+ * own wallets, from this browser's sign-in), so a workflow that grew from that card never offers it again after a reload (`domain/sequence-restore.ts`,
+ * kind `workflow-run`). Proven here, server-side: the run has exactly one step and its canonical hash is exactly this card's
+ * (`editorWorkflowStrategy` single-step; the run's engine workflow carries no Canvas ids, so the card's ids are echoed only once it is proven).
+ * Read-only: a status read, as the run's own poll does; nothing is resolved, prepared, signed or sent.
+ */
+export async function editorSingleRunRecord(approvalId: unknown, card: unknown): Promise<Result<SingleRunRecord>> {
+  return withFlightOwner(async () => {
+  try {
+    if (typeof approvalId !== 'string' || !/^apr_[a-z2-7]{26}$/.test(approvalId)) return { ok: false, code: 'WORKFLOW_RUN_NOT_FOUND' };
+    const jar = await cookies();
+    const status = await workflowRunStatus(await approvalSurface(process.env, name => jar.get(name)?.value), approvalId, await currentWalletPrincipals());
+    const run = status.view.workflowRun?.run;
+    // Only a one-step run can be a single card's (checked before the caller's card is read at all).
+    if (!run || run.stepCount !== 1) return { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };
+    await prepareCatalogs(card);
+    const record = singleCardRunRecord(run, card);
+    return record ? { ok: true, value: record } : { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };
+  } catch (cause) { return failure(cause); }
 
   });
 }

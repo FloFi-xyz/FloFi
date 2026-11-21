@@ -128,3 +128,48 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position-management runs in Histor
     expect(dashboardRunTitle({ flow: 'base-aave', attempts: [attempt('EXIT')] })).toBe('Aave workflow');
   });
 });
+
+// BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): a single-card attempt the owner history lists is a `wfr_` workflow run whose
+// summary carries the run's own state (`packages/cloud-runtime/src/queries.ts`). It is worded by that state alone, never by the execution groups.
+describe('single-card attempts (workflow runs) in History', () => {
+  const attempt = (status: string, over: Partial<DashboardRun> = {}): DashboardRun => ({ runId: 'wfr_' + 'a'.repeat(26), workflowId: '', flow: 'arbitrum-swap', status,
+    provenance: 'WORKFLOW_RUN', ownerAccount: reviewOwner, errorCode: null, needsObservation: false, attentionRequired: false, hasEvidence: false,
+    createdAt: '2026-11-20T12:00:00.000Z', updatedAt: '2026-11-20T12:01:00.000Z', ...over });
+  const editor = 'Check execution status in the Editor\'s execution view', unknown = 'FloFi has not established the final workflow outcome.';
+  it.each<[string, Partial<DashboardRun>, Partial<ReturnType<typeof projectDashboardRun>>]>([
+    ['COMPLETED', {}, { status: 'Completed', message: 'The run records a reconciled outcome.', attention: [], reconciled: true }],
+    ['COMPLETED', { errorCode: 'SOME_RECORDED_ISSUE' }, { status: 'Completed with attention', attention: ['A recorded issue needs review'], reconciled: true }],
+    ['PENDING', {}, { status: 'In progress', message: 'The recorded execution is still awaiting its final outcome.', attention: [editor], reconciled: false }],
+    ['RUNNING', {}, { status: 'In progress', attention: [editor], reconciled: false }],
+    ['ATTENTION', { attentionRequired: true }, { status: 'Needs attention', message: unknown, attention: ['This execution record needs attention', editor] }],
+    ['HALTED', { attentionRequired: true, errorCode: 'WALLET_BATCH_OUTCOME_UNKNOWN' }, { status: 'Needs attention', message: unknown,
+      attention: ['This execution record needs attention', editor] }],
+    // 0015: a run expires only from PENDING, before any mode, authorization or step started.
+    ['EXPIRED', { errorCode: 'WORKFLOW_RUN_EXPIRED' }, { status: 'Not started', message: 'The run has no recorded execution start.', attention: [] }],
+    // Whether a wallet request was sent is not knowable from the summary: never "not submitted", never "declined".
+    ['CANCELLED', { errorCode: 'OWNER_CANCELLED' }, { status: 'Needs attention', message: unknown, attention: ['The request was cancelled'] }],
+    ['FAILED', { errorCode: 'SUBMISSION_REVERTED' }, { status: 'Needs attention', message: unknown, attention: ['Review the incomplete action'] }],
+    ['SOMETHING_NEW', {}, { status: 'Unresolved', message: unknown, attention: ['Execution status unresolved'] }],
+  ])('%s %j', (status, over, expected) => {
+    const view = projectDashboardRun(attempt(status, over));
+    expect(view).toMatchObject({ ...expected, landed: null, networks: [], completed: null, total: null, recovered: false, progress: null, current: false });
+    // Never an execution claim the run row does not prove.
+    expect(view.status).not.toBe('Transaction not submitted');
+    expect([view.message, ...view.attention].join(' ')).not.toMatch(/nothing was sent|not submitted|declined|Evidence|Open the run/i);
+  });
+  it('is titled by its single step\'s flow; an unknown step keeps the generic title', () => {
+    expect(projectDashboardRun(attempt('COMPLETED')).title).toBe('Swap');
+    expect(projectDashboardRun(attempt('COMPLETED', { flow: 'base-mainnet-transfer' })).title).toBe('Send');
+    expect(projectDashboardRun(attempt('COMPLETED', { flow: 'crosschain-router' })).title).toBe('Bridge');
+    expect(projectDashboardRun(attempt('COMPLETED', { flow: 'workflow-run' })).title).toBe('Financial operation');
+  });
+  it('is read from the listing like any owned summary, and never another owner\'s; an execution record with the same words keeps its own wording', () => {
+    const summary = { ...attempt('CANCELLED'), ownerAccount: reviewOwner.toUpperCase().replace('0X', '0x') };
+    expect(toDashboardRun(summary, reviewOwner)).toMatchObject({ runId: 'wfr_' + 'a'.repeat(26), provenance: 'WORKFLOW_RUN', status: 'CANCELLED' });
+    expect(toDashboardRun({ ...summary, ownerAccount: '0x' + '2'.repeat(40) }, reviewOwner)).toBeNull();
+    expect(dashboardRunIndex(reviewOwner, [attempt('COMPLETED'), run('CANCELLED')], null).map(view => view.status)).toEqual(['Completed', 'Transaction not submitted']);
+    // A saved run's projected progress (never the case for an attempt, which has no detail) keeps the existing projection.
+    const progress = projectDashboardRecord(detail('CONFIRMED'), reviewFixture().context)!;
+    expect(projectDashboardRun(attempt('PENDING'), progress).status).toBe('Completed');
+  });
+});

@@ -234,7 +234,12 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls, walletBatchId(g.runId, g.groupIndex));
   // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
   const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
-  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation, ...sponsorship ? { sponsorship } : {},
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's pending transaction count read BEFORE the request leaves FloFi.
+  // Any transaction the owner's account sends afterwards (this batch included) carries this nonce or a later one; it is what lets the server prove
+  // a batch the wallet rejected was never sent (`user-funded/decline-proof.ts`). Not readable: the group is prepared as before, never deletable.
+  const ownerNonce = await t.rpc('eth_getTransactionCount', [group.owner, 'pending']).then(v => big(v).toString(), () => null);
+  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, ...ownerNonce !== null ? { ownerNonce } : {}, simulation,
+    ...sponsorship ? { sponsorship } : {},
     fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(),
       l1FeeUpperBound: l1FeeUpperBound.toString(), estimated: true, sponsorship: sponsorship ? sponsorship.required ? 'REQUIRED' : 'OFFERED' : null } });
 }

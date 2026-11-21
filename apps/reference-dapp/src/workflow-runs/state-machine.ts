@@ -76,6 +76,11 @@ export const WALLET_BATCH_SETTLE_MS = 2 * 60_000;
 /** The code an ended run's wallet batch group and its steps carry when the batch's outcome cannot be known (`walletBatchUnanswered`). */
 export const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
 /**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the code an ended run's wallet batch group and its steps carry when the owner's
+ * wallet rejected the batch AND the server proved from the chain that it was never sent (`user-funded/decline-proof.ts`): nothing was sent.
+ */
+export const WALLET_REQUEST_REJECTED = 'WALLET_REQUEST_REJECTED';
+/**
  * Whether a wallet batch group was handed to the owner's wallet (a prepared artifact, or earlier preparations kept for reconciliation) while no
  * answer was ever recorded for it: the wallet may have executed it before its on-chain deadline and the answer been lost on the way. FloFi
  * cannot know, so such a group is never described as not run: ending the run, or blocking the group at the run's expiry (user-funded-pass.ts),

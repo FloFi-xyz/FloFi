@@ -124,9 +124,13 @@ export function executionPlan(composition: Composition): ExecutionPlan {
  * fresh simulation, Review and wallet signature, and each only after the previous step reconciled. A step without a flow makes the
  * sequence NOT_EXECUTABLE with that step's own reason. BUILD-CROSSCHAIN-UNIVERSAL-001: bound amounts (`bindings`) resolve from the
  * producer step's reconciled received amount in both confirm-each-step and delegated modes (min(cap, received)).
+ *
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: `run` plans a ONE-step workflow as a workflow run of that one step (SEQUENTIAL, its step's own
+ * flow per step), exactly as the multi-step rule plans each step. Only the Editor's own single-card run asks for it; every other caller (MCP,
+ * the Developer API, channels, automations) keeps the one-step plan of its step (SINGLE_FLOW), which is their public contract.
  */
-export function workflowPlan(workflow: WorkflowComposition): ExecutionPlan {
-  if (workflow.steps.length === 1) return executionPlan(workflow.steps[0]!);
+export function workflowPlan(workflow: WorkflowComposition, options: { readonly run?: boolean } = {}): ExecutionPlan {
+  if (workflow.steps.length === 1 && !options.run) return executionPlan(workflow.steps[0]!);
   const plans = workflow.steps.map(executionPlan), networks = [...new Set(plans.flatMap(p => p.networks))];
   const steps = plans.map((p, index) => ({ ...p.steps[0]!, index, action: workflow.steps[index]!.strategy.action, nodeIds: p.steps.flatMap(s => s.nodeIds), flow: p.flow }));
   const missing = plans.find(p => !p.flow);
@@ -195,10 +199,14 @@ export async function evaluateGates(composition: Composition, runtime: McpRuntim
  * own facts are reported; the sequence is supported by code when its plan is SEQUENTIAL and every step executes; it is enabled when every
  * step's flow is enabled here; policy covers every network of every step. No sequence evidence is claimed: each step's evidence is its own
  * flow's, and the run records which steps reconciled.
+ *
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: `run` evaluates a ONE-step workflow as a workflow run of that step (`workflowPlan` with `run`):
+ * the same per-step facts plus the workflow-run gate (WORKFLOW_RUNS_NOT_ENABLED), which a one-step handoff otherwise never consults.
  */
-export async function evaluateWorkflowGates(workflow: WorkflowComposition, runtime: McpRuntime, policy: HandoffPolicy): Promise<Gates & { readonly plan: ExecutionPlan }> {
-  if (workflow.steps.length === 1) return evaluateGates(workflow.steps[0]!, runtime, policy);
-  const owned = workflowPlan(workflow), each = await Promise.all(workflow.steps.map(step => evaluateGates(step, runtime, policy)));
+export async function evaluateWorkflowGates(workflow: WorkflowComposition, runtime: McpRuntime, policy: HandoffPolicy,
+  options: { readonly run?: boolean } = {}): Promise<Gates & { readonly plan: ExecutionPlan }> {
+  if (workflow.steps.length === 1 && !options.run) return evaluateGates(workflow.steps[0]!, runtime, policy);
+  const owned = workflowPlan(workflow, options), each = await Promise.all(workflow.steps.map(step => evaluateGates(step, runtime, policy)));
   const steps = each.map((g, index) => ({ index, flow: g.plan.flow, execute: g.supportedByCode.execute, deploymentEnabled: g.enabledByDeployment.enabled,
     reason: g.supportedByCode.reason ?? g.enabledByDeployment.reason }));
   const facts = await runtime.sequences?.() ?? { enabled: false, delegation: null };

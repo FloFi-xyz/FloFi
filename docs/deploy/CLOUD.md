@@ -250,7 +250,10 @@ These steps need the owner's accounts. The repository already contains everythin
 * **Logs** are one JSON object per line with `trace_id`/`span_id` (W3C), `tenant_id`, `run_id`, `flow`,
   `action`, `worker_id`, `work_kind` and redacted values. Ship them to any collector.
 * **Retention**: the sweeper deletes `DONE` work items after 14 days and expired idempotency keys. Execution
-  logs, journal entries and evidence metadata are append-only and never deleted by the application.
+  logs, journal entries and evidence metadata are append-only and never deleted by the application, except by the owner's own History
+  deletion of a run that provably never started (0016). Workflow-run records are append-only too, except the owner's own History deletion of a
+  single-card attempt that provably never reached a chain, once the operator applied the certified 0033
+  ([RELEASE-WORKFLOW-RUN-PURGE-0033.md](RELEASE-WORKFLOW-RUN-PURGE-0033.md)). Each deletion leaves an immutable identity tombstone.
 * **Importing a local run**: `node apps/reference-dapp/backend/main.ts import-journal <flow> <absolute dir> <run id>`
   validates the local JSONL log with the full flow validator and copies the identical bytes.
 

@@ -25,6 +25,7 @@ import { compositionWorkflow, fundingAllocations, sequenceCursor, sequenceOrder,
 import { proveCompletions, SEQUENCE_RUN_STORAGE_KEY, storedCompletions, type StoredCompletion } from '../domain/sequence-restore';
 import { editorStorage, persistEditor, readPersistedEditor } from '../domain/editor-persistence';
 import { publicStatus } from '../app/public-testnet-action';
+import { editorSingleRunRecord } from '../app/editor-workflow-execution-action';
 import { supplyStatus } from '../app/supply-action';
 import { jupiterStatus } from '../app/jupiter-action';
 import { routerStatus } from '../app/router-action';
@@ -172,7 +173,13 @@ const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks
   introducedTestNetworks(before, after, activeNetworkScope());
 
 /** A sequence step's durable record, read back from its own runtime by run id (BUILD AAVE-V3-EXPANSION-001). Null when unreadable. */
-async function readSequenceRecord(kind: string, runKey: string, sourceChain?: string | null): Promise<unknown> {
+async function readSequenceRecord(kind: string, runKey: string, sourceChain?: string | null, card?: unknown): Promise<unknown> {
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card's one-step workflow run, proven server-side for exactly this card (read-only).
+  if (kind === 'workflow-run') {
+    if (!card) return null;
+    const result = await editorSingleRunRecord(runKey, card).catch(() => null);
+    return result?.ok ? result.value : null;
+  }
   if (kind === 'router') {
     // The Router keeps one store per network; the run id names no network, so each is asked (read-only) until one holds it.
     for (const network of Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]) {
