@@ -30,6 +30,12 @@
 .editor-head-row .editor-network-chips li{height:28px;padding:0 11px 0 4px;border-color:var(--line);background:var(--surface);color:var(--ink);font-size:13px}
 /* A long state shortens with an ellipsis (its full words stay in the element and its title) rather than pushing the indicator off centre. */
 .editor-head-row .editor-state-pill{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* "Needs attention" is never squeezed out: in that state the state and the rest of the meta keep their width and the workflow name shortens
+   (with an ellipsis; its full name stays in the rename control's accessible name). */
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-head-meta,
+.editor-head-row .editor-state-pill[data-editor-state="attention"]{flex:0 0 auto}
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name,
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-name .workflow-name-text{flex:0 1 auto;min-width:48px}
 .editor-head-row>.canvas-head-stages{justify-self:center;margin:0;padding:0;border:0;min-width:0}
 .editor-head-row>.canvas-head-actions{justify-self:end;margin:0;min-width:0}
 .editor-head-row>.editor-head-end{min-height:40px}
