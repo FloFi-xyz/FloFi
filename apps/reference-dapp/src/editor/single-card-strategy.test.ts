@@ -15,7 +15,8 @@ import { deliveredByRun, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES } from '../doma
 import { composeWorkflow } from '../engine/strategy-engine';
 import { evaluateWorkflowGates, readHandoffPolicy, workflowPlan } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
-import { approvalLinkScheme, requestApproval, type ApprovalDeps, type HandoffStore } from '../platform/index.ts';
+import { approvalLinkScheme, requestApproval, type ApprovalDeps, type HandoffRecord, type HandoffStore } from '../platform/index.ts';
+import { ensureForClaim } from '../workflow-runs/service.ts';
 import { editorWorkflowStrategy } from './workflow-strategy';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id,
@@ -91,9 +92,19 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the run-of-one plan and 
     const deps = (kinds: Parameters<typeof approvalLinkScheme>[2]): ApprovalDeps => ({ origin: 'http://localhost:3999', scheme: approvalLinkScheme('flofi_edhs_', randomBytes(32), kinds),
       handoffs: untouched, allow: async () => true, runtime: runtime(true), policy, rules: { handoffSeconds: 900, maxPending: 3, rate: [20, 3_600], supersedeSameWorkflow: true },
       now: new Date() });
-    const channel = { kind: 'CHANNEL_CONVERSATION' as const, ref: 'cnv_singlecardrun000000001', clientId: 'telegram-test-bot', displayName: 'Telegram', context: {} };
-    expect(await requestApproval(deps(['CHANNEL_CONVERSATION']), channel, composed.strategy, composed.workflowHash, { singleStepRun: true }))
-      .toEqual({ ok: false, code: 'APPROVAL_REQUESTER_INVALID' });
+    // Every external requester kind is refused before anything is composed, rate-limited or stored (the store double throws if touched).
+    const external = [
+      { kind: 'CHANNEL_CONVERSATION' as const, ref: 'cnv_singlecardrun000000001', clientId: 'telegram-test-bot', displayName: 'Telegram', context: {} },
+      { kind: 'MCP_ACCOUNT' as const, ref: 'acct_' + 'b'.repeat(26), grantId: 'grt_' + 'c'.repeat(26), clientId: 'mcp-test-client', displayName: 'Claude' },
+      { kind: 'AUTOMATION_RULE' as const, ref: 'aut_' + 'd'.repeat(26), clientId: 'flofi-automations', displayName: 'Automation', context: {} },
+      { kind: 'DEVELOPER_PROJECT' as const, ref: 'prj_' + 'e'.repeat(26), clientId: 'developer-test-client', displayName: 'Developer', context: {} }];
+    let allowed = 0;
+    for (const requester of external) {
+      const d = { ...deps([requester.kind]), allow: async () => { allowed++; return true; } };
+      expect(await requestApproval(d, requester, composed.strategy, composed.workflowHash, { singleStepRun: true }), requester.kind)
+        .toEqual({ ok: false, code: 'APPROVAL_REQUESTER_INVALID' });
+    }
+    expect(allowed).toBe(0);
     const two = composeWorkflow({ version: 2, steps: [V1_SWAP, { ...V1_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.004' }] });
     if (!two.ok) throw new Error(two.code);
     const editor = { kind: 'EDITOR_SESSION' as const, ref: 'acct_' + 'a'.repeat(26), clientId: 'flofi-editor', displayName: 'FloFi Editor', context: {} };
@@ -118,5 +129,24 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: what a completed one-ste
     expect([...SINGLE_CARD_RUNTIMES].sort()).toEqual(['public', 'router', 'supply', 'transfer']);
     for (const kind of SINGLE_CARD_RUNTIMES) expect(SEQUENCE_RUNTIMES).toContain(kind);
     for (const kept of ['universal', 'uniswap-pool', 'solana-swap', 'solana-transfer', 'solana-pool']) expect(SINGLE_CARD_RUNTIMES).not.toContain(kept);
+  });
+});
+
+describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists only for the Editor\'s own handoff', () => {
+  it('ensureForClaim refuses a one-step SEQUENTIAL handoff of any other requester before anything is created', async () => {
+    const composed = composeWorkflow(V1_SWAP);
+    if (!composed.ok) throw new Error(composed.code);
+    const plan = workflowPlan(composed, { run: true });
+    const untouched = new Proxy({}, { get: () => () => { throw new Error('STORE_TOUCHED'); } });
+    const deps = { store: untouched, now: () => new Date(), newId: () => 'wfr_' + 'a'.repeat(26) } as unknown as Parameters<typeof ensureForClaim>[0];
+    const wallets = [{ namespace: 'eip155' as const, address: OWNER }];
+    for (const requesterKind of ['MCP_ACCOUNT', 'CHANNEL_CONVERSATION', 'DEVELOPER_PROJECT', 'AUTOMATION_RULE'] as const) {
+      const handoff = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind, requesterRef: 'ref', plan, workflowHash: composed.workflowHash, claimed: null } as unknown as HandoffRecord;
+      await expect(ensureForClaim(deps, handoff, composed, wallets), requesterKind).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
+    }
+    // A one-step plan stored as SINGLE_FLOW never becomes a run, whoever asked.
+    const single = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind: 'EDITOR_SESSION', requesterRef: 'ref', plan: workflowPlan(composed), workflowHash: composed.workflowHash,
+      claimed: null } as unknown as HandoffRecord;
+    await expect(ensureForClaim(deps, single, composed, wallets)).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
   });
 });
