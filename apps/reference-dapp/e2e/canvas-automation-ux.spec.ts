@@ -63,9 +63,15 @@ test('normal Simulate has concise safety details and no engineering or duplicate
     await expect(footer.locator('button[data-lifecycle-action]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^(Review operation|Continue to authorization)$/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
-    const surface = (await simulationReviewPanel(page).boundingBox())!, button = (await action.boundingBox())!;
-    expect(button.x).toBeGreaterThanOrEqual(surface.x - 1); expect(button.x + button.width).toBeLessThanOrEqual(surface.x + surface.width + 1);
-    expect(button.y + button.height).toBeLessThanOrEqual(surface.y + surface.height + 1);
+    // The panel re-lays itself out after a resize (beside the graph, then under it): the geometry is read once it is laid out, and every
+    // bound must hold on one and the same reading (a box read mid-remount is null, never a pass).
+    await expect(action).toBeVisible();
+    await expect(async () => {
+      const surface = await simulationReviewPanel(page).boundingBox(), button = await action.boundingBox();
+      expect(surface).not.toBeNull(); expect(button).not.toBeNull();
+      expect(button!.x).toBeGreaterThanOrEqual(surface!.x - 1); expect(button!.x + button!.width).toBeLessThanOrEqual(surface!.x + surface!.width + 1);
+      expect(button!.y + button!.height).toBeLessThanOrEqual(surface!.y + surface!.height + 1);
+    }).toPass({ timeout: 10_000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     await page.screenshot({ path: `.tmp/canvas-automation-simulate-${width}.png`, fullPage: true });
   }
