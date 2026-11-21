@@ -37,18 +37,32 @@ const primary = (s: EditorWorkflowRunState, language: Language = 'EN') =>
 const visible = (html: string) => html.slice(0, html.indexOf('<details'));
 
 describe('board 06: the Review before authorization', () => {
-  it('shows only: REVIEW, "Review before authorizing", one line per step, the four summary rows and the wallet line; the rest is collapsed', () => {
+  it('UX-03: shows only the status, "Check your operation", the steps card, the decision rows and the wallet line; the rest is collapsed', () => {
     const html = render(state({}));
     const shown = visible(html);
-    expect(shown).toContain('<p class="eyebrow">REVIEW</p><h3>Review before authorizing</h3>');
-    expect(shown).toContain('Swap <span class="numeric">2 USDC</span> → <span class="numeric">WETH</span> · <span class="numeric">Base</span>');
-    expect(shown).toContain('title="0.000796123456789123 WETH">Bridge <span class="numeric">0.000796124 WETH</span> to <span class="numeric">Arbitrum One</span>');
+    // UX-03 (owner guidelines of 21-11-2026, intentional change): the status first, then the decision title; never "authorized" before the wallet signs.
+    expect(shown).toMatch(/<p class="review-panel-validity review-ready-status" data-tone="ready"><span class="simulation-status-dot" aria-hidden="true"><\/span>Review ready · valid until [^<]+<\/p><h3>Check your operation<\/h3>/);
+    expect(shown).not.toMatch(/authorized|You are authorizing|REVIEW</);
+    // One card: numbered steps with their icon, amounts on their own line (exact value one click away) and the network pill.
+    expect(shown).toContain('<div class="operation-summary step-summary-card" data-variant="numbered"><ol aria-label="Steps">');
+    expect(shown).toMatch(/<span class="operation-summary-number" aria-hidden="true">1<\/span><div class="operation-summary-body"><strong class="step-summary-title">Swap<span class="step-summary-title-icon"/);
+    expect(shown).toContain('2 USDC → <span class="token-amount"><button type="button" class="token-amount-short" title="0.000800123456789 WETH" aria-label="≈ 0.000800123 WETH, Show exact value" aria-expanded="false">≈ 0.000800123 WETH</button></span>');
+    // A refused Review never reads "ready" (flofi-frontend-ux review): only its validity is stated.
+    const refused = visible(render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) })));
+    expect(refused).not.toContain('Review ready');
+    expect(shown).toContain('title="0.000796123456789123 WETH" aria-label="0.000796124 WETH, Show exact value" aria-expanded="false">0.000796124 WETH</button>');
+    expect(shown).toContain('<span class="operation-summary-chip">Base</span>');
+    expect(shown).toContain('<span class="operation-summary-chip">Base → Arbitrum One</span>');
     expect(shown).toContain('<dt>Minimum you receive</dt><dd title="0.000790555555555555 WETH"><span><span class="numeric">0.000790555 WETH</span></span></dd>');
-    expect(shown).toContain('<dt>Network fee, at most</dt><dd><span><span class="numeric">0.000454 ETH</span></span><small class="review-block-qualifier">at today&#x27;s prices; your wallet sets the final fee</small></dd>');
-    expect(shown).toContain('<span class="numeric">Uniswap</span> uses up to <span class="numeric">2 USDC</span>');
-    expect(shown).toContain('<span class="numeric">Across</span> uses up to <span class="numeric">0.000796124 WETH</span>');
-    expect(shown).toContain('<dt>Wallet requests</dt><dd><span><span class="numeric">1</span></span></dd>');
-    expect(shown).toContain('Your wallet pays the network fees. FloFi never signs or sends for you.');
+    // The fee ceiling aligned on its row, who pays it beside it and the pricing caveat as contextual help (never dropped).
+    expect(shown).toContain('<div class="review-fee-row"><dt>Max network fee</dt><dd><span class="review-fee-value"><span class="numeric">0.000454 ETH</span></span><small class="review-block-qualifier review-fee-note"><span>Paid by your wallet · at today&#x27;s prices</span><span class="info-hint"><button type="button" class="info-hint-button" aria-expanded="false" aria-label="More information: At today&#x27;s prices; your wallet sets the final fee.">');
+    // Every token approval stays visible before signing: the token, its limit (rounded up; exact in the title) and who may spend it.
+    expect(shown).toContain('<div class="review-access-row" data-review-access="USDC"><dt>Access to USDC</dt><dd><span class="numeric">Up to 2 USDC</span><small class="review-block-qualifier">Uniswap can use it</small></dd></div>');
+    expect(shown).toContain('<div class="review-access-row" data-review-access="WETH"><dt>Access to WETH</dt><dd><span class="numeric" title="0.000796123456789123 WETH">Up to 0.000796124 WETH</span><small class="review-block-qualifier">Across can use it</small></dd></div>');
+    expect(shown).toContain('<dt>Expected wallet confirmations</dt><dd><span><span class="numeric">1</span></span></dd>');
+    // The repeated "your wallet pays… FloFi never signs" paragraph is gone from the summary; it stays in the technical details.
+    expect(shown).not.toContain('FloFi never signs or sends for you.');
+    expect(html).toContain('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas, and never signs or sends for you.');
     // No chain ids, internal codes, group breakdown, route notes, deadlines or prices outside the collapsed details.
     for (const hidden of ['8453', 'Group', 'atomic', 'calls in the batch', 'Prices', '10 minutes', 'Step 1', 'Review the whole workflow', 'ONE wallet confirmation'])
       expect(shown, hidden).not.toContain(hidden);
@@ -61,22 +75,23 @@ describe('board 06: the Review before authorization', () => {
   });
   it('in Brazilian Portuguese', () => {
     const shown = visible(render(state({}), 'PT'));
-    expect(shown).toContain('<p class="eyebrow">REVISÃO</p><h3>Revise antes de autorizar</h3>');
-    expect(shown).toContain('Trocar <span class="numeric">2 USDC</span> → <span class="numeric">WETH</span> · <span class="numeric">Base</span>');
-    expect(shown).toContain('Levar <span class="numeric">0.000796124 WETH</span> para <span class="numeric">Arbitrum One</span>');
+    expect(shown).toMatch(/Revisão pronta · válida até [^<]+<\/p><h3>Confira sua operação<\/h3>/);
+    expect(shown).toMatch(/<strong class="step-summary-title">Trocar<span/);
     expect(shown).toContain('<dt>Mínimo que você recebe</dt>');
-    expect(shown).toContain('<dt>Taxa de rede, no máximo</dt>');
-    expect(shown).toContain('<dt>Permissão de token</dt>');
-    expect(shown).toContain('<span class="numeric">Uniswap</span> usa até <span class="numeric">2 USDC</span>');
-    expect(shown).toContain('<dt>Pedidos à carteira</dt>');
-    expect(shown).toContain('Sua carteira paga as taxas de rede. A FloFi nunca assina nem envia por você.');
+    expect(shown).toContain('<dt>Taxa de rede máxima</dt>');
+    expect(shown).toContain('<small class="review-block-qualifier review-fee-note"><span>Paga pela sua carteira · nos preços de agora</span><span class="info-hint">');
+    expect(shown).toContain('<dt>Acesso ao USDC</dt><dd><span class="numeric">Até 2 USDC</span><small class="review-block-qualifier">Uniswap pode usar</small></dd>');
+    expect(shown).toContain('<dt>Confirmações previstas na carteira</dt>');
     expect(render(state({}), 'PT')).toContain('<summary>Detalhes técnicos</summary>');
   });
-  it('has no button of its own in the chat-first Editor: the footer hosts the ONE primary action, with the same handlers', () => {
+  it('has no action button of its own in the chat-first Editor: the footer hosts the ONE primary action, with the same handlers', () => {
     const html = render(state({}));
-    // Before the collapsed details: no button at all. "Review again" stays reachable, as a quiet control under Technical details only.
-    expect(visible(html)).not.toContain('<button');
-    expect(html.match(/<button/g)).toHaveLength(1);
+    // Before the collapsed details: only disclosures (an exact value, a hint), never an action. "Review again" stays reachable, as a quiet control
+    // under Technical details only.
+    const visibleButtons = visible(html).match(/<button[^>]*>/g) ?? [];
+    for (const button of visibleButtons) expect(button, button).toMatch(/aria-expanded="false"/);
+    expect(visible(html)).not.toMatch(/Authorize|Review again|Refresh review/);
+    expect(html.match(/class="quiet review-block-again"/g)).toHaveLength(1);
     expect(html).toContain('<button type="button" class="quiet review-block-again">Review again</button>');
     // Expired: the footer offers "Refresh review" (BUILD-FLOFI-UX-EDITOR-FINOPS-001, C2), so the block has no second one.
     expect(render(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) }))).not.toContain('<button');
@@ -106,7 +121,7 @@ describe('board 06: the Review before authorization', () => {
     expect(expired).toMatch(/<span class="review-refresh-badge" title="The token permission is confirmed again by the refreshed review.">Depends on the updated review/);
     expect(expired).toMatch(/<details class="review-panel-technical review-block-technical"><summary>Technical details<\/summary>/);
     expect(expired).not.toMatch(/<details[^>]* open/);
-    expect(expired).not.toMatch(/Review before authorizing|You are authorizing|Network fee, at most|Minimum you receive/);
+    expect(expired).not.toMatch(/Review before authorizing|Check your operation|You are authorizing|Network fee, at most|Max network fee|Minimum you receive/);
     const refused = visible(render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) })));
     expect(refused.match(/review-block-alert/g)).toHaveLength(1);
     expect(refused).toContain('step 2 would fail on chain now');
@@ -115,7 +130,7 @@ describe('board 06: the Review before authorization', () => {
     const blocked = render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'USER_FUNDED_NATIVE_FEE_SHORTFALL', step: null, evidence } }) }));
     expect(blocked).toContain('data-review-state="blocked"');
     expect(blocked).toContain('BEFORE AUTHORIZING');
-    expect(blocked).not.toContain('You are authorizing'); expect(blocked).not.toContain('Review before authorizing');
+    expect(blocked).not.toContain('You are authorizing'); expect(blocked).not.toContain('Review before authorizing'); expect(blocked).not.toContain('Check your operation');
     expect(blocked).toContain('<summary>Technical details, for support</summary>');
   });
   it('a step-by-step Review says each step asks the wallet on its own; a smart-account upgrade and every network switch are said', () => {
@@ -130,7 +145,8 @@ describe('board 06: the Review before authorization', () => {
     const base = swapBridgeReview(), g = base.groups[0]!;
     const sponsored = (sponsorship: 'OFFERED' | 'REQUIRED') => swapBridgeReview({ groups: [{ ...g, fee: { ...g.fee!, sponsorship } }] });
     const required = render(state({ review: sponsored('REQUIRED') }));
-    expect(visible(required)).toContain('<dt>Network fee, at most</dt><dd><span>None from your wallet: FloFi offers to pay it</span></dd>');
+    // UX-03: no "Paid by your wallet" and no pricing hint for a fee FloFi must sponsor; its own sentence stays.
+    expect(visible(required)).toContain('<div class="review-fee-row"><dt>Max network fee</dt><dd><span class="review-fee-value">None from your wallet: FloFi offers to pay it</span></dd></div>');
     expect(visible(required)).toContain('<p class="review-panel-note">FloFi offers to pay the network fee; your wallet must support sponsored fees on Base. FloFi never signs or sends for you.</p>');
     expect(visible(required)).not.toContain('Your wallet pays the network fees');
     expect(required).toContain('one atomic transaction from your own wallet; FloFi offers to pay its network fee (your wallet must support sponsored fees on this network).');
@@ -138,7 +154,8 @@ describe('board 06: the Review before authorization', () => {
     expect(required).toContain('FloFi offers to sponsor the network fee marked &quot;Sponsored network fee&quot;; every other fee is paid by your wallet.');
     expect(required).not.toContain('network fee below');
     const offered = render(state({ review: sponsored('OFFERED') }));
-    expect(visible(offered)).toContain('<dt>Network fee, at most</dt><dd><span><span class="numeric">0.000454 ETH</span></span><small class="review-block-qualifier">');
+    expect(visible(offered)).toContain('<dt>Max network fee</dt><dd><span class="review-fee-value"><span class="numeric">0.000454 ETH</span></span><small class="review-block-qualifier review-fee-note"><span>At today&#x27;s prices</span><span class="info-hint">');
+    expect(visible(offered)).not.toContain('Paid by your wallet');
     expect(visible(offered)).toContain('FloFi offers to pay the network fee; your wallet pays it only if it does not support sponsored fees. FloFi never signs or sends for you.');
     expect(offered).toContain('one atomic transaction from your own wallet; FloFi offers to pay its network fee, and your wallet pays it only if it does not support sponsored fees.');
     // Two groups: the sponsored one is named; the wallet pays the other one's fee.

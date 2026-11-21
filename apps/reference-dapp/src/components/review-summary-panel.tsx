@@ -20,7 +20,7 @@ import { feeShortfallView } from '../domain/approved-ux';
 import { circleUnavailableReason } from '../domain/token-fee';
 import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
-import { OperationSummary, WorkflowTechnicalFacts } from './operation-summary';
+import { OperationSummary, StepSummaryCard, WorkflowTechnicalFacts } from './operation-summary';
 import { liquidityPositionResultRows, positionWorkflowOf } from '../domain/liquidity-position-summary';
 
 export type ReviewSummaryPanelProps = {
@@ -41,6 +41,8 @@ export type ReviewSummaryPanelProps = {
    */
   stage?: 'simulate' | 'execute';
   action?: ReactNode;
+  /** UX-05 (Simulate): the panel's next action once the result is valid — "Continue to authorization" (navigation to Execute only). */
+  next?: ReactNode;
 };
 
 function useRefreshAtExpiry(until: number | null) {
@@ -60,7 +62,7 @@ type PanelRoot = { ref: RefObject<HTMLElement | null>; onFocus: () => void; onBl
  * had given the panel (the phone's "Review" shortcut focuses it) then fell back to the page. When the panel held focus and a switch removed the
  * focused element, focus returns to the panel's new root. Focus the owner moved elsewhere is never pulled back. Presentation only.
  */
-function usePanelFocus(): PanelRoot {
+export function usePanelFocus(): PanelRoot {
   const ref = useRef<HTMLElement | null>(null);
   const held = useRef(false);
   useLayoutEffect(() => {
@@ -96,8 +98,10 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const technical = props.technical ? disclosure(<>{blocked && source.state.error && <p className="review-panel-code"><code>{source.state.error}</code></p>}{props.technical}</>,
     blocked ? 'Technical details, for support' : 'Technical details') : null;
   const action = props.action ? <div className="simulation-panel-action">{props.action}</div> : null;
+  // A run already underway keeps its way to Execute beside the blocker's own action (secondary: the blocker's action stays the primary one).
+  const next = stage === 'simulate' && props.next ? <div className="simulation-panel-action" data-secondary="">{props.next}</div> : null;
   if (blocked && !expired) return <BlockerPanel message={props.unavailableReason ?? status.message} title={status.label} error={source.state.error ?? null}
-    owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={action} root={root}/>;
+    owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={<>{action}{next}</>} root={root}/>;
   const ready = !busy && sim.status !== 'blocked' && (review.status === 'ready' || review.status === 'approved');
   const step = sim.steps[sim.steps.length - 1];
   const canvas = props.canvasWorkflow ?? workflow;
@@ -108,15 +112,26 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const position = positionWorkflowOf(workflow);
   const positionRows = (rowsFor: 'simulate' | 'execute') => step ? liquidityPositionResultRows(step, rowsFor).map(row =>
     <div key={row.label} data-position-row={row.label}><dt>{t(row.label)}</dt><dd className="numeric">{row.amount ? <TokenAmountText value={row.value} rounding={row.amount}/> : t(row.value)}</dd></div>) : null;
+  // UX-03: the owner's wallet pays the network fee unless 0x takes it out of the swap (said beside the fee, not in a separate paragraph).
+  const walletPays = !sim.fees.some(isIncludedNetworkFee);
+  const walletFeeRow = sim.fees.some(line => line.treatment === 'CEILING' && !paidToPimlicoNote(line));
+  // UX-01 / UX-03: each simulated step in the shared step card — its action, the amount the owner configured exactly as set (never reformatted)
+  // and its simulated result, its network in a pill and a shortened recipient (full address one click away and under Technical details).
+  const stepCard = (variant: 'icons' | 'numbered') => <StepSummaryCard variant={variant} items={sim.steps.map(s => ({ key: s.id, action: s.action, title: s.action,
+    amount: <>{t(s.input)}{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</>,
+    network: s.networks.length ? s.networks.join(' → ') : null,
+    recipient: s.destination ? { address: s.destination, own: Boolean(s.destinationOwned) } : null }))}/>;
   // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.
+  // A position-management workflow keeps its own rows; any other workflow states its steps in the step card above these rows (`stepCard`).
   const resultRows = <>
     {position ? positionRows(stage) : <>
-      {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{/* The amount the owner configured, exactly as set (never reformatted). */}{t(s.input)}{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</dd></div>)}
       {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric"><TokenAmountText value={step.minimum} rounding="down"/></dd></div>}
     </>}
     {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
       // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
       const paidTo = paidToPimlicoNote(line);
+      if (line.treatment === 'CEILING' && !paidTo) return <MaximumFeeRow key={`${line.label}:${line.value}`} walletPays={walletPays} priced={false}
+        value={<TokenAmountText value={line.value} rounding="up"/>}/>;
       return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
         ? <dd><TokenAmountText className="numeric" value={line.value} rounding="up"/><small className="review-block-qualifier">{t(paidTo)}</small></dd>
         : <dd className="numeric"><TokenAmountText value={line.value} rounding={line.treatment === 'CEILING' ? 'up' : 'nearest'}/></dd>}</div>;
@@ -158,22 +173,26 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
     // C1: the valid Review — what the owner authorizes, its costs and permissions, before any wallet request. The ONE action is the footer's.
     return <section {...root} className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="ready" data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
-      {until && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{t('Review valid until {0}', until)}</p>}
-      <p className="eyebrow">{t('REVIEW')}</p>
+      {/* UX-03: the status first ("Review ready", until when), then the decision title; never "authorized" before the wallet signs. */}
+      {until && <p className="review-panel-validity review-ready-status" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{t('Review ready · valid until {0}', until)}</p>}
       {/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (EXE-01): a valid Review before any wallet request is reviewed, not yet being authorized. */}
-      <h2>{t('Review before authorizing')}</h2>
-      <dl className="review-panel-rows">
+      <h2>{t('Check your operation')}</h2>
+      {!position && stepCard('numbered')}
+      <dl className="review-panel-rows review-decision-rows">
         {resultRows}
         {step?.details.filter(line => line.label === SIGNATURES_LABEL).map(line => <div key={line.label}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}
-        {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.address}`}><dt>{t('Token permission')}</dt>
+        {/* UX-03: each token approval as "Access to <token>" — its limit and who may spend it — visible before anything is signed. */}
+        {review.approvals.map((approval, index) => <div key={`${index}:${approval.symbol}:${approval.address}`} className="review-access-row" data-review-access={approval.symbol}><dt>{t('Access to {0}', approval.symbol)}</dt>
           <dd>{approval.unlimited ? t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')
-            : t('{0} uses up to {1}', t(approval.spender), t(approval.value))}</dd></div>)}
+            : <span className="numeric">{t(approval.value)}</span>}<small className="review-block-qualifier">{t('{0} can use it', t(approval.spender))}</small></dd></div>)}
         {/* A position operation asks for no token permission (its rows already state its one wallet request). */}
         {position && !review.approvals.length && <div data-position-row="Token permission"><dt>{t('Token permission')}</dt><dd>{t('None — this operation needs no token permission')}</dd></div>}
-        {!position && typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
+        {!position && typeof props.walletRequests === 'number' && <div><dt>{t('Expected wallet confirmations')}</dt><dd>{props.walletRequests}</dd></div>}
       </dl>
-      <p className="review-panel-note">{t(sim.fees.some(isIncludedNetworkFee) ? 'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.'
-        : 'Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
+      {/* UX-03: "Paid by your wallet" sits beside the fee; only 0x's included fee keeps its own sentence (it changes who sends and pays). */}
+      {!walletPays && <p className="review-panel-note">{t('You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.')}</p>}
+      {/* Without a fee ceiling row to carry "Paid by your wallet", who pays stays said in its own sentence (flofi-security review). */}
+      {walletPays && !walletFeeRow && <p className="review-panel-note">{t('Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>}
       {warnings}
       {technical}
     </section>;
@@ -188,8 +207,13 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
         : expired ? t('Simulate again to refresh the expected result and costs. The previous values are no longer current.')
         : t('Check the expected result, costs and possible risks.')}/>
     {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
-    {ready ? <dl className="review-panel-rows simulation-result-rows">{resultRows}</dl> : <OperationSummary workflow={canvas} context={context} heading={null} variant="icons"/>}
+    {/* UX-01: the result in the same card language as before the simulation (icons, amounts on their own line, network pill), then its costs. */}
+    {ready ? <>{!position && stepCard('icons')}<dl className="review-panel-rows simulation-result-rows review-decision-rows">{resultRows}</dl></>
+      : <OperationSummary workflow={canvas} context={context} heading={null} variant="icons"/>}
     {ready && warnings}
+    {/* UX-05: the ONE next action of a valid result, in this panel (navigation to Execute; nothing is signed or accepted here). */}
+    {/* With its own action on screen (Simulate again, a wallet or network step), the way to Execute is secondary: one primary per moment. */}
+    {props.next && !busy && <div className="simulation-panel-action" data-secondary={!ready && props.action ? '' : undefined}>{props.next}</div>}
     {/* The panel's action states its own reason when it is closed; the status line covers a run in progress and a reason with no action here. */}
     {!ready && (busy || props.unavailableReason && !props.action) && <p className="review-panel-status" role="status">{t(busy ? 'Simulating workflow…' : props.unavailableReason!)}</p>}
     {awaiting && <SimulationExplainer/>}
@@ -217,6 +241,33 @@ export function ExpiredReviewAlert() {
   return <div className="review-expired-alert" role="alert"><span className="review-expired-mark" aria-hidden="true">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2.8c.7 0 1.3.4 1.7 1l8.6 15c.7 1.2-.2 2.7-1.6 2.7H3.3c-1.4 0-2.3-1.5-1.6-2.7l8.6-15c.4-.6 1-1 1.7-1Z"/><path d="M12 8.6v5.6M12 17.2v.1" stroke="var(--surface)" strokeWidth="2.2" strokeLinecap="round"/></svg></span>
     <div><strong>{t('Your review expired.')}</strong><p>{t('Refresh the simulation and check the new values before authorizing.')}</p></div></div>;
+}
+/**
+ * UX-03 (owner guidelines of 21-11-2026): a short contextual help beside a label — an "i" button whose text opens under it on click, tap or
+ * keyboard (never a hover-only tooltip) and is part of its accessible name. Presentation only.
+ */
+export function InfoHint({ text }: { text: string }) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  // Closes with Escape (consumed only while open), and when focus leaves the hint; the text is in the button's name, never a hover-only title.
+  return <span className="info-hint" data-open={open || undefined} onKeyDown={event => { if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); } }}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
+    <button type="button" className="info-hint-button" aria-expanded={open} aria-label={t('More information: {0}', t(text))} onClick={() => setOpen(value => !value)}>
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1" strokeLinecap="round"/></svg></button>
+    {open && <span className="info-hint-text" role="note">{t(text)}</span>}</span>;
+}
+/**
+ * UX-03: the network-fee row of a Review or a simulation result — "Max network fee" on the left, its ceiling on the right (rounded UP by its
+ * producer), and under it who pays it when that is the owner's wallet, with the pricing caveat as contextual help. Never a USD figure without a
+ * verified price (none reaches this panel).
+ */
+export function MaximumFeeRow({ value, walletPays, priced, valueTitle }: { value: ReactNode; walletPays: boolean; priced: boolean; valueTitle?: string | undefined }) {
+  const { t } = useLocale();
+  return <div className="review-fee-row"><dt>{t('Max network fee')}</dt>
+    <dd><span className="review-fee-value" title={valueTitle}>{value}</span>{(walletPays || priced) && <small className="review-block-qualifier review-fee-note">
+      {/* The pricing caveat stays visible ("at today's prices"); the hint says the wallet sets the final fee (flofi-security review). */}
+      <span>{walletPays && priced ? t('Paid by your wallet · at today\'s prices') : walletPays ? t('Paid by your wallet') : t('At today\'s prices')}</span>
+      {priced && <InfoHint text="At today's prices; your wallet sets the final fee."/>}</small>}</dd></div>;
 }
 /** C2: a value that only a refreshed Review can state (never a stale figure); `hint` says why, on hover and to assistive technology. */
 export function RefreshBadge({ text, hint = null }: { text: string; hint?: string | null }) {

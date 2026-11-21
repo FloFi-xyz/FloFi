@@ -25,7 +25,7 @@ const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="pr
 /** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request); on the public Editor's
  * Execute it reads "Authorize workflow" (BUILD-FLOFI-UX-EDITOR-FINOPS-001, C1). */
 const authorize = (page: Page) => cta(page).getByRole('button', { name: AUTHORIZE_REVIEW });
-/** One explicit click accepts the fresh Review and makes exactly the next wallet request; nothing is requested before it. "Review operation"
+/** One explicit click accepts the fresh Review and makes exactly the next wallet request; nothing is requested before it. "Continue to authorization"
  * (Simulate → Execute) only navigates. */
 async function authorizeInWallet(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
   await openReview(page, { timeout: 30_000 });
@@ -325,7 +325,7 @@ async function simulateAndReadLimits(page: Page) {
   await openEditorSection(page, 'Simulate');
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
-  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): the valid result is read on Simulate; "Review operation" (to Execute) is offered, nothing is accepted.
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): the valid result is read on Simulate; "Continue to authorization" (UX-05) (to Execute) is offered, nothing is accepted.
   await expectSimulationValid(page, { timeout: 30_000 });
   await openDetails(page);
   const text = await page.locator('main').innerText();

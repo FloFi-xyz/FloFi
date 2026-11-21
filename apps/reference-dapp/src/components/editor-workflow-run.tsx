@@ -31,8 +31,10 @@ import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-exe
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
 import { circleSignatureView, walletRequestView } from '../domain/approved-ux';
-import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
-import { BlockerPanel, ExpiredReviewAlert, RefreshBadge } from './review-summary-panel';
+import { reviewBlockView, reviewStepItems, type ReviewBlockText, type ReviewStepItem } from '../domain/review-block';
+import { BlockerPanel, ExpiredReviewAlert, MaximumFeeRow, RefreshBadge } from './review-summary-panel';
+import { StepSummaryCard } from './operation-summary';
+import { TokenUnitsText } from './token-amount-text';
 import { CopyValue } from './copy-value';
 import { TechnicalBody, TechnicalGroup } from './technical-body';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -964,6 +966,27 @@ const stepText = (run: RunView, step: RunView['steps'][number]) => {
 };
 
 /** A Review line: its translated words, with every amount, asset and network in the numeric face. */
+/** UX-01/UX-03: the step names a summary card uses (a transfer reads "Send", as on its Canvas card). */
+const STEP_TITLE: Readonly<Record<string, string>> = { ...ACTION, transfer: 'Send' };
+/** A step's amounts: what it spends (rounded UP) and what it is expected to deliver ("≈", nearest) or delivers exactly (rounded DOWN). */
+function StepAmounts({ step }: { step: ReviewStepItem }) {
+  const spend = step.spend && <TokenUnitsText units={step.spend.units} decimals={step.spend.decimals} symbol={step.spend.symbol} rounding="up"/>;
+  const receive = step.receive && <TokenUnitsText units={step.receive.units} decimals={step.receive.decimals} symbol={step.receive.symbol}
+    rounding={step.receiveKind === 'exact' ? 'down' : 'nearest'} estimate={step.receiveKind === 'expected'}/>;
+  return <>{spend}{spend && receive ? ' → ' : null}{receive}</>;
+}
+/**
+ * UX-01 (Simulate, icons) and UX-03 (Execute, numbered): the whole-workflow Review's steps in the shared step card — the same values as the Review's
+ * own lines (`reviewBlockView`), the recipient shortened with its full address one click away (and in full under "Technical details").
+ */
+function ReviewStepsCard({ review, variant }: { review: EditorExecutionReview; variant: 'icons' | 'numbered' }) {
+  const items = reviewStepItems(review).map(step => ({ key: String(step.index), action: step.action, title: STEP_TITLE[step.action] ?? step.action,
+    amount: step.spend || step.receive ? <StepAmounts step={step}/> : null,
+    network: step.destination ? `${step.network} → ${step.destination}` : step.network,
+    recipient: step.recipient ? { address: step.recipient, own: step.recipient.toLowerCase() === review.owner.toLowerCase() } : null }));
+  return <StepSummaryCard items={items} variant={variant}/>;
+}
+
 function rich(tr: (key: string, ...parameters: string[]) => string, line: ReviewBlockText) {
   const parts = tr(line.key).split(/\{(\d)\}/);
   return parts.map((part, index) => index % 2 ? <span key={index} className="numeric">{tr(line.parameters[Number(part)] ?? '')}</span> : part);
@@ -1013,7 +1036,9 @@ export function EditorWorkflowSimulateAction({ state, disabled = false, reason =
   </div>;
 }
 
-export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 'execute', summary = null, facts = null }: { state: EditorWorkflowRunState;
+export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 'execute', summary = null, facts = null, next = null }: { state: EditorWorkflowRunState;
+  /** UX-05: on Simulate, the panel's one next action once the result is valid (Continue to authorization: navigation to Execute only). */
+  next?: ReactNode;
   /** The chat-first Editor hosts the Review's primary action in its footer (`EditorWorkflowRunPrimaryAction`); the panel shows none before a run. */
   actionsOutside?: boolean;
   /**
@@ -1273,6 +1298,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
   const sponsoredGroups = review?.groups.filter(g => g.fee?.sponsorship) ?? [], grouped = (review?.groups.length ?? 0) > 1;
   // ADR-0010: a fee paid from the owner's USDC through Circle (the owner's native balance is short) is the owner's own, said as such.
   const circlePaid = Boolean(review?.groups.some(g => g.gasPayment));
+  // UX-03: every network fee of this Review is the owner's wallet's own (no sponsorship, no Circle): said beside the fee instead of a paragraph.
+  const walletPays = sponsoredGroups.length === 0 && !circlePaid;
   const feeNote = !review || sponsoredGroups.length === 0 ? circlePaid ? tr('The network fee is paid from your USDC through Circle. FloFi never signs or sends for you.')
     : tr('Your wallet pays the network fees. FloFi never signs or sends for you.') : [
     ...sponsoredGroups.map(g => g.fee!.sponsorship === 'REQUIRED'
@@ -1310,37 +1337,49 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     {fresh && !feeBlocked && stage === 'simulate' && review && block && !expired && <>
       {/* B2: the simulated result of the whole workflow — what each step spends and is expected to deliver, the minimum and the network fee. */}
       {alert && <p className="review-block-alert" role="alert">{alert}</p>}
-      <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
-      <dl className="review-panel-rows review-block-rows">
+      {/* UX-01: the result in the same card language as before the simulation (icons, amounts on their own line, network pill). */}
+      <ReviewStepsCard review={review} variant="icons"/>
+      <dl className="review-panel-rows review-block-rows review-decision-rows">
         {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
-        {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span>{priced && <small className="review-block-qualifier">{tr('at today\'s prices; your wallet sets the final fee')}</small>}</dd></div>}
+        {block.fee && <MaximumFeeRow value={rich(tr, block.fee)} walletPays={walletPays} priced={priced} valueTitle={block.fee.full ?? undefined}/>}
       </dl>
       {nativeLater}
+      {/* UX-05: the ONE next action of a valid result, in the panel where the owner reads it (navigation to Execute; nothing is signed here). */}
+      {next && <div className="simulation-panel-action">{next}</div>}
       <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary><TechnicalBody>{technical}</TechnicalBody></details>
     </>}
     {fresh && !feeBlocked && stage === 'execute' && !(expired && review && state.grouped) && <>
       {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
       {/* An expired Review never states a validity as current (BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002, EXE-02). */}
-      {block && review?.validUntil && !expired && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>}
-      <p className="eyebrow">{tr('REVIEW')}</p>
+      {/* UX-03: the status first ("Review ready", until when), then the decision title. Never "authorized" before the wallet signs. */}
+      {/* "Review ready" only for a Review that can be authorized (grouped, nothing refused); otherwise its validity alone, never "ready". */}
+      {block && review?.validUntil && !expired && (state.grouped && !alert
+        ? <p className="review-panel-validity review-ready-status" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review ready · valid until {0}', fmtTime(review.validUntil, language))}</p>
+        : <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>)}
       {/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (EXE-01): before any wallet request the owner is reviewing, not yet authorizing; the wallet request has
           its own block below ("Confirm in your wallet"), shown only while the wallet holds it. */}
-      <h3>{tr(expired ? 'Simulation expired' : block ? 'Review before authorizing' : 'Workflow simulation')}</h3>
+      <h3>{tr(expired ? 'Simulation expired' : block ? 'Check your operation' : 'Workflow simulation')}</h3>
       {review?.mode === 'STEP_BY_STEP' && <p className="review-panel-note">{tr('This workflow needs a confirmation in your wallet for each step on its own.')}</p>}
       {circleOnApproval}
       {expired ? <p className="review-panel-status" role="status">{tr('Simulate again to refresh network fees and token permissions before review.')}</p>
         : !block ? <p className="review-panel-status" role="status">{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…'
         : 'FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p> : <>
-        <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
-        <dl className="review-panel-rows review-block-rows">
+        {/* UX-03: the steps in one card with numbered circles, icons, assets and a shortened recipient (full address one click away). */}
+        <ReviewStepsCard review={review!} variant="numbered"/>
+        <dl className="review-panel-rows review-block-rows review-decision-rows">
           {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
-          {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span>{priced && <small className="review-block-qualifier">{tr('at today\'s prices; your wallet sets the final fee')}</small>}</dd></div>}
-          <div><dt>{tr('Token permission')}</dt><dd>{block.permissions.map((line, index) => <span key={index} className="review-block-permission" title={line.full ?? undefined}>{rich(tr, line)}</span>)}</dd></div>
-          <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span>{block.setup && <small className="review-block-qualifier">{rich(tr, block.setup)}</small>}
+          {block.fee && <MaximumFeeRow value={rich(tr, block.fee)} walletPays={walletPays} priced={priced} valueTitle={block.fee.full ?? undefined}/>}
+          {/* UX-03: each token approval as "Access to <token>": its limit and who may spend it, before anything is signed (same approvals as before). */}
+          {(block.access ?? []).map(line => <div key={`${line.step}:${line.symbol}`} className="review-access-row" data-review-access={line.symbol}><dt>{tr('Access to {0}', line.symbol)}</dt>
+            <dd><span className="numeric" title={line.full ?? undefined}>{tr('Up to {0}', line.limit)}</span><small className="review-block-qualifier">{tr('{0} can use it', line.spender)}</small></dd></div>)}
+          {(block.otherPermissions ?? block.permissions).length > 0 && <div><dt>{tr(block.access?.length ? 'Other permissions' : 'Token access')}</dt>
+            <dd>{(block.otherPermissions ?? block.permissions).map((line, index) => <span key={index} className="review-block-permission" title={line.full ?? undefined}>{rich(tr, line)}</span>)}</dd></div>}
+          <div><dt>{tr('Expected wallet confirmations')}</dt><dd><span>{rich(tr, block.walletRequests)}</span>{block.setup && <small className="review-block-qualifier">{rich(tr, block.setup)}</small>}
             {block.signatures && <small className="review-block-qualifier">{rich(tr, block.signatures)}</small>}</dd></div>
         </dl>
         {nativeLater}
-        <p className="review-panel-note">{feeNote}</p>
+        {/* UX-03: "your wallet pays" is said beside the fee; only a fee FloFi sponsors or Circle takes in USDC keeps its own sentence here. */}
+        {!walletPays && <p className="review-panel-note">{feeNote}</p>}
         <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary><TechnicalBody>{quietReview === 'details' && <p>{reviewAgain}</p>}{technical}</TechnicalBody></details>
       </>}
     </>}

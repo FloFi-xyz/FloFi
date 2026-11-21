@@ -106,12 +106,39 @@ function canonical(value: Exact): string {
 export function displayTokenAmount(source: TokenAmountSource | null | undefined, options: DisplayTokenAmountOptions = {}): DisplayTokenAmount | null {
   const exact = parse(source);
   if (!exact) return null;
-  const rounding = options.rounding ?? 'nearest', language = options.language ?? 'EN';
+  const rounding = options.rounding ?? 'nearest';
   // Beyond the largest compact unit (≥ 10^18), every integer digit of the mantissa is kept: digits are never zero-filled.
   const integerDigits = exact.magnitude.toString().length - exact.scale;
-  const shown = round(exact, rounding, Math.max(DISPLAY_SIGNIFICANT_DIGITS, integerDigits - 12)), approximate = shown.magnitude * 10n ** BigInt(Math.max(0, exact.scale - shown.scale)) !==
+  return present(exact, round(exact, rounding, Math.max(DISPLAY_SIGNIFICANT_DIGITS, integerDigits - 12)), rounding, options);
+}
+/**
+ * UX-06 (owner guidelines of 21-11-2026): the same presentation with the fraction cut to `fractionDigits` decimals by purpose (`down` toward zero,
+ * `up` away from it, `nearest` half-up), exact BigInt arithmetic. A non-zero amount never reads 0: when the cut would erase it, its first
+ * significant digit is kept (rounded by the same purpose). Presentation only, like `displayTokenAmount`; `null` when unavailable.
+ */
+export function displayTokenAmountAtDecimals(source: TokenAmountSource | null | undefined, fractionDigits: number, options: DisplayTokenAmountOptions = {}): DisplayTokenAmount | null {
+  const exact = parse(source);
+  if (!exact || !Number.isInteger(fractionDigits) || fractionDigits < 0) return null;
+  const rounding = options.rounding ?? 'nearest';
+  const cut = roundToDecimals(exact, rounding, fractionDigits);
+  // No compact unit here: the decimals were chosen for the amount's value, so every kept digit is shown (thousands grouped).
+  return present(exact, cut.magnitude === 0n && exact.magnitude !== 0n ? round(exact, rounding, 1) : cut, rounding, options, false);
+}
+/** `value` rounded by purpose to at most `digits` fractional digits (on the magnitude, as `round`). */
+export function roundToDecimals(value: Exact, rounding: DisplayRounding, digits: number): Exact {
+  if (value.scale <= digits) return value;
+  const step = 10n ** BigInt(value.scale - digits), quotient = value.magnitude / step, remainder = value.magnitude % step;
+  const up = rounding === 'up' ? remainder > 0n : rounding === 'nearest' ? remainder * 2n >= step : false;
+  return normalize({ negative: value.negative, magnitude: (quotient + (up ? 1n : 0n)) * step, scale: value.scale });
+}
+/** The exact parsed value (`null` when unavailable), for presentation helpers that choose their own precision (UX-06). */
+export function exactTokenAmount(source: TokenAmountSource | null | undefined): Exact | null { return parse(source); }
+export type { Exact as ExactTokenAmount };
+function present(exact: Exact, shown: Exact, rounding: DisplayRounding, options: DisplayTokenAmountOptions, compact = true): DisplayTokenAmount {
+  const language = options.language ?? 'EN';
+  const approximate = shown.magnitude * 10n ** BigInt(Math.max(0, exact.scale - shown.scale)) !==
     exact.magnitude * 10n ** BigInt(Math.max(0, shown.scale - exact.scale));
-  const unit = COMPACT.find(c => shown.magnitude >= 10n ** BigInt(c.power + shown.scale));
+  const unit = compact ? COMPACT.find(c => shown.magnitude >= 10n ** BigInt(c.power + shown.scale)) : undefined;
   const value = unit ? localize(normalize({ ...shown, scale: shown.scale + unit.power }), language, false) + unit[language] : localize(shown, language, options.group ?? true);
   const marker = approximate && (options.marker ?? rounding === 'nearest') ? '≈ ' : '';
   const symbol = options.symbol ? ` ${options.symbol}` : '';

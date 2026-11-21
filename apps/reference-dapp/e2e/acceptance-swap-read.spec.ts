@@ -41,12 +41,13 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
     await expect(summary.getByRole('region', { name: 'Expected result' })).toContainText('0.0005 WETH');
     await expect(summary).not.toContainText('The workflow has changed.');
-    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate states the result with no authorization; its footer's "Review operation" opens
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2) / UX-05: Simulate states the result with no authorization; its panel's "Continue to authorization" opens
     // Execute (C1), where the one owner action, "Authorize workflow" (Review acceptance, then the wallet request), is offered. This read-only
     // acceptance never clicks it: nothing is accepted or requested, and locale and wallet changes act on the fresh Review's authority.
     await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
-    const reviewOperation = primary.getByRole('button', { name: 'Review operation', exact: true });
+    const reviewOperation = page.locator('.simulation-panel-action').getByRole('button', { name: 'Continue to authorization', exact: true });
     await expect(reviewOperation).toBeEnabled();
+    await expect(page.locator('footer.summary-bar button[data-lifecycle-action]')).toHaveCount(0);
     await review.locator('> summary').click();
     for (const limit of ['Wallet', 'Network', 'Permissions', 'Max spend', 'Max slippage', 'Minimum received', 'Valid until']) await expect(review).toContainText(limit);
     await expect(review.getByRole('button')).toHaveCount(0);

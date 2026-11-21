@@ -34,7 +34,12 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 /** P0 approved UX (board 06/07): what the Simulate footer states, from the shell's existing projections (see `simulateFooterStatus`). */
 export type FooterSimulation = { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string; readonly expiresAt: number | null;
   readonly executionStarted: boolean; readonly networkQuestion?: boolean; readonly subject?: 'simulation' | 'review' };
-export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false, statusOverride = null, stageNote = null }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false, statusOverride = null, stageNote = null, stageBar = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+  /**
+   * UX-05: the public Editor's footer keeps its Editor bar look and place on a stage whose one action lives in its panel (Simulate), so the footer
+   * never jumps between stages; it then states the status only and duplicates no action.
+   */
+  stageBar?: boolean;
   /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Execute): the live execution's own status from its records (never a timer), in place of the Review's. */
   statusOverride?: FooterStatus | null;
   /** B2: one quiet line on Simulate before the simulation is valid ("After simulating, you can review the details and then execute."). */
@@ -116,7 +121,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   // P0 hotfix (readable cards): the Editor bar is sticky at the bottom of the page, so anything scrolled into view (a focused control, the
   // Canvas navigator under a tall stacked graph) stops above it rather than behind it — the page's scroll padding is the bar's own height.
   const bar = useRef<HTMLElement>(null);
-  const sticky = Boolean(lifecycle);
+  const sticky = Boolean(lifecycle) || stageBar && tab !== 'Build';
   useLayoutEffect(() => {
     const element = bar.current, root = document.documentElement;
     if (!sticky || !element || typeof ResizeObserver === 'undefined') return;
@@ -126,7 +131,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     observer.observe(element);
     return () => { observer.disconnect(); root.style.removeProperty('--editor-bar-height'); };
   }, [sticky]);
-  return <footer ref={bar} className={`summary-bar${lifecycle ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
+  return <footer ref={bar} className={`summary-bar${sticky ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
     <div className="summary-count"><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount === 1 ? '1 step' : '{0} steps', actionCount)}</strong></div>
     {notice}
     {/* The m:ss countdown ticks visibly only; the live region speaks when the meaning changes (valid, under 15 s, expired, a blocker). */}

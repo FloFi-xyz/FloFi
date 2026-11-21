@@ -63,7 +63,9 @@ const technicalOf = (html: string) => html.slice(html.indexOf('<details'));
 describe('review UX3: a Circle-paid request\'s USDC permit is a visible token permission', () => {
   it('names Circle\'s paymaster, the cap and what stays approved (EN/PT); never "No new token permission"', () => {
     const shown = visible(render(state({})));
-    expect(shown).toContain('<dt>Token permission</dt><dd><span class="review-block-permission"><span class="numeric">Uniswap</span> uses up to');
+    // UX-03: the swap's approval reads "Access to USDC" (limit and spender); the Circle permit keeps its own sentence beside it, never hidden.
+    expect(shown).toMatch(/<dt>Access to USDC<\/dt><dd><span class="numeric"[^>]*>Up to [^<]+<\/span><small class="review-block-qualifier">Uniswap can use it<\/small>/);
+    expect(shown).toContain('<dt>Other permissions</dt><dd><span class="review-block-permission">');
     expect(shown).toContain('Circle&#x27;s paymaster may take up to <span class="numeric">0.21 USDC</span> for the network fee; what is left stays approved until your next USDC permit');
     expect(shown).not.toContain('No new token permission');
     expect(visible(render(state({}), 'PT'))).toContain('O paymaster da Circle pode cobrar até <span class="numeric">0.21 USDC</span> pela taxa de rede');

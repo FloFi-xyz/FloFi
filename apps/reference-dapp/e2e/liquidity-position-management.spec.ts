@@ -24,7 +24,7 @@ import type { Page } from '@playwright/test';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { chooseLanguage } from './app-origin';
 import { expectEditorSection, openEditorSection } from './build-entry-navigation';
-import { assertNoFinancialCanvasAction, expect, openSimulationDetails, test } from './fixtures';
+import { assertNoFinancialCanvasAction, expect, openSimulationDetails, test, continueToAuthorization } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { advanceBasePositions, BASE_CHAIN_HEX, harnessBalances, harnessPosition, harnessSends, ownerManages, ownerRuntime, POSITION_RUN_KEY,
   resetBasePositions } from './liquidity-position-fixtures';
@@ -57,14 +57,14 @@ const WORDS = {
     close: 'Close position', share: 'Share of liquidity to remove', shareLabel: 'Share to remove', prepare: 'Prepare removal', mocked: 'Test data (MOCKED)',
     range: 'Range', price: 'Current price', liquidity: 'Liquidity', principal: 'Principal', owed: 'Owed tokens and fees (recorded)', collectable: 'Collectable now',
     verified: 'Last verified', open: 'Open (has liquidity)', inRange: 'In range', aboveRange: 'Out of range (above)', unit: 'WETH per USDC', simulate: 'Simulate workflow',
-    review: 'Review operation', authorize: 'Authorize workflow', completed: 'Execution completed', reconciled: 'Reconciled', notSent: 'Transaction not submitted',
+    review: 'Continue to authorization', authorize: 'Authorize workflow', completed: 'Execution completed', reconciled: 'Reconciled', notSent: 'Transaction not submitted',
     declined: 'You declined this request in your wallet.', local: 'Local execution · no public-chain transactions', stays: 'Stays in your wallet',
     note: 'These actions prepare the workflow only. You review it and confirm in your wallet; nothing is executed here.' },
   PT: { verify: 'Verificar carteira para consultar o histórico', history: 'O histórico salvo está indisponível neste ambiente', positions: 'Minhas posições DeFi', actions: 'Ações da posição', collect: 'Coletar taxas',
     remove: 'Remover liquidez', close: 'Fechar posição', share: 'Parte da liquidez a remover', shareLabel: 'Parte a remover', prepare: 'Preparar remoção',
     mocked: 'Dados de teste (MOCKED)', range: 'Intervalo', price: 'Preço atual', liquidity: 'Liquidez', principal: 'Capital', owed: 'Tokens devidos e taxas (registrados)',
     collectable: 'Coletável agora', verified: 'Última verificação', open: 'Aberta (com liquidez)', inRange: 'Dentro da faixa', aboveRange: 'Fora da faixa (acima)',
-    simulate: 'Simular fluxo', review: 'Revisar operação', authorize: 'Autorizar fluxo', completed: 'Execução concluída', reconciled: /Reconciliad[ao]/,
+    simulate: 'Simular fluxo', review: 'Continuar para autorização', authorize: 'Autorizar fluxo', completed: 'Execução concluída', reconciled: /Reconciliad[ao]/,
     notSent: 'Transação não enviada', declined: 'Você recusou esta solicitação na carteira.', local: 'Execução local · sem transações numa rede pública',
     stays: 'Continua na sua carteira',
     note: 'Estas ações apenas preparam o fluxo. Você o revisa e confirma na sua carteira; nada é executado aqui.' },
@@ -141,14 +141,14 @@ async function simulate(page: Page, language: Language = 'EN', previous: string 
   // The run pointer still names the previous run until the new simulation answers.
   await expect.poll(async () => { const id = await positionRun(page); return id !== previous && /^balp-[a-f0-9]{32}$/.test(id ?? ''); }, { timeout: 60_000 }).toBe(true);
   const id = (await positionRun(page))!;
-  await expect(footer(page).getByRole('button', { name: new RegExp(`^${W.review}`) })).toBeEnabled({ timeout: 30_000 });
+  await expect(continueToAuthorization(page)).toBeEnabled({ timeout: 30_000 });
   expect(await harnessSends()).toBe(0);
   return id;
 }
 /** Execute (C1) shows the Review; a MOCKED result never offers an enabled Authorize, and nothing is requested from the wallet. */
 async function mockedBoundary(page: Page, language: Language = 'EN') {
   const W = WORDS[language];
-  await footer(page).getByRole('button', { name: new RegExp(`^${W.review}`) }).click();
+  await continueToAuthorization(page).click();
   await expectEditorSection(page, 'Execute');
   await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeDisabled();
   await assertNoFinancialCanvasAction(page);
@@ -398,7 +398,7 @@ test('Create, Simulate and Execute name the position operation from its marker, 
   // MOCKED: no Review is presented, so neither its C1 rows nor an expired C2 Review (both are live-only); the footer's Authorize stays disabled.
   await expect(review).toHaveAttribute('data-review-state', 'pending');
   await expect(page.locator('[data-position-row]')).toHaveCount(0);
-  await expect(page.locator('#workspace')).not.toContainText(/You are authorizing|Review before authorizing|Your review expired/);
+  await expect(page.locator('#workspace')).not.toContainText(/You are authorizing|Review before authorizing|Check your operation|Your review expired/);
   await expectNothingAsked(page);
   networkGuard.assertClean();
 });

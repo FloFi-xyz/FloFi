@@ -87,15 +87,16 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   await configureCanvasAction(page, '1');
   await page.locator('footer.summary-bar').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expectEditorSection(page, 'Simulate');
-  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate states the result with no authorization (the simulated canvas carries no action); the
-  // footer's one lifecycle control, "Review operation", opens Execute.
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2) / UX-05: Simulate states the result with no authorization (the simulated canvas carries no action);
+  // its panel's one next action, "Continue to authorization", opens Execute; the footer states the status only.
   await expect(page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action')).toHaveCount(0);
   const primary = page.locator('footer.summary-bar .canvas-primary-action');
-  const reviewOperation = primary.getByRole('button', { name: 'Review operation', exact: true });
+  const reviewOperation = page.locator('.simulation-panel-action').getByRole('button', { name: 'Continue to authorization', exact: true });
   await expect(reviewOperation).toBeEnabled();
   await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Simulate Supply', exact: true })).toHaveCount(0);
-  await expect(page.locator('.summary-bar button[data-lifecycle-action]')).toHaveCount(1);
+  await expect(page.locator('.summary-bar button[data-lifecycle-action]')).toHaveCount(0);
+  await expect(page.locator('button[data-lifecycle-action="review-operation"]')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(0);
   // C1: the Review is authorized only from Execute, through the one guarded footer action (closed here: nothing is authorized).

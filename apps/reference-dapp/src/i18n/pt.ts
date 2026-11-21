@@ -66,6 +66,7 @@ import { portugueseCopilotAssist } from './pt-copilot-assist';
 import { portugueseLiquidityExecution, portugueseLiquidityPositionValues } from './pt-liquidity-execution';
 import { portugueseLiveCanvasActivity } from './pt-live-canvas-activity';
 import { portugueseUxEditorFinops } from './pt-ux-editor-finops';
+import { portugueseUxGuidelines } from './pt-ux-guidelines';
 import { portugueseUxRefinement, portugueseUxRefinementParameterized } from './pt-ux-refinement';
 import { portugueseEditorFidelity } from './pt-editor-fidelity';
 import { portugueseGlobalPrecision } from './pt-global-precision';
@@ -73,6 +74,8 @@ import { portugueseGlobalPrecision } from './pt-global-precision';
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
   ...portugueseSavedRecipients,
+  // UX-01/02/03/05 (owner guidelines of 21-11-2026): new keys only.
+  ...portugueseUxGuidelines,
   ...portugueseCopilotAssist,
   // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): new keys only.
   ...portugueseLiquidityExecution,

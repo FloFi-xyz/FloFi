@@ -78,7 +78,7 @@ async function setup(page: Page, request: APIRequestContext, loseAt = 0) {
   await stage(page, 'Simulate');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   // The fresh simulation offers one owner action; nothing is accepted or requested from the wallet until the owner clicks it.
-  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2/C1): "Review operation" (Simulate → Execute) only navigates; the Review is authorized on Execute.
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2/C1): "Continue to authorization" (UX-05; Simulate → Execute) only navigates; the Review is authorized on Execute.
   await openReview(page);
   await expect(authorize(page)).toBeEnabled();
   await expect(authorize(page)).toHaveAttribute('data-lifecycle-action', 'approve');
@@ -166,7 +166,7 @@ test('reload after confirmed approval recovers the same run and refreshes its qu
   // carries no action; the footer only leads to Execute).
   await page.locator('.simulation-panel-action').getByRole('button', { name: 'Simulate again', exact: true }).click();
   // BUILD-SOLANA-TRANSFER-UX-001: the one owner action accepts the refreshed Review and makes the swap's wallet request; the confirmed
-  // approval is never requested again. "Review operation" opens that Review on Execute (navigation only).
+  // approval is never requested again. "Continue to authorization" (UX-05) opens that Review on Execute (navigation only).
   await openReview(page);
   await expect(authorize(page)).toBeEnabled(); expect(owner.requested()).toBe(1);
   await authorize(page).click();

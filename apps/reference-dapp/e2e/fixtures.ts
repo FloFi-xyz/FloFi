@@ -138,7 +138,7 @@ export const FINANCIAL_CANVAS_ACTIONS = ['approve', 'execute', 'continue'].map(k
  * then shows Execute.
  */
 export async function acceptProductReview(page: Page): Promise<void> {
-  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional change): in the public Editor a valid simulation offers "Review operation" (Simulate →
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional change): in the public Editor a valid simulation offers "Continue to authorization" (Simulate →
   // Execute), where the same Review is accepted with "Authorize workflow"; the /approve Canvas and the engineering workspace keep "Authorize in
   // wallet" on the simulation. Either way it is the same `approve` lifecycle action, its gates and its first wallet request.
   const authorize = await openReview(page);
@@ -152,23 +152,26 @@ export async function acceptProductReview(page: Page): Promise<void> {
 
 /**
  * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional change): where the ONE lifecycle action of the current stage is. Create and Execute:
- * the footer (or an execution's own timeline); Simulate, before a valid result: its contextual panel ("Simulate workflow", its "Simulating
- * workflow…" state, a wallet or network prerequisite). After a valid result the Simulate footer's "Review operation" opens Execute.
+ * the footer (or an execution's own timeline); Simulate: its contextual panel — before a valid result "Simulate workflow" (its "Simulating
+ * workflow…" state, a wallet or network prerequisite), and, UX-05 (owner guidelines of 21-11-2026), after it "Continue to authorization", which
+ * opens Execute. The Simulate footer then states the status only.
  */
 export const lifecycleAction = (page: Page) => page.locator('.canvas-primary-action, .simulation-panel-action');
 /** The Review acceptance: "Authorize workflow" where the Review covers the whole workflow (C1), "Authorize in wallet" otherwise. */
 export const AUTHORIZE_REVIEW = /^(Authorize in wallet|Authorize workflow)$/;
 /** The simulation's own lifecycle action, by stage: Create/Simulate say "Simulate…"; Execute words the same action "Refresh review" (C2). */
 export const SIMULATE_AGAIN = /^(Simulate (workflow|again)|Refresh review)$/;
-const enabledReviewOperation = (page: Page) => page.locator('footer.summary-bar button[data-lifecycle-action="review-operation"]:enabled');
+const enabledReviewOperation = (page: Page) => page.locator('.simulation-panel-action button[data-lifecycle-action="review-operation"]:enabled');
+/** UX-05: the Simulate panel's "Continue to authorization" (navigation to Execute only), once the simulation is valid. */
+export const continueToAuthorization = (page: Page) => page.locator('.simulation-panel-action').getByRole('button', { name: /^(Continue to authorization|Continuar para autorização)$/ });
 const reviewAcceptance = (page: Page) => page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_REVIEW });
-/** A valid simulation's next step is offered: "Review operation" in the public Editor, the simulation's own Authorize elsewhere. Read-only. */
+/** A valid simulation's next step is offered: "Continue to authorization" in the public Editor, the simulation's own Authorize elsewhere. Read-only. */
 export async function expectSimulationValid(page: Page, options: { timeout?: number } = {}): Promise<void> {
   await expect(enabledReviewOperation(page).or(reviewAcceptance(page).and(page.locator(':enabled'))).first()).toBeVisible(options);
 }
 /**
  * Follows a valid simulation to the Review the owner accepts (navigation only: nothing is accepted or requested) and returns its Authorize
- * control. In the public Editor this is "Review operation" → Execute (C1); elsewhere, or already on Execute, the control is returned as is.
+ * control. In the public Editor this is "Continue to authorization" → Execute (C1); elsewhere, or already on Execute, the control is returned as is.
  */
 export async function openReview(page: Page, options: { timeout?: number } = {}): Promise<Locator> {
   await expectSimulationValid(page, options);
@@ -204,8 +207,9 @@ export async function openProposalSimulationDetails(page: Page): Promise<void> {
 
 /** A blocked workflow may offer simulation, but never an enabled financial CTA (including an "Authorize in wallet" Review acceptance). */
 export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
-  const primary = page.locator('.canvas-primary-action');
-  await expect(primary).toHaveCount(1);
+  // UX-05: the stage's lifecycle control is the footer's (Create, Execute) or the Simulate panel's; at least one is on screen, none financial.
+  const primary = page.locator('.canvas-primary-action, .simulation-panel-action');
+  await expect(primary.first()).toBeAttached();
   await expect(primary.locator(FINANCIAL_CANVAS_ACTIONS)).toHaveCount(0);
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the public Editor's Execute names the same Review acceptance "Authorize workflow" (C1); neither is enabled.
   await expect(page.getByRole('button', { name: new RegExp(`^(${AUTHORIZE_IN_WALLET}|Authorize workflow)$`) }).and(page.locator(':enabled'))).toHaveCount(0);
