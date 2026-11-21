@@ -34,7 +34,9 @@ export function useExecutionControls(props: ExecutionControlsState) {
   const recovery = props.recovery;
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: while a store follows its submitted request by itself (read-only receipts and reconciliation),
   // nothing is asked of the owner: the Canvas shows that it is reconciling, never a manual check. The check returns only if the follow ends unsettled.
-  const following = 'following' in props.source.state && (props.source.state as { readonly following?: unknown }).following === true;
+  // Only THIS workflow's live execution (final frontend-ux review): a request of a previous workflow still being followed never blocks a new,
+  // separate workflow (HOTFIX-WORKFLOW-CONCURRENCY-001); that run keeps being followed and observed meanwhile.
+  const following = Boolean(live) && 'following' in props.source.state && (props.source.state as { readonly following?: unknown }).following === true;
   const verifying = checking || Boolean(recovery?.checking) || following;
   const result = verifying ? null : projectExecutionResult(live);
   const reconciledCount = Object.values(live?.stepEvidence ?? {}).filter(step => step.reconciled).length;

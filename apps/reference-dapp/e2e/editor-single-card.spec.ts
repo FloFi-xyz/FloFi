@@ -294,6 +294,12 @@ test('a wallet without atomic batching on Base: no wallet_sendCalls; the card ke
   console.log(`[single-card] no atomic batching: wallet requests ${JSON.stringify(log.counts())}`);
   await expect(page.getByText('Review before authorizing', { exact: true })).toHaveCount(0);
   await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  // Execute after the fallback shows only the card's own flow: never the whole-workflow Review, its mechanism sentence or a second primary action
+  // ("Review whole workflow" / "Review again") beside the card's own (final frontend-ux review).
+  await openEditorSection(page, 'Execute');
+  await expect(page.getByText('Review before authorizing', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.editor-run-mechanism')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^(Review whole workflow|Review again|Refresh review)$/ })).toHaveCount(0);
   expect(log.count('wallet_sendCalls')).toBe(0);
   expect(log.asking()).toEqual([]);
   expect((await stored(owner)).runs).toEqual([]);

@@ -594,6 +594,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // A run of this workflow (started here, or followed after a reload) always dominates: whatever the deployment's availability answers (an expired
   // account session, before the answer arrives), the workflow is never offered again through its per-step or own-card path.
   const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
+  // A single card back on its own flow shows only that flow (its own Review and wording): never the whole-workflow Review or a second primary action
+  // beside it (final frontend-ux review). A started run of it always stays shown.
+  const groupedShown = workflowRunHere.visible && !singleCardFallback;
   // A single card that falls back to its own flow right after its Review continues there at once (read-only: its own fresh simulation, which never
   // opens the wallet selector or a sign-in: `simulateQuietly`). The owner's Simulate click already asked for it; a flow whose simulation needs a
   // wallet sign-in (the Router without a session, the universal Router) waits for the owner's own click.
@@ -756,7 +759,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedReviewExpired = Boolean(workflowRunHere.review?.validUntil && Date.parse(workflowRunHere.review.validUntil) <= Date.now());
   const groupedRunOpen = Boolean(workflowRunHere.started || workflowRunHere.following);
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
-    {workflowRunHere.started && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
+    {/* A single card shows no workflow-run note (final frontend-ux review): its one action is followed like the card's own flow. */}
+    {workflowRunHere.started && !singleCardRun && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
     <button type="button" className="primary" data-lifecycle-action="workflow-run"
       disabled={(!groupedRunOpen && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
       onClick={() => {
@@ -854,7 +858,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const canvasRunStatus = !editingPaused ? null : liveExecution && !isFinalExecutionResult(liveExecution) ? liveExecution.label
     : ['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) ? 'Waiting for your authorization'
     : workflowRunHere.run && ['ATTENTION', 'HALTED'].includes(workflowRunHere.run.state) ? 'Execution needs attention'
-    : runUnloaded ? 'Load workflow progress' : 'Execution in progress';
+    // Before its first status read answers: loading; once a read could not load it (e.g. the sign-in expired): what the run panel offers.
+    : runUnloaded ? workflowRunHere.error ? 'Load workflow progress' : 'Loading…' : 'Execution in progress';
   const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
     // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.
@@ -880,7 +885,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Board 06: in the chat-first Editor, Execute before anything is authorized shows the whole-workflow Review as the one block beside the cards,
   // with its ONE primary action in the Editor footer (the Review's own Review/Authorize when the whole-workflow path is primary, else the
   // step-by-step path's lifecycle action without its caption). Presentation only: the same handlers, gates and wallet requests as before.
-  const reviewBlock = Boolean(chatFirst && tab === 'Execute' && workflowRunHere.visible && !workflowRunHere.run && !workflowRunHere.started
+  const reviewBlock = Boolean(chatFirst && tab === 'Execute' && groupedShown && !workflowRunHere.run && !workflowRunHere.started
     && !workflowRunHere.following && !workflowRunHere.unloaded && (workflowRunHere.review || workflowRunHere.canReview)
     && !liveExecution && !executionProgress.started && !executionStart.started && !(groupedPrimary ? null : executeContinuation));
   // BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): one live summary of the real workflow (steps and their status, networks, state, what needs
@@ -1086,7 +1091,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         actionInFooter={chatFirst && !groupedPrimary && placement === 'footer'} review={executeReview}
         workflowProgress={workflowProgress} continuation={executeContinuationShown} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
+        workflowRun={groupedShown ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
           facts={<WorkflowTechnicalFacts workflow={state.workflow} context={context}/>}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?

@@ -1171,9 +1171,11 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     <TechnicalGroup title="Operations">
         {/* Review round 2 (ADR-0009): who pays the one confirmation's network fee follows its sponsorship — FloFi offers to pay a REQUIRED one (the
             wallet must take it, or nothing is sent); an OFFERED one is paid by the wallet only when it cannot take the sponsorship. */}
-        {/* BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card in one wallet confirmation needs no mechanism sentence (the Review already shows its
-            one wallet request); every other plan keeps its own words. */}
-        {!(review.stepCount === 1 && review.mode === 'ONE_WALLET_CONFIRMATION' && !review.groups.some(g => g.gasPayment) && !bridgeTo) &&
+        {/* BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card needs no "All N steps" mechanism sentence (the Review already shows its wallet
+            request; a Circle-paid one's two signatures are stated by its fee note); only a bridge card keeps its delivery sentence. Every other plan
+            keeps its own words. */}
+        {review.stepCount === 1 && review.mode !== 'STEP_BY_STEP' ? bridgeTo && <p className="editor-run-mechanism" data-mode={review.mode}>
+          {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</p> :
         <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode !== 'STEP_BY_STEP' && review.groups.some(g => g.gasPayment)
           ? review.groups.length === 1
             ? 'All {0} steps run as ONE operation on {1} from your own account: two signatures in your wallet (a USDC permit for the network fee, then the operation), then FloFi relays it and Circle\'s paymaster takes the network fee from your USDC.'
@@ -1447,7 +1449,10 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         <button type="button" className="quiet" onClick={state.dismiss}>{tr('Forget this workflow in this browser')}</button></>}
       {run && OPEN_RUN.includes(run.state) && heldUntil && !['wallet', 'confirming'].includes(phase)
         && <p className="muted">{tr('The prepared wallet request is valid until {0}; the workflow can be ended after that.', fmtTime(heldUntil, language))}</p>}
-      {run && !OPEN_RUN.includes(run.state) && <button type="button" className="quiet" onClick={state.dismiss}>{tr('Close')}</button>}
+      {/* A completed single card's run is its result, kept like the card's own flow keeps it (final frontend-ux review): it is never closed back into
+          an offer to run the executed card again. A Canvas edit or a new workflow moves on from it. */}
+      {run && !OPEN_RUN.includes(run.state) && !(run.stepCount === 1 && run.state === 'COMPLETED') &&
+        <button type="button" className="quiet" onClick={state.dismiss}>{tr('Close')}</button>}
     </div>
   </section>;
 }

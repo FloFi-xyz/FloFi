@@ -132,7 +132,9 @@ export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 
 export function singleCardFallsBack(run: { readonly started: boolean; readonly review: { readonly mode: string; readonly refusal: unknown } | null;
   readonly stepByStep: boolean; readonly error: string | null; readonly following: boolean }): boolean {
   if (run.started) return false;
-  return run.review ? run.review.mode === 'STEP_BY_STEP' || run.review.refusal !== null : run.stepByStep || run.error !== null && !run.following;
+  // No connected wallet is not a Review that could not answer: the existing connect reason stays where it is (never a silent flip back and forth).
+  return run.review ? run.review.mode === 'STEP_BY_STEP' || run.review.refusal !== null
+    : run.stepByStep || run.error !== null && run.error !== 'EVM_WALLET_REQUIRED' && !run.following;
 }
 /** Runtimes whose reconciled record proves the delivered amount a funded later step spends (`deliveredByRecord`). */
 export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply', 'workflow-run']);

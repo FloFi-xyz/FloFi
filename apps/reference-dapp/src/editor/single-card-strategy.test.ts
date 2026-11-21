@@ -174,6 +174,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists
     // Final workflow review: a Review that could not answer (rate limited, RPC or server failure) never hides the card's own flow.
     for (const error of ['EDITOR_REVIEW_RATE_LIMITED', 'USER_FUNDED_RPC_UNAVAILABLE', 'EDITOR_EXECUTION_FAILED']) expect(singleCardFallsBack({ ...base, error })).toBe(true);
     expect(singleCardFallsBack({ ...base, error: 'EDITOR_EXECUTION_FAILED', following: true })).toBe(false);
+    // No connected wallet keeps the whole-workflow path and its connect reason (final frontend-ux review: no silent flip).
+    expect(singleCardFallsBack({ ...base, error: 'EVM_WALLET_REQUIRED' })).toBe(false);
     // A started run always stays on its path, whatever its Review or errors say.
     expect(singleCardFallsBack({ ...base, started: true, review: { mode: 'STEP_BY_STEP', refusal: null }, error: 'EDITOR_EXECUTION_FAILED', stepByStep: true })).toBe(false);
   });
