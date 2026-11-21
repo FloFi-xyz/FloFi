@@ -35,11 +35,16 @@
 .editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-head-meta,
 .editor-head-row .editor-state-pill[data-editor-state="attention"]{flex:0 0 auto}
 .editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-name .workflow-name-text{flex:0 1 auto;min-width:48px}
-/* The whole name chain shrinks, never below its own content (a legacy `.workflow-rename{flex:none}` or a zero minimum would let the pencil
-   spill over the New workflow control): the name keeps at least 48 px and the pencil stays inside its button (85 px = 48 + gap 6 + pencil 15
-   + padding 16). */
-.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name,
-.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-name :is(h2,.workflow-rename){flex:0 1 auto;min-width:85px}
+/* The name block shrinks only down to its real content: a name column of at least 85 px (48 px of name, the gap, the 15 px pencil and the
+   button's 16 px padding) beside the New workflow control at its own size (32 px, 44 px on touch screens), so neither the pencil nor that control
+   is drawn over its neighbour: the grid places them side by side and the block's floor is their sum. */
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name{display:grid;grid-template-columns:minmax(85px,max-content) auto;
+  column-gap:2px;align-items:center;flex:0 1 auto;min-width:85px}
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name:has(>.workflow-new){min-width:calc(85px + 2px + 32px)}
+@media(pointer:coarse),(max-width:800px){
+  .editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name:has(>.workflow-new){min-width:calc(85px + 2px + 44px)}
+}
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-name :is(h2,.workflow-rename){flex:0 1 auto;min-width:0;max-width:100%}
 .editor-head-row .canvas-name .workflow-new{flex:none}
 .editor-head-row>.canvas-head-stages{justify-self:center;margin:0;padding:0;border:0;min-width:0}
 .editor-head-row>.canvas-head-actions{justify-self:end;margin:0;min-width:0}
