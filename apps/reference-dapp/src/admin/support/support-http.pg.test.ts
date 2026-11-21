@@ -401,6 +401,23 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 addendum: one attention model a
     expect(await state('other')).toBe(foreignBefore);
   });
 
+  it('separates older unflagged testnet divergence from production and surfaces an unavailable execution read', async () => {
+    const tenantId = 'incident-scopes', now = new Date(), h = { db: t.db, tenantId };
+    await t.db.query('INSERT INTO tenants (tenant_id) VALUES ($1)', [tenantId]);
+    await seed({ tenant: tenantId, runId: 'old-test-divergence', flow: 'uniswap-liquidity', provenance: 'PUBLIC_TESTNET',
+      status: 'DIVERGENT', attention: false, needsObservation: false, updatedAt: new Date(now.getTime() - 60 * 86_400_000),
+      attempts: [{ state: 'RECONCILIATION_REQUIRED', hash: hash('test-divergence') }], work: [] });
+    await seed({ tenant: tenantId, runId: 'production-open', provenance: 'PUBLIC_MAINNET' });
+    const production = await supportView({}, h, now, supportFilters({}));
+    expect(production.incidents.filter(i => i.source === 'EXECUTION').map(i => i.resource.id)).toEqual(['production-open']);
+    expect(production.attention?.counts).toMatchObject({ active: 2, activeRealFunds: 1 });
+    const audit = await supportView({}, h, now, supportFilters({ network: 'TESTNET' }));
+    expect(audit.incidents).toMatchObject([{ kind: 'RESULT_DIVERGED', lifecycle: 'ACTIVE', outcome: 'Diverged from the review', funds: 'TEST_ONLY' }]);
+    const unreadable = await discoverIncidents(t.db, tenantId, now, Promise.resolve(null));
+    expect(unreadable.sources.find(s => s.source === 'EXECUTION')).toMatchObject({ ok: false, code: 'EXECUTION_ATTENTION_UNAVAILABLE' });
+    expect(unreadable.attention).toBeNull();
+  });
+
   it('12/13. an OPERATOR acknowledgement marks an incident under investigation; a VIEWER cannot; the note never changes the execution', async () => {
     await seed({ runId: 'lc-ack', provenance: 'PUBLIC_MAINNET', flow: 'crosschain-universal', errorCode: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
     const row = async () => (await t.db.query(`SELECT status, error_code, needs_observation, attention_required, updated_at FROM execution_runs WHERE run_id = 'lc-ack'`)).rows[0];

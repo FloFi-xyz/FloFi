@@ -86,13 +86,15 @@ it('deletes only a never-authorized position simulation after the certified 0031
   const kept = [invalidated.id, prepared.id, settled.id];
   if (!ahead) {
     // Schema 28: no position run is deletable (an explicit, fail-safe refusal); the mint simulation is, as before.
-    for (const id of [unstarted.id, ...kept]) expect(await remove(id), id).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(await remove(unstarted.id)).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    for (const id of kept) expect(await remove(id), id).toMatchObject({ ok: false, code: 'RUN_DELETE_REFUSED' });
     // The operator command never applies the FinOps migrations on its own.
     await expect(runAdminCommand('position-purge-migrate', {}, t.db, 'default')).rejects.toThrow('POSITION_PURGE_REQUIRES_SCHEMA_30');
     expect(await runAdminCommand('finops-migrate', {}, t.db, 'default')).toEqual({ applied: [29] });
     await expect(runAdminCommand('position-purge-migrate', {}, t.db, 'default')).rejects.toThrow('POSITION_PURGE_REQUIRES_SCHEMA_30');
     expect(await runAdminCommand('finops-sync-migrate', {}, t.db, 'default')).toEqual({ applied: [30] });
-    for (const id of [unstarted.id, ...kept]) expect(await remove(id), id).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(await remove(unstarted.id)).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    for (const id of kept) expect(await remove(id), id).toMatchObject({ ok: false, code: 'RUN_DELETE_REFUSED' });
     expect(await runAdminCommand('position-purge-migrate', {}, t.db, 'default')).toEqual({ applied: [31] });
   }
   // Reruns (and the FinOps commands on schema 31) apply nothing.
@@ -102,7 +104,9 @@ it('deletes only a never-authorized position simulation after the certified 0031
 
   // Another owner can never delete (or learn about) this owner's run.
   expect(await remove(unstarted.id, { namespace: 'eip155', address: '0x' + '66'.repeat(20) })).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
-  for (const id of kept) expect(await remove(id), id).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+  expect(await remove(invalidated.id)).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED', reason: 'AUTHORIZATION' });
+  for (const id of [prepared.id, settled.id]) expect(await remove(id), id)
+    .toEqual({ ok: false, code: 'RUN_DELETE_REFUSED', reason: 'EXECUTION_ACTIVITY' });
   expect(await remove(unstarted.id)).toMatchObject({ ok: true, disposition: 'DELETED' });
   expect(await remove(mint.id)).toMatchObject({ ok: true, disposition: 'DELETED' });
   expect(await backend.callHistory('disposition', ['EXECUTION_RUN', unstarted.id], OWNER)).toEqual({ ok: true, disposition: 'DELETED' });

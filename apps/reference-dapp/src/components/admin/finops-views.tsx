@@ -28,10 +28,10 @@ const FIXED_PERIOD: Partial<Record<MetricId, string>> = { monthToDate: 'Month to
   monthlyChange: 'Closed days of the current month', projected: 'End-of-month projection' };
 
 /** The selected period, the custom UTC dates only when they apply, and the period every "selected period" indicator below covers. */
-export function FinopsFilters({ filter, action, language }: { filter: PeriodFilter; action: string; language: Language }) {
+export function FinopsFilters({ filter, action, language, section }: { filter: PeriodFilter; action: string; language: Language; section?: string }) {
   const { copy } = finopsCopy(language);
   return <div className="admin-finops-no-print admin-finops-period-bar">
-    <FinopsPeriodForm action={action} preset={filter.preset} from={filter.preset === 'custom' ? filter.period.from : undefined}
+    <FinopsPeriodForm action={action} preset={filter.preset} section={section} from={filter.preset === 'custom' ? filter.period.from : undefined}
       to={filter.preset === 'custom' ? inclusiveEnd(filter.period) : undefined}
       options={Object.entries(RANGE_NAMES).map(([value, label]) => ({ value, label: copy(label) }))}/>
     <p className="admin-finops-period" aria-live="polite">{copy('Selected period')}: <strong>{copy(RANGE_NAMES[filter.preset])}</strong>
@@ -148,9 +148,9 @@ export function FinopsOverview({ report, language, mode = 'dashboard' }: { repor
       {HEADLINE.map(key => <Indicator key={key} report={report} id={key} language={language} mode={mode} headline/>)}
     </div>
     <CoverageSummary report={report} language={language}/>
-    <h3 className="admin-finops-subhead">{copy('Other cost indicators')}</h3>
-    <Indicators report={report} keys={OVERVIEW_SECONDARY} language={language} mode={mode} label={copy('Other cost indicators')}/>
-    <p className="admin-diff">{copy('AI costs, variable costs, margins and break-even are in their own sections below.')}</p>
+    <TechnicalDetails summary={copy('Other cost indicators')} {...openIn(mode)}>
+      <Indicators report={report} keys={OVERVIEW_SECONDARY} language={language} mode={mode} label={copy('Other cost indicators')}/>
+    </TechnicalDetails>
     <Basis report={report} keys={[...HEADLINE, ...OVERVIEW_SECONDARY]} language={language} mode={mode}/>
   </Section>;
 }
@@ -195,8 +195,8 @@ export function FinopsInfrastructure({ report, language, records = null }: { rep
     {report.ledger.status === 'available' && !report.ledger.complete ? <p role="status" className="admin-alert" data-tone="warn">{copy("The date range reached the record limit. Totals cover only the loaded records.")}</p> : null}
     <FinopsCostBreakdown report={report} language={language}/>
     {report.ledger.records.length > 0 ? <TechnicalDetails summary={copy("Financial records and reconciliation")}>
-      <div className="admin-table-wrap"><table className="admin-table" aria-label={copy("Financial record ledger")}>
-        <thead><tr><th>{copy("Record")}</th><th>{copy("Environment and period")}</th><th>{copy("Source")}</th><th>{copy("Net billed")}</th><th>{copy("Gross, credits, discounts, tax")}</th><th>USD</th><th>{copy("Quality")}</th><th>{copy("Updated")}</th></tr></thead>
+      <div className="admin-table-wrap admin-table-scroll" tabIndex={0} role="region" aria-label={copy('Financial record ledger')}><table className="admin-table" aria-label={copy("Financial record ledger")}>
+        <thead><tr><th>{copy("Record")}</th><th>{copy("Environment and period")}</th><th>{copy("Source")}</th><th className="num">{copy("Net billed")}</th><th className="num">{copy("Gross, credits, discounts, tax")}</th><th className="num">USD</th><th>{copy("Quality")}</th><th>{copy("Updated")}</th></tr></thead>
         <tbody>{report.ledger.records.map(record => {
           const converted = usdOf(record), scope = FINOPS_SCOPES[record.scope];
           return <tr key={record.id}><th scope="row">#{record.id} · {scope.provider} / {scope.name}</th>
@@ -205,9 +205,9 @@ export function FinopsInfrastructure({ report, language, records = null }: { rep
               {record.source === 'USAGE' || record.source === 'ASSUMPTION'
                 ? <p className="admin-diff">{copy('Excluded from recorded expenses (usage or estimate)')}</p>
                 : !record.selected ? <p className="admin-diff">{copy("Superseded in totals")}</p> : null}</td>
-            <td>{exact(record.net, record.currency)}</td>
-            <td>{[record.gross, record.credits, record.discounts, record.taxes].map(value => value === null ? '—' : exact(value, record.currency)).join(' / ')}</td>
-            <td>{exact(converted === null ? null : decimal(converted))}{record.fxSource ? <small><br/>{record.fxUsd} · {record.fxSource}</small> : null}</td>
+            <td className="num">{exact(record.net, record.currency)}</td>
+            <td className="num">{[record.gross, record.credits, record.discounts, record.taxes].map(value => value === null ? '—' : exact(value, record.currency)).join(' / ')}</td>
+            <td className="num">{exact(converted === null ? null : decimal(converted))}{record.fxSource ? <small className="admin-finops-fx-source"><br/>{record.fxUsd} · {record.fxSource}</small> : null}</td>
             <td><QualityBadge language={language} quality={entryQuality(record)}/></td><td>{time(record.updatedAt)}</td></tr>;
         })}</tbody>
       </table></div>

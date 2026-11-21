@@ -31,7 +31,7 @@ const message = (code: string) => ERRORS[code] ?? 'The request could not be comp
  * BUILD-FLOFI-UX-EDITOR-FINOPS-001: the existing reporting period form (GET range/from/to, UTC, same boundaries), compact: the custom start and
  * last day appear only when "Custom dates" is chosen. Nothing is queried until Apply period submits the same parameters as before.
  */
-export function FinopsPeriodForm({ action, preset, from, to, options }: { action: string; preset: string; from?: string | undefined; to?: string | undefined;
+export function FinopsPeriodForm({ action, preset, from, to, options, section }: { action: string; preset: string; from?: string | undefined; to?: string | undefined; section?: string | undefined;
   options: readonly { readonly value: string; readonly label: string }[] }) {
   const { copy } = finopsCopy(useLocale().language);
   const [range, setRange] = useState(preset);
@@ -40,6 +40,7 @@ export function FinopsPeriodForm({ action, preset, from, to, options }: { action
   useEffect(() => { if (select.current && select.current.value !== preset) setRange(select.current.value); }, [preset]);
   const custom = range === 'custom';
   return <form className="admin-filters admin-finops-period-form" action={action} method="get" aria-label={copy("Financial reporting period")}>
+    {section && section !== 'overview' ? <input type="hidden" name="section" value={section}/> : null}
     <label>{copy("Period")}<select ref={select} name="range" aria-label={copy("Period")} defaultValue={preset} onChange={event => setRange(event.target.value)}>
       {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
     <fieldset className="admin-finops-custom-dates" hidden={!custom} disabled={!custom}>
@@ -85,7 +86,8 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
       requestInFlight.current = false; setBusy(false);
     }
   }
-  if (!integrations.available) return <p role="status">{copy('Automatic synchronization is awaiting database activation.')}</p>;
+  if (!integrations.available) return <p role="status" className="admin-alert" data-tone="warn">{
+    copy('unreadable' in integrations && integrations.unreadable ? 'Provider integration status is temporarily unavailable.' : 'Automatic synchronization is awaiting database activation.')}</p>;
   return <>
     {csrf && <div className="admin-actions"><button type="button" className="admin-button" disabled={busy || !integrations.providers.some(provider => provider.configured)}
       onClick={() => void queue('all')}>{copy('Sync all')}</button></div>}
@@ -171,7 +173,7 @@ function EntryFields() {
   </>;
 }
 
-export function FinopsImports({ csrf, adapters, filter }: { csrf: string; adapters: readonly ScopeId[]; filter: RelativeFilter }) {
+export function FinopsImports({ csrf, adapters, filter, csvOpen }: { csrf: string; adapters: readonly ScopeId[]; filter: RelativeFilter; csvOpen?: boolean }) {
   const { copy, count } = finopsCopy(useLocale().language);
   const router = useRouter(), working = useRef(false);
   const [busy, setBusy] = useState(false), [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
@@ -207,7 +209,7 @@ export function FinopsImports({ csrf, adapters, filter }: { csrf: string; adapte
         <div><button type="submit" className="admin-button" disabled={busy}>{copy("Save financial record")}</button></div>
       </form>
     </details>
-    <details className="admin-details">
+    <details className="admin-details" open={csvOpen}>
       <summary>{copy("Import CSV")}</summary>
       <form className="admin-details-body admin-form" onSubmit={csv}>
         <p className="admin-diff">{copy("Paste up to 100 rows with these headers. Optional headers are gross, credits, discounts, taxes, fxUsd, fxSource, and notes.")}</p>

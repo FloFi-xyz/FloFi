@@ -24,7 +24,7 @@ import { isFlightRecoveryMethod } from '../src/server/flight-access.ts';
 
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
 import { validateSavedWorkflow, workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../src/domain/saved-workflow.ts';
-import { createOwnerHistory, type HistoryDisposition, type HistoryKind } from '@defi-workflow-engine/cloud-runtime';
+import { createOwnerHistory, savedWorkflowDeleted, type HistoryDisposition, type HistoryKind } from '@defi-workflow-engine/cloud-runtime';
 import { investigateNonceConflict, NONCE_CONFLICT_CODE, nonceConflictPacing, nonceConflictSubject, STABLE_ESCALATION_CODE,
   type NonceConflictPacing } from '../src/server/nonce-conflict.ts';
 import { loadNonceConflict, markNonceConflictEscalated, peerAttempts, peersByTransaction, previousScan, recordNonceConflict } from '../src/server/nonce-conflict-store.ts';
@@ -496,7 +496,12 @@ export function createBackend(options: BackendOptions) {
       if (typeof key !== 'string') throw new HttpError(400, 'IDEMPOTENCY_KEY_REQUIRED');
       const scope = 'workflows/save', hash = requestHash(scope, [owner, ...args]), store = idempotency(options.tenantId);
       const claim = await store.begin(scope, key, hash);
-      if (claim.kind === 'REPLAY') return { status: 200, body: claim.response };
+      if (claim.kind === 'REPLAY') {
+        const id = (claim.response as { value?: { workflowId?: unknown } } | null)?.value?.workflowId;
+        if (validWorkflowId(id) && await savedWorkflowDeleted(db, options.tenantId, owner.address, id))
+          return { status: 200, body: { ok: false, code: 'WORKFLOW_NOT_FOUND' } };
+        return { status: 200, body: claim.response };
+      }
       if (claim.kind === 'CONFLICT') throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED');
       if (claim.kind === 'IN_PROGRESS') throw new HttpError(409, 'IDEMPOTENCY_IN_PROGRESS');
       const result = await callWorkflows(method, args, owner, options.tenantId, requestIdentity(request));

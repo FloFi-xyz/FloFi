@@ -24,8 +24,8 @@ export function Section({ id, title, description, actions, children, tone }: { i
 }
 
 /** Secondary, technical information an operator can open on demand. Never used for a warning. */
-export function TechnicalDetails({ summary = 'Technical details', children, open }: { summary?: string; children: ReactNode; open?: boolean }) {
-  return <details className="admin-details" open={open}><summary>{summary}</summary><div className="admin-details-body">{children}</div></details>;
+export function TechnicalDetails({ summary = 'Technical details', children, open, className }: { summary?: string; children: ReactNode; open?: boolean | undefined; className?: string }) {
+  return <details className={className ? `admin-details ${className}` : 'admin-details'} open={open}><summary>{summary}</summary><div className="admin-details-body">{children}</div></details>;
 }
 
 export function Kpi({ label, value, note, tone }: { label: string; value: string; note?: string | undefined; tone?: string | undefined }) {

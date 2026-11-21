@@ -7,6 +7,8 @@ import { AttentionList, Section, StatusTile, TechnicalDetails } from '../../../c
 import { adminPage } from '../../../admin/page-context';
 import { AdminShell, AdminUnavailable } from '../../../components/admin/admin-shell';
 import { fmt } from '../../../components/admin/charts';
+import { finopsCopy } from '../../../components/admin/finops-copy';
+import { requestLanguage } from '../../../server/request-language';
 
 const ago = (seconds: number | null) => seconds === null ? '—' : seconds < 120 ? `${seconds} s` : seconds < 7200 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds / 3600)} h`;
 const at = (iso: string | null) => iso ? iso.replace('T', ' ').slice(0, 16) + ' UTC' : 'never';
@@ -18,20 +20,25 @@ function Status({ ok, warn, children }: { ok: boolean; warn?: boolean; children:
 export default async function AdminHealthPage() {
   const page = await adminPage();
   if (!page.ok) return <AdminUnavailable code={page.code}/>;
-  const [report, copilot] = await Promise.all([healthReport(process.env, page.host, page.now), copilotSettingsView(process.env, page.host)]);
+  const [{ language }, report, copilot] = await Promise.all([requestLanguage(), healthReport(process.env, page.host, page.now), copilotSettingsView(process.env, page.host)]);
+  const { copy, count, time } = finopsCopy(language);
   const { database, api, queue, runs, scheduler } = report;
-  const overall = healthStatus(report), ai = copilotStatus(copilot);
-  return <AdminShell active="health" context={page.context} title="System Health" description={`Is every FloFi service working? Checked ${at(report.checkedAt)}.`}
-    actions={<a className="admin-button" href="/admin/health">Check again</a>}>
-    <Section id="admin-health-summary" title="Summary" description="Problems are listed first, with where to handle them.">
+  const items = healthAttention(report).filter(item => !['attention', 'attention-partial', 'runs'].includes(item.key));
+  const overall = healthStatus(report, items), ai = copilotStatus(copilot);
+  const production = runs.ok ? runs.value.attention.activeRealFunds : null;
+  return <AdminShell active="health" context={page.context} title="System Health" description={copy('Checked {0}', time(report.checkedAt))}
+    actions={<a className="admin-button" href="/admin/health">{copy('Check again')}</a>}>
+    <Section id="admin-health-summary" title={copy('Status at a glance')}>
       <div className="admin-tiles">
-        <StatusTile label="Services and queues" tone={overall.tone} value={overall.value} detail={overall.detail} href="#admin-health-services"/>
-        <StatusTile label="AI Copilot" tone={ai.tone} value={ai.value} detail={ai.detail} href="/admin/ai-settings"/>
-        <StatusTile label="Recent incidents" tone={!report.incidentsAvailable || report.incidents.length ? 'warn' : 'ok'}
-          value={!report.incidentsAvailable ? 'Unavailable' : report.incidents.length ? fmt(report.incidents.length) : 'None'}
-          detail="Stopped work items" href="#admin-incidents"/>
+        <StatusTile label={copy('Services and queues')} tone={overall.tone} value={copy(overall.value)} href="#admin-health-services"/>
+        <StatusTile label={copy('Active execution incidents')} href="/admin/support?lifecycle=OPEN" detail={copy('Mainnet and unknown environments')}
+          tone={production === null || production || runs.ok && runs.value.truncated ? 'warn' : 'ok'}
+          value={production === null ? copy('Unavailable') : runs.ok && runs.value.truncated ? copy('At least {0}', count(production)) : count(production)}/>
+        <StatusTile label={copy('AI Copilot')} tone={ai.tone} value={copy(ai.value)} href="/admin/ai-settings"/>
       </div>
-      <div style={{ marginTop: 14 }}><AttentionList items={[...healthAttention(report), ...ai.items]} allClear="All checks passed. Nothing needs your attention."/></div>
+      {items.length || ai.items.length ? <TechnicalDetails summary={copy('Service and AI checks')}>
+        <AttentionList items={[...items, ...ai.items]} allClear={copy('No service warnings.')}/>
+      </TechnicalDetails> : null}
     </Section>
     <h2 className="admin-section-title" id="admin-health-services">Services</h2>
     <div className="admin-grid admin-grid-2">
@@ -69,7 +76,7 @@ export default async function AdminHealthPage() {
         {runs.ok ? <><table className="admin-table"><tbody>
           <tr><th scope="row">Active incidents</th><td><Status ok warn={runs.value.attention.active + runs.value.attention.underInvestigation > 0}>
             {fmt(runs.value.attention.active + runs.value.attention.underInvestigation)}{runs.value.attention.underInvestigation ? ` (${fmt(runs.value.attention.underInvestigation)} under investigation)` : ''}</Status>
-            {runs.value.attention.active + runs.value.attention.underInvestigation ? <> · <a href="/admin/support?lifecycle=OPEN">Open in Support</a></> : null}</td></tr>
+            {runs.value.attention.active + runs.value.attention.underInvestigation ? <> · <a href="/admin/support?lifecycle=OPEN&amp;network=ALL">Open in Support</a></> : null}</td></tr>
           <tr><th scope="row">Outcome unknown</th><td><Status ok warn={runs.value.attention.unknownOutcome > 0}>{fmt(runs.value.attention.unknownOutcome)}</Status></td></tr>
           <tr><th scope="row">Observation exhausted</th><td><Status ok warn={runs.value.attention.observationExhausted > 0}>{fmt(runs.value.attention.observationExhausted)}</Status>
             {runs.value.attention.notScheduled ? <> · <Status ok warn>{fmt(runs.value.attention.notScheduled)} check not scheduled</Status></> : null}</td></tr>

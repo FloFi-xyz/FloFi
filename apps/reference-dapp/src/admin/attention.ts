@@ -73,8 +73,7 @@ export function copilotStatus(view: CopilotSettingsView): { readonly tone: Tone;
   return { tone, value, detail, items };
 }
 
-export function healthStatus(report: HealthReport): { readonly tone: Tone; readonly value: string; readonly detail: string } {
-  const items = healthAttention(report);
+export function healthStatus(report: HealthReport, items = healthAttention(report)): { readonly tone: Tone; readonly value: string; readonly detail: string } {
   if (items.some(item => item.tone === 'bad')) return { tone: 'bad', value: 'Action needed', detail: `${plural(items.length, 'issue')} found` };
   if (items.length) return { tone: 'warn', value: 'Needs a look', detail: `${plural(items.length, 'item')} to review` };
   const historical = report.runs.ok ? report.runs.value.attention.historical : 0;

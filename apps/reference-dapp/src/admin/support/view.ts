@@ -25,21 +25,26 @@ export type RangeFilter = 'all' | '24h' | '7d' | '30d';
 export type LifecycleFilter = 'OPEN' | Lifecycle | 'FINAL' | 'ALL';
 export const LIFECYCLE_FILTERS: readonly LifecycleFilter[] = ['OPEN', 'ACTIVE', 'UNDER_INVESTIGATION', 'HISTORICAL', 'VERIFIED_RESOLVED', 'FINAL', 'ALL'];
 export type SupportFilters = { readonly lifecycle: LifecycleFilter; readonly status: IncidentStatus | 'ALL'; readonly severity: Severity | 'ALL'; readonly category: IncidentCategory | 'ALL';
-  readonly feature: Feature | 'ALL'; readonly network: 'ALL' | 'MAINNET' | 'TESTNET' | 'MOCKED'; readonly range: RangeFilter; readonly eligibility: EligibilityState | 'ALL' };
+  readonly feature: Feature | 'ALL'; readonly network: 'PRODUCTION' | 'ALL' | 'MAINNET' | 'TESTNET' | 'MOCKED'; readonly range: RangeFilter; readonly eligibility: EligibilityState | 'ALL';
+  readonly observation: 'ALL' | 'WAITING_EXTERNAL' };
 const one = <T extends string>(value: string | undefined, allowed: readonly T[], fallback: T): T => value && (allowed as readonly string[]).includes(value) ? value as T : fallback;
 export function supportFilters(params: Readonly<Record<string, string | undefined>>): SupportFilters {
+  const lifecycle = one(params.lifecycle, LIFECYCLE_FILTERS, 'OPEN');
   return {
-    lifecycle: one(params.lifecycle, LIFECYCLE_FILTERS, 'OPEN'),
+    lifecycle,
     status: one(params.status, ['ALL', 'NEW', 'INVESTIGATING', 'ESCALATED', 'RESOLUTION_NOTED'] as const, 'ALL'),
     severity: one(params.severity, ['ALL', 'HIGH', 'MEDIUM', 'LOW'] as const, 'ALL'),
     category: one(params.category, ['ALL', ...CATEGORIES] as const, 'ALL'),
     feature: one(params.feature, ['ALL', ...Object.keys(FEATURE_LABELS) as Feature[]] as const, 'ALL'),
-    network: one(params.network, ['ALL', 'MAINNET', 'TESTNET', 'MOCKED'] as const, 'ALL'),
+    network: one(params.network, ['PRODUCTION', 'ALL', 'MAINNET', 'TESTNET', 'MOCKED'] as const, ['OPEN', 'ACTIVE', 'UNDER_INVESTIGATION'].includes(lifecycle) ? 'PRODUCTION' : 'ALL'),
     range: one(params.range, ['all', '24h', '7d', '30d'] as const, 'all'),
     eligibility: one(params.eligibility, ['ALL', ...ELIGIBILITY_ORDER] as const, 'ALL'),
+    observation: one(params.observation, ['ALL', 'WAITING_EXTERNAL'] as const, 'ALL'),
   };
 }
 const RANGE_MS: Readonly<Record<RangeFilter, number | null>> = { all: null, '24h': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
+export const inIncidentScope = (incident: Incident, network: SupportFilters['network']) =>
+  network === 'ALL' || (network === 'PRODUCTION' ? incident.environment === 'MAINNET' || incident.environment === null : incident.environment === network);
 
 export function applyFilters(list: readonly Incident[], filters: SupportFilters, notes: ReadonlyMap<string, readonly Note[]>, now: Date): Incident[] {
   const since = RANGE_MS[filters.range];
@@ -48,8 +53,9 @@ export function applyFilters(list: readonly Incident[], filters: SupportFilters,
   return list.filter(incident => lifecycle(incident) && (filters.severity === 'ALL' || incident.severity === filters.severity)
     && (filters.category === 'ALL' || incident.category === filters.category)
     && (filters.feature === 'ALL' || incident.feature === filters.feature)
-    && (filters.network === 'ALL' || incident.environment === filters.network)
+    && inIncidentScope(incident, filters.network)
     && (filters.eligibility === 'ALL' || incident.eligibility === filters.eligibility)
+    && (filters.observation === 'ALL' || incident.eligibility === 'WAITING_EXTERNAL' && incident.transactionCheck?.state !== 'RETRYING')
     && (filters.status === 'ALL' || incidentStatus(notes.get(incident.id) ?? []) === filters.status)
     && (since === null || now.getTime() - Date.parse(incident.at) <= since));
 }

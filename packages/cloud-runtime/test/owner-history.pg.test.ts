@@ -92,7 +92,7 @@ describe('owner purge and archive, real PostgreSQL', () => {
     { outcome: { received: '1' } }, { unknownFutureFinancialField: true }, { quote: { executionId: 'unsafe', ownerReview: { account: stranger } } },
   ])('retains raw snapshots with authority, attempts, signatures, outcomes, unknown fields or wrong owner: %j', async extra => {
     const t = await database(); await seed(t, 'unsafe', { extra });
-    expect(await createOwnerHistory(t.db, 'default').change(owner, 'EXECUTION_RUN', 'unsafe', 'DELETE')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(await createOwnerHistory(t.db, 'default').change(owner, 'EXECUTION_RUN', 'unsafe', 'DELETE')).toMatchObject({ ok: false, code: 'RUN_DELETE_REFUSED' });
     expect(await createRunQueries(t.db, 'default').getRun('unsafe')).not.toBeNull();
   });
   it('checks every historic snapshot; clearing authorization in the latest snapshot never erases its history', async () => {
@@ -100,11 +100,14 @@ describe('owner purge and archive, real PostgreSQL', () => {
     const prior = new TextDecoder().decode((await store.read('history.jsonl'))!);
     await store.extend('history.jsonl', bytes(prior + JSON.stringify(snapshot('history')) + '\n'), () => undefined);
     expect(first).toContain('reviewedManifestHash');
-    expect(await createOwnerHistory(t.db, 'default').change(owner, 'EXECUTION_RUN', 'history', 'DELETE')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    const history = createOwnerHistory(t.db, 'default');
+    expect(await history.change(stranger, 'EXECUTION_RUN', 'history', 'DELETE')).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
+    expect(await history.change(owner, 'EXECUTION_RUN', 'history', 'DELETE')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED', reason: 'AUTHORIZATION' });
   });
   it('archives a financially uncertain run without removing evidence/history and excludes it from all main run lists after reconnect', async () => {
     const t = await database(); await seed(t, 'uncertain', { status: 'SUBMISSION_RESULT_UNKNOWN', observe: true });
     const history = createOwnerHistory(t.db, 'default');
+    expect(await history.change(owner, 'EXECUTION_RUN', 'uncertain', 'DELETE')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED', reason: 'EXECUTION_ACTIVITY' });
     expect(await history.change(owner, 'EXECUTION_RUN', 'uncertain', 'ARCHIVE')).toEqual({ ok: true, disposition: 'ARCHIVED' });
     expect((await createRunQueries(t.db, 'default').listRuns(null, 100, { owner })).items).toEqual([]);
     expect((await createRunQueries(t.db, 'default').listRuns(null, 100, { owner, flow: 'base-swap', includeArchived: true })).items).toHaveLength(1);
@@ -184,7 +187,7 @@ describe('owner purge and archive, real PostgreSQL', () => {
   it('archives an executed workflow library entry even without a saved draft, retaining its runs', async () => {
     const t = await database(); await seed(t, 'executed', { status: 'RECONCILED', evidence: true });
     const history = createOwnerHistory(t.db, 'default');
-    expect(await history.change(owner, 'SAVED_WORKFLOW', 'workflow-executed', 'DELETE')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(await history.change(owner, 'SAVED_WORKFLOW', 'workflow-executed', 'DELETE')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED', reason: 'EXECUTION_ACTIVITY' });
     expect(await history.change(owner, 'SAVED_WORKFLOW', 'workflow-executed', 'ARCHIVE')).toEqual({ ok: true, disposition: 'ARCHIVED' });
     expect(await createOwnerHistory(t.open(), 'default').disposition(owner, 'SAVED_WORKFLOW', 'workflow-executed')).toEqual({ ok: true, disposition: 'ARCHIVED' });
     expect(await createRunQueries(t.db, 'default').getRun('executed')).toMatchObject({ hasEvidence: true });

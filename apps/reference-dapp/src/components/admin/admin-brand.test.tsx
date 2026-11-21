@@ -29,9 +29,9 @@ describe('BUILD-FLOFI-UX-UI-002 admin identity', () => {
     expect(html).toContain('Private console');
   });
 
-  it('the console frame renders the same identity, and the legacy file is the former Gryloo artwork', () => {
+  it('the console frame renders the same identity, and the legacy file is the former Gryloo artwork', async () => {
     const context = { principal: { account: '0x' + 'a'.repeat(40), role: 'ADMIN' }, csrf: 'c'.repeat(32) } as unknown as AdminContext;
-    const html = renderToStaticMarkup(createElement(AdminShell, { active: 'overview', context, title: 'Overview', children: null }));
+    const html = renderToStaticMarkup(await AdminShell({ active: 'overview', context, title: 'Overview', children: null }));
     expect(html).toContain('/brand/flofi-symbol-light.svg');
     expect(html).not.toContain('/flofi-logo.png');
     expect(digest('../../../public/flofi-logo.png')).toBe(digest('../../../public/gryloo-logo.png'));

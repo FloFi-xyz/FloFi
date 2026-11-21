@@ -61,6 +61,8 @@ export type Incident = {
   /** The recorded provenance when it maps to no known environment (shown verbatim, never assumed public). */
   readonly provenance: string | null;
   readonly outcome: string; readonly outcomeKnown: boolean; readonly submitted: Submitted; readonly funds: FundsExposure;
+  readonly transactionCheck?: { readonly state: RunAttention['observation']; readonly checkedAt: string | null; readonly verifiedAt: string | null };
+  readonly evidence?: 'ARCHIVED' | 'RECORDED' | 'NO_BUNDLE' | 'UNAVAILABLE';
   readonly recommended: string;
   /** Registered recovery actions for this resource and whether each is eligible now (re-checked on the server at execution). */
   readonly actions: readonly { readonly id: RecoveryActionId; readonly eligible: boolean; readonly reason: string | null }[];
@@ -157,12 +159,19 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
         : run.attentionRequired ? 'This execution still needs its transaction checked, but no check is queued, and the background sweeper never re-queues a flagged execution.'
         : 'This execution still needs its transaction checked, but no check is queued. The background sweeper normally re-queues it within a minute — the worker may not be running.';
       const action = actions[0]!;
-      eligibility = action.eligible ? 'RECOVERABLE_NOW' : action.state ?? 'INVESTIGATION';
-      recommended = !action.eligible ? action.reason ?? 'Investigate.'
-        // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: a stop for review is not cured by checking again with the same evidence.
-        : reconcile?.state === 'DEAD' && reconcile.lastError === 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW'
-          ? 'Review the nonce-conflict investigation below and record a finding note. Resume the check only when there is new on-chain evidence: with unchanged evidence it stops again after one check (and counts toward the retry limit).'
-        : 'Resume the transaction check. It only reads the network and cannot submit anything.';
+      if (attention.observation === 'OPERATOR_REVIEW') {
+        title = 'Nonce conflict needs operator review';
+        summary = 'Automatic observation stopped after repeated verifications found the same evidence. The execution outcome remains unknown.';
+        eligibility = 'INVESTIGATION';
+        recommended = 'Review the finalized transaction and the alternate nonce scan. Resume the read-only check when new evidence is available.';
+      } else if (run.nonceCheck?.code === 'RPC_UNAVAILABLE') {
+        eligibility = 'WAITING_EXTERNAL';
+        summary = 'Automatic observation stopped before the RPC provider could supply the required evidence. The execution outcome remains unknown.';
+        recommended = 'Check that the provider can read finalized receipts and historical logs before resuming the check.';
+      } else {
+        eligibility = action.eligible ? 'RECOVERABLE_NOW' : action.state ?? 'INVESTIGATION';
+        recommended = action.eligible ? 'Resume the read-only transaction check.' : action.reason ?? 'Review the execution timeline.';
+      }
       break;
     }
     case 'EVIDENCE_ARCHIVE_STOPPED': {
@@ -176,7 +185,13 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
     case 'OUTCOME_UNCERTAIN':
       category = crossChain ? 'CROSS_CHAIN' : 'CONFIRMATION'; severity = funds === 'POSSIBLE' ? 'HIGH' : 'MEDIUM'; title = 'Outcome unknown';
       summary = 'FloFi cannot establish whether this execution’s transaction landed. It is not treated as failed or successful.';
-      if (has('RETRY_PENDING')) {
+      if (attention.observation === 'WAITING_EXTERNAL') {
+        eligibility = 'WAITING_EXTERNAL';
+        summary = 'The last chain check could not verify the transaction. Its financial outcome remains unknown.';
+        recommended = run.nonceCheck?.code === 'CONFLICT_NOT_FINAL'
+          ? 'Wait for finality, then review the nonce-conflict evidence in diagnostics.'
+          : 'Check the RPC provider for the affected network. Look for the finalized receipt and complete the alternate nonce scan before deciding the outcome.';
+      } else if (attention.observation === 'RETRYING' || has('RETRY_PENDING')) {
         eligibility = 'WAITING_EXTERNAL';
         recommended = 'A transaction check was queued again and has not finished. Wait for the worker, then check this page again; the outcome stays unknown until then.';
       } else if (OWNER_RECOVERABLE.has(run.status)) {
@@ -228,8 +243,12 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
   return { id: `run:${run.runId}`, lifecycle, attention: { explanation: attention.explanation, conditions: attention.conditions, stopped: attention.stopped,
       flagged: attention.flagged, ownerReviewPending: attention.ownerReviewPending }, kind, source: 'EXECUTION', category, severity, eligibility, title, summary, component: run.flow, feature: featureOf(run.flow),
     at: run.updatedAt.toISOString(), environment, provenance: environment ? null : run.provenance, networks: run.chains.map(chain => networkInfo(chain).name),
-    outcome: has('OUTCOME_UNKNOWN') ? OUTCOME_LABELS.UNCERTAIN : provenNotExecuted(run) ? 'Not executed — expired before it could land (service verdict)'
+    outcome: has('OUTCOME_UNKNOWN') ? OUTCOME_LABELS.UNCERTAIN : has('RESULT_DIVERGED') ? 'Diverged from the review'
+      : provenNotExecuted(run) ? 'Not executed — expired before it could land (service verdict)'
       : OUTCOME_LABELS[c.outcome], outcomeKnown: !has('OUTCOME_UNKNOWN') && KNOWN_OUTCOMES.has(c.outcome) && !run.needsObservation, submitted, funds, recommended,
+    ...(run.needsObservation ? { transactionCheck: { state: attention.observation, checkedAt: run.nonceCheck?.checkedAt ?? null,
+      verifiedAt: run.nonceCheck?.verifiedAt ?? null } } : {}),
+    evidence: !facts ? 'UNAVAILABLE' : facts.evidenceArchived ? 'ARCHIVED' : run.hasEvidence ? 'RECORDED' : 'NO_BUNDLE',
     actions: actions.map(({ id, eligible, reason }) => ({ id, eligible, reason })), guided: null, codes, resource: { type: 'run', id: run.runId } };
 }
 

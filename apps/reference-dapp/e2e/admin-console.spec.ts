@@ -7,12 +7,13 @@
  */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { createDatabase, type Database } from '@defi-workflow-engine/cloud-runtime';
+import { CERTIFIED_FORWARD_MIGRATIONS, createDatabase, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { runAdminCommand } from '../src/admin/cli-commands.ts';
 import { persistCopilotInterpretation, persistCopilotTurn } from '../src/server/copilot-metrics-store.ts';
 import { expect, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
+import { chooseLanguage } from './app-origin';
 
 const BASE_SEPOLIA = 'eip155:84532', ARBITRUM_SEPOLIA = 'eip155:421614', SOLANA_DEVNET = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -101,10 +102,26 @@ test('admin console: refusal until granted, overview with network distribution, 
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Executed workflows' }).locator('strong')).toHaveText('3');
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Completed & reconciled' }).locator('strong')).toHaveText('1');
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Failed (confirmed)' }).locator('strong')).toHaveText('1');
+    await page.screenshot({ path: test.info().outputPath('admin-overview-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileMenu = page.locator('.admin-nav-mobile summary');
+    await mobileMenu.focus();
+    await page.keyboard.press('Enter');
+    await expect(nav.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Support & Recovery' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('admin-navigation-mobile.png') });
+    await mobileMenu.click();
+    await page.screenshot({ path: test.info().outputPath('admin-overview-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByText('Execution metrics and trends', { exact: true }).click();
     const networks = page.getByRole('region', { name: 'Network distribution' }).or(page.locator('section').filter({ has: page.getByRole('heading', { name: 'Network distribution' }) }));
     await expect(networks.getByRole('img', { name: /Share of executed actions by network/ })).toBeVisible();
     const shares = networks.locator('table').first();
     await expect(shares.getByRole('row', { name: /Base Sepolia/ })).toContainText('66.7%');
+    expect(await shares.locator('td.num').first().evaluate(cell => ({
+      alignment: getComputedStyle(cell).textAlign, numerals: getComputedStyle(cell).fontVariantNumeric,
+    }))).toEqual({ alignment: 'right', numerals: 'tabular-nums' });
     await expect(shares.getByRole('row', { name: /Solana Devnet/ })).toContainText('33.3%');
     await expect(networks.getByRole('row', { name: /Base Sepolia → .*Arbitrum Sepolia/ })).toBeVisible();
     await page.mouse.move(0, 0);
@@ -197,11 +214,13 @@ test('admin console: refusal until granted, overview with network distribution, 
 
     await nav.getByRole('link', { name: 'FinOps & Unit Economics' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'FinOps & Unit Economics' })).toBeVisible();
+    await page.getByRole('link', { name: 'Expenses & invoices' }).click();
     await expect(page.getByText('Billing ledger unavailable.', { exact: false })).toBeVisible();
     await expect(page.getByRole('table', { name: 'Provider cost breakdown' }).getByRole('row', { name: /Railway.*flofi-api/ })).toContainText('UNAVAILABLE');
     await page.getByLabel('Period', { exact: true }).selectOption('previous');
     await page.getByRole('button', { name: 'Apply period' }).click();
     await page.waitForURL(url => url.searchParams.get('range') === 'previous');
+    expect(new URL(page.url()).searchParams.get('section')).toBe('expenses');
     await page.getByRole('link', { name: 'Investor reporting' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Investor Reporting' })).toBeVisible();
     const exportResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/admin/api/finops/export');
@@ -223,7 +242,7 @@ test('admin console: refusal until granted, overview with network distribution, 
     await expect(page.getByRole('heading', { level: 1, name: 'Relatório para investidores' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Baixar CSV para investidores' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await page.getByRole('button', { name: 'Sair', exact: true }).click();
     await page.waitForURL(url => url.pathname === '/admin/login');
     await page.goto('/admin/ai-settings');
     expect(new URL(page.url()).pathname).toBe('/admin/login');
@@ -236,6 +255,57 @@ test('admin console: refusal until granted, overview with network distribution, 
     expect(kinds).toEqual(['ADMIN_SIGN_IN:REFUSED', 'ADMIN_PRINCIPAL_GRANTED:OK', 'ADMIN_SIGN_IN:OK', 'ADMIN_COPILOT_SETTINGS_SAVED:OK',
       'ADMIN_FINOPS_EXPORTED:OK', 'ADMIN_SIGN_OUT:OK']);
     expect(errors).toEqual([]);
+    networkGuard.assertClean();
+  } finally { await db.close(); }
+});
+
+test('FinOps exposes CSV import, shows partial coverage and keeps original currency and FX source', async ({ page, networkGuard }, info) => {
+  test.setTimeout(90_000);
+  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 2 });
+  const operator = createTestWallet();
+  try {
+    const finance = CERTIFIED_FORWARD_MIGRATIONS.flatMap(c => c.migrations).find(m => m.version === 29)!;
+    const sql = await readFile(new URL('../../../packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql', import.meta.url), 'utf8');
+    expect(sha(Buffer.from(sql))).toBe(finance.sha256);
+    await migrate(db, [...await loadMigrations(), { ...finance, sql }]);
+    await runAdminCommand('grant', { wallet: operator.address, role: 'OPERATOR', label: 'FinOps operator' }, db, 'default');
+    await installJourneyWallet(page, [operator], { chain: '0x14a34' });
+    await page.goto('/admin/finops');
+    await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
+    await page.waitForURL(url => url.pathname === '/admin');
+    await page.goto('/admin/finops?range=7d');
+    await page.screenshot({ path: info.outputPath('finops-overview-desktop.png') });
+    await expect(page.getByRole('navigation', { name: 'FinOps sections' }).getByRole('link')).toHaveCount(4);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath('finops-overview-mobile.png') });
+    await page.getByRole('link', { name: 'Import CSV', exact: true }).click();
+    await expect(page.getByLabel('CSV data')).toBeVisible();
+    await page.screenshot({ path: info.outputPath('finops-import-mobile.png') });
+
+    const now = Date.now(), day = new Date(now - 86_400_000).toISOString().slice(0, 10);
+    const today = new Date(now).toISOString().slice(0, 10);
+    const csv = [
+      'scope,environment,start,end,source,reference,currency,net,coverage,fxUsd,fxSource',
+      `openai,production,${day},${today},INVOICE,Loopback invoice,BRL,10.25,PARTIAL,0.2,Invoice fixture rate`,
+    ].join('\n');
+    await page.getByLabel('CSV data').fill(csv);
+    const imported = page.waitForResponse(response => new URL(response.url()).pathname === '/admin/api/finops/import');
+    await page.getByRole('button', { name: 'Import financial records' }).click();
+    expect((await imported).status()).toBe(200);
+    await expect(page.getByText('1 saved, 0 already recorded.')).toBeVisible();
+    await page.getByText('Financial records and reconciliation', { exact: true }).click();
+    const invoice = page.getByRole('table', { name: 'Financial record ledger' }).getByRole('row', { name: /Loopback invoice/ });
+    await expect(invoice).toContainText('Invoice fixture rate');
+    await expect(invoice).toContainText('PARTIAL');
+    await expect(invoice).toContainText(/R\$\s?10\.25/);
+    expect(await invoice.locator('td.num').first().evaluate(cell => getComputedStyle(cell).textAlign)).toBe('right');
+    expect(await invoice.locator('td.num').first().evaluate(cell => getComputedStyle(cell).fontVariantNumeric)).toBe('tabular-nums');
+
+    await chooseLanguage(page.context(), 'PT');
+    await page.reload();
+    await expect(page.getByRole('link', { name: 'Despesas e faturas' })).toHaveAttribute('aria-current', 'true');
+    await expect(page.getByRole('link', { name: 'Importar CSV' })).toBeVisible();
     networkGuard.assertClean();
   } finally { await db.close(); }
 });
@@ -347,31 +417,49 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await nav.getByRole('link', { name: 'Support & Recovery' }).click();
     await expect(page.getByRole('heading', { name: 'Support & Recovery', level: 1 })).toBeVisible();
     const card = page.locator('.admin-incident').filter({ hasText: 'Transaction check stopped' }).filter({ hasText: 'base-sepolia-swap' });
+    await expect(card).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('support-production-desktop.png') });
+    await db.query('ALTER TABLE execution_nonce_conflicts RENAME TO e2e_nonce_conflicts_unavailable');
+    try {
+      await page.reload();
+      await expect(page.getByRole('alert')).toContainText('Unavailable sources: Executions');
+      await expect(page.locator('.admin-incident-summary')).toContainText('Matching records Unavailable');
+    } finally { await db.query('ALTER TABLE e2e_nonce_conflicts_unavailable RENAME TO execution_nonce_conflicts'); }
+    await page.goto('/admin/support?network=ALL');
+    await expect(card).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Production incidents' })).not.toHaveAttribute('aria-current', 'true');
+    await page.getByRole('link', { name: 'Testnet audit' }).click();
     await expect(card).toContainText('Recoverable now');
     await expect(card).toContainText('Outcome unknown');
     await expect(card).toContainText('Test or mocked funds only'); // a testnet run never claims real funds
+    await page.getByText('Incident and recovery statistics', { exact: true }).click();
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Recoverable here' }).locator('strong')).not.toHaveText('0');
     await expect(card).toContainText('Active');
     // The historical flag is counted separately and kept out of the open list; it is listed under its own lifecycle, never as resolved.
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Historical attention' }).locator('strong')).toHaveText('1');
-    await expect(page.locator('.admin-kpi').filter({ hasText: 'Raw flag' }).locator('strong')).toHaveText('2');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Raw execution flags' }).locator('strong')).toHaveText('2');
     await expect(page.locator('.admin-incident').filter({ hasText: 'Earlier attention' })).toHaveCount(0);
-    await page.screenshot({ path: test.info().outputPath('support-overview.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('support-testnet-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/admin/support?lifecycle=HISTORICAL#support-incidents');
     const historical = page.locator('.admin-incident').filter({ hasText: 'Earlier attention — no active condition' });
     await expect(historical).toContainText('Historical attention');
     await expect(historical).toContainText('No action needed');
-    await expect(historical).toContainText('Outcome: Completed');
+    await expect(historical).toContainText('Completed');
     // Workflows and System Health show the same split.
     await page.goto('/admin/workflows');
     const requiring = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Requiring attention' }) });
+    await expect(requiring.getByRole('row').filter({ hasText: 'e2e-stuck' })).toHaveCount(0);
+    await requiring.getByText(/^Test and mock incidents \(/).click();
     await expect(requiring.getByRole('row').filter({ hasText: 'e2e-stuck' })).toContainText('Active');
     await expect(requiring).not.toContainText('e2e-historical');
     await expect(page.getByRole('heading', { name: 'Historical attention' })).toBeVisible();
     await page.goto('/admin/health');
     await expect(page.getByRole('row').filter({ hasText: 'Historical attention' })).toContainText('1');
     await expect(page.getByRole('row').filter({ hasText: 'Observation exhausted' })).toContainText('1');
-    await page.goto('/admin/support');
+    await page.goto('/admin/support?network=TESTNET');
 
     // Diagnose: timeline marks the unknown submission; preview → confirm → run → verified state.
     await card.getByRole('link', { name: /^Diagnose/ }).click();

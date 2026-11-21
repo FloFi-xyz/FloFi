@@ -32,7 +32,13 @@ export async function ownerHistoryOperation(expectedAccount: string, method: 'ch
     if (value.ok === true && ['DELETED','ARCHIVED','VISIBLE'].includes(value.disposition as string) &&
       (method === 'disposition' || value.disposition === (action === 'DELETE' ? 'DELETED' : 'ARCHIVED')))
       return result as HistoryDisposition;
-    if (value.ok === false && ['RUN_NOT_FOUND','RUN_DELETE_REFUSED','HISTORY_INVALID','HISTORY_READ_ONLY'].includes(value.code as string)) return result as HistoryDisposition;
+    if (value.ok === false && value.code === 'RUN_DELETE_REFUSED') {
+      const reason = value.reason;
+      return reason === 'AUTHORIZATION' || reason === 'EXECUTION_ACTIVITY' || reason === 'DEPENDENCY'
+        ? { ok: false, code: value.code, reason } : { ok: false, code: value.code };
+    }
+    if (value.ok === false && (value.code === 'RUN_NOT_FOUND' || value.code === 'HISTORY_INVALID' || value.code === 'HISTORY_READ_ONLY'))
+      return { ok: false, code: value.code };
     return { ok: false, code: 'HISTORY_INVALID' };
   } catch { return { ok: false, code: 'HISTORY_INVALID' }; }
 }

@@ -136,7 +136,7 @@ test('financial authorization refuses deletion, offers Archive, and preserves th
   await card(page, id).getByRole('button', { name: 'Delete execution', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete permanently?', exact: true });
   await dialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toContainText('Archive it to preserve its history');
+  await expect(dialog.getByRole('alert')).toContainText('previous execution authorization');
   expect(await inspect(id)).toEqual(before);
   await dialog.getByRole('button', { name: 'Archive instead', exact: true }).click(); await expect(card(page, id)).toHaveCount(0);
   await page.reload(); await expect(card(page, id)).toHaveCount(0);
@@ -147,6 +147,75 @@ test('financial authorization refuses deletion, offers Archive, and preserves th
     expect(fresh.unexpected).toEqual([]);
   } finally { await fresh.context.close(); }
   expect(await inspect(id)).toEqual({ ...before, archives: 1 });
+});
+
+test('dismissed history actions release focus and clear refusal messages across rows', async ({ page }, info) => {
+  const owner = createTestWallet(), first = await seed(owner, true), second = await seed(owner, true);
+  await open(page, [owner]);
+  const walletActions = async () => (await walletRequests(page)).filter(method => /sign|send/i.test(method));
+  const signedIn = await walletActions();
+  const more = (id: string) => card(page, id).getByRole('button', { name: 'More execution actions', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Delete permanently?', exact: true });
+  const alerts = page.locator('.history-actions [role="alert"]');
+  const refuse = async (id: string) => {
+    await more(id).click();
+    await card(page, id).getByRole('button', { name: 'Delete execution', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('previous execution authorization');
+    await expect(alerts).toHaveCount(1);
+  };
+  await more(first).click();
+  await expect(more(first)).toHaveAttribute('aria-expanded', 'true');
+  await page.getByRole('heading', { name: 'Your workflows', exact: true }).click();
+  await expect(more(first)).toHaveAttribute('aria-expanded', 'false');
+  await refuse(first);
+  await page.mouse.click(5, 5);
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  await page.screenshot({ path: info.outputPath('history-refusal-desktop.png') });
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(alerts).toHaveCount(0);
+  await expect(more(first)).toBeFocused();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await refuse(second);
+  await page.screenshot({ path: info.outputPath('history-refusal-mobile.png') });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(more(second)).toBeFocused();
+  await expect(alerts).toHaveCount(0);
+  await more(first).click();
+  await more(second).click();
+  await expect(more(first)).toHaveAttribute('aria-expanded', 'false');
+  await expect(card(page, second).getByRole('button', { name: 'Archive execution', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(more(second)).toBeFocused();
+  await expect(alerts).toHaveCount(0);
+
+  // Fail a pending archive request after the user has already dismissed its menu.
+  let finish!: () => void, started!: () => void;
+  const pending = new Promise<void>(resolve => { started = resolve; });
+  const release = new Promise<void>(resolve => { finish = resolve; });
+  await page.route('**/app/workflows', async route => {
+    if (route.request().method() !== 'POST' || !route.request().headers()['next-action']) return route.continue();
+    started();
+    await release;
+    await route.fulfill({ status: 503, body: 'Unavailable' });
+  });
+  try {
+    await more(first).click();
+    await card(page, first).getByRole('button', { name: 'Archive execution', exact: true }).click();
+    await pending;
+    await page.keyboard.press('Escape');
+    await expect(more(first)).toBeFocused();
+  } finally { finish(); }
+  await expect(more(first)).toHaveAttribute('aria-describedby', /.+/);
+  await expect(more(first)).toBeEnabled();
+  await more(first).click();
+  await expect(card(page, first).getByRole('alert')).toContainText('The result could not be confirmed');
+  await page.getByRole('heading', { name: 'Your workflows', exact: true }).click();
+  await expect(alerts).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('history-after-outside.png') });
+  expect(await walletActions()).toEqual(signedIn);
 });
 
 test('Portuguese confirmation remains usable on a narrow screen and keeps the cancel action safe', async ({ page }, info) => {

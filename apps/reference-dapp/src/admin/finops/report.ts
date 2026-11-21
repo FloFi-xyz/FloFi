@@ -156,7 +156,7 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
     ledgerPromise, samePeriod(current, period) ? ledgerPromise : readCosts(host, current),
     samePeriod(previous, period) ? ledgerPromise : readCosts(host, previous), readAiEconomics(host, period, now).catch(() => null),
     readWorkflowEconomics(host, period).catch(() => null), readSyncState(host).catch(() => []),
-    readFinancialSync(host).catch(() => ({ available: false, providers: [] })),
+    readFinancialSync(host).catch(() => ({ available: false, unreadable: true as const, providers: [] as never[] })),
     readExecutionEconomics(host, period).catch(() => null),
     readGasPayerEvidence(host, period).catch(() => null),
   ]);

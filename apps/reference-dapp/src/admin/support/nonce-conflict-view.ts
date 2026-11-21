@@ -8,6 +8,7 @@
  */
 import type { NonceConflictRow } from '../../server/nonce-conflict-store.ts';
 import type { Comparison, NonceConflictClassification, SafeNextAction } from '../../server/nonce-conflict.ts';
+import { externalNonceEvidencePending } from './lifecycle.ts';
 
 const NETWORKS: Readonly<Record<string, { name: string; explorer: string }>> = {
   '1': { name: 'Ethereum mainnet', explorer: 'https://etherscan.io/tx/' }, '8453': { name: 'Base mainnet', explorer: 'https://basescan.org/tx/' },
@@ -22,12 +23,12 @@ export const CLASSIFICATION_LABELS: Readonly<Record<NonceConflictClassification,
 };
 const CLASSIFICATION_MEANING: Readonly<Record<NonceConflictClassification, string>> = {
   MATCHING_TRANSACTION_CONFIRMED: 'The flow’s own reconciliation settles a matching transaction; this investigation does not.',
-  CONFLICTING_TRANSACTION_IDENTIFIED: 'The nonce was consumed by a direct transaction that is not the reviewed call. That alone does not prove the reviewed call never executed.',
+  CONFLICTING_TRANSACTION_IDENTIFIED: 'A finalized transaction used this nonce and its effects differ from the reviewed call. The outcome of the reviewed execution remains open.',
   DELEGATED_EXECUTION_UNDETERMINED: 'The consuming transaction runs through a delegated account or batch, or carries the reviewed effect inside a different outer call. '
     + 'The reviewed call may have executed inside it; it cannot be attributed from the outer transaction.',
   POSSIBLE_ALTERNATE_NONCE: 'An event with the reviewed effect was found in another of the sender’s transactions. It may be the reviewed call sent with another nonce, or '
     + 'an unrelated transaction with the same effect; it is not attributed to this execution.',
-  INSUFFICIENT_CHAIN_EVIDENCE: 'The network could not be read, or the consuming transaction is not final or canonical yet. The worker checks again.',
+  INSUFFICIENT_CHAIN_EVIDENCE: 'The investigation needs a usable RPC response and a finalized, canonical receipt for the consuming transaction.',
 };
 const NEXT_ACTION: Readonly<Record<SafeNextAction, string>> = {
   WAIT_FOR_RPC: 'Wait: the worker retries the read. If it keeps failing, check the network’s RPC provider.',
@@ -36,7 +37,7 @@ const NEXT_ACTION: Readonly<Record<SafeNextAction, string>> = {
   CONTINUE_SCAN: 'Wait: the worker is still scanning the sender’s later transactions for the reviewed effect.',
   OPERATOR_REVIEW_DELEGATED: 'Decode the consuming transaction’s inner calls on two independent sources and record a finding note. Do not ask the owner to sign again until the inner calls are known.',
   OPERATOR_REVIEW_ALTERNATE: 'Compare the candidate transaction with the reviewed call on two independent sources and record a finding note. It is not attributed automatically.',
-  OPERATOR_REVIEW_CONFLICT: 'Record a finding note. If the owner still wants the original intent, they review and authorize a NEW request; never replay the old one.',
+  OPERATOR_REVIEW_CONFLICT: 'Compare the finalized receipt and the alternate nonce scan with the reviewed call. Record a finding and request another read-only check when new evidence is available.',
   OPERATOR_REVIEW_PROTOCOL_WINDOW: 'The flow’s protocol-specific checks (deposit scan, deadline) remain the only proof of non-execution; let them run and review their verdict.',
 };
 const REASONS: Readonly<Record<string, string>> = {
@@ -90,13 +91,19 @@ function statusOf(row: NonceConflictRow, context: RunCheckContext | null): strin
   if (row.escalatedAt && open && check!.createdAt > row.escalatedAt) return 'Re-inspection queued — outcome still unknown';
   if (row.escalatedAt) return 'Investigation complete and unchanged — escalated for operator review (outcome still unknown)';
   if (context && check?.state === 'DEAD') return 'Automatic checks stopped — see Recovery (outcome still unknown)';
-  return row.report.retryable || row.classification === 'INSUFFICIENT_CHAIN_EVIDENCE' ? 'Investigation in progress' : 'Investigation complete — outcome still unknown';
+  if (open && externalNonceEvidencePending(row.lastCheckCode)) return 'Awaiting external evidence — check queued or running';
+  return row.report.retryable || row.classification === 'INSUFFICIENT_CHAIN_EVIDENCE' ? 'Evidence gathering incomplete' : 'Investigation complete — outcome still unknown';
 }
 export function nonceConflictView(row: NonceConflictRow, context: RunCheckContext | null = null): NonceConflictView {
   const r = row.report, network = NETWORKS[row.chainId], conflict = r.conflict;
   const proven = row.classification !== 'INSUFFICIENT_CHAIN_EVIDENCE' && !!conflict && conflict.final;
   const alt = r.alternateNonce;
-  const alternate = alt.truncated ? 'Truncated — more same-spender approvals than recorded (incomplete)' : alt.status === 'NOT_EVALUATED' ? 'Not evaluated here (protocol-specific for this step)'
+  const stopped = context?.reconcile?.state === 'DEAD';
+  const nextAction = stopped && row.lastCheckCode === 'RPC_UNAVAILABLE' ? 'Restore access to finalized receipts and historical logs before resuming a read-only check.'
+    : stopped && ['WAIT_FOR_FINALITY', 'WAIT_FOR_RPC', 'CONTINUE_SCAN', 'LET_FLOW_SETTLE', 'OPERATOR_REVIEW_PROTOCOL_WINDOW'].includes(r.safeNextAction)
+      ? 'Review the missing evidence. Use Recovery to preview a read-only check when the evidence is available.' : NEXT_ACTION[r.safeNextAction];
+  const alternate = alt.truncated ? 'Truncated — more same-spender approvals than recorded (incomplete)' : alt.status === 'NOT_EVALUATED'
+    ? row.classification === 'INSUFFICIENT_CHAIN_EVIDENCE' ? 'Scan unavailable because the chain evidence is incomplete' : 'Protocol-specific evidence required for this step'
     : `${alt.status === 'CANDIDATE_FOUND' ? `${alt.candidates.length} candidate transaction(s) found` : alt.status === 'NONE_IN_SCANNED_RANGE' ? 'None found' : 'Scan in progress'}`
       + (alt.scannedFrom !== null && alt.scannedThrough !== null ? ` — blocks ${alt.scannedFrom}–${alt.scannedThrough}${alt.complete ? ' (reached the final block)' : ''}` : '');
   return {
@@ -118,7 +125,7 @@ export function nonceConflictView(row: NonceConflictRow, context: RunCheckContex
     proofComplete: r.proofComplete, lastVerifiedAt: row.lastVerifiedAt?.toISOString() ?? null, lastCheckedAt: row.lastCheckedAt.toISOString(),
     firstObservedAt: row.firstObservedAt.toISOString(), stableObservations: row.stableObservations, investigations: row.investigations,
     escalatedAt: row.escalatedAt?.toISOString() ?? null, lastCheckCode: row.lastCheckCode,
-    whyUnknown: r.reasons.map(code => REASONS[code] ?? code), nextAction: NEXT_ACTION[r.safeNextAction] ?? r.safeNextAction,
+    whyUnknown: r.reasons.map(code => REASONS[code] ?? code), nextAction,
     laterAttempts: r.laterAttempts.length ? r.laterAttempts.map(a => `${a.step} ${a.state}${a.hashRecorded ? ' (hash recorded)' : ''}`).join(', ')
       : 'None — FloFi never asked the wallet for a later step of this execution.',
   };

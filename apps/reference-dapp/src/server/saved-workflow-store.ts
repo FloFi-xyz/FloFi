@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import { lockSavedWorkflowHistory, savedWorkflowDeleted, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { savedWorkflowHash, validateSavedWorkflow, type SavedWorkflow, type WorkflowList, type WorkflowOwner } from '../domain/saved-workflow.ts';
 
 /** A simulation or an unused approval is not a previously executed workflow. */
@@ -33,6 +33,8 @@ export function createSavedWorkflowStore(db: Database, tenantId: string, owner: 
       return db.transaction(async tx => {
         const values = [...scope, workflow.workflowId, name.trim(), JSON.stringify(workflow), workflow.revision, hash];
         if (expectedVersion === 0) {
+          await lockSavedWorkflowHistory(tx, tenantId, owner.address, workflow.workflowId);
+          if (await savedWorkflowDeleted(tx, tenantId, owner.address, workflow.workflowId, true)) throw Error('WORKFLOW_NOT_FOUND');
           const inserted = await tx.query<Row>(`INSERT INTO saved_workflows (tenant_id,owner_namespace,owner_account,workflow_id,display_name,semantic_workflow,semantic_revision,workflow_hash,version)
             VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,1) ON CONFLICT DO NOTHING RETURNING *`, values);
           if (!inserted.rows[0]) throw Error('WORKFLOW_VERSION_CONFLICT');
