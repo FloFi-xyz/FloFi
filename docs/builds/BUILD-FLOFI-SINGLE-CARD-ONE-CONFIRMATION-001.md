@@ -223,3 +223,17 @@ Documented, not changed:
 - **Data-privacy minor 6:** Support texts are matched by run id, handoff id or incident, live or deleted.
 - **Data-privacy nits 7 and 9:** runtime-role privilege checks are in the verification; per-subject legal holds are noted.
 - **Data-privacy minor 3:** the release procedures require recording the approval and retention-decision references; no new CLI flag.
+
+### 6.4 Production activation rehearsal finding (after merge), resolved before activation
+
+The rehearsal of 0031–0033 on a disposable Neon branch of production (2026-11-21) matched every identity and function body, but showed that
+production's role model differs from the test harness: the objects belong to the migration role, and the API, worker and web tier connect as a
+separate runtime role whose table rights come from `ALTER DEFAULT PRIVILEGES`. There, 0033 alone (a) gives the runtime role no EXECUTE on
+`purge_unsubmitted_workflow_run`, so History deletion would fail closed, and (b) gives it INSERT/UPDATE/DELETE on the private permit table and the
+tombstone, so a forged permit could delete any run's append-only rows (reproduced as the runtime role on that branch, rolled back). The release
+document's earlier claim that "the runtime role owns these objects, as it owns 0016's" was wrong for production. Resolved without touching the
+certified migration: `docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql` (operator step immediately after 0033, idempotent,
+guarded on 0033's exact identity) and its documented verification, both run by a new case of `certificate-0033.pg.test.ts` with a separate runtime
+role holding production's default privileges (the forgery succeeds before and is refused after; the procedure deletes as the runtime role; the
+reversal is unaffected). The same exposure exists since 0016 for `execution_purge_permits` / `execution_purge_audit`; this build does not change
+it and the release document gives the analogous remediation as a separate owner decision.

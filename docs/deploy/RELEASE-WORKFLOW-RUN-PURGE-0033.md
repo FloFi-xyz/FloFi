@@ -95,6 +95,9 @@ Support texts written later about a deleted attempt through the tombstone.
    - record the verification values below **before** 0033 on that branch;
    - `node apps/reference-dapp/backend/admin-cli.ts workflow-run-purge-migrate --preview-branch <branch>` → `{ "applied": [33] }`; a rerun →
      `{ "applied": [] }`;
+   - immediately after, if the branch's API, worker or web tier connect as a role other than the one that owns the objects (FloFi production
+     does: see [Runtime-role provisioning](#runtime-role-provisioning-required-where-a-separate-runtime-role-connects)), run the provisioning file
+     with that role;
    - verify with the queries below; restart the API and worker against the branch and confirm they start (schema compatible);
    - on that branch only, with test funds the owner controls: start one single card and end it before confirming in the wallet, then delete it from
      History (expect `DELETED`); reject one in the wallet, end it once the batch has expired on chain and delete it (expect `DELETED`); confirm one,
@@ -117,29 +120,74 @@ Support texts written later about a deleted attempt through the tombstone.
    transaction. Its only table lock is the short SHARE ROW EXCLUSIVE on `tenants` the tombstone's foreign key needs; on its 5 s lock timeout (a
    long transaction writing `tenants`) it rolls back completely and can be retried in a quieter moment.
 
+   **Immediately after, in the same operator session, provision the runtime role** (required in FloFi production, where the objects belong to the
+   migration role and the API, worker and web tier connect as a separate runtime role):
+
+   ```sh
+   psql "$DATABASE_MIGRATION_URL" -v ON_ERROR_STOP=1 -v runtime_role=<runtime role> -f docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql
+   ```
+
+   Until it runs, History's Delete fails closed (no EXECUTE) and the runtime role can write the private permit table (see below), so run the two
+   back to back, or apply 0033 and the file's statements in one transaction.
+
+## Runtime-role provisioning (required where a separate runtime role connects)
+
+Migrations name no role: 0033 revokes its new objects from PUBLIC only. FloFi production keeps the objects owned by the migration role and grants
+the runtime role table rights through `ALTER DEFAULT PRIVILEGES ... GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES`, and 0016's
+`purge_unstarted_execution` was granted to the runtime role explicitly. On such a database, 0033 alone leaves two defects, both reproduced on a
+disposable Neon branch of production during the activation rehearsal (2026-11-21, as the production runtime role, rolled back):
+
+- the runtime role cannot EXECUTE `purge_unsubmitted_workflow_run`, so every History deletion of a single-card attempt fails closed; and
+- the default privileges give the runtime role INSERT/UPDATE/DELETE on `workflow_run_purge_permits` and `workflow_run_purge_audit`, so it can insert a
+  forged tombstone and a permit for **any** run and then delete that run's append-only rows (a completed run's events included) without the
+  checked procedure.
+
+[RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql](./RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql) closes both: it revokes every
+privilege of the runtime role on the permit table (only the procedure and 0015's redefined trigger function, both SECURITY DEFINER, use it) and
+every privilege but SELECT on the tombstone (History and privacy reports read it), and grants EXECUTE on the procedure. It is idempotent, takes the
+migration advisory lock, refuses unless 0033 (exact identity) is applied (`WORKFLOW_RUN_PURGE_NOT_ACTIVE`) and changes nothing else. The 0033
+reversal drops the objects and these grants with them; re-applying 0033 brings the default privileges back, so run the file again after every
+application of 0033. A database where one role owns the objects and also serves the runtime (the test harness) does not need it. Proven on
+disposable PostgreSQL by `packages/cloud-runtime/test/certificate-0033.pg.test.ts` (a separate runtime role with production's default privileges:
+forgery before, refused after; the procedure deleting as the runtime role; the reversal unaffected), which runs this exact file and the
+verification query below.
+
+**Related pre-existing exposure (owner decision; not changed by this release).** 0016's `execution_purge_permits` and `execution_purge_audit` have
+the same default privileges in production, so the runtime role can forge a permit and delete execution journal entries without
+`purge_unstarted_execution` (reproduced on the same rehearsal branch, rolled back). The application never writes either table directly; the
+analogous remediation, for the owner to decide and apply separately, is
+`REVOKE ALL ON execution_purge_permits FROM <runtime role>; REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON execution_purge_audit FROM <runtime role>;`.
+
 ## Verification (read-only, except the rolled-back probe)
 
 ```sql
 SELECT version, name, sha256 FROM schema_migrations WHERE version >= 28 ORDER BY version;
 SELECT md5(pg_get_functiondef('workflow_run_append_only()'::regprocedure));
 SELECT to_regclass('workflow_run_purge_audit') AS tombstones, to_regclass('workflow_run_purge_permits') AS permits;
-SELECT (SELECT count(*) FROM workflow_run_purge_audit) AS deleted, (SELECT count(*) FROM workflow_run_purge_permits) AS open_permits,
-  has_function_privilege('public', 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS public_execute,
-  has_function_privilege(current_user, 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS runtime_execute,
-  has_table_privilege(current_user, 'workflow_run_purge_audit', 'SELECT') AS runtime_reads_tombstones;
--- Run the last query as the role the API and the web tier connect with: both runtime_* columns must be true (EXECUTE and SELECT are revoked
--- from PUBLIC, so the runtime role must own these objects, as it owns 0016's).
+SELECT (SELECT count(*) FROM workflow_run_purge_audit) AS deleted, (SELECT count(*) FROM workflow_run_purge_permits) AS open_permits;
 -- On a database with at least one workflow run: a plain DELETE is still refused with 0015's error, and nothing changes.
 BEGIN;
 DELETE FROM workflow_run_events WHERE event_id = (SELECT min(event_id) FROM workflow_run_events);
 ROLLBACK;
 ```
 
+```sql
+-- Runtime-role verification of 0033 (psql -v runtime_role=<the role the API, worker and web tier connect with>; any connection may run it)
+SELECT has_function_privilege(:'runtime_role', 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS runtime_execute,
+  has_table_privilege(:'runtime_role', 'workflow_run_purge_audit', 'SELECT') AS runtime_reads_tombstones,
+  has_table_privilege(:'runtime_role', 'workflow_run_purge_audit', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS runtime_writes_tombstones,
+  has_table_privilege(:'runtime_role', 'workflow_run_purge_permits', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS runtime_touches_permits,
+  has_function_privilege('public', 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS public_execute;
+```
+
 Expected: the ledger ends with `33 | workflow_run_purge | 26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2`; `md5(...)` is
 `e0fddfad32606d18b69a69b2202a0c29` before 0033 (0015's function) and `91282e520832e7cb272f132bafa61251` after, on disposable PostgreSQL 16.15
 (`pg_get_functiondef` is regenerated by the server, so record the rehearsal's own two values on the Neon version and compare production against
-those); both tables exist; `deleted = 0`, `open_permits = 0`, `public_execute = false` right after activation; the probe fails with
-`WORKFLOW_RUN_RECORD_APPEND_ONLY` (SQLSTATE 23000) and the `ROLLBACK` leaves everything as it was. Any other difference stops the activation.
+those); both tables exist; `deleted = 0`, `open_permits = 0` right after activation; the probe fails with `WORKFLOW_RUN_RECORD_APPEND_ONLY`
+(SQLSTATE 23000) and the `ROLLBACK` leaves everything as it was. With the runtime role provisioned: `runtime_execute = true`,
+`runtime_reads_tombstones = true`, `runtime_writes_tombstones = false`, `runtime_touches_permits = false`, `public_execute = false` (where one role
+owns the objects and also serves the runtime, the two write columns are true by ownership and the file does not apply). Any other difference
+stops the activation.
 
 ## Rollback
 
