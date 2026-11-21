@@ -1,0 +1,115 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* UX-01 · UX-02 · UX-03 · UX-05 (owner guidelines of 21-11-2026, approved references C–G). Presentation only: existing design tokens, no new
+   colours. Loaded last in the product layout so it refines the earlier Editor layers without editing them. */
+
+/* ── UX-02: one Editor header row on every stage ─────────────────────────────────────────────────────────────────────────────────────────────
+   Identity (name · networks · steps · state) on the left, the stage indicator centred in the frame, the stage's controls on the right. The
+   indicator's column is centred by the grid itself (1fr · auto · 1fr), so its place never depends on what the identity or the controls hold, and
+   every stage shares the same padding and row height. */
+.workflow-workspace .canvas>.canvas-head.editor-head,
+.workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid)>.canvas>.canvas-head.editor-frame-head.editor-head,
+.build-workspace .build-canvas-head.editor-head{padding:8px 12px 8px 20px;border-bottom:1px solid var(--line);background:var(--app-bg)}
+.editor-stage-head.editor-head{padding:8px 12px 8px 20px}
+.canvas-head-main.editor-head-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:6px 16px;width:100%;min-height:40px;margin:0}
+.editor-head-row>.editor-head-identity{position:relative;display:flex;align-items:center;gap:8px 12px;min-width:0;overflow:hidden;justify-self:stretch;
+  /* Room inside the clipped box for the rename control's focus ring and hover background (WCAG 2.4.7); the negative margins keep the layout. */
+  padding:4px 4px 4px 12px;margin:-4px -4px -4px -12px}
+.editor-head-row>.editor-head-identity>.canvas-head-meta{display:flex;align-items:center;flex-wrap:nowrap;gap:8px 12px;flex:0 1 auto;min-width:0;overflow:hidden}
+.editor-head-row .canvas-name{display:flex;align-items:center;gap:2px;flex:0 0 auto;min-width:0;max-width:100%;margin-left:-8px}
+.editor-head-row .canvas-name h2{display:flex;min-width:0;max-width:none;margin:0;overflow:visible;overflow-wrap:normal;white-space:nowrap;font-size:18px;font-weight:600;line-height:inherit}
+.editor-head-row .canvas-name .workflow-name-text{flex:0 0 auto}
+.editor-head-row .canvas-name .workflow-rename{display:inline-flex;align-items:center;gap:6px;width:auto;max-width:100%;height:36px;min-width:0;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:18px;font-weight:600;letter-spacing:-.01em;cursor:text}
+.editor-head-row .canvas-name .workflow-rename:hover{background:var(--surface-raised)}
+.editor-head-row .canvas-name .workflow-rename:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.editor-head-row .canvas-name .workflow-rename svg{flex:none;color:var(--muted)}
+.editor-head-row .canvas-name input{width:240px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface-raised);color:var(--ink);font-size:18px;font-weight:600}
+.editor-head-row .workflow-name-text{min-width:0;max-width:min(18vw,240px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.editor-head-row>.editor-head-identity>h2{min-width:0;margin:0;overflow:hidden;font-size:18px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.editor-head-row .revision{flex:none;margin:0;padding:0;border:0;background:none;color:var(--muted);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap}
+.editor-head-row .editor-network-chips{flex:none;flex-wrap:nowrap}
+.editor-head-row .editor-network-chips li{height:28px;padding:0 11px 0 4px;border-color:var(--line);background:var(--surface);color:var(--ink);font-size:13px}
+/* A long state shortens with an ellipsis (its full words stay in the element and its title) rather than pushing the indicator off centre. */
+.editor-head-row .editor-state-pill{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.editor-head-row>.canvas-head-stages{justify-self:center;margin:0;padding:0;border:0;min-width:0}
+.editor-head-row>.canvas-head-actions{justify-self:end;margin:0;min-width:0}
+.editor-head-row>.editor-head-end{min-height:40px}
+/* The workflow's state keeps its coloured dot and its words for assistive technology (and its detail as a tooltip) when the header is too
+   narrow for the words beside a centred indicator. "Needs attention" always keeps its words on screen (the footer also names the step). */
+@media(max-width:1899px){
+  .editor-head-row .editor-state-pill:not([data-editor-state="attention"]) .editor-state-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+}
+/* A medium frame (a 1280–1740 px desktop): the identity column takes more of the free space than the controls column, with the same proportions
+   on every stage — the indicator sits at the same place on Create, Simulate and Execute. */
+@media(min-width:861px) and (max-width:1739px){
+  .canvas-head-main.editor-head-row{grid-template-columns:minmax(0,1.35fr) auto minmax(0,.65fr)}
+}
+/* A narrow frame: the indicator takes its own centred row under the identity (the same on every stage). */
+@media(max-width:860px){
+  .canvas-head-main.editor-head-row{grid-template-columns:minmax(0,1fr) auto}
+  .editor-head-row>.canvas-head-stages{grid-column:1/-1;grid-row:2;justify-self:stretch;display:flex;justify-content:center;padding-top:6px;border-top:1px solid var(--line)}
+  .editor-head-row>.editor-head-end{min-height:0}
+  .editor-head-row .workflow-name-text{max-width:min(46vw,240px)}
+}
+@media(max-width:1100px){.editor-head-row>.canvas-head-stages{order:0;flex-basis:auto}}
+
+/* UX-02: on a wide screen the Simulate and Execute frame takes the same place as the Create frame (same top, same left and right edges, the
+   FloFi Assistant the same width), so moving between stages moves neither the frame nor its header. */
+@media(min-width:1281px){
+  .app-shell .stage-with-chat{max-width:1720px;margin-inline:auto;grid-template-columns:minmax(0,1fr) 400px}
+  .app-shell .stage-with-chat>.main.workflow-workspace{padding:14px 16px 28px 20px}
+  .app-shell .stage-with-chat>.copilot{margin:14px 20px 28px 0}
+}
+
+/* ── UX-01 / UX-03: the shared step card ──────────────────────────────────────────────────────────────────────────────────────────────────── */
+.step-summary-card ol{border:1px solid var(--line);border-radius:14px;padding:2px 14px;background:var(--surface)}
+.step-summary-card li{align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.step-summary-card li:last-child{border-bottom:0}
+.operation-summary.step-summary-card[data-variant="numbered"] ol{padding:2px 14px;border-bottom:1px solid var(--line)}
+.operation-summary.step-summary-card[data-variant="numbered"] li{align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.operation-summary.step-summary-card[data-variant="numbered"] li:last-child{border-bottom:0}
+.operation-summary.step-summary-card[data-variant="numbered"] li::before{display:none}
+.step-summary-title{display:inline-flex;align-items:center;gap:6px;font-size:14.5px;font-weight:600}
+.step-summary-title-icon{display:inline-grid;place-items:center;width:18px;height:18px;color:var(--accent)}
+.step-summary-title-icon svg{width:16px;height:16px}
+.step-summary-card .step-summary-amount{color:var(--ink);font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.step-summary-card .operation-summary-chip{align-self:center}
+.step-recipient{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px}
+.step-recipient-toggle{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;border:0;border-radius:6px;background:transparent;color:var(--accent);cursor:pointer}
+.step-recipient-toggle:hover{background:var(--blue-soft)}
+.step-recipient-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.step-recipient-toggle code{color:inherit;text-decoration:underline dotted;text-underline-offset:3px}
+.step-recipient-full{flex-basis:100%;font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;overflow-wrap:anywhere}
+/* UX-03: the Execute Review's recipient in full (visible text, wraps in the card, copy control beside it). */
+.step-recipient-visible{display:block;margin-top:2px;color:var(--muted);font-size:12.5px}
+.step-recipient-visible .execution-receipt-copy>span[title]{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+/* A secondary way to Execute beside the panel's own action (one primary per moment). */
+.simulation-panel-action[data-secondary] button.primary{background:var(--surface);color:var(--accent);border:1px solid var(--line)}
+.simulation-panel-action[data-secondary] button.primary:hover:not(:disabled){background:var(--blue-soft);filter:none}
+
+/* ── UX-03: the Review's decision rows — label left, value right, its qualifier under the value, aligned on one baseline ─────────────────── */
+.review-panel-rows.review-decision-rows>div{align-items:flex-start}
+.review-decision-rows dt{flex:1 1 auto;min-width:0;line-height:1.35}
+.review-fee-note{display:inline-flex;align-items:center;gap:2px}
+.review-fee-note .info-hint-button{width:20px;height:20px}
+.review-decision-rows dd .info-hint-text{left:auto;right:0}
+.review-decision-rows dd{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:0 1 auto;min-width:0}
+/* A value and its qualifier never break inside (a fee or a limit read as one figure); the label wraps instead. */
+.review-decision-rows dd :is(.review-fee-value,.numeric){white-space:nowrap}
+.review-decision-rows dd .review-fee-note{white-space:normal;justify-content:flex-end;text-align:right;flex-wrap:wrap}
+.review-decision-rows dd .review-block-permission{white-space:normal;text-align:right}
+.review-decision-rows dd .review-block-qualifier{font-size:12.5px}
+.review-decision-rows dd .review-block-permission{display:block}
+.canvas-review-dock .review-decision-rows{display:flex;flex-direction:column}
+.canvas-review-dock .review-decision-rows>div{border-top:0;border-bottom:1px solid var(--line)}
+.canvas-review-dock .review-decision-rows>div:last-child{border-bottom:0}
+.review-ready-status{display:inline-flex;align-self:flex-start;padding:4px 12px 4px 10px;border-radius:999px;background:var(--success-surface,var(--surface-raised));color:var(--ink);font-weight:500}
+.info-hint{position:relative;display:inline-flex;align-items:center}
+.info-hint-button{display:inline-grid;place-items:center;width:24px;height:24px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer}
+.info-hint-button:hover,.info-hint[data-open] .info-hint-button{background:var(--surface-raised);color:var(--ink)}
+.info-hint-button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.info-hint-text{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:max-content;max-width:240px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:12.5px;line-height:1.4;white-space:normal;box-shadow:0 8px 20px rgba(20,35,58,.12)}
+@media(pointer:coarse){.info-hint-button,.step-recipient-toggle{min-width:44px;min-height:44px}}
+@media(max-width:600px){
+  .info-hint-text{max-width:min(240px,70vw)}
+  .review-decision-rows dd :is(.review-fee-value,.numeric,.review-block-qualifier){white-space:normal;overflow-wrap:anywhere}
+}

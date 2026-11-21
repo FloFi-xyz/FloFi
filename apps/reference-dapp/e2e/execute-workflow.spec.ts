@@ -9,12 +9,12 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
   await sendChatCommand(page, 'swap 2.25 USDC to WETH on Base slippage 50 bps');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-  await expect(page.locator('.simulate-canvas').getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
+  await expect(page.locator('.simulate-canvas').getByRole('heading', { name: /ESPARTACUS$/ })).toBeVisible();
   await openEditorSection(page, 'Execute');
   const execution = page.getByRole('main', { name: 'Execution workspace', exact: true });
   const graph = execution.getByRole('region', { name: 'Execution workflow graph', exact: true });
   await expect(execution.locator(':scope > :first-child')).toHaveAttribute('aria-label', 'Workflow execution workspace');
-  await expect(execution.getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
+  await expect(execution.getByRole('heading', { name: /ESPARTACUS$/ })).toBeVisible();
   await expect(execution.locator('.stage-empty, .unavailable')).toHaveCount(0);
   await expect(graph.locator('.composer-card')).toHaveCount(1);
   await expect(graph.locator('.composer-card')).toContainText('USDC');

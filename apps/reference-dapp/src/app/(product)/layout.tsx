@@ -33,6 +33,8 @@ import '../editor-workspace.css';
 // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the approved Criar / Simular / Executar refinement and the simplified execution receipt (last).
 import '../ux-refinement.css';
 import '../editor-fidelity.css';
+// UX-01/02/03/05 (owner guidelines of 21-11-2026): loaded last so it refines the earlier Editor layers.
+import '../ux-guidelines.css';
 
 /**
  * One persistent workspace for /app, its deep links, /approve and /connections.

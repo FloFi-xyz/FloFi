@@ -2941,6 +2941,7 @@
         "apps/reference-dapp/src/app/terms/page.tsx",
         "apps/reference-dapp/src/app/editor-workspace.css",
         "apps/reference-dapp/src/app/ux-refinement.css",
+        "apps/reference-dapp/src/app/ux-guidelines.css",
         "apps/reference-dapp/src/app/editor-fidelity.css"
       ],
       "suites": [
@@ -4709,6 +4710,7 @@
         "apps/reference-dapp/src/domain/chat-message.ts",
         "apps/reference-dapp/src/domain/token-fee.ts",
         "apps/reference-dapp/src/domain/token-amount-display.ts",
+        "apps/reference-dapp/src/domain/adaptive-amount-display.ts",
         "apps/reference-dapp/src/domain/chat-action-variant.ts",
         "apps/reference-dapp/src/domain/conversation-persistence.ts",
         "apps/reference-dapp/src/domain/amount-shortcuts.ts",
@@ -5407,6 +5409,7 @@
         "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts",
         "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts",
         "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts",
+        "apps/reference-dapp/src/i18n/pt-ux-guidelines.ts",
         "apps/reference-dapp/src/i18n/pt-ux-refinement.ts",
         "apps/reference-dapp/src/i18n/pt-editor-fidelity.ts",
         "apps/reference-dapp/src/i18n/pt-global-precision.ts"

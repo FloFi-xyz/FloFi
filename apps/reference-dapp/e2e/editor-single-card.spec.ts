@@ -4,7 +4,7 @@
  * EIP-1193 requests the real Editor actually makes are counted by the wallet double (e2e/batch-wallet-fixtures.ts), never a button label.
  *
  *   one Uniswap V3 card (swap 0.0006 WETH → USDC on Base) → "Simulate workflow" (the read-only whole-workflow Review: `wallet_getCapabilities`,
- *   no prompt) → "Review operation" → "Authorize workflow" (one click; a wallet sign-in session already exists) → exactly ONE `wallet_sendCalls`
+ *   no prompt) → "Continue to authorization" → "Authorize workflow" (one click; a wallet sign-in session already exists) → exactly ONE `wallet_sendCalls`
  *   (atomic; the exact ERC-20 approval folded in only when the allowance is short, then the swap) → the page reads the batch's status and the
  *   run reconciles by itself to COMPLETED (no "Continue", no manual check) → reload: followed, never sent again.
  *   A declined batch executes nothing and is never retried automatically; a wallet without atomic batching on Base keeps the card's own flow.
@@ -44,7 +44,8 @@ const WETH = BASE_MAINNET_SWAP.weth.toLowerCase(), ROUTER = BASE_MAINNET_SWAP.ro
 const AMOUNT_IN = 600_000_000_000_000n;
 const APPROVE = '0x095ea7b3', MULTICALL = '0x5ae401dc', EXACT_INPUT_SINGLE = '0x04e45aaf';
 /** Words of the card's own flows that must never appear on the one-confirmation path (a second step or a manual status check). */
-const MANUAL = /^(Continue to swap|Continue\b.*|Check confirmation|Check status)$/;
+// UX-05: "Continue to authorization" is the Simulate panel's navigation to Execute (no step, no wallet request), not a card flow's own step.
+const MANUAL = /^(Continue to swap|Continue(?! to authorization\b)\b.*|Check confirmation|Check status)$/;
 
 test.afterAll(disposeChainControl);
 async function query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -123,15 +124,16 @@ async function begin(page: Page, options: BatchWalletOptions & { readonly allowa
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
   return { wallet, owner, log, manual };
 }
-/** Simulate → Review operation: the read-only whole-workflow Review of the one card, ready to authorize in Execute. Nothing prompts. */
+/** Simulate → Continue to authorization: the read-only whole-workflow Review of the one card, ready to authorize in Execute. Nothing prompts. */
 async function simulateAndReview(page: Page, log: WalletRecorder) {
   await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-panel-action').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expect(page.locator('.simulation-context-panel')).toHaveAttribute('data-review-state', 'ready', { timeout: 60_000 });
-  await footerAction(page).getByRole('button', { name: 'Review operation', exact: true }).click();
-  await expect(panel(page).getByRole('heading', { name: 'Review before authorizing', exact: true })).toBeVisible({ timeout: 60_000 });
-  await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText('Swap 0.0006 WETH → USDC · Base', { timeout: 60_000 });
-  await expect(panel(page).locator('.review-block-rows')).toContainText('Wallet requests1');
+  // UX-05: the Simulate panel's "Continue to authorization" (navigation to Execute only; the footer states the status).
+  await page.locator('.simulation-panel-action').getByRole('button', { name: 'Continue to authorization', exact: true }).click();
+  await expect(panel(page).getByRole('heading', { name: 'Check your operation', exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText(/Swap\s*0\.0006 WETH → (≈ )?[\d.,]+ USDC/, { timeout: 60_000 });
+  await expect(panel(page).locator('.review-block-rows')).toContainText('Expected wallet confirmations1');
   await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
   expect(log.methods).toContain('wallet_getCapabilities');
   expect(log.asking()).toEqual([]);
@@ -292,12 +294,12 @@ test('a wallet without atomic batching on Base: no wallet_sendCalls; the card ke
   await expect(page.locator('footer.summary-bar')).toContainText('Nothing was sent');
   await page.waitForTimeout(5_000);
   console.log(`[single-card] no atomic batching: wallet requests ${JSON.stringify(log.counts())}`);
-  await expect(page.getByText('Review before authorizing', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/^(Review before authorizing|Check your operation)$/)).toHaveCount(0);
   await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
   // Execute after the fallback shows only the card's own flow: never the whole-workflow Review, its mechanism sentence or a second primary action
   // ("Review whole workflow" / "Review again") beside the card's own (final frontend-ux review).
   await openEditorSection(page, 'Execute');
-  await expect(page.getByText('Review before authorizing', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/^(Review before authorizing|Check your operation)$/)).toHaveCount(0);
   await expect(page.locator('.editor-run-mechanism')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^(Review whole workflow|Review again|Refresh review)$/ })).toHaveCount(0);
   expect(log.count('wallet_sendCalls')).toBe(0);

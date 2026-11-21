@@ -29,14 +29,14 @@ test.setTimeout(240_000);
 const BASE = '0x2105', BASE_HARNESS = 'http://127.0.0.1:8562', CHAIN_HARNESS = 'https://127.0.0.1:8567';
 const PT = process.env.FLOFI_UX_EVIDENCE_LANG === 'PT';
 /** The few visible words this proof reads, in the interface language it runs in. */
-const W = PT ? { simulate: 'Simular fluxo', review: 'Revisar operação', authorizing: 'Revise antes de autorizar', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
+const W = PT ? { simulate: 'Simular fluxo', review: 'Continuar para autorização', authorizing: 'Confira sua operação', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
   expired: 'Sua revisão expirou', refreshFee: 'Precisa ser atualizada', refreshPermission: 'Depende da revisão atualizada', reviewExpired: 'Revisão expirada',
   refresh: 'Atualizar revisão', executeClosed: /Simule o fluxo primeiro/, simulateClosed: /Adicione uma ação ao seu fluxo primeiro/, operate: 'Operar', areas: 'Áreas do produto',
-  assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar 3 USDC → WETH · Base/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
-  : { simulate: 'Simulate workflow', review: 'Review operation', authorizing: 'Review before authorizing', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
+  assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar\s*3 USDC → (≈ )?[\d.,]+ WETH/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
+  : { simulate: 'Simulate workflow', review: 'Continue to authorization', authorizing: 'Check your operation', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
   expired: 'Your review expired', refreshFee: 'Needs to be refreshed', refreshPermission: 'Depends on the updated review', reviewExpired: 'Review expired',
   refresh: 'Refresh review', executeClosed: /Simulate the workflow first/, simulateClosed: /Add an action to your workflow first/, operate: 'Operate', areas: 'Product areas',
-  assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap 3 USDC → WETH · Base/, card: ['Swap', 'Supply', 'Borrow'] };
+  assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap\s*3 USDC → (≈ )?[\d.,]+ WETH/, card: ['Swap', 'Supply', 'Borrow'] };
 
 let api: APIRequestContext | null = null;
 test.afterAll(async () => { await api?.dispose(); api = null; });
@@ -140,7 +140,7 @@ test('evidence: Create → Simulate → Execute (valid, expired) on the referenc
   const reviewSeenAt = Date.now();
   await snap(page, 'simulate-result');
   await snapDetails(page, 'simulate-result-details');
-  await footer(page).getByRole('button', { name: W.review, exact: true }).click();
+  await page.locator('.simulation-context-panel').getByRole('button', { name: W.review, exact: true }).click();
   await expectEditorSection(page, 'Execute');
   await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeEnabled({ timeout: 60_000 });
   await snap(page, 'execute-valid');

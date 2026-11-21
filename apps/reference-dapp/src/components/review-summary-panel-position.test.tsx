@@ -78,8 +78,11 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(shown['Position NFT']).toBe('Stays in your wallet');
     // The one figure the owner authorizes, shown rounded UP (never below the authorized wei); the minimum rounded DOWN (never above the floor).
     const fee = record.review.fees.totalUpperBoundWei!;
-    expect(shown['Network fee, at most']).toBe(displayTokenAmount({ units: fee, decimals: 18 }, { rounding: 'up', symbol: 'ETH' })!.text);
-    expect(BigInt(Math.round(Number(shown['Network fee, at most']!.split(' ')[0]) * 1e18))).toBeGreaterThanOrEqual(BigInt(fee));
+    // UX-03: "Max network fee" with "Paid by your wallet" beside the value (the value itself is unchanged).
+    const feeShown = shown['Max network fee']!.replace(/ Paid by your wallet$/, '');
+    expect(shown['Max network fee']).toMatch(/ Paid by your wallet$/);
+    expect(feeShown).toBe(displayTokenAmount({ units: fee, decimals: 18 }, { rounding: 'up', symbol: 'ETH' })!.text);
+    expect(BigInt(Math.round(Number(feeShown.split(' ')[0]) * 1e18))).toBeGreaterThanOrEqual(BigInt(fee));
     const [min0, min1] = shown['Minimum you receive']!.split(' + ').map(part => Number(part.split(' ')[0]!.replace(/,/g, '')));
     expect(min0).toBeLessThanOrEqual(Number(record.review.minimums.amount0Min) / 10 ** record.review.token0.decimals);
     expect(min1).toBeLessThanOrEqual(Number(record.review.minimums.amount1Min) / 10 ** record.review.token1.decimals);
@@ -87,17 +90,18 @@ describe('Uniswap v3 position operations in the Editor', () => {
     // Explanations of how the figures are built are Technical details, not amber banners.
     expect(text(html)).not.toMatch(/Owed tokens and fees can include|returned to your wallet as the pool|reverts on chain if the principal/);
     // Simulate is not the authorization: no permission rows, no Review heading, no authorize control, no wallet-request row.
-    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission|Wallet requests|Pool \/ Liquidity/);
+    expect(html).not.toMatch(/Review before authorizing|Check your operation|You are authorizing|Token permission|Wallet requests|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
     expect(text(html)).not.toMatch(NO_YIELD);
   });
 
-  it('Execute C1: "Review before authorizing" the position Review lines — no token permission, one wallet request — and no authorize control in the panel', async () => {
+  it('Execute C1: "Check your operation" (UX-03) the position Review lines — no token permission, one wallet request — and no authorize control in the panel', async () => {
     const { bound, observedAt, record } = await uniswap('EXIT', null, true);
     const html = render(bound, 'execute', 'EN', observedAt);
     expect(html).toContain('data-review-state="ready"');
-    expect(text(html)).toContain('Review before authorizing');
-    expect(text(html)).toMatch(/Review valid until/);
+    // UX-03 (intentional change): the status first, then "Check your operation".
+    expect(text(html)).toContain('Check your operation');
+    expect(text(html)).toMatch(/Review ready · valid until/);
     const shown = rows(html);
     expect(shown.Operation).toBe('Remove all liquidity, collect and close the position (burns the NFT)');
     expect(shown.Pool).toMatch(/^Uniswap V3 · Base · /);
@@ -143,7 +147,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(shown['Token permission']).toBe('None — this operation needs no token permission');
     expect(shown['Wallet requests']).toBe('1');
     // Nothing of the expired Review is presented as current.
-    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Expected principal returned|Minimum principal|Network fee, at most|Pool \/ Liquidity/);
+    expect(html).not.toMatch(/Review before authorizing|Check your operation|You are authorizing|Expected principal returned|Minimum principal|Network fee, at most|Max network fee|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
   });
 
@@ -162,7 +166,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(authorizing['Destinatário']).toMatch(/^Sua carteira · 0x[0-9a-f]{4}…[0-9a-f]{4}$/);
     expect(authorizing.Desvio).toBe('1%');
     expect(Object.values(authorizing).join(' ')).not.toMatch(/\bof\b|\bper\b|\(unchanged\)|\band\b.*\bto\b/);
-    expect(valid).toContain('Revise antes de autorizar');
+    expect(valid).toContain('Confira sua operação');
     expect(valid).toContain('Nenhuma — esta operação não precisa de permissão de token');
     expect(valid).toContain('Pedidos à carteira');
     const expired = text(render(bound, 'execute', 'PT', expiresAt + 1_000));
@@ -204,13 +208,13 @@ describe('Orca position operations in the Editor', () => {
     expect(shown['Position NFT']).toBe('Stays in your wallet');
     for (const label of [...TECHNICAL_ROWS, 'Fees collected, at least']) expect(shown[label], label).toBeUndefined();
     expect(shown['Estimated network fee']).toBe('0.000005 SOL');
-    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission|Pool \/ Liquidity/);
+    expect(html).not.toMatch(/Review before authorizing|Check your operation|You are authorizing|Token permission|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
   });
   it('Execute C1 of an exit: the position closes and its rent is refunded, no token permission, one wallet request', async () => {
     const { bound, mint } = await orca('EXIT');
     const html = render(bound, 'execute', 'EN', ORCA_CLOCK);
-    expect(text(html)).toContain('Review before authorizing');
+    expect(text(html)).toContain('Check your operation');
     const shown = rows(html);
     expect(shown.Operation).toBe('Remove all liquidity, collect fees and close the position; the position NFT is closed and its account rent is refunded');
     expect(shown.Pool).toMatch(/^Orca Whirlpools · Solana · /);

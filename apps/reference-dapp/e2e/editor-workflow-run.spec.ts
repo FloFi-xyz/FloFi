@@ -64,7 +64,7 @@ async function simulate(page: Page) {
   const action = page.locator('.canvas-primary-action [data-lifecycle-action="simulate"]');
   await expect(action).toBeEnabled({ timeout: 30_000 });
   await action.click();
-  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): a valid simulation offers "Review operation" (to Execute); nothing is accepted from Simulate.
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): a valid simulation offers "Continue to authorization" (UX-05) (to Execute); nothing is accepted from Simulate.
   await expectSimulationValid(page, { timeout: 45_000 });
 }
 

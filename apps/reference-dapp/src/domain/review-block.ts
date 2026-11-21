@@ -29,7 +29,35 @@ export type ReviewBlockView = {
   readonly setup: ReviewBlockText | null;
   /** ADR-0010: a request whose fee is paid in USDC through Circle asks the wallet twice (the permit, then the operation); null otherwise. */
   readonly signatures?: ReviewBlockText | null;
+  /**
+   * UX-03 (owner guidelines of 21-11-2026): the token approvals of `permissions` as structured rows — "Access to USDC", up to its exact limit,
+   * and who may spend it — for a Review that words them per token. The same approvals, limits and spenders as `permissions` (never fewer); every
+   * other permission line (an unworded approval, a Circle permit, later steps) stays in `permissions` and is shown beside them.
+   */
+  readonly access?: readonly ReviewAccessLine[];
+  /** The `permissions` lines that are not one of `access` (shown as they are); empty when `access` words every permission. */
+  readonly otherPermissions?: readonly ReviewBlockText[];
 };
+/** One token approval: the token, its limit (rounded UP: a limit is never understated; `full` is exact) and the spender's name. */
+export type ReviewAccessLine = { readonly symbol: string; readonly limit: string; readonly full: string | null; readonly spender: string; readonly step: number };
+
+/**
+ * UX-01 / UX-03: one step of the whole-workflow Review as structured, presentation-only parts — the action, what it spends (rounded UP), what it is
+ * expected to deliver (`receive`: a swap's quoted output, a borrow's or withdrawal's exact delivery), the network and a transfer's recipient. Every
+ * value is the Review's own (`ReviewStep`); nothing is quoted, estimated or recomputed here.
+ */
+export type ReviewStepItem = { readonly index: number; readonly action: string; readonly spend: ReviewAmount | null; readonly receive: ReviewAmount | null;
+  /** `expected`: an estimate (shown with "≈"); `exact`: the step's own exact delivery. */
+  readonly receiveKind: 'expected' | 'exact' | null;
+  readonly network: string; readonly destination: string | null; readonly recipient: string | null; readonly provider: string | null };
+export function reviewStepItems(review: EditorExecutionReview): ReviewStepItem[] {
+  return review.steps.map(step => {
+    const delivers = step.action === 'borrow' || step.action === 'withdraw' || step.action === 'bridge';
+    const receive = step.action === 'transfer' || step.action === 'supply' || step.action === 'repay' ? null : step.expected ?? null;
+    return { index: step.index, action: step.action, spend: step.spend, receive, receiveKind: receive ? delivers ? 'exact' : 'expected' : null,
+      network: step.network, destination: step.destination ?? null, recipient: step.recipient, provider: step.provider };
+  });
+}
 
 /**
  * A decimal amount with at most 6 significant digits. `down` (a minimum, what the owner receives) never overstates; `up` (what the owner spends
@@ -101,10 +129,12 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   // Token permissions: each step whose prepared calls include an approval lets its protocol spend exactly the step's amount.
   const prepared = review.groups.filter(g => g.calls);
   const approving = [...new Set(prepared.flatMap(g => g.calls!.filter(c => c.kind === 'ERC20_APPROVE').map(c => c.step)))].sort((a, b) => a - b);
+  const access: ReviewAccessLine[] = [];
   const permissions = approving.flatMap(index => {
     const step = review.steps.find(s => s.index === index);
     if (!step?.spend) return [];
     const spender = step.provider?.replace(/ V\d+$/, '') ?? SPENDER.get(step.action) ?? step.action;
+    access.push({ symbol: step.spend.symbol, limit: amount(step.spend, 'up'), full: fullOf([step.spend], 'up'), spender, step: index });
     return [text('{0} uses up to {1}', [spender, amount(step.spend, 'up')], fullOf([step.spend], 'up'))];
   });
   const laterGroups = prepared.length < review.groups.length;
@@ -117,8 +147,9 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   const permissionLines = permissions.length || unworded.length || circlePermits.length
     ? [...permissions, ...unworded, ...circlePermits, ...laterGroups ? [text('Later steps ask when they are due')] : []]
     : [text(laterGroups ? 'Asked when each step is due' : 'No new token permission')];
+  const otherPermissions = permissionLines.filter(line => !permissions.includes(line));
   const counts = review.counts;
-  return { steps: review.steps.map(stepLine), minimum, fee, permissions: permissionLines,
+  return { steps: review.steps.map(stepLine), minimum, fee, permissions: permissionLines, access, otherPermissions,
     // The one-time smart-account upgrade happens inside a confirmation: it is an account change the owner approves, so it is said here.
     setup: counts.oneTimeSetup.includes('EVM_SMART_ACCOUNT_UPGRADE') ? text('includes a one-time smart-account upgrade of this account') : null,
     signatures: circle.length ? text('Two signatures: a USDC permit for the fee, then the operation') : null,

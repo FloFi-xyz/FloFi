@@ -25,7 +25,7 @@ import type { Page } from '@playwright/test';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { chooseLanguage } from './app-origin';
 import { expectEditorSection, navigateTo, openEditorSection } from './build-entry-navigation';
-import { assertNoFinancialCanvasAction, chooseWallet, expect, openSimulationDetails, test } from './fixtures';
+import { assertNoFinancialCanvasAction, chooseWallet, expect, openSimulationDetails, test, continueToAuthorization } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signMessageRequests, signRequests } from './jupiter-fixtures';
 import { ORCA_RUN_KEY, orcaBalances, orcaOwnerRuntime, orcaPosition, orcaSent, orcaTrade, ownerManagesOrca, resetOrcaPositions, type OrcaOwnerWallet,
   type SeededOrcaPosition } from './orca-position-fixtures';
@@ -56,7 +56,7 @@ const WORDS = {
     collect: 'Collect fees', remove: 'Remove liquidity', close: 'Close position', share: 'Share of liquidity to remove', shareLabel: 'Share to remove',
     prepare: 'Prepare removal', mocked: 'Test data (MOCKED)', range: 'Range', price: 'Current price', liquidity: 'Liquidity', principal: 'Principal',
     owed: 'Owed tokens and fees (recorded)', collectable: 'Collectable now', verified: 'Last verified', unavailable: 'Unavailable', inRange: 'In range',
-    open: 'Open (has liquidity)', refresh: 'Refresh', simulate: 'Simulate workflow', review: 'Review operation', authorize: 'Authorize workflow', completed: 'Execution completed',
+    open: 'Open (has liquidity)', refresh: 'Refresh', simulate: 'Simulate workflow', review: 'Continue to authorization', authorize: 'Authorize workflow', completed: 'Execution completed',
     reconciled: 'Reconciled', areas: 'Product areas', operate: 'Operate', unit: 'USDC per SOL', local: 'Local execution · no public-chain transactions',
     delegated: 'This position token is delegated, so FloFi does not manage it.',
     note: 'These actions prepare the workflow only. You review it and confirm in your wallet; nothing is executed here. Closing an Orca position refunds its account rent.' },
@@ -64,7 +64,7 @@ const WORDS = {
     collect: 'Coletar taxas', remove: 'Remover liquidez', close: 'Fechar posição', share: 'Parte da liquidez a remover', shareLabel: 'Parte a remover',
     prepare: 'Preparar remoção', mocked: 'Dados de teste (MOCKED)', range: 'Intervalo', price: 'Preço atual', liquidity: 'Liquidez', principal: 'Capital',
     owed: 'Tokens devidos e taxas (registrados)', collectable: 'Coletável agora', verified: 'Última verificação', unavailable: 'Indisponível', inRange: 'Dentro da faixa',
-    open: 'Aberta (com liquidez)', refresh: 'Atualizar', simulate: 'Simular fluxo', review: 'Revisar operação', authorize: 'Autorizar fluxo', completed: 'Execução concluída',
+    open: 'Aberta (com liquidez)', refresh: 'Atualizar', simulate: 'Simular fluxo', review: 'Continuar para autorização', authorize: 'Autorizar fluxo', completed: 'Execução concluída',
     reconciled: /Reconciliad[ao]/, areas: 'Áreas do produto', operate: 'Operar', unit: 'USDC per SOL', local: 'Execução local · sem transações numa rede pública',
     delegated: 'Este token de posição está delegado, então a FloFi não o gerencia.',
     note: 'Estas ações apenas preparam o fluxo. Você o revisa e confirma na sua carteira; nada é executado aqui. Fechar uma posição Orca devolve o aluguel (rent) da conta.' },
@@ -162,7 +162,7 @@ async function simulate(page: Page, operation: Operation, subject: string, langu
   await expectEditorSection(page, 'Simulate', { timeout: 30_000 });
   // The run pointer still names the previous run until the new simulation answers.
   await expect.poll(async () => { const id = await orcaRun(page); return id !== previous && /^orcalp-[a-f0-9]{32}$/.test(id ?? ''); }, { timeout: 60_000 }).toBe(true);
-  await expect(footer(page).getByRole('button', { name: new RegExp(`^${W.review}`) })).toBeEnabled({ timeout: 30_000 });
+  await expect(continueToAuthorization(page)).toBeEnabled({ timeout: 30_000 });
   await expectOperationPresented(page, '.simulation-context-panel', operation, subject);
   await expect(page.locator('.simulation-result-rows')).toHaveCount(0);
   expect(await orcaSent()).toBe(sent);
@@ -174,7 +174,7 @@ async function simulate(page: Page, operation: Operation, subject: string, langu
  */
 async function mockedBoundary(page: Page, operation: Operation, subject: string, language: Language = 'EN') {
   const W = WORDS[language], sent = await orcaSent();
-  await footer(page).getByRole('button', { name: new RegExp(`^${W.review}`) }).click();
+  await continueToAuthorization(page).click();
   await expectEditorSection(page, 'Execute');
   await expectOperationPresented(page, '.review-panel-execute', operation, subject);
   await expect(page.locator('section.review-panel-execute')).toHaveAttribute('data-review-state', 'pending');
