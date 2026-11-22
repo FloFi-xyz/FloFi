@@ -4,10 +4,14 @@
  * (request → claim → apply → continue), run store and runner. Each step is the ordinary single-step proposal FloFi's signing surface loads; the
  * owner's flow runs are recorded by the isolated flow-runtime test double (as FloFi's flows would after the owner's wallet signature). MOCKED.
  */
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { semanticWorkflowHash } from '../engine/strategy-engine';
-import { approvalProgress, applyApproval, claimApproval, workflowRunCancel, workflowRunContinue, workflowRunResume, workflowRunStatus } from '../platform/index.ts';
+import { createPgDeveloperStore } from '../developer/pg-store.ts';
+import { composeWorkflowBound, semanticWorkflowHash } from '../engine/strategy-engine';
+import { ENGINE_VERSION, workflowPlan } from '../mcp/execution.ts';
+import { approvalLinkScheme, approvalProgress, applyApproval, assembleApprovalSurface, claimApproval, requestApproval, typedId,
+  workflowRunCancel, workflowRunContinue, workflowRunResume, workflowRunStatus } from '../platform/index.ts';
 import { advanceRun } from './runner.ts';
 import { workflowRunHarness, type RunHarness } from './workflow-run.test-harness.ts';
 
@@ -176,6 +180,63 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
       await h.drain(run.runId);
       expect(await runOf(h, approval.approvalId)).toMatchObject({ state: 'RUNNING', currentStep: 1 });
       expect((await h.store.steps(run.runId))[0]).toMatchObject({ state: 'RECONCILED', outcome: { executionId: pending.runId } });
+    } finally { await t.drop(); }
+  });
+
+  it('ends a pinned developer Router refusal only when every attempt is durably recorded as unsent', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['base-swap', 'crosschain-router'], delegation: false,
+        policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base,arbitrum-one' } });
+      const strategy = { version: 2, steps: [{ ...BASE_SWAP, network: 'base' },
+        { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5' },
+        { ...BASE_SWAP, network: 'base' }] };
+      const composed = composeWorkflowBound(strategy, undefined);
+      if (!composed.ok) throw new Error(composed.code);
+      const developer = createPgDeveloperStore(t.db, h.d.tenantId);
+      const projectId = await developer.createProject('External Router fixture', h.d.now());
+      const stored = await developer.createStrategy({ strategyId: typedId('str'), projectId, environment: 'production', strategy: composed.strategy,
+        workflowHash: composed.workflowHash, engineVersion: ENGINE_VERSION, fundsClass: 'REAL_FUNDS', networkEnvironment: 'MAINNET',
+        plan: workflowPlan(composed, { run: true }) }, h.d.now());
+      const runtime = { ...h.flows.runtime, mode: async () => 'live' as const };
+      const scheme = approvalLinkScheme('flofi_dhs_', randomBytes(32), ['DEVELOPER_PROJECT']);
+      const surface = assembleApprovalSurface([{ scheme, profiles: { DEVELOPER_PROJECT: { policy: h.policy,
+        claimPolicy: async () => ({ ok: true as const }) } } }], h.handoffs, runtime, { ...h.runs, runtime });
+      const approval = await requestApproval({ ...h.deps(), runtime, scheme }, { kind: 'DEVELOPER_PROJECT', ref: `${projectId}.production`,
+        clientId: projectId, displayName: 'External Router fixture', context: { strategyId: stored.strategyId } }, stored.strategy, stored.workflowHash, { ownerStepsOnly: true });
+      if (!approval.ok) throw new Error(approval.code);
+      const { approvalId, approvalUrl } = approval.value, secret = decodeURIComponent(new URL(approvalUrl).hash.slice(1));
+      const first = await claimApproval(surface, secret, [h.evm], true, h.d.now());
+      await applyApproval(surface, secret, [h.evm], first.workflow, h.d.now());
+      const { runId } = await runOf(h, approvalId);
+      const prior = h.flows.ownerExecutes('base-swap', h.evm.address, first.workflow, 'RECONCILED');
+      await h.drain(runId);
+      const second = await workflowRunContinue(surface, approvalId, [h.evm]);
+      expect(second.view.workflowRun!.step).toMatchObject({ index: 1 });
+
+      // The mainnet-shaped fixture records no wallet transaction. The durable handoff precedes the wallet answer.
+      const execution = h.flows.ownerExecutes('crosschain-router', h.evm.address, second.workflow, 'REFUSED_BEFORE_SUBMISSION');
+      Object.assign(execution, { status: 'SUBMITTING', needsObservation: true, errorCode: null });
+      await h.drain(runId);
+      expect((await h.store.steps(runId))[1]).toMatchObject({ state: 'UNCERTAIN', outcome: { executionId: execution.runId } });
+      const cancelled = { state: 'CANCELLED', step: 'DEPOSIT', transactionHash: null, replacementHash: null, receipt: null, reconciled: false, note: 'ROUTER_REJECTED' };
+      const refused = { format: 'flofi.router-run.v1', verdict: 'PENDING', phase: 'PREPARED', authorization: null, source: null, destination: null, refund: null,
+        evidence: null, error: 'ROUTER_REJECTED', attempts: [cancelled] };
+      Object.assign(execution, { status: 'REJECTED', needsObservation: false, errorCode: 'ROUTER_REJECTED',
+        recordExtras: { ...refused, attempts: [{ ...cancelled, state: 'NOT_FOUND' }, cancelled] } });
+      await h.drain(runId);
+      expect(await runOf(h, approvalId)).toMatchObject({ state: 'ATTENTION', currentStep: 1 });
+      expect((await workflowRunContinue(surface, approvalId, [h.evm])).workflow).toBeNull();
+
+      execution.recordExtras = refused;
+      await h.drain(runId);
+      expect(await runOf(h, approvalId)).toMatchObject({ state: 'HALTED', currentStep: 1, code: 'ROUTER_REJECTED' });
+      expect(await h.store.steps(runId)).toMatchObject([
+        { state: 'RECONCILED', outcome: { executionId: prior.runId } },
+        { state: 'FAILED', code: 'ROUTER_REJECTED', outcome: { executionId: execution.runId, transactions: [], evidence: null } },
+        { state: 'PENDING', outcome: null },
+      ]);
+      expect((await workflowRunContinue(surface, approvalId, [h.evm])).workflow).toBeNull();
     } finally { await t.drop(); }
   });
 
