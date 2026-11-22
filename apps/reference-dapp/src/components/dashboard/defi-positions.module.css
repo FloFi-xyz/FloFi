@@ -1,6 +1,19 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-h2 > button.disclosure { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: inherit; font: inherit; line-height: 1.25; text-align: start; }
-.disclosure:is(:hover, [aria-expanded='true']):not(:disabled) { border-color: var(--accent-border); background: var(--blue-soft); }
+h2 > button.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.25;
+  text-align: start;
+}
 .disclosure::before { content: ''; flex: none; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
 .disclosure[aria-expanded='true']::before { transform: rotate(45deg); }
 .content, .scans { display: grid; gap: .75rem; min-width: 0; }

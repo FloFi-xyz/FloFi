@@ -250,21 +250,31 @@ test('row buttons and status tags keep their text inside at every width and zoom
   }
 });
 
-test('My DeFi Positions loads only on disclosure and distinguishes a disconnected wallet', async ({ page }) => {
-  const requests: string[] = [];
-  page.on('request', request => { if (request.url().endsWith('/api/dashboard/positions')) requests.push(request.url()); });
-  await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'My DeFi Positions' })).toBeVisible();
-  expect(requests).toHaveLength(0);
-  const disclosure = page.getByRole('button', { name: 'My DeFi Positions', exact: true });
-  await expect(disclosure).toBeEnabled();
-  await expect(disclosure).toHaveCSS('border-top-left-radius', '10px');
-  await expect(disclosure).toHaveCSS('min-height', '44px');
-  await disclosure.press('Enter');
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toBeVisible();
-  expect(requests).toHaveLength(1);
-  await disclosure.press('Enter');
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toHaveCount(0);
-});
+for (const theme of ['light', 'dark'] as const) {
+  test(`My DeFi Positions loads only on disclosure and distinguishes a disconnected wallet in ${theme} mode`, async ({ page }) => {
+    const requests: string[] = [];
+    page.on('request', request => { if (request.url().endsWith('/api/dashboard/positions')) requests.push(request.url()); });
+    await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
+    await page.goto('/app/dashboard');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await expect(page.getByRole('heading', { name: 'My DeFi Positions' })).toBeVisible();
+    expect(requests).toHaveLength(0);
+    const disclosure = page.getByRole('button', { name: 'My DeFi Positions', exact: true });
+    await expect(disclosure).toBeEnabled();
+    await expect(disclosure).toHaveCSS('border-top-left-radius', '10px');
+    await expect(disclosure).toHaveCSS('min-height', '44px');
+    await expect(disclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await disclosure.hover();
+    await expect(disclosure).toHaveCSS('border-top-width', '0px');
+    await page.mouse.move(0, 0);
+    await disclosure.press('Enter');
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    await expect(disclosure).toHaveCSS('outline-style', 'solid');
+    await expect(disclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toBeVisible();
+    expect(requests).toHaveLength(1);
+    await disclosure.press('Enter');
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toHaveCount(0);
+  });
+}
