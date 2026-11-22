@@ -109,7 +109,7 @@ export function embeddedRuntime(env: Env = process.env): Promise<EmbeddedRuntime
  */
 export async function cloudFlow<T>(flow: FlowName, method: string, args: readonly unknown[],
   options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch; readonly betaIdentity?: BetaRequestIdentity | null;
-    readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string;
+    readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string; readonly developerLive?: boolean;
     /** P0 catalog reliability: the caller stopped waiting (read-only calls only; a mutating call's outcome is then UNKNOWN, see callCloudFlow). */
     readonly signal?: AbortSignal } = {}):
   Promise<FlowResult<T> | null> {
@@ -123,7 +123,7 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
   let result: FlowResult<T>;
   if (kind === 'remote') result = await callCloudFlow<T>(flow, method, args, { ...options, env, principal });
   else {
-    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal, options.betaIdentity) as FlowResult<T>; }
+    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal, options.betaIdentity, options.developerLive) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   }
   // BUILD-FLOFI-FLIGHT-001: a successful simulation is shown to the simulation observer (`simulation-observer.ts`), which cannot change it.
