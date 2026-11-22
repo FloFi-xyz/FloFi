@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
-import { Fragment, useActionState, useState, type ReactNode } from 'react';
+import { useActionState, useState, type ReactNode } from 'react';
 import { changeStudioIntegration } from '../../app/studio-integration-action';
 import { HYPEREVM, SAVINGS_DAI, type StudioIntegration } from '../../studio/integration-manifest';
 import type { StudioVersion } from '../../studio/integration-store';
@@ -101,7 +101,7 @@ function StudioForm({ t, projectId, version, operation, label, children }: {
       <input type="hidden" name="version" value={version.version}/>
       <input type="hidden" name="generation" value={version.generation}/>
     </>}
-    <Fragment key={result?.ok ? 'saved' : 'editing'}>{children}</Fragment>
+    {children}
     <button className={styles.pillBlue} type="submit" disabled={pending}>{pending ? t.working : label}</button>
     {!pending && result && (result.ok ? <p role="status">{t.saved}</p> : <p role="alert">{errorMessage(result.code, t)}</p>)}
   </form>;
