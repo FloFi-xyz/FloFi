@@ -38,8 +38,8 @@ Check after a redeploy: `GET https://<deployment>/api/developer/v1/capabilities`
 
 ## 3. Projects and keys (operator CLI)
 
-There is no self-service portal. The operator manages projects and sandbox keys with a CLI that runs on plain Node 24 against the
-deployment's database:
+The operator manages legacy projects and sandbox keys with a CLI that runs on plain Node 24 against the deployment's database.
+For account-owned projects, see [Account-owned Developer Console](#account-owned-developer-console).
 
 ```bash
 export DATABASE_URL='postgres://…'            # the deployment's database

@@ -4,6 +4,7 @@ import { ensureTenant, assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, SHI
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { createAccountStore } from '../accounts/account-store.ts';
 import { runAdminCommand } from '../admin/cli-commands.ts';
+import { typedId } from '../platform/ids.ts';
 import { createDeveloperConsoleStore, developerOwnershipInstalled } from './console-store.ts';
 import { developerApi, developerConfig, recordingRuntime } from './developer.test-harness.ts';
 import { apiKeyDigest } from './keys.ts';
@@ -81,6 +82,33 @@ describe('developer console ownership', () => {
     const audit = (await t.db.query('SELECT kind, detail FROM admin_audit_events WHERE tenant_id=$1 AND target=$2 ORDER BY event_id', [tenant, project])).rows;
     expect(audit.map(row => row.kind)).toEqual(['DEVELOPER_PROJECT_CREATED', 'DEVELOPER_KEY_ISSUED', 'DEVELOPER_KEY_ROTATED', 'DEVELOPER_KEY_REVOKED']);
     expect(JSON.stringify(audit)).not.toContain(replacement!.key);
+  });
+
+  it('serializes late API writes with project shutdown', async () => {
+    const owner = consoleFor(first), store = createPgDeveloperStore(t.db, tenant);
+    const projectId = await owner.create('Shutdown', '', now());
+    const key = await owner.issue(projectId, 'sandbox', ['strategies'], config, now());
+    const api = developerApi({ db: t.db, runtime: recordingRuntime() }, key.key);
+    const scope = { projectId, environment: 'sandbox' as const };
+    const created = await api<{ id: string }>('POST', '/strategies', { strategy: {
+      action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5',
+    } });
+    expect(created.status).toBe(201);
+    const stored = await store.strategy(scope, created.body.id);
+    if (!stored) throw new Error('Strategy fixture missing');
+    const lateStrategy = { ...stored, strategyId: typedId('str') };
+    const writes: Promise<void>[] = [];
+    await t.db.transaction(async tx => {
+      await tx.query("UPDATE developer_projects SET status='DISABLED', disabled_at=$3 WHERE tenant_id=$1 AND project_id=$2", [tenant, projectId, now()]);
+      // These run on other connections while the project change is uncommitted.
+      writes.push(
+        expect(store.createKey(projectId, 'sandbox', ['strategies'], apiKeyDigest(config, 'disposable test value'), 'test', now())).resolves.toBeNull(),
+        expect(store.createStrategy(lateStrategy, now())).rejects.toThrow('DEVELOPER_PROJECT_DISABLED'),
+      );
+    });
+    await Promise.all(writes);
+    expect(await store.strategy(scope, lateStrategy.strategyId)).toBeNull();
+    expect(await store.listKeys(projectId)).toMatchObject([{ keyId: key.keyId, status: 'REVOKED' }]);
   });
 
   it('closes dependent resources on account deletion and leaves its project identity for history', async () => {

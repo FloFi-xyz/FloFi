@@ -55,13 +55,14 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
       return (await db.query(`UPDATE developer_projects SET status = 'DISABLED', disabled_at = $3 WHERE tenant_id = $1 AND project_id = $2 AND status = 'ACTIVE'`,
         [tenantId, projectId, now])).rowCount === 1;
     },
-    async createKey(projectId, environment, scopes, digest, hint, now) {
+    createKey: (projectId, environment, scopes, digest, hint, now) => db.transaction(async tx => {
+      if (!await activeProject(tx, tenantId, projectId, true)) return null;
       const keyId = typedId('key');
-      const inserted = await db.query(`INSERT INTO developer_api_keys (tenant_id, key_id, project_id, environment, key_digest, hint, scopes, created_at)
-        SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS (SELECT 1 FROM developer_projects WHERE tenant_id = $1 AND project_id = $3 AND status = 'ACTIVE')`,
+      await tx.query(`INSERT INTO developer_api_keys (tenant_id, key_id, project_id, environment, key_digest, hint, scopes, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [tenantId, keyId, projectId, environment, digest, hint, [...scopes], now]);
-      return inserted.rowCount === 1 ? keyId : null;
-    },
+      return keyId;
+    }),
     async revokeKey(keyId, now) {
       return (await db.query(`UPDATE developer_api_keys SET status = 'REVOKED', revoked_at = $3 WHERE tenant_id = $1 AND key_id = $2 AND status = 'ACTIVE'`,
         [tenantId, keyId, now])).rowCount === 1;
@@ -93,12 +94,13 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
       return { projectId: String(row.project_id), projectName: String(row.display_name), environment: row.environment as DeveloperEnvironment, keyId: String(row.key_id),
         scopes: scopesOf(row.scopes), plan: row.plan as DeveloperPlan };
     },
-    async createStrategy(record, now) {
-      await db.query(`INSERT INTO developer_strategies (tenant_id, strategy_id, project_id, environment, strategy, workflow_hash, engine_version, funds_class,
+    createStrategy: (record, now) => db.transaction(async tx => {
+      if (!await activeProject(tx, tenantId, record.projectId, true)) throw new Error('DEVELOPER_PROJECT_DISABLED');
+      await tx.query(`INSERT INTO developer_strategies (tenant_id, strategy_id, project_id, environment, strategy, workflow_hash, engine_version, funds_class,
         network_environment, plan, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, [tenantId, record.strategyId, record.projectId, record.environment,
         JSON.stringify(record.strategy), record.workflowHash, record.engineVersion, record.fundsClass, record.networkEnvironment, JSON.stringify(record.plan), now]);
       return { ...record, createdAt: now };
-    },
+    }),
     async strategy(scope, strategyId) {
       const row = (await db.query(`SELECT * FROM developer_strategies WHERE tenant_id = $1 AND project_id = $2 AND environment = $3 AND strategy_id = $4`,
         [tenantId, scope.projectId, scope.environment, strategyId])).rows[0];

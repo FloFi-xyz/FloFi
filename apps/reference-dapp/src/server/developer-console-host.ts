@@ -9,6 +9,10 @@ import { readDeveloperConfig } from '../developer/config';
 
 export const DEVELOPER_CONSOLE_PATH = '/developers/console';
 
+export function developerConsoleConfigured(env: typeof process.env = process.env): boolean {
+  return env.FLOFI_DEVELOPER_CONSOLE === 'enabled' && readDeveloperConfig(env).enabled;
+}
+
 export async function developerConsoleHost(env: typeof process.env = process.env) {
   const config = readDeveloperConfig(env);
   if (env.FLOFI_DEVELOPER_CONSOLE !== 'enabled' || !config.enabled) return { status: 'unavailable' } as const;
