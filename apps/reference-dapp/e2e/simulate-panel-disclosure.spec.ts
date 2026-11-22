@@ -35,7 +35,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/__simulate-panel-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
   // The fixture's simulation is valid at its own time (client clock only), installed after the real shell loaded (never hydrated with it).
   await page.clock.install({ time: reviewNow + 10_000 });
-  await page.route('**/__simulate-panel-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html class="${fontClasses ?? ''}" data-theme="light"><head><meta charset="utf-8">${styles}</head><body><div class="app-shell"><main class="main"><div id="acceptance-root" style="max-width:420px"></div></main></div><script src="/__simulate-panel-acceptance.js"></script></body></html>` }));
+  await page.route('**/__simulate-panel-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="en" class="${fontClasses ?? ''}" data-theme="light"><head><meta charset="utf-8">${styles}</head><body><div class="app-shell"><main class="main"><div id="acceptance-root" style="max-width:420px"></div></main></div><script src="/__simulate-panel-acceptance.js"></script></body></html>` }));
   await page.goto('/__simulate-panel-acceptance');
   await page.evaluate(() => (window as unknown as { FloFiSimulatePanelAcceptance: { mount(element: HTMLElement): void } }).FloFiSimulatePanelAcceptance.mount(document.getElementById('acceptance-root')!));
   await page.waitForFunction(() => Boolean((window as unknown as { flofiSimulatePanelAcceptance?: unknown }).flofiSimulatePanelAcceptance));
@@ -43,7 +43,33 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 
-const show = (page: Page, state: 'checking' | 'blocked' | 'unavailable' | 'pending' | 'ready') => page.evaluate(value => window.flofiSimulatePanelAcceptance.show(value), state);
+const show = (page: Page, state: Parameters<Window['flofiSimulatePanelAcceptance']['show']>[0]) => page.evaluate(value => window.flofiSimulatePanelAcceptance.show(value), state);
+
+test('native ETH result keeps the pool floor indicative and displays only available network fees in EN and PT', async ({ page }) => {
+  const panel = page.locator('.simulation-context-panel');
+  for (const locale of ['EN', 'PT'] as const) {
+    const pt = locale === 'PT';
+    await page.evaluate(language => window.dispatchEvent(new CustomEvent('flofi:language', { detail: language })), locale);
+    await show(page, 'native-quote');
+    await expect(panel.getByRole('heading', { name: pt ? 'Cotação da pool' : 'Pool quote' })).toBeVisible();
+    await expect(panel.locator('.review-decision-rows dt')).toHaveText(pt ? ['Você troca', 'Recebimento estimado', 'Mínimo estimado'] : ['You swap', 'Estimated receipt', 'Estimated minimum']);
+    await expect(panel.locator('.review-decision-rows dd')).toHaveText(['1 USDC', pt ? '≈ 0,0005 ETH' : '≈ 0.0005 ETH', pt ? '0,0004975 ETH' : '0.0004975 ETH']);
+    const missingFee = pt ? 'A taxa de rede ainda não está disponível. Será necessário verificá-la antes de autorizar.' : 'The network fee is not yet available. Check it before authorizing.';
+    await expect(panel).toContainText(missingFee);
+    await panel.locator('details > summary').click();
+    await expect(panel.getByRole('status')).toContainText(pt ? 'Cotação da pool' : 'Pool quote');
+    await expect(panel).not.toContainText(/WETH9|unwrap/);
+    await panel.locator('details > summary').click();
+    await show(page, 'native-priced-quote');
+    await expect(panel.getByRole('heading', { name: pt ? 'Cotação da pool' : 'Pool quote' })).toBeVisible();
+    await expect(panel.locator('.review-fee-value')).toHaveText(pt ? '0,000012 ETH' : '0.000012 ETH');
+    await expect(panel).not.toContainText(missingFee);
+    await show(page, 'native-simulated');
+    await expect(panel.getByRole('heading', { name: pt ? 'Resultado da simulação' : 'Simulation result' })).toBeVisible();
+    await expect(panel).toContainText(pt ? 'Mínimo que você recebe' : 'Minimum you receive');
+    await expect(panel.getByRole('button', { name: pt ? 'Continuar para autorização' : 'Continue to authorization' })).toBeVisible();
+  }
+});
 
 test('availability still being checked is never shown as a blocker, and opened Technical details survive every panel layout', async ({ page }) => {
   const panel = page.locator('.canvas-review-dock > section');

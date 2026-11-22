@@ -39,13 +39,14 @@ export type FooterStatus = { readonly tone: 'ready' | 'attention' | 'blocked' | 
 export function simulateFooterStatus(input: { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string;
   readonly expiresAt: number | null; readonly now: number; readonly executionStarted: boolean; readonly networkQuestion?: boolean;
   /** Board 06: the footer of the whole-workflow Review (Execute, before authorization) words its own Review, never a simulation. */
-  readonly subject?: 'simulation' | 'review' }): FooterStatus | null {
+  readonly subject?: 'simulation' | 'review' | 'quote' }): FooterStatus | null {
   const review = input.subject === 'review';
   if (input.networkQuestion) return { tone: 'attention', text: 'Choose the network in the chat to simulate' };
   if (input.busy) return { tone: 'neutral', text: review ? 'Reviewing the whole workflow…' : 'Simulating workflow…' };
   if (input.status === 'blocked') return { tone: 'blocked', text: input.label, detail: input.executionStarted ? null : 'Nothing was sent' };
   if (input.expiresAt !== null) {
     const left = input.expiresAt - input.now;
+    if (left > 0 && input.subject === 'quote') return { tone: 'attention', text: 'Pool quote' };
     return left > 0 ? { tone: left < COUNTDOWN_ATTENTION_MS ? 'attention' : 'ready', text: review ? 'Review valid for {0}' : 'Simulation valid for {0}', parameters: [countdown(left)] }
       // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review blocks authorization ("Review expired", its own red tone, as C2 shows); the
       // footer's one action refreshes it. An expired simulation keeps its amber line.

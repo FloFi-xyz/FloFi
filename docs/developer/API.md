@@ -71,7 +71,7 @@ can execute, sign, submit or approve a Review.
 | `GET /executions/{id}` | `executions` | 200 `execution` | A shared execution's status and attempts |
 | `GET /executions/{id}/evidence` | `executions` | 200 `evidence` | Its canonical Evidence Bundle |
 | `POST /webhook-endpoints` | `webhooks` | 201 `webhook_endpoint` | Register a signed endpoint; the secret is returned once |
-| `DELETE /webhook-endpoints/{id}` | `webhooks` | 200 `{ deleted: true }` | Retire an endpoint and its secret |
+| `DELETE /webhook-endpoints/{id}` | `webhooks` | 200 `{ id, object: "webhook_endpoint", deleted: true }` | Retire an endpoint and its secret |
 
 ### `GET /capabilities`
 
