@@ -106,8 +106,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: certificate for 0032 sin
     // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion, intentional): the same certificate was extended with 0033 (its assessment
     // anchor moved to §25, which keeps §24); 0029–0032 keep their exact identities and order (certificate-0033.pg.test.ts).
     expect(CERTIFICATE.migrations.map(m => [m.version, m.name])).toEqual([[29, 'finops_ledger'], [30, 'finops_sync'], [31, 'position_history_purge'],
-      [32, 'single_step_runs'], [33, 'workflow_run_purge']]);
-    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#25-certificate-0033_workflow_run_purge');
+      [32, 'single_step_runs'], [33, 'workflow_run_purge'], [34, 'developer_project_ownership']]);
+    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#26-certificate-0034_developer_project_ownership');
     expect((await fixture(32)).sha256).toBe('1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c');
     // 0015, which created the constraint, is immutable and unchanged; 0032 is not shipped by this build.
     expect(SHIPPED_MIGRATIONS.find(m => m.version === 15)!.sha256).toBe('5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f');

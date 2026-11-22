@@ -64,7 +64,7 @@ export interface HandoffStore {
    * Creates a PENDING handoff for its requester: expires the requester's lapsed ones, supersedes its older PENDING handoffs of the same
    * workflow when the rules say so, and enforces the requester's open-request cap (`HANDOFF_PENDING_LIMIT`).
    */
-  readonly create: (handoff: NewHandoff, now: Date, rules: HandoffCreateRules) => Promise<{ readonly ok: true } | { readonly ok: false; readonly code: 'HANDOFF_PENDING_LIMIT' }>;
+  readonly create: (handoff: NewHandoff, now: Date, rules: HandoffCreateRules) => Promise<{ readonly ok: true } | { readonly ok: false; readonly code: 'HANDOFF_PENDING_LIMIT' | 'DEVELOPER_PROJECT_DISABLED' }>;
   /** One requester's handoff (never another requester's), with lazy expiry. */
   readonly forRequester: (handoffId: string, requester: RequesterScope, now: Date) => Promise<HandoffRecord | null>;
   /** Read-only recovery of an applied proposal, limited to its proven claimant and this tenant. Never a claim/session capability. */
@@ -152,6 +152,11 @@ export function createPgHandoffStore(db: Database, tenantId: string): HandoffSto
   return {
     create: (h, now, rules) => db.transaction(async tx => {
       const mcp = h.requester.kind === 'MCP_ACCOUNT';
+      if (h.requester.kind === 'DEVELOPER_PROJECT') {
+        const projectId = h.requester.ref.split('.')[0];
+        const project = await tx.query("SELECT 1 FROM developer_projects WHERE tenant_id=$1 AND project_id=$2 AND status='ACTIVE' FOR SHARE", [tenantId, projectId]);
+        if (!project.rowCount) return { ok: false, code: 'DEVELOPER_PROJECT_DISABLED' } as const;
+      }
       // Serialize one requester's handoff creation so its cap and supersession are exact (any requester kind, row or not).
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`flofi.handoff/${tenantId}/${h.requester.kind}/${h.requester.ref}`]);
       await tx.query(`UPDATE mcp_handoffs SET status = 'EXPIRED', ended_at = $4 WHERE tenant_id = $1 AND requester_kind = $2 AND requester_ref = $3

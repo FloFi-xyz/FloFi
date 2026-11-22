@@ -361,3 +361,30 @@ export const DEVELOPER_ENDPOINTS = [
   ['GET', '/capabilities'], ['POST', '/strategies'], ['POST', '/strategies/{id}/validate'],
   ['POST', '/strategies/{id}/simulate'], ['POST', '/approvals'],
 ] as const;
+
+export const projectCopy = {
+  PT: {
+    docs: 'Documentação da API', unavailable: 'O console ainda não está disponível neste ambiente.', projects: 'Projetos',
+    active: 'Ativo', disabled: 'Desativado', create: 'Criar projeto', missing: 'Projeto não encontrado.',
+    settings: 'Configurações', save: 'Salvar alterações', disable: 'Desativar projeto',
+    confirmDisable: 'Revogar as chaves, fechar as aprovações abertas e parar os webhooks deste projeto.',
+    credentials: 'Credenciais', livePending: 'A emissão de novas chaves depende da ativação neste ambiente.',
+    revoked: 'Revogada', lastUse: 'Última utilização', rotate: 'Rotacionar', revoke: 'Revogar', issue: 'Gerar chave',
+    scopes: 'Permissões', name: 'Nome do projeto', description: 'Descrição', saving: 'Salvando…', saved: 'Alteração salva.',
+    failed: 'A alteração não foi concluída.', keyNotice: 'Guarde esta chave agora no gerenciador de segredos do seu backend. A FloFi a exibe uma única vez.',
+    hide: 'Ocultar chave', reauth: 'Entre novamente para gerar uma chave.', reauthLink: 'Confirmar identidade',
+    rate: 'Limite de alterações atingido. Tente novamente mais tarde.', scopeMissing: 'Selecione pelo menos uma permissão.',
+  },
+  EN: {
+    docs: 'API documentation', unavailable: 'The console is unavailable on this deployment.', projects: 'Projects',
+    active: 'Active', disabled: 'Disabled', create: 'Create project', missing: 'Project not found.',
+    settings: 'Settings', save: 'Save changes', disable: 'Disable project',
+    confirmDisable: 'Revoke credentials, close open approvals, and stop webhooks for this project.',
+    credentials: 'Credentials', livePending: 'New keys require activation on this deployment.',
+    revoked: 'Revoked', lastUse: 'Last used', rotate: 'Rotate', revoke: 'Revoke', issue: 'Generate key',
+    scopes: 'Permissions', name: 'Project name', description: 'Description', saving: 'Saving…', saved: 'Changes saved.',
+    failed: 'The change could not be completed.', keyNotice: 'Save this key in your backend secret manager now. FloFi shows it once.',
+    hide: 'Hide key', reauth: 'Sign in again to generate a key.', reauthLink: 'Verify identity',
+    rate: 'Change limit reached. Try again later.', scopeMissing: 'Select at least one permission.',
+  },
+} as const;

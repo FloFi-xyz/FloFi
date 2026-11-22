@@ -297,7 +297,8 @@ for (const width of [320, 390, 1440]) test(`How it works and For developers at $
     await expect(main.getByRole('link', { name: 'Telegram', exact: true })).toHaveAttribute('href', '/docs/mcp-integrations#in-chat');
     await expect(main.getByRole('link', { name: pt ? 'Redes e operações' : 'Networks and operations' })).toHaveAttribute('href', '/docs/supported-networks');
     for (const capability of ['Arbitrum One', 'Robinhood Chain', 'Aave V3', 'Uniswap V3', 'Orca']) await expect(main.locator('[aria-labelledby="dev-product"]')).toContainText(capability);
-    await expect(main.getByRole('link', { name: pt ? 'Falar com a FloFi no X' : 'Contact FloFi on X' })).toHaveAttribute('href', 'https://x.com/FloFi_xyz');
+    await expect(main.getByRole('link', { name: pt ? 'Começar a desenvolver' : 'Start building' })).toHaveAttribute('href', '/developers/console');
+    await expect(main.getByRole('link', { name: pt ? 'Abrir console' : 'Open console' })).toHaveAttribute('href', '/developers/console');
     await noOverflow(page);
     await main.getByRole('link', { name: pt ? 'Ler o guia da API' : 'Read the API guide' }).click();
     await expect(page).toHaveURL('/docs/developer-api');

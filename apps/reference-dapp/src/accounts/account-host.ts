@@ -86,7 +86,8 @@ export async function currentAccountSession(host: AccountHost | null, env: Env =
 
 /** Where a successful sign-in continues: an account that has not finished onboarding adds its wallets first; everyone else returns. */
 export function nextPath(outcome: Pick<SignInOutcome, 'onboarding' | 'session' | 'walletOnboarding'>, intent: AccountIntent, returnTo: string): string {
-  if (intent === 'link') return safeReturnPath(returnTo);
+  const destination = safeReturnPath(returnTo);
+  if (intent === 'link' || destination.split('?')[0] === '/developers/console') return destination;
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-05): onboarding only when the account has no usable wallet yet.
   return (outcome.walletOnboarding ?? outcome.onboarding === 'pending') ? '/onboarding/wallets' : safeReturnPath(returnTo);
 }

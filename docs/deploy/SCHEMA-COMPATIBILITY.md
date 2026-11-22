@@ -1179,3 +1179,21 @@ a group transition; schema 32 without 0033 still refusing; privacy access and er
 `apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts` — the operator command.
 
 **Activation, rollout and rollback**: [RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md). Not applied anywhere by this build.
+
+## 26. Certificate 0034_developer_project_ownership
+
+0034 follows the certified 0029–0033 chain and adds the owner and description of
+self-service developer projects. Legacy projects have no account owner and keep
+their operator management path. The account/project foreign keys are
+tenant-scoped. Deleting an account cascades through the ownership records,
+disabling its projects, closing unaccepted proposals and revoking keys in the
+same transaction. Project disable preserves applied proposals and wallet-owned
+records. The developer-only handoff insertion trigger serializes new proposals
+with shutdown. The shipped schema remains 28.
+
+Proof is exercised in the Developer Console PostgreSQL suite. Deploy a build
+carrying this certificate to all database consumers before applying 0034. The
+owner's `developer-projects-migrate` admin command requires schema 33 and
+applies only 0034. Earlier binaries without the extended certificate refuse
+schema 34. Leave the console release control off until the schema and account
+configuration are verified. The migration does not enable live keys.

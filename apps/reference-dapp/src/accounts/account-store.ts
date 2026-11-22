@@ -72,7 +72,7 @@ export type PrivySignIn = { readonly privyUser: string; readonly identities: rea
   readonly existingOnly?: boolean };
 /** Why an account cannot be retired as an empty duplicate (account-store.ts `retirementBlockers`). */
 export type RetirementBlocker = 'WALLETS' | 'WALLET_SIGN_IN' | 'LEGACY_WALLET' | 'RECIPIENTS' | 'BOARDING_PASS' | 'INVITE' | 'LIST_CLAIM' | 'BETA_ACCESS' | 'MCP'
-  | 'SIMULATION' | 'HISTORY' | 'IDENTITIES';
+  | 'SIMULATION' | 'HISTORY' | 'IDENTITIES' | 'DEVELOPER_PROJECTS';
 /** Every table that can hold something of an account, and the blocker it raises (all scoped by tenant and account). */
 export const RETIREMENT_CHECKS: readonly (readonly [RetirementBlocker, string])[] = [
   ['WALLETS', 'SELECT 1 FROM flofi_account_wallets WHERE tenant_id=$1 AND account_id=$2'],
@@ -306,6 +306,9 @@ export function createAccountStore(db: Database, tenantId: string) {
     async retirementBlockers(accountId: string, q: Queryable = db): Promise<RetirementBlocker[]> {
       const out: RetirementBlocker[] = [];
       for (const [blocker, sql] of RETIREMENT_CHECKS) if ((await q.query(`${sql} LIMIT 1`, [tenantId, accountId])).rowCount) out.push(blocker);
+      const ownership = await q.query<{ installed: boolean }>("SELECT to_regclass('developer_project_owners') IS NOT NULL AS installed");
+      if (ownership.rows[0]?.installed && (await q.query("SELECT 1 FROM developer_project_owners o JOIN developer_projects p USING (tenant_id,project_id) WHERE o.tenant_id=$1 AND o.account_id=$2 AND p.status='ACTIVE' LIMIT 1", [tenantId, accountId])).rowCount)
+        out.push('DEVELOPER_PROJECTS');
       return out;
     },
     /** Every tenant's account that holds this Privy user (a Privy app may serve several tenants, e.g. previews): read only. */

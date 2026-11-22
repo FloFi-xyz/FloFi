@@ -338,6 +338,10 @@
       "path": "apps/reference-dapp/src/developer/credentials.test.ts",
       "stage": "unit"
     },
+    "app.developer.console-store.pg": {
+      "path": "apps/reference-dapp/src/developer/console-store.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.developer.engine.pg": {
       "path": "apps/reference-dapp/src/developer/engine.pg.test.ts",
       "stage": "postgres"
@@ -2935,6 +2939,8 @@
         "apps/reference-dapp/src/app/privacy/page.tsx",
         "apps/reference-dapp/src/app/privacy/privacy.module.css",
         "apps/reference-dapp/src/app/how-it-works/page.tsx",
+        "apps/reference-dapp/src/app/developer-console-action.ts",
+        "apps/reference-dapp/src/app/developers/console/page.tsx",
         "apps/reference-dapp/src/app/developers/page.tsx",
         "apps/reference-dapp/src/app/faq/page.tsx",
         "apps/reference-dapp/src/app/editor.css",
@@ -4032,6 +4038,7 @@
         "apps/reference-dapp/src/components/simulate-workspace.tsx",
         "apps/reference-dapp/src/components/review-summary-panel.tsx",
         "apps/reference-dapp/src/components/simulation-summary.tsx",
+        "apps/reference-dapp/src/components/site/developer-console.tsx",
         "apps/reference-dapp/src/components/site/developers-page.tsx",
         "apps/reference-dapp/src/components/site/docs-content.ts",
         "apps/reference-dapp/src/components/site/docs-pages.tsx",
@@ -4525,6 +4532,8 @@
         "apps/reference-dapp/src/developer/admin.ts",
         "apps/reference-dapp/src/developer/approval-profile.ts",
         "apps/reference-dapp/src/developer/config.ts",
+        "apps/reference-dapp/src/developer/console-store.ts",
+        "apps/reference-dapp/src/server/developer-console-host.ts",
         "apps/reference-dapp/src/developer/dispatch.ts",
         "apps/reference-dapp/src/developer/errors.ts",
         "apps/reference-dapp/src/developer/events.ts",
@@ -4542,6 +4551,7 @@
       ],
       "suites": [
         "app.developer.api.pg",
+        "app.developer.console-store.pg",
         "app.developer.credentials",
         "app.developer.engine.pg",
         "app.developer.openapi",
@@ -9025,6 +9035,7 @@
     "app.channels.whatsapp.learning.pg",
     "app.delegation.adversarial.pg",
     "app.developer.api.pg",
+    "app.developer.console-store.pg",
     "app.developer.engine.pg",
     "app.developer.sdk.pg",
     "app.developer.webhooks.pg",

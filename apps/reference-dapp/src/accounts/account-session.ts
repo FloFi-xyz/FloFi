@@ -131,7 +131,7 @@ export function safeReturnPath(value: unknown): string {
   const path = value.split('?')[0]!;
   if (path.includes('//') || /%2e/i.test(path) || /(?:^|\/)\.{1,2}(?:\/|$)/.test(path)) return '/app';
   // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the account's Sign-in methods page, exactly (a step-up returns there).
-  if (path === '/account/sign-in-methods') return value;
+  if (path === '/account/sign-in-methods' || path === '/developers/console') return value;
   return /^\/(?:app|onboarding|board)(?:[/?]|$)/.test(value) ? value : '/app';
 }
 

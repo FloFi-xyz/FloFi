@@ -24,7 +24,10 @@ import { promisify } from 'node:util';
 import { test, expect, type Page } from '@playwright/test';
 import { FloFi, verifyWebhook, type WebhookEvent } from '../../../packages/developer-sdk/src/index.ts';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
-import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
+import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
+import { runAdminCommand } from '../src/admin/cli-commands';
+import { E2E_APP_ORIGIN as APP_ORIGIN, chooseLanguage } from './app-origin';
+import { signedIn } from './batch-wallet-fixtures';
 import { AUTHORIZE_IN_WALLET, openProposalSimulationDetails, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { guardedContext, installJourneyWallet, journeySends, walletRequests } from './journey-fixtures';
 import { assertMcpHarness } from './mcp-fixtures';
@@ -149,4 +152,57 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       await new Promise(resolve => receiver.close(resolve));
     }
   });
+});
+
+test('a FloFi account creates an isolated project and rotates a server credential', async ({ browser }) => {
+  assertMcpHarness();
+  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
+  try {
+    for (const command of ['finops-migrate', 'finops-sync-migrate', 'position-purge-migrate', 'single-step-runs-migrate',
+      'workflow-run-purge-migrate', 'developer-projects-migrate'] as const) await runAdminCommand(command, {}, db, 'default');
+  } finally { await db.close(); }
+
+  const { context, unexpected } = await guardedContext(browser);
+  const page = await context.newPage();
+  const wallet = createTestWallet();
+  try {
+    await chooseLanguage(context, 'EN');
+    await page.goto('/developers');
+    await page.getByRole('link', { name: 'Start building' }).click();
+    await expect(page).toHaveURL(/\/login\?returnTo=%2Fdevelopers%2Fconsole/);
+    await signedIn(page, wallet.address, 'developer-owner');
+    const response = await page.goto('/developers/console');
+    expect(response?.headers()['cache-control']).toContain('no-store');
+    expect(response?.headers()['x-frame-options']).toBe('DENY');
+    await page.getByRole('textbox', { name: 'Project name' }).fill('Portfolio integration');
+    await page.getByRole('textbox', { name: 'Description' }).fill('Portfolio workflows');
+    await page.getByRole('button', { name: 'Create project' }).click();
+    await expect(page).toHaveURL(/\/developers\/console\?project=prj_[a-z2-7]{26}$/);
+    const projectUrl = page.url();
+    await expect(page.getByRole('heading', { name: 'Portfolio integration' })).toBeVisible();
+
+    await page.getByText('Generate key (sandbox)', { exact: true }).click();
+    await page.getByRole('checkbox', { name: 'strategies' }).check();
+    await page.getByRole('button', { name: 'Generate key', exact: true }).click();
+    const output = page.getByTestId('developer-one-time-key');
+    await expect(output).toBeVisible();
+    const apiKey = await output.innerText();
+    const sdk = new FloFi({ apiKey, baseUrl: APP_ORIGIN });
+    expect((await sdk.capabilities.list()).environment).toBe('sandbox');
+    await page.getByRole('button', { name: 'Hide key' }).click();
+    await expect(output).toHaveCount(0);
+    await page.getByRole('button', { name: 'Rotate', exact: true }).click();
+    await expect(output).toBeVisible();
+    const replacement = new FloFi({ apiKey: await output.innerText(), baseUrl: APP_ORIGIN });
+    await expect(sdk.capabilities.list()).rejects.toMatchObject({ status: 401 });
+    expect((await replacement.capabilities.list()).environment).toBe('sandbox');
+    await page.getByRole('button', { name: 'Hide key' }).click();
+
+    const other = await context.newPage();
+    await signedIn(other, createTestWallet().address, 'developer-outsider');
+    await other.goto(projectUrl);
+    await expect(other.getByText('Project not found.')).toBeVisible();
+    await expect(other.getByRole('heading', { name: 'Portfolio integration' })).toHaveCount(0);
+    expect(unexpected).toEqual([]);
+  } finally { await context.close(); }
 });

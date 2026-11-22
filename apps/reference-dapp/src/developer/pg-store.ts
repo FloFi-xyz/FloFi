@@ -12,6 +12,11 @@ import { DEVELOPER_SCOPES, type DeveloperEnvironment, type DeveloperScope } from
 import { DEVELOPER_EVENT_TYPES, type DeliveryClaim, type DeveloperEventType, type DeveloperPlan, type DeveloperStore, type EndpointRecord, type EventRecord,
   type ProjectScope, type StrategyRecord } from './store.ts';
 
+async function activeProject(db: Queryable, tenantId: string, projectId: string, lock = false): Promise<boolean> {
+  return (await db.query(`SELECT 1 FROM developer_projects WHERE tenant_id=$1 AND project_id=$2 AND status='ACTIVE' ${lock ? 'FOR SHARE' : ''}`,
+    [tenantId, projectId])).rowCount === 1;
+}
+
 const DAY = 86_400_000;
 const date = (value: unknown) => value instanceof Date ? value : new Date(String(value));
 const maybeDate = (value: unknown) => value === null || value === undefined ? null : date(value);
@@ -44,7 +49,7 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
       return projectId;
     },
     async projectActive(projectId) {
-      return (await db.query(`SELECT 1 FROM developer_projects WHERE tenant_id = $1 AND project_id = $2 AND status = 'ACTIVE'`, [tenantId, projectId])).rows.length === 1;
+      return activeProject(db, tenantId, projectId);
     },
     async disableProject(projectId, now) {
       return (await db.query(`UPDATE developer_projects SET status = 'DISABLED', disabled_at = $3 WHERE tenant_id = $1 AND project_id = $2 AND status = 'ACTIVE'`,
@@ -106,6 +111,7 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
       return row ? String(row.handoff_id) : null;
     },
     createEndpoint: (scope, url, eventTypes, maxActive, now) => db.transaction(async tx => {
+      if (!await activeProject(tx, tenantId, scope.projectId, true)) throw new Error('DEVELOPER_PROJECT_DISABLED');
       await lockScope(tx, tenantId, scope, 'endpoints');
       const active = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM developer_webhook_endpoints WHERE tenant_id = $1 AND project_id = $2
         AND environment = $3 AND status = 'ACTIVE'`, [tenantId, scope.projectId, scope.environment])).rows[0]!.n;
@@ -126,6 +132,7 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
     }),
 
     recordEvents: (scope, events, now) => db.transaction(async tx => {
+      if (!await activeProject(tx, tenantId, scope.projectId, true)) return [];
       const recorded: EventRecord[] = [];
       for (const event of events) {
         const row = (await tx.query(`INSERT INTO developer_events (tenant_id, event_id, project_id, environment, type, dedupe_key, approval_id, data, created_at)

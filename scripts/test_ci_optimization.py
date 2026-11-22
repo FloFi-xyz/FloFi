@@ -502,7 +502,7 @@ MAIN_PROFILES = {
 # main ran these as separate Playwright commands after the product phase; they are profiles of the same runner now.
 MAIN_SEPARATE_SUITES = {
     'mcp-routes-oauth-disabled': (['mcp-route-presentation.spec.ts'], {}),
-    'developer-journey': (['developer-journey.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+    'developer-journey': (['developer-journey.spec.ts'], {'FLOFI_E2E_DEVELOPER_CONSOLE': '1', 'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
     'mcp-in-chat': (['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts', '--grep-invert', 'embedded wallet proof'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'FLOFI_MCP_OAUTH_ACCESS': 'open', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
     'mcp-embedded-signing': (['mcp-in-chat.spec.ts', '--grep', 'embedded wallet proof'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'FLOFI_MCP_OAUTH_ACCESS': 'open', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
     'channel-signing': (['channel-signing.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),

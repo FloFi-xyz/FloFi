@@ -39,5 +39,5 @@ export async function isOtherAccountOfBoardedPerson(accountId: string, identitie
 
 /** Where a sign-in that would land in wallet onboarding or the product goes instead, for such an account; any other destination is kept. */
 export function otherAccountDestination(next: string): string {
-  return /^\/(?:onboarding|app)(?:[/?]|$)/.test(next) ? '/board' : next;
+  return /^\/(?:onboarding|app)(?:[/?]|$)/.test(next) || next.split('?')[0] === '/developers/console' ? '/board' : next;
 }

@@ -84,6 +84,7 @@ async function attempt(deps: DispatchDeps, transport: WebhookTransport, claim: D
     await deps.store.incrementUsage(scope, 'webhook.delivery', status === 'PENDING' ? 'RETRY' : status, now).catch(() => undefined);
     return status;
   };
+  if (!await deps.store.projectActive(scope.projectId)) return settle('DEAD', null, 'PROJECT_DISABLED', null);
   if (!claim.endpointActive) return settle('DEAD', null, 'ENDPOINT_DELETED', null);
   const envelope = eventEnvelope(claim.event);
   try { const { data, ...rest } = envelope; assertSafeOutput(rest); assertSafeOutput(data); } catch { return settle('DEAD', null, 'PAYLOAD_GUARD', null); }
