@@ -11,6 +11,11 @@ export const portugueseUxEditorFinops: Readonly<Record<string, string>> = {
   'Add an action to your workflow first': 'Adicione uma ação ao seu fluxo primeiro', 'Simulate the workflow first': 'Simule o fluxo primeiro',
   // Simulate (B2)
   'Simulation result': 'Resultado da simulação', 'Simulation blocked': 'Simulação bloqueada',
+  'Pool quote': 'Cotação da pool',
+  'The swap transaction still needs to be simulated.': 'A transação da troca ainda precisa ser simulada.',
+  'You swap': 'Você troca', 'Estimated receipt': 'Recebimento estimado', 'Estimated minimum': 'Mínimo estimado',
+  'Max network fee for token approval': 'Taxa máxima de rede para aprovar o token',
+  'The network fee is not yet available. Check it before authorizing.': 'A taxa de rede ainda não está disponível. Será necessário verificá-la antes de autorizar.',
   'Check the expected result, costs and possible risks.': 'Verifique o resultado esperado, custos e possíveis riscos.',
   'What does the simulation do?': 'O que a simulação faz?',
   'It estimates the result of your operation and shows the expected costs, without moving your funds.': 'Estima o resultado da sua operação e mostra os custos previstos, sem movimentar seus fundos.',

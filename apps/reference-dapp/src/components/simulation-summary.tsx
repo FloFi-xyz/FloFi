@@ -98,7 +98,7 @@ export function SimulationOutcome({ step }: { step: SimulationStep }) {
   return <>
     <span className="simulation-result-label">{tr(step.resultLabel)}</span>
     <div className="simulation-result"><span aria-hidden="true">→</span><TokenAmount value={step.result ?? '—'}/></div>
-    {step.minimum && <p className="simulation-minimum">{tr('Minimum received · ')}<TokenAmountText value={step.minimum} rounding="down"/></p>}
+    {step.minimum && <p className="simulation-minimum">{step.poolQuoteOnly ? `${tr('Estimated minimum')} · ` : tr('Minimum received · ')}<TokenAmountText value={step.minimum} rounding="down"/></p>}
     {step.details.length > 0 && <Lines lines={step.details}/>}
   </>;
 }

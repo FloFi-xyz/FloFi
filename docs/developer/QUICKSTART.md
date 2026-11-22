@@ -18,13 +18,13 @@ with sandbox keys. The operator issues sandbox keys. Live keys are refused.
 - Node.js 20 or later (or a server runtime with `fetch` and Web Crypto). For the local example, use a sandbox key with `strategies` and `approvals` scopes and a fixture wallet’s public address as `simulationSubject`. Steps 6 and 10 also require `webhooks` and `executions` scopes, respectively.
 
 ```ts
-import { FloFi, verifyWebhook } from '@defi-workflow-engine/developer-sdk';
+import { FloFi } from '@defi-workflow-engine/developer-sdk';
 
 const flofi = new FloFi({ apiKey: process.env.FLOFI_API_KEY!, baseUrl: process.env.FLOFI_BASE_URL! });
 ```
 
-The SDK is a private workspace package in this repository today (npm publication is not authorized yet). It has no runtime
-dependency and contains no FloFi logic: FloFi decides everything.
+The SDK is available as a private workspace package. Follow the [SDK setup](../../packages/developer-sdk/README.md)
+to build it from the repository.
 
 ## 1. Check your key
 
@@ -140,6 +140,8 @@ the approval's states only (claimed, applied, ended) — never the wallet, runs 
 
 ```ts
 // In your webhook handler — use the RAW request body:
+import { verifyWebhook } from '@defi-workflow-engine/developer-sdk';
+
 const event = await verifyWebhook({ payload: rawBody, headers: request.headers, secret: process.env.FLOFI_WEBHOOK_SECRET! });
 if (await seen(event.id)) return; // deduplicate on webhook-id
 switch (event.type) { case 'approval.claimed': case 'approval.applied': case 'approval.ended':
@@ -164,6 +166,8 @@ if (sharedRun) {
   // evidence is null until the shared run has reconciled.
 }
 ```
+
+To retire a webhook endpoint, call `await flofi.webhookEndpoints.delete(endpoint.id)` with the `webhooks` scope.
 
 `evidence.environment` states exactly what was proven, copied from FloFi's Evidence Bundle and never upgraded: `MOCKED` is not a
 testnet execution. An execution that was not shared with your project, never existed or belongs to another project is

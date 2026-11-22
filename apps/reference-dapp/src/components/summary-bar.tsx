@@ -33,7 +33,7 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
  */
 /** P0 approved UX (board 06/07): what the Simulate footer states, from the shell's existing projections (see `simulateFooterStatus`). */
 export type FooterSimulation = { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string; readonly expiresAt: number | null;
-  readonly executionStarted: boolean; readonly networkQuestion?: boolean; readonly subject?: 'simulation' | 'review' };
+  readonly executionStarted: boolean; readonly networkQuestion?: boolean; readonly subject?: 'simulation' | 'review' | 'quote' };
 export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false, statusOverride = null, stageNote = null, stageBar = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
   /**
    * UX-05: the public Editor's footer keeps its Editor bar look and place on a stage whose one action lives in its panel (Simulate), so the footer

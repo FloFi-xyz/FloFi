@@ -258,6 +258,8 @@ test('My DeFi Positions loads only on disclosure and distinguishes a disconnecte
   expect(requests).toHaveLength(0);
   const disclosure = page.getByRole('button', { name: 'My DeFi Positions', exact: true });
   await expect(disclosure).toBeEnabled();
+  await expect(disclosure).toHaveCSS('border-top-left-radius', '10px');
+  await expect(disclosure).toHaveCSS('min-height', '44px');
   await disclosure.press('Enter');
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toBeVisible();

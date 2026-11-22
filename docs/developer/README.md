@@ -1,6 +1,9 @@
 # FloFi for Developers
 
-> **Developers build the experience. FloFi handles the DeFi workflow lifecycle.**
+FloFi Web supports owner-authorized mainnet workflows on Base, Arbitrum One, Ethereum, Solana and Robinhood Chain. The
+[supported networks guide](https://flofi.xyz/docs/supported-networks) covers registered swaps, bridges, transfers, Aave V3
+lending and Uniswap V3 and Orca liquidity. Route, wallet and deployment policy determine which operations, fee options and
+step groupings are available.
 
 Use FloFi from a third-party server to discover deployment capabilities. In a local engineering sandbox, your server can also
 create, validate and preview a strategy, then give the user a link to review it in FloFi. The user proves ownership, runs FloFi's
@@ -10,12 +13,12 @@ status and reconciled evidence only with the user's consent.
 | Surface | Availability |
 | --- | --- |
 | Developer guides and OpenAPI | Public on [FloFi](https://flofi.xyz/developers). |
-| Developer API discovery | Operator-enabled. Any active sandbox key for the deployment can call `GET /capabilities` within project limits. |
+| Developer API discovery | The public deployment exposes `GET /capabilities`. Use an operator-issued sandbox key from that deployment. |
 | TypeScript SDK | Private workspace package. Use the repository source. No npm distribution. |
 | Strategy creation, validation, preview and handoff with test funds | Local engineering sandbox with enabled flows and the required API scopes. The MOCKED browser journey reaches Review with signing blocked. |
 | Approval status and signed webhooks | Operator-enabled API with the corresponding scopes. Dispatch depends on configured delivery, approval activity or the operator's scheduler. |
 | Shared execution status and evidence | Requires an eligible approval, the user's sharing consent and, for evidence, a reconciled run. |
-| MCP | Separate operator-configured gateway for AI clients, with its own authentication and policies. See [MCP integrations](https://flofi.xyz/docs/mcp-integrations). |
+| MCP and Telegram | ChatGPT and Claude use configured MCP connectors with FloFi OAuth and beta access. The official Telegram bot uses channel-specific policy. Eligible handoffs lead to FloFi for wallet authorization. See [MCP integrations](https://flofi.xyz/docs/mcp-integrations). |
 | Mainnet strategies through the Developer API, hosted test networks and live keys | Blocked by current policy. |
 | Public SDK publishing, self-service keys and other deferred API features | See [v1 scope](API.md#not-in-v1-yet). |
 

@@ -46,8 +46,6 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
     'Unwrap pelo WETH9: exatamente 1:1, sem pool, sem impacto de preço e sem slippage. O WETH9 paga você em ETH nativo; a taxa de rede é paga à parte.',
   'This swap spends native ETH: your wallet sends it with the request (no token approval). The network fee is paid separately from the same ETH balance.':
     'Este swap gasta ETH nativo: a sua carteira o envia junto com o pedido (sem aprovação de token). A taxa de rede é paga à parte, do mesmo saldo de ETH.',
-  'You receive native ETH: in the same transaction the router unwraps WETH9 and pays you at least the minimum. The network fee is paid separately.':
-    'Você recebe ETH nativo: na mesma transação o roteador faz o unwrap do WETH9 e paga a você pelo menos o mínimo. A taxa de rede é paga à parte.',
   'WETH9': 'WETH9',
   // The FloFi Assistant.
   'FloFi Assistant': 'FloFi Assistant',

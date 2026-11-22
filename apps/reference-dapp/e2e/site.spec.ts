@@ -294,6 +294,9 @@ for (const width of [320, 390, 1440]) test(`How it works and For developers at $
     await expect(main).toContainText(pt ? 'A assinatura on-chain fica bloqueada' : 'On-chain signing is blocked');
     await expect(main.getByRole('link', { name: 'MCP', exact: true })).toHaveAttribute('href', '/docs/mcp-integrations');
     await expect(main.getByRole('link', { name: 'Webhooks', exact: true })).toHaveAttribute('href', '/docs/typescript-sdk#webhooks');
+    await expect(main.getByRole('link', { name: 'Telegram', exact: true })).toHaveAttribute('href', '/docs/mcp-integrations#in-chat');
+    await expect(main.getByRole('link', { name: pt ? 'Redes e operações' : 'Networks and operations' })).toHaveAttribute('href', '/docs/supported-networks');
+    for (const capability of ['Arbitrum One', 'Robinhood Chain', 'Aave V3', 'Uniswap V3', 'Orca']) await expect(main.locator('[aria-labelledby="dev-product"]')).toContainText(capability);
     await expect(main.getByRole('link', { name: pt ? 'Falar com a FloFi no X' : 'Contact FloFi on X' })).toHaveAttribute('href', 'https://x.com/FloFi_xyz');
     await noOverflow(page);
     await main.getByRole('link', { name: pt ? 'Ler o guia da API' : 'Read the API guide' }).click();

@@ -50,15 +50,15 @@ FloFi is a **mainnet product** on five networks. It resolves every request by **
 
 | Network | Swap | Bridge | Transfer | Lend & borrow | Add liquidity |
 | --- | --- | --- | --- | --- | --- |
-| **Ethereum** | Uniswap v3 | ✓ | ✓ | Aave V3 (USDC) — supply, borrow, repay, withdraw | Uniswap v3 |
-| **Base** | Uniswap v3 | ✓ | ✓ | Aave V3 (USDC) — supply, borrow, repay, withdraw | Uniswap v3 |
-| **Arbitrum One** | Uniswap v3 | ✓ | ✓ | Aave V3 (USDC) — supply, borrow, repay, withdraw | Uniswap v3 |
+| **Ethereum** | Uniswap v3 | ✓ | ✓ | Aave V3 registered reserves | Uniswap v3 |
+| **Base** | Uniswap v3 | ✓ | ✓ | Aave V3 registered reserves | Uniswap v3 |
+| **Arbitrum One** | Uniswap v3 | ✓ | ✓ | Aave V3 registered reserves | Uniswap v3 |
 | **Robinhood Chain** | Uniswap v3, including stock tokens | ✓ | ✓ | — | Uniswap v3 |
 | **Solana** | Jupiter | ✓ | SOL and SPL tokens | — | Orca Whirlpools (SOL/USDC) |
 
 **Bridges** connect any of the five networks — including EVM ↔ Solana — through FloFi's cross-chain router, which shows the provider, its fees and the guaranteed minimum you receive before you sign. Supported assets differ per network and protocol; the app offers only the combinations it can execute and explains anything it refuses.
 
-**Multi-step workflows.** Chain actions together — for example *bridge, then swap what arrived*. FloFi runs the steps in order: each one gets a fresh review and your wallet's signature, and starts only after the previous step has settled. A later step can spend exactly what an earlier step actually delivered, never more than you authored.
+**Multi-step workflows.** Chain eligible actions together, such as bridging and then swapping what arrived. Compatible steps can share a wallet confirmation when the wallet and network support a batch. Sequential flows present each applicable confirmation after the preceding step settles. A supported dependent step can spend what the previous step actually delivered within the reviewed limits.
 
 **Honest status.** These mainnet paths are live in beta but not yet certified: FloFi's recorded, reconciled executions so far are owner runs on test networks, and FloFi does not claim a security audit. Every run records its own evidence; see [Status & evidence](#status--evidence).
 
@@ -106,10 +106,10 @@ FloFi's business model is a **0.1% fee on each completed workflow**, calculated 
 
 Building a wallet, dapp, agent or fintech? FloFi can be the DeFi workflow layer behind your own experience.
 
-- **Developer API** (`/api/developer/v1`) — discover capabilities, create an immutable strategy, validate and preview it, then hand the approval to your user. Follow status and evidence your user chooses to share.
+- **Developer API** (`/api/developer/v1`) — discover capabilities with an operator-issued sandbox key. Use a local engineering sandbox to create an immutable strategy, validate and preview it, and send the user an approval link. Project scopes and user consent govern access to execution status and evidence.
 - **TypeScript SDK** — a zero-dependency client in [`packages/developer-sdk`](packages/developer-sdk/README.md) (Apache-2.0; not yet published to npm).
 - **Webhooks** — signed notifications ([Standard Webhooks](https://www.standardwebhooks.com)) derived from durable workflow state.
-- **MCP** — the same engine for AI clients over Streamable HTTP with OAuth.
+- **MCP and Telegram** — ChatGPT and Claude can connect over Streamable HTTP with OAuth and beta access. The official Telegram bot uses channel-specific access and hands eligible workflows off to FloFi.
 
 API keys are server-side credentials with **zero financial authority**: nothing they can call signs, submits or approves. The Developer API is enabled per deployment and currently issues **sandbox (test-funds) keys only**. Because FloFi's hosted product is mainnet-only, today you build and test an integration against a local engineering deployment; production keys are not issued yet.
 
@@ -134,7 +134,7 @@ FloFi is in active development and released as a beta. Capabilities can differ b
 
 **Built, switched on per deployment:** Automations — scheduled DCA, price triggers and daily market watches — that propose each occurrence for you to confirm and sign. Optional *automatic within limits* execution is built but stays blocked in production until a custody-grade signing service exists.
 
-**On the roadmap:** Tempo as the next network, more protocols, certified mainnet execution, live activation of conversational channels, production Developer API keys and settlement of the workflow fee. Roadmap items are not shipped features.
+**On the roadmap:** Tempo, more protocols, certified mainnet execution, production Developer API keys and settlement of the workflow fee.
 
 ## Documentation
 

@@ -30,7 +30,7 @@ and [report](../builds/BUILD-MCP-001-REPORT.md); [MCP-002 plan](../builds/BUILD-
 | `FLOFI_MCP_OAUTH` | for consumer clients | `enabled`: FloFi's OAuth 2.1 authorization server (section 2). Needs PostgreSQL platform state (`DATABASE_URL`), with either remote or embedded flows. |
 | `FLOFI_PUBLIC_ORIGIN` | with OAuth | Production: exactly `https://flofi.xyz`. Deliberate previews: their exact server-configured HTTPS origin, e.g. `https://flofi-git-claude-build-mcp-002-….vercel.app`. Issuer, resource (`<origin>/api/mcp`) and approval links derive from it, never from request headers. `http://` only for loopback on a local server. |
 | `FLOFI_MCP_OAUTH_SECRET` | with OAuth | ≥ 32 characters (`openssl rand -hex 32`), dedicated: refused if equal to `API_AUTH_TOKEN` or `FLOFI_SESSION_SECRET`. Keys the token, consent, handoff, account-cookie and IP digests (one HKDF key each). |
-| `FLOFI_MCP_OAUTH_ACCESS` | no | `invite` (default): a new pseudonymous FloFi account needs an invite code. `open`: anyone may create one. |
+| `FLOFI_MCP_OAUTH_ACCESS` | no | `open` (default). `invite` is restricted to local engineering. The hosted beta requires an eligible linked FloFi account independently of OAuth consent. |
 | `FLOFI_MCP_OAUTH_INVITES` | with `invite` | Comma-separated SHA-256 hex digests of invite codes (`printf '%s' "$CODE" \| sha256sum`). Codes are never configured in clear. |
 | `FLOFI_MCP_CIMD_HOSTS` | no | Hosts whose Client ID Metadata Documents are accepted. Default `claude.ai,chatgpt.com`. |
 | `FLOFI_MCP_OAUTH_DCR` / `FLOFI_MCP_DCR_REDIRECT_HOSTS` | no | `enabled` turns on narrow dynamic registration (public clients; redirect URIs on the listed hosts, default `claude.ai,chatgpt.com`, or loopback). Off by default. |
@@ -59,7 +59,7 @@ FloFi is its own authorization server (MCP authorization spec 2026-07-28):
 | --- | --- |
 | `GET /.well-known/oauth-protected-resource/api/mcp` | RFC 9728: `resource` = `<origin>/api/mcp`, one `authorization_servers` entry, scopes |
 | `GET /.well-known/oauth-authorization-server` | RFC 8414: `code` + PKCE `S256` only, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`, `authorization_response_iss_parameter_supported: true` |
-| `GET/POST /oauth/authorize` | consent page (script-free, no framing, CSRF-bound), invite code for new accounts, `code` + `state` + `iss` redirect |
+| `GET/POST /oauth/authorize` | consent page (script-free, no framing, CSRF-bound), invite code only for engineering deployments configured for invites, `code` + `state` + `iss` redirect |
 | `POST /oauth/token` | `authorization_code` (exact client, redirect, verifier, resource) and `refresh_token` (rotation; reuse detection) |
 | `POST /oauth/revoke` | RFC 7009 |
 | `POST /oauth/register` | RFC 7591, only with `FLOFI_MCP_OAUTH_DCR=enabled` |
@@ -69,7 +69,7 @@ a tool outside the token's scopes gets `403 insufficient_scope` (the client can 
 
 | Client | How |
 | --- | --- |
-| Claude (claude.ai web/desktop custom connector; Free: 1 connector, Pro, Max; Team/Enterprise: added by an Owner) | Settings → Connectors → Add custom connector → URL `<origin>/api/mcp`. Claude uses its Client ID Metadata Document (`https://claude.ai/oauth/mcp-oauth-client-metadata`, callback `https://claude.ai/api/mcp/auth_callback`). The consent page opens; enter the invite code; Allow. |
+| Claude (claude.ai web/desktop custom connector; Free: 1 connector, Pro, Max; Team/Enterprise: added by an Owner) | Settings → Connectors → Add custom connector → URL `<origin>/api/mcp`. Claude uses its Client ID Metadata Document (`https://claude.ai/oauth/mcp-oauth-client-metadata`, callback `https://claude.ai/api/mcp/auth_callback`). Complete the FloFi consent page with an eligible account when the beta gate applies. |
 | ChatGPT developer mode | Settings → Apps & Connectors → Advanced → Developer mode → Create → URL `<origin>/api/mcp`, authentication OAuth. ChatGPT's CIMD (`https://chatgpt.com/oauth/BpZIpxL-aggt/client.json`) lists `none` besides `private_key_jwt`; FloFi treats it as a public client with PKCE. |
 | Claude Code | `claude mcp add --transport http flofi <origin>/api/mcp` → OAuth in the browser (CIMD `https://claude.ai/oauth/claude-code-client-metadata`, loopback callback on any port, RFC 8252). |
 | Developer/partner with a static credential (development, Preview) | `Authorization: Bearer <token>` from `FLOFI_MCP_CLIENTS` (section 7). |
@@ -130,7 +130,7 @@ what an earlier step actually delivered (capped by its own amount); owner-signed
    signing window. MetaMask's mobile link carries the private capability in the fragment. Phantom opens the public FloFi
    landing page; the owner pastes the private approval link into its browser. The model-visible fallback (`/approve#apr_…`)
    requires the requesting account's existing browser cookie or an already-proven owner resuming an applied proposal.
-4. `/approve` opens FloFi's normal Canvas with the proposal's action cards already on it (BUILD-FLOFI-UX-UI-002) and a compact
+4. `/approve` opens FloFi's signing surface with the proposal, optional Canvas access and a compact
    notice: from which client, that nothing is authorized, the REAL_FUNDS warning when relevant, the AI disclosure, the sharing
    choice and (under **Proposal details**) network, funds class and workflow hash. Proving a wallet (EIP-4361 or Sign-In With
    Solana, or an existing FloFi sign-in session) loads the exact proposal: FloFi re-composes it, re-checks hash, engine,

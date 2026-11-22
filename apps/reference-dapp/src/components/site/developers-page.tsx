@@ -25,19 +25,25 @@ export function DevelopersPage({ language }: { language: SiteLanguage }) {
           </div>
         </div>
       </section>
-      <section className={styles.section} aria-labelledby="dev-get">
+      <section className={styles.section} aria-labelledby="dev-product">
+        <div className={`${styles.wrap} ${styles.stack}`}>
+          <h2 id="dev-product" className={styles.h2s}>{t.productTitle}</h2>
+          <div className={styles.getGrid}>{t.product.map(([title, body, href]) => <div key={title}><h3><Link href={href}>{title}</Link></h3><p>{body}</p></div>)}</div>
+        </div>
+      </section>
+      <section className={`${styles.section} ${styles.soft}`} aria-labelledby="dev-get">
         <div className={`${styles.wrap} ${styles.stack}`}>
           <h2 id="dev-get" className={styles.h2s}>{t.getTitle}</h2>
           <div className={styles.getGrid}>{t.get.map(([title, body, href]) => <div key={title}><h3><Link href={href}>{title}</Link></h3><p>{body}</p></div>)}</div>
         </div>
       </section>
-      <section className={`${styles.section} ${styles.soft}`} aria-labelledby="dev-decide">
+      <section className={styles.section} aria-labelledby="dev-decide">
         <div className={`${styles.wrap} ${styles.split}`}>
           <h2 id="dev-decide" className={styles.h2s}>{t.availabilityTitle}</h2>
           <p className={styles.devAvailability}>{t.availability}</p>
         </div>
       </section>
-      <section className={styles.section} aria-labelledby="dev-flow">
+      <section className={`${styles.section} ${styles.soft}`} aria-labelledby="dev-flow">
         <div className={`${styles.wrap} ${styles.split}`}>
           <h2 id="dev-flow" className={styles.h2s}>{t.flowTitle}</h2>
           <div className={styles.devFlow}>

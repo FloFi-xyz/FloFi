@@ -3,7 +3,17 @@
 A dependency-free server client for the FloFi Developer API v1. Use the private package from this workspace. It is licensed
 under Apache-2.0.
 
-Install the workspace with the repository's pinned toolchain. Set `FLOFI_BASE_URL` to the deployment origin and load the
+Use the repository's pinned Node 24.21.0 and pnpm 11.22.0 to build the workspace package.
+
+```sh
+git clone https://github.com/FloFi-xyz/FloFi.git
+cd FloFi
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @defi-workflow-engine/developer-sdk build
+```
+
+Declare `"@defi-workflow-engine/developer-sdk": "workspace:*"` in a consumer in this workspace. The built SDK requires Node.js 20+
+or a compatible server runtime with Fetch and Web Crypto. Set `FLOFI_BASE_URL` to the deployment origin and load the
 operator-issued sandbox key into `FLOFI_API_KEY` through your server's secret store. The client appends `/api/developer/v1`.
 The deployment must have the API enabled.
 
@@ -29,5 +39,6 @@ requires their consent.
   The client uses `Retry-After` up to its configured delay ceiling.
 - `verifyWebhook` verifies the raw body and headers. Deduplicate on `webhook-id` and use a fresh API read for current state.
   Signature failures are reported as `FloFiWebhookError`.
+- Use `webhookEndpoints.create({ url })` to register a receiver and `webhookEndpoints.delete(endpointId)` to retire it. Both calls require the `webhooks` scope.
 
 [API reference](../../docs/developer/API.md) · [OpenAPI](../../docs/developer/openapi.json) · [Webhooks](../../docs/developer/WEBHOOKS.md)

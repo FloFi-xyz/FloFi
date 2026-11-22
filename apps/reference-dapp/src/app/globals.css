@@ -336,12 +336,13 @@
 .header-settings-menu button{display:block;width:100%;min-height:36px;padding:8px 10px;border:0;border-radius:5px;background:transparent;text-align:left;color:var(--muted);font-size:12px}
 .header-settings-menu button:disabled{opacity:1;cursor:default}
 .header-settings-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 4px;color:var(--muted);font-size:12px}
-.header-settings-menu .header-settings-choices{position:relative;isolation:isolate;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;flex:none;width:68px;min-height:34px;padding:2px;border:1px solid var(--line);border-radius:7px;background:var(--soft);text-align:center}
-.header-settings-choices::before{content:"";position:absolute;z-index:-1;top:2px;left:2px;width:30px;height:28px;border:1px solid var(--accent-line);border-radius:5px;background:var(--paper);box-shadow:0 1px 3px rgba(24,59,104,.06);pointer-events:none}
-.header-settings-choices[aria-checked=true]::before{transform:translateX(32px)}
-.header-settings-choices>span{display:grid;place-items:center;min-height:28px;color:var(--muted);font-size:11px;font-weight:600;pointer-events:none}
+.header-settings-menu .header-settings-choices{--choice-inset:2px;--choice-gap:2px;position:relative;isolation:isolate;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--choice-gap);flex:none;width:68px;min-height:34px;padding:var(--choice-inset);border:1px solid var(--line);border-radius:7px;background:var(--soft);text-align:center}
+.header-settings-choices::before{content:"";position:absolute;z-index:-1;inset:var(--choice-inset) auto var(--choice-inset) var(--choice-inset);box-sizing:border-box;width:calc((100% - 2 * var(--choice-inset) - var(--choice-gap)) / 2);border:1px solid var(--accent-line);border-radius:5px;background:var(--paper);box-shadow:0 1px 3px rgba(24,59,104,.06);pointer-events:none}
+.header-settings-choices[aria-checked=true]::before{transform:translateX(calc(100% + var(--choice-gap)))}
+.header-settings-choices>span{display:grid;place-items:center;min-height:28px;color:var(--muted);font-size:11px;font-weight:600;line-height:1;pointer-events:none}
+.header-settings-theme svg{display:block}
 .header-settings-choices>span[data-selected=true]{color:var(--blue)}
-.header-settings-menu .header-settings-choices:hover{border-color:var(--accent-border)}
+.header-settings-menu .header-settings-choices:is(:hover,:focus-visible){border-color:var(--accent-border)}
 .header-settings-menu .header-settings-choices:active{background:var(--blue-soft)}
 @media(prefers-reduced-motion:no-preference){
   .header-settings-choices::before{transition:transform 240ms cubic-bezier(.22,1,.36,1),background-color 220ms ease,border-color 220ms ease}
@@ -1802,6 +1803,9 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 
 /* Shared lifecycle controls remain within the workflow surface at every viewport. */
 .canvas-lifecycle-control{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:100%}
+.canvas-lifecycle-control .canvas-network-switch{min-height:44px;padding:10px 18px;border:1px solid var(--primary);border-radius:12px;background:var(--primary);color:var(--on-accent);font-weight:600}
+.canvas-lifecycle-control .canvas-network-switch:hover:not(:disabled){background:color-mix(in srgb,var(--primary) 94%,var(--on-accent))}
+.canvas-lifecycle-control .canvas-network-switch:disabled{border-color:transparent;background:var(--line);color:var(--muted);opacity:1}
 .canvas-lifecycle-control [role="status"]{padding:10px 16px;overflow-wrap:anywhere}
 /* UX-003: simulating / waiting for the wallet keep the CTA in place as a locked, active button (no second request can start). */
 :root .app-shell .canvas-lifecycle-control button[data-lifecycle-action="processing"]:disabled{display:inline-flex;align-items:center;justify-content:center;gap:8px;opacity:1;cursor:progress;border-color:var(--primary);background:var(--primary);color:var(--on-accent);animation:build-cta-pulse 1.8s ease-in-out infinite}

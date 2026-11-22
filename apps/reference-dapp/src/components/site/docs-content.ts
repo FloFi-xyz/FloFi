@@ -92,7 +92,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Terminal · bash",
-        "code": "git clone https://github.com/alrimarleskovar/gryloo.git\ncd gryloo\npnpm install --frozen-lockfile --ignore-scripts\npnpm build\npnpm --filter @defi-workflow-engine/reference-dapp dev"
+        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm build\npnpm --filter @defi-workflow-engine/reference-dapp dev"
        },
        {
         "kind": "p",
@@ -444,7 +444,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "Base"
           ],
           [
-           "Trocas e liquidez na Uniswap v3 com a lista oficial de tokens, transferências, Aave V3 USDC e o Cross-chain Router. Fundos reais; a execução pelo dono está implementada, e nenhuma execução em mainnet foi demonstrada ainda."
+           "Trocas e liquidez na Uniswap v3 com a lista oficial de tokens, transferências, reservas registradas da Aave V3 e o Cross-chain Router. Fundos reais; a execução pelo dono está implementada, e nenhuma execução em mainnet foi demonstrada ainda."
           ]
          ],
          [
@@ -452,7 +452,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "Arbitrum One"
           ],
           [
-           "Trocas e liquidez na Uniswap v3, transferências, Aave V3 USDC e o Cross-chain Router. Fundos reais; nenhuma execução em mainnet foi demonstrada ainda."
+           "Trocas e liquidez na Uniswap v3, transferências, reservas registradas da Aave V3 e o Cross-chain Router. Fundos reais; nenhuma execução em mainnet foi demonstrada ainda."
           ]
          ],
          [
@@ -460,7 +460,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "Ethereum"
           ],
           [
-           "Trocas e liquidez na Uniswap v3, transferências, Aave V3 USDC e o Cross-chain Router. Fundos reais; nenhuma execução em mainnet foi demonstrada ainda."
+           "Trocas e liquidez na Uniswap v3, transferências, reservas registradas da Aave V3 e o Cross-chain Router. Fundos reais; nenhuma execução em mainnet foi demonstrada ainda."
           ]
          ],
          [
@@ -519,7 +519,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Chaves sandbox de desenvolvedor recusam estratégias que tocam a mainnet. O produto público do FloFi não tem redes de teste; ali, uma chave sandbox só consulta capacidades."
+         "Chaves sandbox podem consultar capacidades na implantação pública. Estratégias da API com fundos de teste exigem um sandbox local de engenharia. Chaves live e estratégias mainnet da API são recusadas. Leituras com escopo exigem recursos elegíveis do projeto."
         ]
        }
       ]
@@ -823,7 +823,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "As passagens vindas de ChatGPT, Claude, WhatsApp e Telegram usam a mesma jornada /approve. O FloFi abre com as ações da proposta já no Canvas; provar que a carteira é sua (uma mensagem de login ou o seu login no FloFi) carrega essa proposta exata para a sua carteira. Depois, rode uma simulação nova, revise o Strategy Manifest e autorize com a sua carteira. Um painel de agente embutido não pode assinar por você."
+         "Os encaminhamentos habilitados de ChatGPT, Claude e Telegram usam a jornada /approve. A FloFi abre a proposta na tela de assinatura, com Canvas opcional; provar que a carteira é sua (uma mensagem de login ou o seu login no FloFi) carrega essa proposta exata para a sua carteira. Depois, rode uma simulação nova, revise o Strategy Manifest e autorize com a sua carteira. Um painel de agente embutido não pode assinar por você."
         ]
        },
        {
@@ -832,6 +832,22 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          "Se uma passagem interrompida já tinha sido aplicada, a recuperação só restaura a proposta de quem provou ser o dono. Ela não restaura simulação, revisão nem permissão de gasto. Outro link de aprovação não herda o estado de recuperação da proposta anterior."
         ]
        }
+      ]
+     },
+     {
+      "id": "confirmations-and-fees",
+      "title": "Confirmações e taxas de rede",
+      "blocks": [
+       {
+        "kind": "p",
+        "text": [
+         "Etapas compatíveis podem compartilhar uma confirmação quando a carteira e a rede aceitam o lote. Outros fluxos pedem confirmações em sequência ou assinaturas adicionais. A revisão mostra as estimativas ou os limites disponíveis."
+        ]
+       },
+       {"kind": "p", "text": ["A carteira normalmente paga em ETH ou SOL, conforme a rede."]},
+       {"kind": "p", "text": ["Em Base, Arbitrum One e Ethereum, workflows de contas inteligentes elegíveis podem pagar em USDC pelo Circle Paymaster. A carteira assina a permissão para a taxa e depois a operação."]},
+       {"kind": "p", "text": ["Na Solana, swaps Jupiter, transferências SPL e etapas elegíveis podem pagar em USDC ou USDT pelo Pimlico Kora. Na Robinhood Chain, swaps ERC-20 elegíveis pelo 0x podem descontar a taxa da própria troca, com uma ou duas assinaturas."]},
+       {"kind": "p", "text": ["Essas opções dependem da configuração da implantação, do provedor, da carteira e da rota."]}
       ]
      },
      {
@@ -858,7 +874,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
       ]
      }
     ],
-    "sources": "Fontes: docs/AUTHORITY_MATRIX.md · docs/SECURITY_MODEL.md · docs/developer/QUICKSTART.md · docs/deploy/UNIVERSAL-SIGNING.md",
+    "sources": "Fontes: docs/AUTHORITY_MATRIX.md · docs/SECURITY_MODEL.md · docs/developer/QUICKSTART.md · docs/deploy/UNIVERSAL-SIGNING.md · docs/deploy/GAS-ABSTRACTION.md",
     "prev": {
      "href": "/docs/strategy-manifest",
      "title": "Strategy Manifest"
@@ -1001,7 +1017,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
         "tone": "warning",
         "title": "Integração sandbox no servidor",
         "text": [
-         "O operador habilita a API e emite chaves sandbox. Em uma implantação hospedada, uma chave válida pode consultar capacidades. A API recusa estratégias de mainnet (403 MAINNET_DISABLED) e chaves live (403 FORBIDDEN, LIVE_MODE_DISABLED). Estratégias de teste recebem 400 INVALID_STRATEGY com a razão TEST_NETWORK_NOT_AVAILABLE no produto público. A integração completa usa um sandbox local de engenharia."
+         "A implantação pública da FloFi expõe a consulta de capacidades autenticada. O operador habilita a API em cada ambiente e emite chaves sandbox. Em uma implantação hospedada, uma chave válida pode consultar capacidades. A API recusa estratégias de mainnet (403 MAINNET_DISABLED) e chaves live (403 FORBIDDEN, LIVE_MODE_DISABLED). Estratégias de teste recebem 400 INVALID_STRATEGY com a razão TEST_NETWORK_NOT_AVAILABLE no produto público. A integração completa usa um sandbox local de engenharia."
         ]
        },
        {
@@ -1159,6 +1175,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          },
          ". Não existe endpoint de execução, assinatura, envio ou aprovação de Manifest."
         ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         "Uma chave sandbox ativa pode chamar GET /capabilities sem escopo adicional. Filtre por network ou action e confira operations.*.available e reason. A resposta indica suporte no código, habilitação na implantação, política e evidência demonstrada. Para os demais endpoints, use strategies (estratégias, validação e prévias), approvals (criação e consulta de aprovações), executions (execução e evidência compartilhadas) ou webhooks (registro e remoção)."
+        ]
        }
       ]
      },
@@ -1184,7 +1206,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        },
        {
         "kind": "p",
-        "text": ["O teste de navegador MOCKED chega à revisão com a assinatura bloqueada. O status da aprovação inclui o andamento do handoff. Status de execuções e evidências de reconciliação só aparecem com o consentimento do usuário, desativado por padrão."]
+        "text": ["O teste de navegador MOCKED chega à revisão com a assinatura bloqueada. Envie o link de aprovação em privado. A aprovação original expira em 15 minutos e o segredo do link fica no fragmento da URL. A consulta da aprovação acompanha o handoff. Status de execuções e evidências de reconciliação exigem o consentimento do usuário, desativado por padrão. A prévia da API aceita fluxos elegíveis de uma etapa."]
        }
       ]
      },
@@ -1195,7 +1217,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Valores são strings decimais. Estratégias são imutáveis; crie uma nova se a intenção mudar. POSTs de criação aceitam uma Idempotency-Key válida por projeto, ambiente e operação durante 24 horas. A mesma chave com um corpo diferente gera IDEMPOTENCY_CONFLICT."
+         "Valores são strings decimais. Estratégias são imutáveis; crie uma nova se a intenção mudar. A criação de estratégia, aprovação e endpoint de webhook aceita Idempotency-Key por projeto, ambiente e operação durante 24 horas. A mesma chave com um corpo diferente gera IDEMPOTENCY_CONFLICT."
         ]
        },
        {
@@ -1249,6 +1271,11 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        },
        {
         "kind": "code",
+        "label": "Compilar o SDK a partir do repositório · bash",
+        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm --filter @defi-workflow-engine/developer-sdk build"
+       },
+       {
+        "kind": "code",
         "label": "Inicialização no servidor · typescript",
         "code": "import { FloFi } from \"@defi-workflow-engine/developer-sdk\";\n\nconst flofi = new FloFi({\n  apiKey: process.env.FLOFI_API_KEY!,\n  baseUrl: process.env.FLOFI_BASE_URL!,\n});"
        }
@@ -1288,7 +1315,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Verifique o corpo bruto do pedido antes de interpretar ou reserializar. A ordem de entrega não é garantida. Eventos execution.* são gerados enquanto o usuário compartilha o status. Uma entrega já enfileirada ainda pode chegar depois que ele parar de compartilhar. Notificações não autorizam um fluxo nem mudam o estado financeiro dele."
+         "Registre um endereço HTTPS na porta 443 com webhookEndpoints.create e guarde o segredo retornado uma única vez. Remova-o com webhookEndpoints.delete. Verifique o corpo bruto antes de interpretar ou reserializar, deduplique por webhook-id e consulte o recurso para obter o estado atual. A entrega depende da configuração do operador. A ordem de entrega não é garantida. Eventos execution.* são gerados enquanto o usuário compartilha o status. Uma entrega já enfileirada ainda pode chegar depois que ele parar de compartilhar. Notificações não autorizam um fluxo nem mudam o estado financeiro dele."
         ]
        }
       ]
@@ -1331,7 +1358,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "slug": "mcp-integrations",
     "group": "Integre o FloFi",
     "title": "Integrações MCP",
-    "status": "Ativado pelo operador · evidência local",
+    "status": "Gateway configurável · beta com acesso restrito",
     "lead": "Dê a um agente ferramentas estruturadas de descoberta e composição, mantendo a autorização no FloFi.",
     "sections": [
      {
@@ -1347,9 +1374,9 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "note",
         "tone": "info",
-        "title": "Implementado não é aprovado ao vivo",
+        "title": "Acesso ao gateway e aos clientes",
         "text": [
-         "A integração tem evidência MOCKED/loopback. Isso não comprova aceitação ao vivo no ChatGPT ou no Claude, nem execução de transações públicas. A configuração do operador e a aceitação pelo cliente continuam separadas."
+         "O gateway de produção usa https://flofi.xyz/api/mcp e publica metadados OAuth. O acesso depende da política do beta e da configuração do conector em ChatGPT ou Claude. Os testes com fixtures cobrem o protocolo e o encaminhamento no FloFi. O suporte a painéis embutidos depende do cliente e da carteira."
         ]
        }
       ]
@@ -1431,7 +1458,9 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Veja o guia principal do operador, linkado abaixo, para as variáveis da implantação e o passo a passo completo de conexão do cliente."
+         "Consulte o ",
+         {"link": "guia do operador do MCP", "href": "https://github.com/FloFi-xyz/FloFi/blob/main/docs/deploy/MCP.md"},
+         " para configurar a implantação e conectar o cliente."
         ]
        }
       ]
@@ -1467,7 +1496,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Acompanhamento no chat",
             "text": [
-             "Sim. O painel do FloFi acompanha a aprovação e as execuções e informa status e evidências na conversa; sem MCP Apps, peça get_approval_status."
+             "O painel da FloFi acompanha a aprovação. O status da execução e as evidências exigem consentimento do usuário. Sem MCP Apps, use get_approval_status."
             ]
            },
            {
@@ -1485,7 +1514,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Disponibilidade",
             "text": [
-             "Um conector personalizado no modo Desenvolvedor, com OAuth do FloFi."
+             "Conector personalizado no modo Desenvolvedor, com OAuth da FloFi e uma conta FloFi vinculada com acesso ao beta."
             ]
            }
           ]
@@ -1508,7 +1537,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Acompanhamento no chat",
             "text": [
-             "Sim. O painel do FloFi acompanha a aprovação e as execuções e informa status e evidências na conversa; sem MCP Apps, peça get_approval_status."
+             "O painel da FloFi acompanha a aprovação. O status da execução e as evidências exigem consentimento do usuário. Sem MCP Apps, use get_approval_status."
             ]
            },
            {
@@ -1526,7 +1555,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Disponibilidade",
             "text": [
-             "Um conector personalizado, com OAuth do FloFi."
+             "Conector personalizado configurado com OAuth da FloFi e uma conta FloFi vinculada com acesso ao beta."
             ]
            }
           ]
@@ -1537,7 +1566,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Montagem no chat",
             "text": [
-             "Sim. Comandos exatos sempre; linguagem natural quando o intérprete Copilot da implantação está ativo (FLOFI_CHANNEL_COPILOT)."
+             "Com acesso ao canal, use comandos exatos ou linguagem natural se o Copilot estiver ativo (FLOFI_CHANNEL_COPILOT)."
             ]
            },
            {
@@ -1555,19 +1584,19 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Onde assina",
             "text": [
-             "Sua carteira, no FloFi. Abrir o FloFi mostra o fluxo no Canvas; o Telegram não tem assinador de carteira, e nenhuma mensagem (“sim”, “confirmo”) autoriza nada."
+             "Sua carteira, na FloFi. O link abre a tela de assinatura com Canvas opcional; o Telegram não tem assinador de carteira, e nenhuma mensagem (“sim”, “confirmo”) autoriza nada."
             ]
            },
            {
             "term": "Redes e ações",
             "text": [
-             "A mesma gramática de estratégias; a política do canal decide fundos de teste e mainnets (nenhuma, a menos que o operador liste)."
+             "Canais hospedados usam rotas de mainnet registradas, conforme a política do canal e do beta. Rotas com fundos de teste exigem ambiente local de engenharia."
             ]
            },
            {
             "term": "Disponibilidade",
             "text": [
-             "O bot do FloFi, com o webhook verificado da implantação."
+             "O bot oficial @FloFiAppBot está publicado. A disponibilidade da conversa e dos fluxos depende da política do bot, do acesso ao beta e do webhook configurado."
             ]
            }
           ]
@@ -1578,7 +1607,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Montagem no chat",
             "text": [
-             "Sim. Comandos exatos sempre; linguagem natural quando o intérprete Copilot da implantação está ativo (FLOFI_CHANNEL_COPILOT)."
+             "Com acesso ao canal, use comandos exatos ou linguagem natural se o Copilot estiver ativo (FLOFI_CHANNEL_COPILOT)."
             ]
            },
            {
@@ -1596,19 +1625,19 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Onde assina",
             "text": [
-             "Sua carteira, no FloFi. Abrir o FloFi mostra o fluxo no Canvas; o WhatsApp não tem assinador de carteira, e nenhuma mensagem (“sim”, “confirmo”) autoriza nada."
+             "Sua carteira, na FloFi. O link abre a tela de assinatura com Canvas opcional; o WhatsApp não tem assinador de carteira, e nenhuma mensagem (“sim”, “confirmo”) autoriza nada."
             ]
            },
            {
             "term": "Redes e ações",
             "text": [
-             "A mesma gramática de estratégias; a política do canal decide fundos de teste e mainnets (nenhuma, a menos que o operador liste)."
+             "Canais hospedados usam rotas de mainnet registradas, conforme a política do canal e do beta. Rotas com fundos de teste exigem ambiente local de engenharia."
             ]
            },
            {
             "term": "Disponibilidade",
             "text": [
-             "Ainda não está no ar: bloqueado até o dono registrar a liberação da política do provedor (WHATSAPP_POLICY_CLEARANCE)."
+             "Ainda não está no ar. As capacidades acima são testadas em fixtures locais. O uso hospedado exige a autorização do provedor (WHATSAPP_POLICY_CLEARANCE)."
             ]
            }
           ]
@@ -2023,7 +2052,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Terminal · bash",
-        "code": "git clone https://github.com/alrimarleskovar/gryloo.git\ncd gryloo\npnpm install --frozen-lockfile --ignore-scripts\npnpm build\npnpm --filter @defi-workflow-engine/reference-dapp dev"
+        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm build\npnpm --filter @defi-workflow-engine/reference-dapp dev"
        },
        {
         "kind": "p",
@@ -2375,7 +2404,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "Base"
           ],
           [
-           "Uniswap v3 swaps and liquidity over the official token list, transfers, Aave V3 USDC and the Cross-chain Router. Real funds; owner execution is implemented, and no mainnet execution is demonstrated yet."
+           "Uniswap v3 swaps and liquidity over the official token list, transfers, registered Aave V3 reserves and the Cross-chain Router. Real funds; owner execution is implemented, and no mainnet execution is demonstrated yet."
           ]
          ],
          [
@@ -2383,7 +2412,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "Arbitrum One"
           ],
           [
-           "Uniswap v3 swaps and liquidity, transfers, Aave V3 USDC and the Cross-chain Router. Real funds; no mainnet execution is demonstrated yet."
+           "Uniswap v3 swaps and liquidity, transfers, registered Aave V3 reserves and the Cross-chain Router. Real funds; no mainnet execution is demonstrated yet."
           ]
          ],
          [
@@ -2391,7 +2420,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "Ethereum"
           ],
           [
-           "Uniswap v3 swaps and liquidity, transfers, Aave V3 USDC and the Cross-chain Router. Real funds; no mainnet execution is demonstrated yet."
+           "Uniswap v3 swaps and liquidity, transfers, registered Aave V3 reserves and the Cross-chain Router. Real funds; no mainnet execution is demonstrated yet."
           ]
          ],
          [
@@ -2450,7 +2479,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Developer sandbox keys refuse strategies touching mainnet. FloFi’s public product has no test networks, so there a sandbox key can only discover capabilities."
+         "Sandbox keys can discover capabilities on the public deployment. Test-fund API strategies require a local engineering sandbox. The API refuses live keys and mainnet strategies. Scoped reads require eligible project resources."
         ]
        }
       ]
@@ -2754,7 +2783,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "ChatGPT, Claude, WhatsApp and Telegram handoffs use the same /approve journey. FloFi opens with the proposal’s actions already on the Canvas; proving wallet ownership (a sign-in message, or your existing FloFi sign-in) loads that exact proposal for your wallet. Then run a fresh simulation, review the Strategy Manifest and authorize with your own wallet. An embedded agent panel cannot sign for you."
+         "Enabled ChatGPT, Claude and Telegram handoffs use the /approve journey. FloFi opens the proposal on the signing surface, with Canvas optional; proving wallet ownership (a sign-in message, or your existing FloFi sign-in) loads that exact proposal for your wallet. Then run a fresh simulation, review the Strategy Manifest and authorize with your own wallet. An embedded agent panel cannot sign for you."
         ]
        },
        {
@@ -2763,6 +2792,22 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          "If an interrupted handoff was already applied, recovery can restore only the proven claimant’s authoring proposal. It does not restore simulation, review or spending authority. A different approval link cannot inherit the previous proposal’s recovery state."
         ]
        }
+      ]
+     },
+     {
+      "id": "confirmations-and-fees",
+      "title": "Confirmations and network fees",
+      "blocks": [
+       {
+        "kind": "p",
+        "text": [
+         "Compatible steps can share one confirmation when the wallet and network support batching. Other workflows use sequential confirmations or additional signatures. Review shows available estimates or fee limits."
+        ]
+       },
+       {"kind": "p", "text": ["The wallet usually pays in ETH or SOL, depending on the network."]},
+       {"kind": "p", "text": ["On Base, Arbitrum One and Ethereum, eligible smart-account workflows can pay in USDC through Circle Paymaster. The wallet signs the fee permit and then the operation."]},
+       {"kind": "p", "text": ["On Solana, eligible Jupiter swaps, SPL transfers and workflow steps can pay in USDC or USDT through Pimlico Kora. On Robinhood Chain, eligible ERC-20 swaps via 0x can deduct the fee from the swap and require one or two signatures."]},
+       {"kind": "p", "text": ["These options depend on deployment configuration, the provider, the wallet and the route."]}
       ]
      },
      {
@@ -2789,7 +2834,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
       ]
      }
     ],
-    "sources": "Sources: docs/AUTHORITY_MATRIX.md · docs/SECURITY_MODEL.md · docs/developer/QUICKSTART.md · docs/deploy/UNIVERSAL-SIGNING.md",
+    "sources": "Sources: docs/AUTHORITY_MATRIX.md · docs/SECURITY_MODEL.md · docs/developer/QUICKSTART.md · docs/deploy/UNIVERSAL-SIGNING.md · docs/deploy/GAS-ABSTRACTION.md",
     "prev": {
      "href": "/docs/strategy-manifest",
      "title": "Strategy Manifest"
@@ -2932,7 +2977,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
         "tone": "warning",
         "title": "Server-side sandbox integration",
         "text": [
-         "The operator enables the API and issues sandbox keys. On a hosted deployment, a valid key can discover capabilities. The API refuses mainnet strategies (403 MAINNET_DISABLED) and live keys (403 FORBIDDEN, LIVE_MODE_DISABLED). Test-network strategies return 400 INVALID_STRATEGY with reason TEST_NETWORK_NOT_AVAILABLE in the public product. Use a local engineering sandbox for the full integration."
+         "The public FloFi deployment exposes authenticated capability discovery. The operator enables the API per environment and issues sandbox keys. On a hosted deployment, a valid key can discover capabilities. The API refuses mainnet strategies (403 MAINNET_DISABLED) and live keys (403 FORBIDDEN, LIVE_MODE_DISABLED). Test-network strategies return 400 INVALID_STRATEGY with reason TEST_NETWORK_NOT_AVAILABLE in the public product. Use a local engineering sandbox for the full integration."
         ]
        },
        {
@@ -3090,6 +3135,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          },
          ". No execution, signing, submission or Manifest-approval endpoint exists."
         ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         "An active sandbox key can call GET /capabilities without an additional scope. Filter by network or action and check operations.*.available and reason. The response distinguishes code support, deployment enablement, policy and demonstrated evidence. Other endpoints require strategies (strategies, validation and previews), approvals (approval creation and reads), executions (shared execution and evidence) or webhooks (registration and removal)."
+        ]
        }
       ]
      },
@@ -3115,7 +3166,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        },
        {
         "kind": "p",
-        "text": ["The MOCKED browser test reaches Review with signing blocked. Approval status tracks the handoff. Execution status and reconciliation evidence require the user’s consent, which is off by default."]
+        "text": ["The MOCKED browser test reaches Review with signing blocked. Deliver the approval link privately. The original approval expires after 15 minutes and the link secret stays in the URL fragment. Poll approval status to track the handoff. Execution status and reconciliation evidence require user consent, which is off by default. API previews accept eligible single-step flows."]
        }
       ]
      },
@@ -3126,7 +3177,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Amounts are decimal strings. Strategies are immutable; create a new one for a changed intent. Creating POSTs accept an Idempotency-Key scoped to project, environment and operation for 24 hours. Same key with a changed body yields IDEMPOTENCY_CONFLICT."
+         "Amounts are decimal strings. Strategies are immutable; create a new one for a changed intent. Strategy, approval and webhook endpoint creation accept an Idempotency-Key scoped to project, environment and operation for 24 hours. Same key with a changed body yields IDEMPOTENCY_CONFLICT."
         ]
        },
        {
@@ -3180,6 +3231,11 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        },
        {
         "kind": "code",
+        "label": "Build the SDK from source · bash",
+        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm --filter @defi-workflow-engine/developer-sdk build"
+       },
+       {
+        "kind": "code",
         "label": "Server initialization · typescript",
         "code": "import { FloFi } from \"@defi-workflow-engine/developer-sdk\";\n\nconst flofi = new FloFi({\n  apiKey: process.env.FLOFI_API_KEY!,\n  baseUrl: process.env.FLOFI_BASE_URL!,\n});"
        }
@@ -3219,7 +3275,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Verify the raw request body before parsing or re-serialization. Delivery ordering is not guaranteed. execution.* events are generated while the user shares status. A queued delivery can still arrive after sharing ends. Notifications do not authorize a workflow or change its financial state."
+         "Register an HTTPS URL on port 443 with webhookEndpoints.create and store the secret returned once. Remove the endpoint with webhookEndpoints.delete. Verify the raw body before parsing or re-serialization, deduplicate by webhook-id and fetch the resource for its current state. Delivery depends on operator configuration. Delivery ordering is not guaranteed. execution.* events are generated while the user shares status. A queued delivery can still arrive after sharing ends. Notifications do not authorize a workflow or change its financial state."
         ]
        }
       ]
@@ -3262,7 +3318,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "slug": "mcp-integrations",
     "group": "Integrate FloFi",
     "title": "MCP Integrations",
-    "status": "Operator enabled · local evidence",
+    "status": "Configurable gateway · restricted beta access",
     "lead": "Give an agent structured discovery and composition tools while keeping authorization in FloFi.",
     "sections": [
      {
@@ -3278,9 +3334,9 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "note",
         "tone": "info",
-        "title": "Implemented is not live acceptance",
+        "title": "Gateway and client access",
         "text": [
-         "The integration has MOCKED/loopback evidence. That does not establish live ChatGPT or Claude acceptance, nor public transaction execution. Operator configuration and client acceptance remain separate."
+         "The production gateway uses https://flofi.xyz/api/mcp and publishes OAuth metadata. Access depends on beta policy and connector setup in ChatGPT or Claude. Fixture tests cover the protocol and FloFi handoff. Embedded panels depend on the client and wallet."
         ]
        }
       ]
@@ -3362,7 +3418,9 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "See the primary operator guide linked below for deployment variables and the full client connection procedure."
+         "See the ",
+         {"link": "MCP operator guide", "href": "https://github.com/FloFi-xyz/FloFi/blob/main/docs/deploy/MCP.md"},
+         " for deployment settings and connection steps."
         ]
        }
       ]
@@ -3398,7 +3456,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "In-chat progress",
             "text": [
-             "Yes. The FloFi panel follows the approval and its runs and reports status and evidence to the conversation; without MCP Apps, ask for get_approval_status."
+             "The FloFi panel follows the approval. Run status and evidence require the owner’s consent. Without MCP Apps, use get_approval_status."
             ]
            },
            {
@@ -3416,7 +3474,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Availability",
             "text": [
-             "A custom connector in Developer mode, with FloFi OAuth."
+             "A configured custom connector in Developer mode, with FloFi OAuth and an eligible linked FloFi account in the beta."
             ]
            }
           ]
@@ -3439,7 +3497,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "In-chat progress",
             "text": [
-             "Yes. The FloFi panel follows the approval and its runs and reports status and evidence to the conversation; without MCP Apps, ask for get_approval_status."
+             "The FloFi panel follows the approval. Run status and evidence require the owner’s consent. Without MCP Apps, use get_approval_status."
             ]
            },
            {
@@ -3457,7 +3515,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Availability",
             "text": [
-             "A custom connector, with FloFi OAuth."
+             "A configured custom connector, with FloFi OAuth and an eligible linked FloFi account in the beta."
             ]
            }
           ]
@@ -3468,7 +3526,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "In-chat composition",
             "text": [
-             "Yes. Exact commands always; natural language when the deployment’s Copilot interpreter is enabled (FLOFI_CHANNEL_COPILOT)."
+             "With channel access, use exact commands or natural language if Copilot is enabled (FLOFI_CHANNEL_COPILOT)."
             ]
            },
            {
@@ -3486,19 +3544,19 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Signing path",
             "text": [
-             "Your wallet, in FloFi. Open FloFi shows the workflow on the Canvas; Telegram has no wallet signer, and no message (“yes”, “confirm”) authorizes anything."
+             "Your wallet, in FloFi. The link opens the signing surface with an optional Canvas; Telegram has no wallet signer, and no message (“yes”, “confirm”) authorizes anything."
             ]
            },
            {
             "term": "Networks and actions",
             "text": [
-             "The shared strategy grammar; channel policy decides test funds and mainnets (none unless the operator lists them)."
+             "Hosted channels use registered mainnet routes subject to channel and beta policy. Test-fund routes require local engineering."
             ]
            },
            {
             "term": "Availability",
             "text": [
-             "FloFi’s bot, with the deployment’s verified webhook."
+             "The official @FloFiAppBot is listed publicly. Chat and workflow availability depend on the bot policy, beta access and configured webhook."
             ]
            }
           ]
@@ -3509,7 +3567,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "In-chat composition",
             "text": [
-             "Yes. Exact commands always; natural language when the deployment’s Copilot interpreter is enabled (FLOFI_CHANNEL_COPILOT)."
+             "With channel access, use exact commands or natural language if Copilot is enabled (FLOFI_CHANNEL_COPILOT)."
             ]
            },
            {
@@ -3527,19 +3585,19 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Signing path",
             "text": [
-             "Your wallet, in FloFi. Open FloFi shows the workflow on the Canvas; WhatsApp has no wallet signer, and no message (“yes”, “confirm”) authorizes anything."
+             "Your wallet, in FloFi. The link opens the signing surface with an optional Canvas; WhatsApp has no wallet signer, and no message (“yes”, “confirm”) authorizes anything."
             ]
            },
            {
             "term": "Networks and actions",
             "text": [
-             "The shared strategy grammar; channel policy decides test funds and mainnets (none unless the operator lists them)."
+             "Hosted channels use registered mainnet routes subject to channel and beta policy. Test-fund routes require local engineering."
             ]
            },
            {
             "term": "Availability",
             "text": [
-             "Not live: blocked until the owner records provider policy clearance (WHATSAPP_POLICY_CLEARANCE)."
+             "Not live. The capabilities above are exercised only in local fixtures; hosted use requires provider policy clearance (WHATSAPP_POLICY_CLEARANCE)."
             ]
            }
           ]

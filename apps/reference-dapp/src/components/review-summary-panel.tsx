@@ -104,6 +104,11 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
     owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={<>{action}{next}</>} root={root}/>;
   const ready = !busy && sim.status !== 'blocked' && (review.status === 'ready' || review.status === 'approved');
   const step = sim.steps[sim.steps.length - 1];
+  const quote = source.kind === 'public' ? source.state.run?.quote : null;
+  const nativeSwap = stage === 'simulate' && quote?.native === 'OUTPUT' && !quote.conversion && quote.inputSymbol === 'USDC' && step?.result ? step : null;
+  const poolQuote = !busy && !expired && !invalidWorkflow && review.status !== 'invalidated' && nativeSwap?.poolQuoteOnly && (!quote?.ownerReview || ready);
+  const showResult = ready || poolQuote;
+  const approvalFeeOnly = Boolean(poolQuote && quote?.ownerReview?.step === 'approval');
   const canvas = props.canvasWorkflow ?? workflow;
   const until = review.expiresAt !== null && review.expiresAt > now ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management workflow (its canonical node's marker) states its operation's own rows — liquidity
@@ -118,28 +123,33 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // UX-01 / UX-03: each simulated step in the shared step card — its action, the amount the owner configured exactly as set (never reformatted)
   // and its simulated result, its network in a pill and a shortened recipient (full address one click away and under Technical details).
   const stepCard = (variant: 'icons' | 'numbered') => <StepSummaryCard variant={variant} items={sim.steps.map(s => ({ key: s.id, action: s.action, title: s.action,
-    amount: <>{t(s.input)}{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</>,
+    amount: s === nativeSwap ? null : <>{t(s.input)}{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</>,
     network: s.networks.length ? s.networks.join(' → ') : null,
     recipient: s.destination ? { address: s.destination, own: Boolean(s.destinationOwned) } : null }))}/>;
   // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.
   // A position-management workflow keeps its own rows; any other workflow states its steps in the step card above these rows (`stepCard`).
   const resultRows = <>
+    {nativeSwap?.result && <>
+      <div><dt>{t('You swap')}</dt><dd className="numeric">{t(nativeSwap.input)}</dd></div>
+      <div><dt>{t('Estimated receipt')}</dt><dd className="numeric"><TokenAmountText value={`≈ ${nativeSwap.result}`}/></dd></div>
+    </>}
     {position ? positionRows(stage) : <>
-      {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric"><TokenAmountText value={step.minimum} rounding="down"/></dd></div>}
+      {step?.minimum && <div><dt>{t(poolQuote ? 'Estimated minimum' : 'Minimum you receive')}</dt><dd className="numeric"><TokenAmountText value={step.minimum} rounding="down"/></dd></div>}
     </>}
     {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
       // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
       const paidTo = paidToPimlicoNote(line);
-      if (line.treatment === 'CEILING' && !paidTo) return <MaximumFeeRow key={`${line.label}:${line.value}`} walletPays={walletPays} priced={false}
+      if (line.treatment === 'CEILING' && !paidTo && !approvalFeeOnly) return <MaximumFeeRow key={`${line.label}:${line.value}`} walletPays={walletPays} priced={false}
         value={<TokenAmountText value={line.value} rounding="up"/>}/>;
-      return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
+      return <div key={`${line.label}:${line.value}`}><dt>{t(approvalFeeOnly ? 'Max network fee for token approval' : line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
         ? <dd><TokenAmountText className="numeric" value={line.value} rounding="up"/><small className="review-block-qualifier">{t(paidTo)}</small></dd>
         : <dd className="numeric"><TokenAmountText value={line.value} rounding={line.treatment === 'CEILING' ? 'up' : 'nearest'}/></dd>}</div>;
     })}
     {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
     {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric"><TokenAmountText value={line.value} rounding="up"/></dd></div>)}
   </>;
-  const warnings = sim.warnings.filter(warning => !warning.technical).map((warning, index) => <p className="review-panel-note review-panel-warning" key={index}>{t(warning.message)}</p>);
+  const warnings = sim.warnings.filter(warning => !warning.technical && !(poolQuote && warning.message === 'This is a pool quote. Network fees and exact transaction simulation are not available yet.'))
+    .map((warning, index) => <p className="review-panel-note review-panel-warning" key={index}>{t(warning.message)}</p>);
   if (stage === 'execute') {
     // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review keeps the workflow's summary (only what the owner configured) and marks the fee and
     // the permissions as needing a refreshed Review; no stale figure is shown as current and nothing can be authorized from it.
@@ -200,17 +210,20 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): the Simulate contextual panel. Before the simulation it lists the operations, says what a simulation does
   // and holds the ONE primary action (Simulate workflow); a valid result states the expected outcome and costs with no authorization language
   // (the footer's "Review operation" leads to Execute, where the Review is authorized); an expired result shows no stale figure.
-  const awaiting = !busy && !ready && !expired;
-  return <section {...root} className="review-panel-approved simulation-context-panel" aria-label={t(ready ? 'Simulation result' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'} data-position-operation={position?.management.operation}>
-    <SimulationPanelHead title={ready ? 'Simulation result' : expired ? 'Simulation expired' : 'Simulate workflow'}
-      subtitle={ready ? until ? t('Valid until {0}. Nothing has been signed or sent.', until) : t('Nothing has been signed or sent.')
+  const awaiting = !busy && !showResult && !expired;
+  const title = poolQuote ? 'Pool quote' : ready ? 'Simulation result' : expired ? 'Simulation expired' : 'Simulate workflow';
+  return <section {...root} className="review-panel-approved simulation-context-panel" aria-label={t(poolQuote || ready ? title : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'} data-position-operation={position?.management.operation}>
+    <SimulationPanelHead title={title}
+      subtitle={poolQuote ? t('The swap transaction still needs to be simulated.') : ready ? until ? t('Valid until {0}. Nothing has been signed or sent.', until) : t('Nothing has been signed or sent.')
         : expired ? t('Simulate again to refresh the expected result and costs. The previous values are no longer current.')
         : t('Check the expected result, costs and possible risks.')}/>
     {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
     {/* UX-01: the result in the same card language as before the simulation (icons, amounts on their own line, network pill), then its costs. */}
-    {ready ? <>{!position && stepCard('icons')}<dl className="review-panel-rows simulation-result-rows review-decision-rows">{resultRows}</dl></>
+    {showResult ? <>{!position && stepCard('icons')}<dl className="review-panel-rows simulation-result-rows review-decision-rows">{resultRows}</dl></>
       : <OperationSummary workflow={canvas} context={context} heading={null} variant="icons"/>}
-    {ready && warnings}
+    {showResult && nativeSwap && (approvalFeeOnly || !sim.fees.some(line => line.treatment === 'CEILING' || isIncludedNetworkFee(line))) &&
+      <p className="review-panel-note">{t('The network fee is not yet available. Check it before authorizing.')}</p>}
+    {showResult && warnings}
     {/* UX-05: the ONE next action of a valid result, in this panel (navigation to Execute; nothing is signed or accepted here). */}
     {/* With its own action on screen (Simulate again, a wallet or network step), the way to Execute is secondary: one primary per moment. */}
     {props.next && !busy && <div className="simulation-panel-action" data-secondary={!ready && props.action ? '' : undefined}>{props.next}</div>}

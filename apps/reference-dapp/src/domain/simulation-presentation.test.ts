@@ -48,6 +48,22 @@ describe('simulation financial presentation', () => {
     expect(result.steps[0]).toMatchObject({ result: null, provider: null, minimum: null, priceImpact: null, slippage: null, configuredSlippage: '0.50%' });
     expect(result.fees).toEqual([]); expect(result.status).toBe('attention');
   });
+  it('keeps the USDC to native ETH pool floor indicative even when a gas estimate exists', () => {
+    const nativeQuote = { ...quote, native: 'OUTPUT', outputSymbol: 'ETH', amountIn: '1000000',
+      expectedOut: '500000000000000', minimumOut: '497500000000000',
+      gas: { native: { worstCaseWei: '12000000000000' } } };
+    const projectQuote = (fields: object) => project(snapshot('public', { run: { workflow: swap, quote: { ...nativeQuote, ...fields }, attempts: [], outcome: null } }));
+    const result = projectQuote({});
+    expect(result.steps[0]).toMatchObject({ input: '1 USDC', result: '0.0005 ETH', minimum: '0.0004975 ETH', slippage: '0.50%', poolQuoteOnly: true });
+    expect(simulationStatusPresentation(result).label).toBe('Pool quote');
+    expect(result.fees).toMatchObject([{ value: '0.000012 ETH', treatment: 'CEILING' }]);
+    expect(result.warnings.map(warning => warning.message).join(' ')).not.toMatch(/WETH9|unwrap/);
+    const approval = projectQuote({ ownerReview: { step: 'approval', feeBudgetWei: '10000000000000' } });
+    expect(approval.steps[0]?.poolQuoteOnly).toBe(true);
+    const exact = projectQuote({ ownerReview: { step: 'swap', feeBudgetWei: '10000000000000' } });
+    expect(exact.steps[0]?.poolQuoteOnly).toBeUndefined();
+    expect(exact.fees).toMatchObject([{ value: '0.00001 ETH', treatment: 'CEILING' }]);
+  });
   it('hides expired and differently bound quotes', () => {
     const expired = project(publicSource(), now + 120_000);
     expect(expired.status).toBe('blocked'); expect(expired.steps[0]?.result).toBeNull(); expect(expired.fees).toEqual([]);

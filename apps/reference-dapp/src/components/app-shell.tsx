@@ -780,7 +780,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       </>}
     </div>
     : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
-    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
+    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" className="primary canvas-network-switch" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
     simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={note}
     simulate={() => { if (!options.stay) setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')} labelFor={options.labelFor}/>;
   const simulateAction = simulateActionFor(sequenceNote);
@@ -1011,7 +1011,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     const view = projectSimulation(runtimeWorkflow, context, simulationSource);
     const label = simulationStatusPresentation(view, Boolean(reviewError), simulationSource.state.busy).label;
     return { busy: Boolean(simulationSource.state.busy), status: view.status, label, expiresAt: view.expiresAt, networkQuestion,
-      executionStarted: workflowStarted };
+      executionStarted: workflowStarted, subject: tab === 'Simulate' && label === 'Pool quote' ? 'quote' as const : 'simulation' as const };
   })();
   // Board 06: on the Review before authorization the footer states the whole-workflow Review's validity (its batch simulation) or that it was
   // refused; the step-by-step path keeps its own simulation's status.
@@ -1103,7 +1103,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={chatFirst ? undefined : () => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview}
           simulateAction={chatFirst ? undefined : simulateAction}
           panelLabel={groupedPrimary ? runReviewed && !groupedReviewExpired && !runReviewed.refusal ? 'Simulation result' : 'Workflow simulation'
-            : canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Simulation result' : 'Workflow simulation'}
+            : footerSimulation.subject === 'quote' ? 'Pool quote' : canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Simulation result' : 'Workflow simulation'}
           renderPanel={chatFirst ? technical => groupedPrimary
             ? <GroupedSimulationPanel state={workflowRunHere} canvasWorkflow={state.workflow} context={context} action={simulatePanelAction} next={continueToAuthorization}/>
             : <ReviewSummaryPanel stage="simulate" action={simulatePanelAction} next={continueToAuthorization} canvasWorkflow={state.workflow} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet}
