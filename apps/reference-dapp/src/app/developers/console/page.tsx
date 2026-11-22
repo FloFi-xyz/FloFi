@@ -78,6 +78,25 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
             <span>{t.metrics[row.metric]} · {row.environment}</span>
             <strong>{new Intl.NumberFormat(locale).format(BigInt(row.total))}</strong>
           </li>)}</ul> : <p>{t.noUsage}</p>}
+          <h3>{t.openApprovals}</h3>
+          {selected.awaiting.length > 0 ? <ul className={styles.consoleList}>{selected.awaiting.map(row => <li key={`${row.environment}-${row.status}`}>
+            <span>{t.approvalStatuses[row.status]} · {row.environment}</span>
+            <strong>{new Intl.NumberFormat(locale).format(BigInt(row.total))}</strong>
+          </li>)}</ul> : <p>{t.noOpenApprovals}</p>}
+          <details>
+            <summary>{t.webhooks}</summary>
+            <p><Link href="/docs/typescript-sdk#webhooks">{t.webhookDocs}</Link></p>
+            {selected.endpoints.length > 0 ? <ul className={styles.consoleList}>{selected.endpoints.map(endpoint => <li key={endpoint.endpoint_id}>
+              <code>{endpoint.endpoint_id}</code><span>{endpoint.environment}</span>
+            </li>)}</ul> : <p>{t.noEndpoints}</p>}
+            {selected.deliveries.length > 0 && <>
+              <h4>{t.recentDeliveries}</h4>
+              <ul className={styles.consoleList}>{selected.deliveries.map(delivery => <li key={delivery.deliveryId}>
+                <span>{delivery.eventType}</span>
+                <span>{t.deliveryStatuses[delivery.status]}{delivery.lastError ? <> · <code>{delivery.lastError}</code></> : null}</span>
+              </li>)}</ul>
+            </>}
+          </details>
           {selected.status === 'ACTIVE' && <DeveloperPlayground language={language} projectId={selected.id}/>}
         </section>}
       </>}

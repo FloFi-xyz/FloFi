@@ -73,7 +73,23 @@ export function createDeveloperConsoleStore(db: Database, tenantId: string, acco
       const item = await project(id);
       if (!item) return null;
       const store = createPgDeveloperStore(db, tenantId);
-      return { ...item, keys: await store.listKeys(id) };
+      const [keys, deliveries, endpoints, awaiting] = await Promise.all([
+        store.listKeys(id),
+        store.listDeliveries(id, 10),
+        db.query<{ endpoint_id: string; environment: DeveloperEnvironment }>(`
+          SELECT e.endpoint_id,e.environment FROM developer_webhook_endpoints e
+          JOIN developer_project_owners o USING (tenant_id,project_id)
+          WHERE o.tenant_id=$1 AND o.account_id=$2 AND o.project_id=$3 AND e.status='ACTIVE'
+          ORDER BY e.created_at DESC LIMIT 10`, [...scope, id]),
+        db.query<{ environment: DeveloperEnvironment; status: 'PENDING' | 'CLAIMED'; total: string }>(`
+          SELECT a.environment,h.status,count(*)::text AS total FROM developer_approvals a
+          JOIN developer_project_owners o USING (tenant_id,project_id)
+          JOIN mcp_handoffs h USING (tenant_id,handoff_id)
+          WHERE o.tenant_id=$1 AND o.account_id=$2 AND o.project_id=$3
+            AND ((h.status='PENDING' AND h.expires_at>now()) OR (h.status='CLAIMED' AND h.claim_expires_at>now()))
+          GROUP BY a.environment,h.status ORDER BY a.environment,h.status`, [...scope, id]),
+      ]);
+      return { ...item, keys, deliveries, endpoints: endpoints.rows, awaiting: awaiting.rows };
     },
     async activity(id: string, now: Date) {
       if (!PROJECT_ID.test(id)) return [];

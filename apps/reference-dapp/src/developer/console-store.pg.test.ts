@@ -98,6 +98,21 @@ describe('developer console ownership', () => {
     ]);
     expect(await outsider.activity(projectId, at)).toEqual([]);
     expect(await consoleFor(first, 'other').activity(projectId, at)).toEqual([]);
+
+    const key = await owner.issue(projectId, 'sandbox', ['strategies', 'approvals', 'webhooks'], config, now());
+    const api = developerApi({ db: t.db, runtime: recordingRuntime() }, key.key);
+    const hook = await api<{ id: string }>('POST', '/webhook-endpoints', { url: 'https://example.com/flofi' });
+    expect(hook.status).toBe(201);
+    const strategy = await api<{ id: string; workflowHash: string }>('POST', '/strategies', { strategy: {
+      action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5',
+    } });
+    expect(strategy.status).toBe(201);
+    expect((await api('POST', '/approvals', { strategyId: strategy.body.id, workflowHash: strategy.body.workflowHash })).status).toBe(201);
+    const snapshot = await owner.details(projectId);
+    expect(snapshot).toMatchObject({ endpoints: [{ endpoint_id: hook.body.id, environment: 'sandbox' }],
+      awaiting: [{ environment: 'sandbox', status: 'PENDING', total: '1' }] });
+    expect(JSON.stringify(snapshot)).not.toContain('https://example.com/flofi');
+    expect(await outsider.details(projectId)).toBeNull();
   });
 
   it('serializes late API writes with project shutdown', async () => {
