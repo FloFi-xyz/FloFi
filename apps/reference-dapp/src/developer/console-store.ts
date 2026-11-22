@@ -10,6 +10,8 @@ const migration = CERTIFIED_FORWARD_MIGRATIONS.flatMap(item => item.migrations).
 const PROJECT_LIMIT = 20;
 const ACTIVE_KEY_LIMIT = 10;
 const canonicalId = /^acct_[0-9a-f]{32}$/;
+export const PROJECT_USAGE_METRICS = ['api.request', 'strategy.create', 'simulation.run', 'approval.create', 'execution.reconciled', 'webhook.delivery'] as const;
+type UsageMetric = typeof PROJECT_USAGE_METRICS[number];
 
 export async function developerOwnershipInstalled(db: Queryable): Promise<boolean> {
   if (!migration) return false;
@@ -61,6 +63,7 @@ export function createDeveloperConsoleStore(db: Database, tenantId: string, acco
   }
 
   return {
+    readProject: (id: string) => project(id),
     async list() {
       return (await db.query<ProjectRow>(`SELECT p.project_id,p.display_name,p.status,p.plan,o.description FROM developer_project_owners o
         JOIN developer_projects p USING (tenant_id, project_id) WHERE o.tenant_id=$1 AND o.account_id=$2
@@ -70,7 +73,34 @@ export function createDeveloperConsoleStore(db: Database, tenantId: string, acco
       const item = await project(id);
       if (!item) return null;
       const store = createPgDeveloperStore(db, tenantId);
-      return { ...item, keys: await store.listKeys(id) };
+      const [keys, deliveries, endpoints, awaiting] = await Promise.all([
+        store.listKeys(id),
+        store.listDeliveries(id, 10),
+        db.query<{ endpoint_id: string; environment: DeveloperEnvironment }>(`
+          SELECT e.endpoint_id,e.environment FROM developer_webhook_endpoints e
+          JOIN developer_project_owners o USING (tenant_id,project_id)
+          WHERE o.tenant_id=$1 AND o.account_id=$2 AND o.project_id=$3 AND e.status='ACTIVE'
+          ORDER BY e.created_at DESC LIMIT 10`, [...scope, id]),
+        db.query<{ environment: DeveloperEnvironment; status: 'PENDING' | 'CLAIMED'; total: string }>(`
+          SELECT a.environment,h.status,count(*)::text AS total FROM developer_approvals a
+          JOIN developer_project_owners o USING (tenant_id,project_id)
+          JOIN mcp_handoffs h USING (tenant_id,handoff_id)
+          WHERE o.tenant_id=$1 AND o.account_id=$2 AND o.project_id=$3
+            AND ((h.status='PENDING' AND h.expires_at>now()) OR (h.status='CLAIMED' AND h.claim_expires_at>now()))
+          GROUP BY a.environment,h.status ORDER BY a.environment,h.status`, [...scope, id]),
+      ]);
+      return { ...item, keys, deliveries, endpoints: endpoints.rows, awaiting: awaiting.rows };
+    },
+    async activity(id: string, now: Date) {
+      if (!PROJECT_ID.test(id)) return [];
+      const { rows } = await db.query<{ environment: DeveloperEnvironment; metric: UsageMetric; total: string }>(`
+        SELECT u.environment,u.metric,sum(u.count)::text AS total
+        FROM developer_usage u JOIN developer_project_owners o USING (tenant_id,project_id)
+        WHERE o.tenant_id=$1 AND o.account_id=$2 AND o.project_id=$3
+          AND u.day BETWEEN $4::date - 29 AND $4::date AND u.metric=ANY($5::text[])
+        GROUP BY u.environment,u.metric ORDER BY u.environment,u.metric`,
+      [...scope, id, now.toISOString().slice(0, 10), PROJECT_USAGE_METRICS]);
+      return rows;
     },
     async create(name: string, description: string, now: Date) {
       const values = projectValues(name, description);

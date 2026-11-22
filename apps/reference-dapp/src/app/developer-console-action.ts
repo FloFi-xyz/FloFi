@@ -4,8 +4,10 @@
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 import { freshlyAuthenticated } from '../accounts/account-session';
+import { SimulateStrategyRequest } from '../developer/schemas';
+import { compileSchema } from '../engine/strategy-spec';
 import { DEVELOPER_CONSOLE_PATH, developerConsoleHost } from '../server/developer-console-host';
-import { fixedWindow } from '../platform/index';
+import { composeWorkflowOrRefuse, deploymentEngineRuntime, fixedWindow, simulateWorkflowPreview, workflowPlan } from '../platform/index';
 
 type Result = { ok: false; code: string } | { ok: true; projectId: string; key?: string; keyId?: string };
 const errors = new Set(['ACCOUNT_SESSION_REQUIRED', 'PROJECT_NOT_FOUND', 'PROJECT_NOT_ACTIVE', 'PROJECT_NAME_INVALID',
@@ -49,5 +51,46 @@ export async function changeDeveloperProject(_previous: Result | null, data: For
   } catch (cause) {
     const code = cause instanceof Error ? cause.message : '';
     return { ok: false, code: errors.has(code) ? code : 'CONSOLE_REQUEST_FAILED' };
+  }
+}
+
+type PlaygroundResult = { ok: true; output: string } | { ok: false; code: string };
+const playgroundSubject = compileSchema(SimulateStrategyRequest);
+
+export async function inspectDeveloperWorkflow(_previous: PlaygroundResult | null, data: FormData): Promise<PlaygroundResult> {
+  try {
+    const host = await developerConsoleHost();
+    if (host.status !== 'signed-in' || (await headers()).get('origin') !== host.config.origin) {
+      return { ok: false, code: 'CONSOLE_UNAVAILABLE' };
+    }
+    const projectId = data.get('projectId'), input = data.get('strategy'), subject = data.get('simulationSubject');
+    if (typeof projectId !== 'string' || (await host.store.readProject(projectId))?.status !== 'ACTIVE') {
+      return { ok: false, code: 'PROJECT_NOT_ACTIVE' };
+    }
+    if (typeof input !== 'string' || Buffer.byteLength(input, 'utf8') > 16_000
+      || typeof subject !== 'string' || subject.length > 100) return { ok: false, code: 'INVALID_REQUEST' };
+    if (!await fixedWindow(host.db, host.tenantId).allow(`dev:playground:${host.session.accountId}`, 30, 3_600, new Date())) {
+      return { ok: false, code: 'CONSOLE_RATE_LIMITED' };
+    }
+    const workflow = composeWorkflowOrRefuse(JSON.parse(input), undefined);
+    const plan = workflowPlan(workflow);
+    const simulationSubject = subject.trim();
+    if (!simulationSubject) return { ok: true, output: JSON.stringify({
+      strategy: workflow.strategy, workflowHash: workflow.workflowHash, plan: plan.kind,
+      networks: plan.networks, authority: 'NONE',
+    }, null, 2) };
+    if (!playgroundSubject.check({ simulationSubject })) return { ok: false, code: 'SIMULATION_SUBJECT_INVALID' };
+    const preview = await simulateWorkflowPreview(deploymentEngineRuntime(), {
+      strategy: workflow.strategy, workflowHash: workflow.workflowHash, simulationSubject,
+    });
+    return { ok: true, output: JSON.stringify({
+      workflowHash: preview.workflowHash, status: preview.status, executionSimulation: preview.executionSimulation,
+      steps: preview.steps.map(step => ({ index: step.index, state: step.state, reason: step.code, amountFrom: step.amountFrom,
+        simulationSubject: step.simulationSubject, subjectSource: step.subjectSource, provenance: step.view?.provenance, facts: step.view?.facts })),
+      authorizable: false, persisted: false, authority: 'NONE',
+    }, null, 2) };
+  } catch (cause) {
+    const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'INVALID_STRATEGY';
+    return { ok: false, code };
   }
 }
