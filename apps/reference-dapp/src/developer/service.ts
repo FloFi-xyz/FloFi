@@ -49,11 +49,9 @@ const MAX_STRATEGY_BYTES = 16_000;
 
 export async function listCapabilities(ctx: DeveloperContext, query: { network?: string; action?: string }): Promise<CapabilityListBody> {
   const live = ctx.scope.environment === 'production';
-  const [facts, sequences] = await Promise.all([
-    capabilityFacts(ctx.runtime, policyOf(ctx), query as Parameters<typeof capabilityFacts>[2], live ? 'PUBLIC_MAINNET' : undefined),
-    live ? ctx.runtime.sequences?.() : undefined,
-  ]);
-  return { object: 'list', environment: ctx.scope.environment, data: facts.map(f => capabilityView(f, ctx.scope.environment, sequences?.enabled === true)),
+  const facts = await capabilityFacts(ctx.runtime, policyOf(ctx), query as Parameters<typeof capabilityFacts>[2],
+    live ? 'PUBLIC_MAINNET' : undefined, { singleStepRun: live });
+  return { object: 'list', environment: ctx.scope.environment, data: facts.map(f => capabilityView(f, ctx.scope.environment)),
     ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY' };
 }
 
