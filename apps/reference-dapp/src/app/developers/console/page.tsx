@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { SessionGuard } from '../../../components/account/session-guard';
-import { ConsoleForm } from '../../../components/site/developer-console';
+import { ConsoleForm, DeveloperPlayground } from '../../../components/site/developer-console';
 import { projectCopy } from '../../../components/site/site-copy';
 import { SiteShell } from '../../../components/site/site-shell';
 import { siteLanguage } from '../../../components/site/site-language';
@@ -21,8 +21,12 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
   const returnTo = id ? `${DEVELOPER_CONSOLE_PATH}?project=${id}` : DEVELOPER_CONSOLE_PATH;
   if (host.status === 'other-account') redirect('/board');
   if (host.status === 'signed-out') redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-  const projects = host.status === 'signed-in' ? await host.store.list() : [];
-  const selected = host.status === 'signed-in' && id ? await host.store.details(id) : null;
+  const [projects, selected, activity] = host.status === 'signed-in' ? await Promise.all([
+    host.store.list(),
+    id ? host.store.details(id) : null,
+    id ? host.store.activity(id, new Date()) : [],
+  ]) : [[], null, []] as const;
+  const locale = language === 'PT' ? 'pt-BR' : 'en';
   return <SiteShell language={language} page="developers" skipTo="developer-console">
     <SessionGuard/>
     <main id="developer-console" tabIndex={-1} className={`${styles.wrap} ${styles.console}`}>
@@ -55,7 +59,7 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
           {!host.environment && <p>{t.livePending}</p>}
           {selected.keys.length > 0 && <ul className={styles.consoleList}>{selected.keys.map(key => <li key={key.keyId}>
             <div><code>…{key.hint}</code> · {key.environment} · {key.status === 'ACTIVE' ? t.active : t.revoked}<br/>
-              <small>{key.scopes.join(', ')} · {t.lastUse} {key.lastUsedAt ? new Intl.DateTimeFormat(language === 'PT' ? 'pt-PT' : 'en', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(key.lastUsedAt) + ' UTC' : '—'}</small>
+              <small>{key.scopes.join(', ')} · {t.lastUse} {key.lastUsedAt ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(key.lastUsedAt) + ' UTC' : '—'}</small>
             </div>
             {key.status === 'ACTIVE' && selected.status === 'ACTIVE' && <div className={styles.consoleButtons}>
               {key.environment === host.environment && <ConsoleForm language={language} operation="rotate" projectId={selected.id} keyId={key.keyId} submit={t.rotate}/>}
@@ -69,6 +73,12 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
               </label>)}</fieldset>
             </ConsoleForm>
           </details>}
+          <h3>{t.usage}</h3>
+          {activity.length > 0 ? <ul className={styles.consoleList}>{activity.map(row => <li key={`${row.environment}-${row.metric}`}>
+            <span>{t.metrics[row.metric]} · {row.environment}</span>
+            <strong>{new Intl.NumberFormat(locale).format(BigInt(row.total))}</strong>
+          </li>)}</ul> : <p>{t.noUsage}</p>}
+          {selected.status === 'ACTIVE' && <DeveloperPlayground language={language} projectId={selected.id}/>}
         </section>}
       </>}
     </main>

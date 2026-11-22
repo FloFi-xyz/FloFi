@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useActionState, useEffect, useState, type ReactNode } from 'react';
-import { changeDeveloperProject } from '../../app/developer-console-action';
+import { changeDeveloperProject, inspectDeveloperWorkflow } from '../../app/developer-console-action';
 import { projectCopy } from './site-copy';
 import styles from './site.module.css';
 
@@ -48,4 +48,21 @@ export function ConsoleForm({ language, operation, projectId, keyId, submit, chi
       {t.saved}
     </p>}
   </form>;
+}
+
+export function DeveloperPlayground({ language, projectId }: { language: keyof typeof projectCopy; projectId: string }) {
+  const t = projectCopy[language];
+  const [result, action, pending] = useActionState(inspectDeveloperWorkflow, null);
+  return <details>
+    <summary>{t.playground}</summary>
+    <p>{t.playgroundHelp}</p>
+    <form action={action} className={styles.consoleForm}>
+      <input type="hidden" name="projectId" value={projectId}/>
+      <label>StrategySpec JSON<textarea name="strategy" required maxLength={16_000} rows={8}/></label>
+      <label>{t.playgroundSubject}<input name="simulationSubject" maxLength={100} spellCheck={false}/></label>
+      <button className={styles.pillBlue} disabled={pending} type="submit">{pending ? t.checking : t.inspect}</button>
+    </form>
+    {!pending && result && (result.ok ? <pre className={styles.consoleOutput} tabIndex={0} aria-label={t.playgroundResult}>{result.output}</pre>
+      : <p role="alert">{t.playgroundFailed} <code>{result.code}</code></p>)}
+  </details>;
 }

@@ -84,6 +84,22 @@ describe('developer console ownership', () => {
     expect(JSON.stringify(audit)).not.toContain(replacement!.key);
   });
 
+  it('shows only owned usage in the last 30 UTC days and keeps environments distinct', async () => {
+    const owner = consoleFor(first), outsider = consoleFor(second), store = createPgDeveloperStore(t.db, tenant);
+    const projectId = await owner.create('Usage isolation', '', now());
+    const sandbox = { projectId, environment: 'sandbox' as const };
+    await store.incrementUsage(sandbox, 'strategy.create', '', new Date('2026-11-01T12:00:00Z'), 5);
+    await store.incrementUsage(sandbox, 'strategy.create', '', new Date('2026-11-02T12:00:00Z'), 2);
+    await store.incrementUsage({ projectId, environment: 'production' }, 'strategy.create', '', new Date('2026-11-02T12:00:00Z'), 3);
+    const at = new Date('2026-12-01T01:00:00Z');
+    expect(await owner.activity(projectId, at)).toEqual([
+      { environment: 'production', metric: 'strategy.create', total: '3' },
+      { environment: 'sandbox', metric: 'strategy.create', total: '2' },
+    ]);
+    expect(await outsider.activity(projectId, at)).toEqual([]);
+    expect(await consoleFor(first, 'other').activity(projectId, at)).toEqual([]);
+  });
+
   it('serializes late API writes with project shutdown', async () => {
     const owner = consoleFor(first), store = createPgDeveloperStore(t.db, tenant);
     const projectId = await owner.create('Shutdown', '', now());

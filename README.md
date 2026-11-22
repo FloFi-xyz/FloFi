@@ -70,14 +70,14 @@ FloFi Web resolves eligible actions and protocol paths on five mainnets. A deplo
 
 Open FloFi for Developers and use the Developer Console on a deployment where project management is enabled. The existing sandbox quickstart shows how to provision a key on a local engineering deployment and run a complete server integration. Store the API key exclusively in your backend's secret manager. [FloFi for Developers](https://flofi.xyz/developers) · [Developer Console source](apps/reference-dapp/src/app/developers/console/page.tsx) · [Quickstart](docs/developer/QUICKSTART.md)
 
-This Node.js example uses the SDK against a configured engineering deployment. Set `FLOFI_API_ORIGIN`, `FLOFI_API_KEY` and the test wallet's public `FLOFI_SIMULATION_SUBJECT` in your backend environment. The development subject is used only for the preview. Send `approvalUrl` to the user for wallet authorization and retain `approval.id` on the backend to fetch status.
+Install the [versioned SDK tarball](packages/developer-sdk/README.md) in your Node.js or Next.js project. This example uses a configured engineering deployment. Set `FLOFI_BASE_URL`, `FLOFI_API_KEY` and the test wallet's public `FLOFI_SIMULATION_SUBJECT` in your backend environment. FloFi uses the development subject only for the preview. Send `approvalUrl` to the user for wallet authorization and retain `approval.id` on the backend to fetch status.
 
 ```ts
 import { FloFi } from '@defi-workflow-engine/developer-sdk';
 
 const flofi = new FloFi({
   apiKey: process.env.FLOFI_API_KEY!,
-  baseUrl: process.env.FLOFI_API_ORIGIN!,
+  baseUrl: process.env.FLOFI_BASE_URL!,
 });
 const { data } = await flofi.capabilities.list({ action: 'bridge' });
 const row = data.find(({ operations }) =>

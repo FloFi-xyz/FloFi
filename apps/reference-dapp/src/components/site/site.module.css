@@ -377,6 +377,8 @@
 .consoleForm{display:grid;gap:10px;justify-items:start;margin-block:12px;min-width:0}
 .consoleForm label:not(.consoleCheck){display:grid;gap:6px;width:min(100%,36rem)}
 .consoleForm input:not([type="checkbox"]):not([type="hidden"]){min-width:0;width:100%;font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px}
+.consoleForm textarea{min-width:0;width:100%;font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px;resize:vertical}
+.consoleOutput{max-height:28rem;overflow:auto;padding:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
 .consoleForm fieldset{border:1px solid var(--line);border-radius:8px;min-width:0}
 .consoleCheck{display:flex;align-items:baseline;gap:8px}
 .consoleButtons{display:flex;gap:8px;flex-wrap:wrap;align-items:start}

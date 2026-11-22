@@ -1248,19 +1248,19 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "slug": "typescript-sdk",
     "group": "Integre o FloFi",
     "title": "SDK TypeScript",
-    "status": "Pacote privado do workspace",
+    "status": "Pacote compilável a partir do repositório",
     "lead": "Um cliente de servidor pequeno e sem dependências para a API para desenvolvedores e os webhooks assinados.",
     "sections": [
      {
       "id": "setup",
-      "title": "Use o SDK do workspace",
+      "title": "Instale o SDK no seu projeto",
       "blocks": [
        {
         "kind": "note",
         "tone": "info",
         "title": "Disponibilidade do pacote",
         "text": [
-         "O SDK é privado neste repositório. A publicação no npm não está autorizada. Use o pacote existente do workspace; não há comando público de instalação no npm."
+         "Gere um pacote versionado a partir do repositório e instale-o no seu backend. A publicação no npm está pendente."
         ]
        },
        {
@@ -1272,7 +1272,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Compilar o SDK a partir do repositório · bash",
-        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm --filter @defi-workflow-engine/developer-sdk build"
+        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm --filter @defi-workflow-engine/developer-sdk build\npnpm --filter @defi-workflow-engine/developer-sdk pack --out /tmp/flofi-developer-sdk-%v.tgz"
+       },
+       {
+        "kind": "code",
+        "label": "Instalar a versão 0.1.0 no seu projeto · bash",
+        "code": "pnpm add /tmp/flofi-developer-sdk-0.1.0.tgz"
        },
        {
         "kind": "code",
@@ -3208,19 +3213,19 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "slug": "typescript-sdk",
     "group": "Integrate FloFi",
     "title": "TypeScript SDK",
-    "status": "Private workspace package",
+    "status": "Buildable from the repository",
     "lead": "A small, dependency-free server client for the implemented Developer API and signed webhooks.",
     "sections": [
      {
       "id": "setup",
-      "title": "Use the workspace SDK",
+      "title": "Install the SDK in your project",
       "blocks": [
        {
         "kind": "note",
         "tone": "info",
         "title": "Package availability",
         "text": [
-         "The SDK is private in this repository. npm publication is not authorized. Use the existing workspace package; there is no public npm installation command to follow."
+         "Build a versioned tarball from the repository and install it in your backend. npm publication is pending."
         ]
        },
        {
@@ -3232,7 +3237,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Build the SDK from source · bash",
-        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm --filter @defi-workflow-engine/developer-sdk build"
+        "code": "git clone https://github.com/FloFi-xyz/FloFi.git\ncd FloFi\npnpm install --frozen-lockfile --ignore-scripts\npnpm --filter @defi-workflow-engine/developer-sdk build\npnpm --filter @defi-workflow-engine/developer-sdk pack --out /tmp/flofi-developer-sdk-%v.tgz"
+       },
+       {
+        "kind": "code",
+        "label": "Install version 0.1.0 in your project · bash",
+        "code": "pnpm add /tmp/flofi-developer-sdk-0.1.0.tgz"
        },
        {
         "kind": "code",

@@ -6,14 +6,15 @@ where signing is blocked. The execution and evidence examples illustrate access 
 [API reference](API.md) · [Webhooks](WEBHOOKS.md)
 
 Hosted FloFi is mainnet-only. The Developer API refuses test-network strategies on hosted deployments and mainnet strategies
-with sandbox keys. The operator issues sandbox keys. Live keys are refused.
+with sandbox keys. On local engineering deployments, obtain a sandbox key through the Developer Console or the operator CLI.
+Live keys are refused on the currently released API.
 
 ## 0. Before you start
 
 - The deployment origin in `FLOFI_BASE_URL` (HTTPS or HTTP on local loopback) and the API enabled by its operator.
   For the local examples, the operator enables the local engineering scope and the MOCKED bridge fixture. Follow the
   [operator guide](../deploy/DEVELOPER.md).
-- A **sandbox** key (`flofi_sk_test_…`) from that operator. Store it in your server's secret store. Never put it in a web page, a
+- A **sandbox** key (`flofi_sk_test_…`) issued by that deployment. Store it in your server's secret store. Never put it in a web page, a
   mobile app or a URL: FloFi refuses any request that carries an `Origin` or `Sec-Fetch-Site` header (`BROWSER_ORIGIN_FORBIDDEN`).
 - Node.js 20 or later (or a server runtime with `fetch` and Web Crypto). For the local example, use a sandbox key with `strategies` and `approvals` scopes and a fixture wallet’s public address as `simulationSubject`. Steps 6 and 10 also require `webhooks` and `executions` scopes, respectively.
 
@@ -23,8 +24,9 @@ import { FloFi } from '@defi-workflow-engine/developer-sdk';
 const flofi = new FloFi({ apiKey: process.env.FLOFI_API_KEY!, baseUrl: process.env.FLOFI_BASE_URL! });
 ```
 
-The SDK is available as a private workspace package. Follow the [SDK setup](../../packages/developer-sdk/README.md)
-to build it from the repository.
+Follow the [SDK setup](../../packages/developer-sdk/README.md) to build and install its versioned tarball in a separate Node.js
+or Next.js project. On an engineering deployment with the Developer Console enabled, use your FloFi account to create a
+project, select its scopes and generate a local sandbox key. The operator CLI also supports local sandbox provisioning.
 
 ## 1. Check your key
 

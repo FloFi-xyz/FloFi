@@ -189,8 +189,23 @@ test('a FloFi account creates an isolated project and rotates a server credentia
     const apiKey = await output.innerText();
     const sdk = new FloFi({ apiKey, baseUrl: APP_ORIGIN });
     expect((await sdk.capabilities.list()).environment).toBe('sandbox');
+    const strategy = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' } as const;
+    const saved = await sdk.strategies.create({ strategy });
     await page.getByRole('button', { name: 'Hide key' }).click();
     await expect(output).toHaveCount(0);
+    await expect(async () => {
+      await page.reload();
+      await expect(page.getByText('Strategies created · sandbox')).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+    await page.getByText('Playground', { exact: true }).click();
+    await page.getByRole('textbox', { name: 'StrategySpec JSON' }).fill(JSON.stringify(strategy));
+    await page.getByRole('button', { name: 'Inspect strategy' }).click();
+    await expect(page.getByLabel('Playground result')).toContainText(saved.workflowHash);
+    await expect(page.getByLabel('Playground result')).toContainText('"authority": "NONE"');
+    await page.getByRole('textbox', { name: 'StrategySpec JSON' }).fill(JSON.stringify(strategy));
+    await page.getByRole('textbox', { name: 'Public address for the preview (optional)' }).fill('invalid wallet');
+    await page.getByRole('button', { name: 'Inspect strategy' }).click();
+    await expect(page.locator('#developer-console').getByRole('alert')).toContainText('SIMULATION_SUBJECT_INVALID');
     await page.getByRole('button', { name: 'Rotate', exact: true }).click();
     await expect(output).toBeVisible();
     const replacement = new FloFi({ apiKey: await output.innerText(), baseUrl: APP_ORIGIN });
