@@ -9,7 +9,6 @@ import { observeSimulations } from '../server/simulation-observer';
 import { cloudFlow as runtimeFlow } from '../server/flow-runtime';
 import { requireFlightMethodAccess } from '../server/flight-access';
 import { guardFlowExecution } from '../server/execution-guard';
-import { currentSolanaSession, currentWalletSession } from '../server/session-principal';
 import { readDeveloperConfig } from '../developer/config';
 import { issuesWalletRequest } from '../workflow-runs/external-step';
 
@@ -35,6 +34,7 @@ export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
   if (developerLive && !principal) {
     const solana = method === 'handoff' ? false : typeof values[1] === 'string' && !values[1].startsWith('0x');
     // An unreadable session leaves the principal unset: an external step is then refused, an ordinary flow is unaffected.
+    const { currentSolanaSession, currentWalletSession } = await import('../server/session-principal.ts');
     principal = (await (solana ? currentSolanaSession() : currentWalletSession()).catch(() => null))?.account ?? null;
   }
   const identity = await requireFlightMethodAccess(method,

@@ -17,8 +17,6 @@ import { localCatalogNetworkMode } from '../server/catalog-networks';
 import { createManagedWalletEvm, type ManagedEvmBroadcast, type ManagedEvmExpected, type ManagedEvmFees, type ManagedWalletEvm } from '../server/managed-wallet-evm';
 import { resolveManagedSigning, type CircleSigningRun, type ManagedSigningDeps, type ManagedSigningRequest, type ManagedSigningResult } from '../server/managed-signing';
 import { platformStateHost } from '../server/platform-state-host';
-import { currentSolanaSession, currentWalletSession } from '../server/session-principal';
-import { readDeveloperConfig } from '../developer/config';
 import { createPgWorkflowRunStore } from '../workflow-runs/pg-store';
 import { externalStepWorkflow, externalWalletRequestRefusal } from '../workflow-runs/external-step';
 import type { SigningContext, SigningFlow } from '../wallet/flofi-signing';
@@ -123,6 +121,9 @@ export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: 
     try {
       const workflow = externalStepWorkflow(record);
       if (workflow) {
+        // Loaded only for an external step: Next's request APIs are absent where this module is imported outside a request.
+        const [{ readDeveloperConfig }, { currentSolanaSession, currentWalletSession }] = await Promise.all([
+          import('../developer/config.ts'), import('../server/session-principal.ts')]);
         const config = readDeveloperConfig(process.env);
         if (!config.enabled || !config.live) return { ok: false, code: 'LIVE_MODE_DISABLED' };
         const session = await (request.ecosystem === 'solana' ? currentSolanaSession() : currentWalletSession());

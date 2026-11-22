@@ -1017,7 +1017,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
         "tone": "warning",
         "title": "Disponibilidade por ambiente",
         "text": [
-         "Uma chave válida pode consultar capacidades. Em produção, a emissão de chaves live para projetos de uma conta depende de ativação explícita. Enquanto o acesso live estiver desativado, a API retorna 403 FORBIDDEN com LIVE_MODE_DISABLED para chaves live. Estratégias de mainnet enviadas com uma chave sandbox recebem 403 MAINNET_DISABLED. Use um sandbox local de engenharia para testar com fundos de teste."
+         "Uma chave válida pode consultar capacidades. Em produção, a emissão de chaves live para projetos de uma conta depende de ativação explícita. Enquanto o acesso live estiver desativado, a API retorna 403 FORBIDDEN com LIVE_MODE_DISABLED para chaves live. Estratégias de mainnet enviadas com uma chave sandbox recebem 403 MAINNET_DISABLED. Estratégias de teste recebem 400 INVALID_STRATEGY com a razão TEST_NETWORK_NOT_AVAILABLE no produto público. Use um sandbox local de engenharia para testar com fundos de teste."
         ]
        },
        {
@@ -3012,7 +3012,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
         "tone": "warning",
         "title": "Availability by environment",
         "text": [
-         "Any valid key can discover capabilities. Live key issuance for account-owned projects requires explicit production activation. While live access is disabled, the API returns 403 FORBIDDEN with LIVE_MODE_DISABLED for live keys. Mainnet strategies submitted with a sandbox key return 403 MAINNET_DISABLED. Use a local engineering sandbox to test with test funds."
+         "Any valid key can discover capabilities. Live key issuance for account-owned projects requires explicit production activation. While live access is disabled, the API returns 403 FORBIDDEN with LIVE_MODE_DISABLED for live keys. Mainnet strategies submitted with a sandbox key return 403 MAINNET_DISABLED. Test-network strategies return 400 INVALID_STRATEGY with reason TEST_NETWORK_NOT_AVAILABLE in the public product. Use a local engineering sandbox to test with test funds."
         ]
        },
        {
