@@ -14,3 +14,9 @@ export { API_PATH, FloFi, SDK_VERSION, type FloFiOptions, type RequestOptions } 
 export { FloFiError, FloFiWebhookError, type Issue } from './errors.js';
 export { verifyWebhook, type VerifyWebhookOptions, type WebhookHeaders } from './webhooks.js';
 export type * from './types.js';
+
+export { defineIntegrationPackage, integrationEndpoint, INTEGRATION_ARCHITECTURES, INTEGRATION_CAPABILITIES,
+  INTEGRATION_CATEGORIES, INTEGRATION_CATEGORY_CAPABILITIES } from './integration-package.js';
+export type { BuiltinStudioAdapter, IntegrationAdapter, IntegrationArchitecture, IntegrationCapability,
+  IntegrationCategory, IntegrationPackage } from './integration-package.js';
+export type { StudioAdapterInput, StudioAdapterResult, StudioAdapterV1 } from './studio-adapter.js';

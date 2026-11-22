@@ -107,7 +107,7 @@ function StudioForm({ t, projectId, version, operation, label, children }: {
   </form>;
 }
 
-function Config({ t, manifest }: { t: Copy; manifest?: StudioIntegration }) {
+function Config({ t, manifest }: { t: Copy; manifest?: Extract<StudioIntegration, { schemaVersion: 1 }> }) {
   const [kind, setKind] = useState(manifest?.kind === 'vault' ? 'vault' : 'network');
   const [name, setName] = useState(manifest?.name ?? '');
   const [slug, setSlug] = useState('');
@@ -140,6 +140,7 @@ function StudioItem({ version, t, projectId, active, now }: {
   version: Version; t: Copy; projectId: string; active: boolean; now: string;
 }) {
   const { manifest, verification, test_result: test, status } = version;
+  if (manifest.schemaVersion === 2) return <article><h4>{manifest.name}</h4><p><code>{version.slug}</code> · {t.statuses[status]}</p></article>;
   const withinDay = (at: string) => Date.parse(now) - Date.parse(at) >= 0 && Date.parse(now) - Date.parse(at) <= 86_400_000;
   const allowsDraft = status !== 'CERTIFIED' && status !== 'PUBLISHED' && (manifest.kind === 'network' || manifest.kind === 'vault');
   const currentVerification = verification && withinDay(verification.observedAt);

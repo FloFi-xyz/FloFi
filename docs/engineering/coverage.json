@@ -1913,6 +1913,10 @@
     "e2e.developer-journey": {
       "path": "apps/reference-dapp/e2e/developer-journey.spec.ts",
       "stage": "browser"
+    },
+    "developer-sdk.integration-package": {
+      "path": "packages/developer-sdk/test/integration-package.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2097,7 +2101,8 @@
     "app.components.editor-workflow-run-single-card",
     "app.user-funded.decline-proof",
     "app.state.router-store",
-    "app.studio.integration-probe"
+    "app.studio.integration-probe",
+    "developer-sdk.integration-package"
   ],
   "modules": [
     {
@@ -4594,6 +4599,8 @@
         "packages/developer-sdk/src/client.ts",
         "packages/developer-sdk/src/errors.ts",
         "packages/developer-sdk/src/index.ts",
+        "packages/developer-sdk/src/integration-package.ts",
+        "packages/developer-sdk/src/studio-adapter.ts",
         "packages/developer-sdk/src/types.ts",
         "packages/developer-sdk/src/webhooks.ts",
         "packages/developer-sdk/tsconfig.json"
@@ -4606,6 +4613,7 @@
         "app.developer.sdk.pg",
         "app.developer.webhooks.pg",
         "developer-sdk.client",
+        "developer-sdk.integration-package",
         "developer-sdk.webhooks"
       ],
       "gaps": [
@@ -5883,6 +5891,7 @@
         "scripts/gcp-source-snapshot.py",
         "scripts/governance_lite.py",
         "scripts/guarded-release-browser.mjs",
+        "scripts/studio-adapter-check.py",
         "scripts/summarize-screenshot-diffs.py",
         "scripts/universal-route-matrix.mjs",
         "scripts/vercel_deployment_cleanup.py",
@@ -5893,6 +5902,7 @@
         "vitest.config.ts"
       ],
       "suites": [
+        "scripts.test_ci_agent_evolution",
         "scripts.test_ci_agent_guard",
         "scripts.test_ci_claude_agents",
         "scripts.test_ci_dependency_security",
@@ -5901,8 +5911,7 @@
         "scripts.test_ci_optimization",
         "scripts.test_ci_source_snapshot",
         "scripts.test_ci_vercel_deployment_cleanup",
-        "scripts.test_governance_lite",
-        "scripts.test_ci_agent_evolution"
+        "scripts.test_governance_lite"
       ],
       "gaps": [
         "Static/config contracts do not deploy or prove hosted Vercel/Railway/Cloud Build operations; CI branch protection remains owner-managed.",
@@ -9049,8 +9058,8 @@
         "e2e.developer-journey"
       ],
       "gaps": [
-        "Mainnet read evidence is collected separately from closed browser and unit suites.",
-        "HyperEVM transfer, vault writes, financial certification and publication require canonical runtime support and signed acceptance."
+        "Proposal RPC compatibility is reproducible with fixtures. Mainnet identity and execution need independent certification.",
+        "External adapter intake accepts pinned source. A trusted signed attestation and financial runtime dispatch require a separate integration."
       ]
     }
   ],
