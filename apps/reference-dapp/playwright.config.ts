@@ -176,6 +176,8 @@ if (mcpHarness && !process.env.FLOFI_E2E_DATABASE_URL) {
 // BUILD-DEVELOPER-001: the Developer API on the same embedded loopback harness (its database and MOCKED router chains), with loopback
 // webhooks only. Per-run secrets generated here are inherited by the workers: the operator CLI digests keys with the developer secret
 // and the scheduler call presents the dispatch token. Keys exist only in mode-0600 files under the run's temporary directory.
+const developerConsoleHarness = mcpHarness && process.env.FLOFI_E2E_DEVELOPER_CONSOLE === '1';
+if (developerConsoleHarness) process.env.FLOFI_E2E_SESSION_SECRET ??= randomBytes(32).toString('hex');
 if (mcpHarness) {
   process.env.FLOFI_E2E_DEVELOPER_SECRET ??= randomBytes(32).toString('hex');
   process.env.FLOFI_E2E_DEVELOPER_DISPATCH_TOKEN ??= randomBytes(24).toString('base64url');
@@ -184,6 +186,8 @@ const mcpServerEnv = mcpHarness ? { FLOFI_RUNTIME: 'embedded', DATABASE_URL: pro
   FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, FLOFI_MCP_OAUTH_SECRET: randomBytes(32).toString('hex'), FLOFI_MCP_OAUTH_DCR: 'enabled',
   FLOFI_MCP_OAUTH_ACCESS: process.env.FLOFI_MCP_OAUTH_ACCESS ?? 'invite',
   FLOFI_MCP_OAUTH_INVITES: createHash('sha256').update(MCP_E2E_INVITE).digest('hex'), FLOFI_MCP_INFRAME_WALLET_HOSTS: 'flofi-e2e-host',
+  ...(developerConsoleHarness ? { FLOFI_DEVELOPER_CONSOLE: 'enabled', FLOFI_DEVELOPER_CONSOLE_TEST_KEYS: 'ALLOW_LOCAL_ONLY',
+    FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET! } : {}),
   FLOFI_DEVELOPER: 'enabled', FLOFI_DEVELOPER_SECRET: process.env.FLOFI_E2E_DEVELOPER_SECRET!, FLOFI_DEVELOPER_WEBHOOK_LOOPBACK: 'ALLOW_LOCAL_ONLY',
   FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256: createHash('sha256').update(process.env.FLOFI_E2E_DEVELOPER_DISPATCH_TOKEN!).digest('hex'),
   GRYLOO_ROUTER_TESTNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_LENDING_HARNESS: 'MOCKED_LOOPBACK_ONLY' } : {};

@@ -51,8 +51,8 @@ it('applies only the certified 0033 on exact schema 32; refuses below 32; reruns
   expect(applied).toMatchObject({ code: 0, stderr: '' });
   expect(JSON.parse(applied.stdout)).toEqual({ tenantId: 'default', applied: [33] });
   expect(await purgeFunction()).toBe(1);
-  expect((await db.query('SELECT version, name, sha256 FROM schema_migrations WHERE version >= 29 ORDER BY version')).rows).toEqual(CERTIFICATE.migrations.map(m => ({ ...m })));
-  expect(CERTIFICATE.migrations.at(-1)).toEqual({ version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' });
+  expect((await db.query('SELECT version, name, sha256 FROM schema_migrations WHERE version >= 29 ORDER BY version')).rows).toEqual(CERTIFICATE.migrations.filter(m => m.version <= 33).map(m => ({ ...m })));
+  expect(CERTIFICATE.migrations.find(migration => migration.version === 33)).toEqual({ version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' });
 
   // A rerun, and every earlier operator command on schema 33, verifies the ledger and applies nothing; so does the ordinary deployment migration.
   expect(await run('workflow-run-purge-migrate')).toEqual({ applied: [] });

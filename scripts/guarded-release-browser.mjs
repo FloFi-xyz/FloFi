@@ -130,7 +130,7 @@ const definitions = [
   // BUILD-DEVELOPER-001: a third-party server integrates with the SDK alone (operator CLI key, strategy, approval, signed loopback
   // webhooks) and the end user reaches FloFi's Review, where MOCKED financial authority stays blocked (no wallet transaction), on the
   // same embedded loopback harness (no public network, no real transaction). The full lifecycle is proven by journey.pg.test.ts.
-  ['developer-journey', ['developer-journey.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  ['developer-journey', ['developer-journey.spec.ts'], { FLOFI_E2E_DEVELOPER_CONSOLE: '1', GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-MCP-002: consumer OAuth and in-chat approval on disposable loopback infrastructure.
   ['mcp-in-chat', ['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts', '--grep-invert', 'embedded wallet proof'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_MCP_OAUTH_ACCESS: 'open', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // Each invocation gets a fresh disposable database; keep the production OAuth registration rate limit intact.
@@ -307,7 +307,7 @@ for (const [index, name] of selection.entries()) {
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
     'FLOFI_FLIGHT_TEAM_E2E', 'FLOFI_FLIGHT_TEAM_CLOCK', 'FLOFI_FLIGHT_TEAM_ACCOUNTS', 'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS', 'FLOFI_E2E_NETWORK_SCOPE', 'FLOFI_NETWORK_SCOPE',
-    'FLOFI_USER_FUNDED_E2E', 'FLOFI_E2E_SINGLE_CARD', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL', 'FLOFI_ORCA_POSITIONS_E2E',
+    'FLOFI_USER_FUNDED_E2E', 'FLOFI_E2E_SINGLE_CARD', 'FLOFI_E2E_DEVELOPER_CONSOLE', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL', 'FLOFI_ORCA_POSITIONS_E2E',
     'GRYLOO_ORCA_MAINNET_JOURNAL',
     // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: local visual-evidence switches never reach a certifying profile.
     'FLOFI_UX_EVIDENCE_DIR', 'FLOFI_UX_EVIDENCE_LANG', 'FLOFI_UX_EVIDENCE_PREFIX']) delete env[key];

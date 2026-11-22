@@ -158,6 +158,7 @@ export function DeleteAccount({ state }: { state: AccountState }) {
   return <div className="workspace-inline-form" role="group" aria-label={t('Delete FloFi account')}>
     {confirming ? <>
       <p>{t('Delete your FloFi account? Your sign-in identities, sessions, saved wallet addresses and saved recipients are deleted from FloFi.')}{' '}
+        {t('Deleting your account also disables your developer projects and revokes their credentials.')}{' '}
         {t(managed ? 'Wallets created or imported in FloFi are not deleted: they stay with their provider and their funds are unchanged. Export them first if you want to keep using them elsewhere.'
           : 'Your wallets and their funds are not affected.')}{' '}
         {state.account?.privy ? t('Your sign-in and wallets at our wallet provider, Privy, are not deleted by this. To have Privy delete them too, export your wallets first, then ask FloFi (see Privacy).') : null}</p>

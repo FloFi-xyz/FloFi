@@ -46,7 +46,7 @@ const config: NextConfig = {
     // `script-src 'self'` policy no same-origin response that is not JavaScript can ever run as a script.
     const privyConnect = PRIVY_CONNECT_SOURCES.join(' ');
     return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: `connect-src 'self' ${privyConnect}` }, { key: 'X-Content-Type-Options', value: 'nosniff' }] },
-      { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive },
+      { source: '/developers/console', headers: sensitive }, { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive },
       // BUILD-FLOFI-AUTH-WALLETS-001: sign-in, wallet onboarding and Credentials (wallet import/export) are never framed by another site.
       // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: Sign-in methods (linking, duplicate-account move) too.
       ...['/login', '/onboarding', '/onboarding/:path*', '/app/credentials', '/account/sign-in-methods'].map(source => ({ source, headers: [{ key: 'X-Frame-Options', value: 'DENY' },

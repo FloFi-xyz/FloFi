@@ -364,3 +364,21 @@
   .tryBox{padding-left:20px;gap:10px}.tryText{font-size:17px}.tryButton{font-size:16px;padding:14px 18px}
 }
 @media (prefers-reduced-motion:reduce){.caret,.caretSmall{animation:none}}
+
+.console{padding-block:clamp(32px,6vw,80px);display:grid;gap:24px;min-height:55vh;overflow-wrap:anywhere}
+.console header{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap}
+.console h1,.console h2{margin:0}
+.console h1{font-size:clamp(32px,5vw,52px)}
+.console section{border:1px solid var(--line);border-radius:20px;padding:clamp(16px,3vw,30px);min-width:0}
+.console summary{width:fit-content;cursor:pointer;font-weight:600;margin-top:14px}
+.consoleList{padding:0;list-style:none;display:grid;gap:8px}
+.consoleList li{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;gap:8px 18px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.consoleList [aria-current="page"]{font-weight:700}
+.consoleForm{display:grid;gap:10px;justify-items:start;margin-block:12px;min-width:0}
+.consoleForm label:not(.consoleCheck){display:grid;gap:6px;width:min(100%,36rem)}
+.consoleForm input:not([type="checkbox"]):not([type="hidden"]){min-width:0;width:100%;font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px}
+.consoleForm fieldset{border:1px solid var(--line);border-radius:8px;min-width:0}
+.consoleCheck{display:flex;align-items:baseline;gap:8px}
+.consoleButtons{display:flex;gap:8px;flex-wrap:wrap;align-items:start}
+.consoleSecret{min-width:0;background:var(--soft);border:1px solid var(--line);padding:12px;border-radius:8px}
+.consoleSecret code{display:block;margin-bottom:10px}

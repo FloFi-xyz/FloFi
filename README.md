@@ -5,12 +5,12 @@
 <h1 align="center">FloFi</h1>
 
 <p align="center"><strong>Many ways in. One clear path.</strong><br />
-Tell FloFi what you want to do with your crypto. It turns your goal into a clear DeFi workflow that you review, approve and sign with your own wallet.</p>
+Describe a DeFi goal and execute it with your own wallet. Build DeFi workflows into your product with FloFi for Developers.</p>
 
 <p align="center">
   <a href="https://flofi.xyz"><strong>Open FloFi</strong></a> ·
   <a href="https://flofi.xyz/docs">Docs</a> ·
-  <a href="https://flofi.xyz/docs/developer-api">FloFi for Developers</a> ·
+  <a href="https://flofi.xyz/developers">FloFi for Developers</a> ·
   <a href="https://x.com/FloFi_xyz">X</a> ·
   <a href="https://discord.gg/36rEhdUa">Discord</a> ·
   <a href="https://www.linkedin.com/company/flofixyz/home/">LinkedIn</a>
@@ -24,29 +24,29 @@ Tell FloFi what you want to do with your crypto. It turns your goal into a clear
 
 ---
 
-## What is FloFi?
+## FloFi for users
 
-FloFi is a **non-custodial, multichain DeFi platform**. Instead of jumping between bridges, DEXs, lending apps and block explorers, you describe a goal — *“swap 50 USDC to ETH on Base”*, *“move my USDC to Arbitrum and supply it to Aave”* — and FloFi builds the workflow for you.
+FloFi is a non-custodial DeFi platform. Describe a goal in chat, such as swapping USDC to ETH on Base or bridging an asset and using it in a later step. FloFi turns your request into a workflow, simulates the supported steps and shows the financial review. You choose whether to sign with your own wallet and can follow the outcome in FloFi. The visual Canvas is optional.
 
-- **Ask in plain language.** FloFi's chat — assisted by its AI Copilot where a deployment enables it — turns your request into proposed steps and asks for anything that is missing. You accept or change them.
-- **Or build visually.** The optional canvas shows the same workflow as connected cards you can edit, reorder or delete.
-- **See it before you sign it.** FloFi simulates the supported path and shows a review of assets, amounts, limits, permissions and costs.
-- **You stay in control.** Your own wallet signs every transaction. FloFi never holds your keys, and an AI suggestion can never move funds.
-- **Follow it to the end.** FloFi tracks each step, helps you recover from an interrupted run and checks the result against what you approved.
+## FloFi for Developers
 
-## Why people use it
+Use FloFi as the workflow layer for a wallet, fintech, protocol, app or AI agent. Your backend defines the DeFi intent and sends the user to a hosted FloFi review. FloFi composes the workflow, works with the registered protocols, prompts the user's wallet and reconciles the outcome. Your integration can read the status and evidence the user chooses to share.
 
-| Without FloFi | With FloFi |
-| --- | --- |
-| Several apps, tabs and networks for one strategy | One workflow, from goal to result |
-| Guessing at routes, approvals and fees | A simulated preview and an itemized review before signing |
-| Token approvals you can't easily read | Every approval spelled out in review, with a clear warning if one has no spending cap |
-| Lost track when a bridge or step stalls | Step-by-step status, recovery and a reconciled outcome |
-| Copying addresses between chains | One account with your EVM and Solana wallets side by side |
+`Create Project → API Key → Build Workflow → Simulate → User Authorization → Execute → Results`
 
-## What you can do today
+The account-based Developer Console is release-gated. The existing Developer API sandbox is available to integrations on configured engineering deployments. Public self-service live keys and the external mainnet API journey are pending release. The hosted FloFi app supports mainnet and records confirmed and reconciled `PUBLIC_MAINNET` executions.
 
-FloFi is a **mainnet product** on five networks. It resolves every request by **action × network**: the paths below are implemented end to end in the app — author, quote, simulate, review, authorize, execute, reconcile and recover — and switched on in FloFi's hosted beta at [flofi.xyz](https://flofi.xyz).
+## How the workflow infrastructure works
+
+1. FloFi composes an intent into a versioned strategy and computes the canonical workflow hash.
+2. The shared capability registry and runtime check the requested actions, networks and protocols. Simulation previews the relevant flow.
+3. A hosted approval binds the exact strategy revision to an expiring request. The user sees networks, assets, amounts, permissions, providers and fees in a fresh review.
+4. The user's wallet authorizes the applicable transactions. Compatible steps can share a confirmation where the wallet and execution path support a batch. Other steps require separate confirmation.
+5. FloFi observes submissions, reconciles individual steps and records evidence with its actual provenance. The requester can receive results within the user's sharing choice.
+
+## Networks and operations
+
+FloFi Web resolves eligible actions and protocol paths on five mainnets. A deployment, an asset, a wallet or an unavailable provider can further limit the paths it offers. Check discovery and review for the action you plan to use.
 
 | Network | Swap | Bridge | Transfer | Lend & borrow | Add liquidity |
 | --- | --- | --- | --- | --- | --- |
@@ -60,62 +60,40 @@ FloFi is a **mainnet product** on five networks. It resolves every request by **
 
 **Multi-step workflows.** Chain eligible actions together, such as bridging and then swapping what arrived. Compatible steps can share a wallet confirmation when the wallet and network support a batch. Sequential flows present each applicable confirmation after the preceding step settles. A supported dependent step can spend what the previous step actually delivered within the reviewed limits.
 
-**Honest status.** These mainnet paths are live in beta but not yet certified: FloFi's recorded, reconciled executions so far are owner runs on test networks, and FloFi does not claim a security audit. Every run records its own evidence; see [Status & evidence](#status--evidence).
+## API, SDK, MCP and integrations
 
-## How it works
+- The **Developer API v1** provides capability discovery, strategies, read-only previews, hosted approvals, consented execution reads and signed webhooks. [API guide](https://flofi.xyz/docs/developer-api) · [OpenAPI and reference](docs/developer/API.md)
+- The **TypeScript SDK** wraps these endpoints for server-side integrations and verifies webhook signatures. Its versioned package can be built and packed from the repository. Registry publication is pending. [SDK](packages/developer-sdk/README.md) · [Webhooks](docs/developer/WEBHOOKS.md)
+- **MCP** gives OAuth-enabled clients access to FloFi workflows and approval handoffs. **Telegram** has channel-specific access. Availability follows each deployment's configuration. [MCP](docs/deploy/MCP.md) · [Telegram](docs/deploy/TELEGRAM.md)
 
+## Get started as a developer
+
+Open FloFi for Developers and use the Developer Console on a deployment where project management is enabled. The existing sandbox quickstart shows how to provision a key on a local engineering deployment and run a complete server integration. Store the API key exclusively in your backend's secret manager. [FloFi for Developers](https://flofi.xyz/developers) · [Developer Console source](apps/reference-dapp/src/app/developers/console/page.tsx) · [Quickstart](docs/developer/QUICKSTART.md)
+
+This Node.js example uses the SDK against a configured engineering deployment. Set `FLOFI_API_ORIGIN`, `FLOFI_API_KEY` and the test wallet's public `FLOFI_SIMULATION_SUBJECT` in your backend environment. The development subject is used only for the preview. Send `approvalUrl` to the user for wallet authorization and retain `approval.id` on the backend to fetch status.
+
+```ts
+import { FloFi } from '@defi-workflow-engine/developer-sdk';
+
+const flofi = new FloFi({
+  apiKey: process.env.FLOFI_API_KEY!,
+  baseUrl: process.env.FLOFI_API_ORIGIN!,
+});
+const { data } = await flofi.capabilities.list({ action: 'bridge' });
+const row = data.find(({ operations }) =>
+  operations.compose.available && operations.simulate.available && operations.approve.available
+);
+if (!row) throw new Error('Bridge unavailable on this deployment');
+
+const strategy = await flofi.strategies.create({ strategy: row.exampleStrategy });
+const validation = await flofi.strategies.validate(strategy.id);
+if (!validation.availability.approvable) throw new Error(validation.availability.reason ?? 'Review blocked');
+await flofi.strategies.simulate(strategy.id, { simulationSubject: process.env.FLOFI_SIMULATION_SUBJECT! });
+const approval = await flofi.approvals.create({ strategy });
+// Give approval.approvalUrl to the user. Retrieve status with flofi.approvals.get(approval.id).
 ```
- Sign in or connect   →   Describe or build   →   Review   →   Authorize   →   Track
-```
 
-1. **Sign in or connect a wallet.** Use your FloFi account, connect an existing wallet, or just explore the builder without an account.
-2. **Describe your goal or build it.** Type what you want on the start screen (*What do you want to do?*) or in the chat. Prefer cards? Open the visual builder. The canvas is optional — you never need it to use chat.
-3. **Review.** FloFi simulates the supported path and shows the Strategy Manifest: every asset, amount, limit, approval, recipient, route, provider fee and network fee. Changing anything after review requires a fresh simulation.
-4. **Authorize with your wallet.** You approve the reviewed workflow and your wallet signs each transaction. Connecting a wallet never authorizes anything by itself.
-5. **Track the result.** Follow progress step by step, check status if a confirmation is slow, recover an interrupted run, and find past workflows and their outcomes in your Dashboard.
-
-## Your account and wallets
-
-FloFi accounts give you one place for your workflows and wallets, without giving FloFi your keys.
-
-- **Sign in your way:** Apple, Google, email code or a Web3 wallet signature (EVM or Solana).
-- **Bring or create wallets:** connect wallets you already use, or create and import EVM and Solana wallets secured by [Turnkey](https://www.turnkey.com)'s non-custodial embedded wallets. Imports and exports happen inside Turnkey's own secure frames, never in FloFi's page.
-- **Manage them in Credentials → My wallets:** rename, remove, link and — after a recent sign-in and an explicit confirmation — export.
-- **No account required to look around:** the builder at `/app` stays open to everyone.
-
-> **Rolling out:** accounts and embedded wallets are new. Apple, Google, email and embedded wallets depend on provider configuration and live verification on each deployment; until a method is enabled, the sign-in screen shows it as unavailable. Embedded wallets do not sign FloFi transactions yet — you sign with a connected wallet.
-
-## Use FloFi where you already are
-
-| Surface | What it does | Availability |
-| --- | --- | --- |
-| **FloFi app** — [flofi.xyz](https://flofi.xyz) | Chat, visual builder, review, signing, dashboard | Live (beta) |
-| **AI assistants via MCP** — `https://flofi.xyz/api/mcp` | Connect an MCP client such as ChatGPT or Claude to plan, compose, validate and simulate strategies with FloFi; the assistant hands the approval back to you in FloFi | Endpoint live; assistants have no signing authority. Acceptance testing with ChatGPT and Claude is still in progress |
-| **Telegram** — [@FloFiAppBot](https://t.me/FloFiAppBot) | Compose a proposal in chat, then open it in FloFi to review and sign | Built; live activation pending acceptance testing |
-| **WhatsApp** | Same channel model as Telegram | Built; not activated (policy review) |
-
-Whatever the surface, the money moves only after you review in FloFi and sign with your own wallet. Saying *“yes”* or *“execute”* in a chat authorizes nothing.
-
-## Pricing
-
-FloFi's business model is a **0.1% fee on each completed workflow**, calculated on the workflow's input and due only when it completes — failed, refunded or mismatched runs are waived.
-
-**Today, FloFi does not charge or collect this fee.** For completed bridges through FloFi's cross-chain router, FloFi already calculates the 0.1% and records it, and the review screen says it is not collected on-chain yet; other workflows record no fee. How the fee will be settled is still an open decision. You pay only the network's gas and any protocol or provider fees, which are itemized in review before you sign.
-
-## FloFi for Developers
-
-Building a wallet, dapp, agent or fintech? FloFi can be the DeFi workflow layer behind your own experience.
-
-- **Developer API** (`/api/developer/v1`) — discover capabilities with an operator-issued sandbox key. Use a local engineering sandbox to create an immutable strategy, validate and preview it, and send the user an approval link. Project scopes and user consent govern access to execution status and evidence.
-- **TypeScript SDK** — a zero-dependency client in [`packages/developer-sdk`](packages/developer-sdk/README.md) (Apache-2.0; not yet published to npm).
-- **Webhooks** — signed notifications ([Standard Webhooks](https://www.standardwebhooks.com)) derived from durable workflow state.
-- **MCP and Telegram** — ChatGPT and Claude can connect over Streamable HTTP with OAuth and beta access. The official Telegram bot uses channel-specific access and hands eligible workflows off to FloFi.
-
-API keys are server-side credentials with **zero financial authority**: nothing they can call signs, submits or approves. The Developer API is enabled per deployment and currently issues **sandbox (test-funds) keys only**. Because FloFi's hosted product is mainnet-only, today you build and test an integration against a local engineering deployment; production keys are not issued yet.
-
-Start with the [Developer API docs](https://flofi.xyz/docs/developer-api), the [quickstart](docs/developer/QUICKSTART.md), the [API reference](docs/developer/API.md), [webhooks](docs/developer/WEBHOOKS.md) and the [MCP guide](docs/deploy/MCP.md).
-
-## Security
+## Security and authorization
 
 - **Non-custodial.** FloFi never stores your private keys or recovery phrase and never asks for them.
 - **Your wallet is the only authority.** AI proposals, chat messages, MCP tools and API keys cannot authorize or move funds.
@@ -125,16 +103,17 @@ Start with the [Developer API docs](https://flofi.xyz/docs/developer-api), the [
 
 Simulation is a preview, not a guarantee of price or outcome. Open-source code and automated tests are not a security audit, and FloFi does not claim one. Read the [security model](docs/SECURITY_MODEL.md) and the [authority matrix](docs/AUTHORITY_MATRIX.md).
 
-## Status & evidence
+The review itemizes network and provider fees. Collection of the planned FloFi fee on completed workflows remains deferred.
 
-FloFi is in active development and released as a beta. Capabilities can differ between deployments and are always resolved per action and network.
+## Repository architecture
 
-- [Current status](docs/STATUS.md) and [build reports](docs/builds) — what each release delivered and what it did not verify.
-- [Evidence levels](docs/EVIDENCE_LEVELS.md) — how FloFi labels proof, from mocked tests to recorded on-chain execution.
-
-**Built, switched on per deployment:** Automations — scheduled DCA, price triggers and daily market watches — that propose each occurrence for you to confirm and sign. Optional *automatic within limits* execution is built but stays blocked in production until a custody-grade signing service exists.
-
-**On the roadmap:** Tempo, more protocols, certified mainnet execution, production Developer API keys and settlement of the workflow fee.
+| Path | Responsibility |
+| --- | --- |
+| `apps/reference-dapp` | FloFi Web, accounts, approvals, Developer API, MCP, protocol/runtime adapters and operational services |
+| `packages/workflow-contracts` and `packages/action-registry` | Workflow types, validation contracts and registered capabilities |
+| `packages/reference-compiler`, `reference-linter`, `reference-executor` and `reference-reconciler` | Compilation, policy checks, execution and evidence verification |
+| `packages/cloud-runtime` | PostgreSQL state, migrations, leases and runtime persistence |
+| `packages/developer-sdk` | Typed server client and webhook verification |
 
 ## Documentation
 
@@ -148,7 +127,7 @@ FloFi is in active development and released as a beta. Capabilities can differ b
 | [Deployment guides](docs/deploy) | Operating a FloFi deployment |
 | [Engineering history](docs/builds/README-ENGINEERING-HISTORY.md) | The previous, build-oriented README |
 
-## Run FloFi locally (developers)
+### Run FloFi locally
 
 Requires **Node 24.21.0** and **pnpm 11.22.0** (pinned).
 
@@ -167,7 +146,7 @@ pnpm check                              # typecheck, lint, build, schema drift, 
 python3 scripts/governance_lite.py      # repository safety checks
 ```
 
-Browser, PostgreSQL and fork suites need extra local tooling; see the [CI workflow](.github/workflows/contracts.yml).
+Browser, PostgreSQL and fork suites need extra local tooling; see the [certification guide](docs/engineering/CI.md).
 
 ## Contributing
 

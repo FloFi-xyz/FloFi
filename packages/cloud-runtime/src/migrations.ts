@@ -94,8 +94,9 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
       { version: 30, name: 'finops_sync', sha256: '63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b' },
       { version: 31, name: 'position_history_purge', sha256: 'c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d' },
       { version: 32, name: 'single_step_runs', sha256: '1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c' },
-      { version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' }],
-    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#25-certificate-0033_workflow_run_purge',
+      { version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' },
+      { version: 34, name: 'developer_project_ownership', sha256: '7c698ed7779703abdd6110b39802aa0dad50c74798d6b1eb11a5e35bb4ea1485' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#26-certificate-0034_developer_project_ownership',
   },
   {
     // BUILD-FLOFI-UNIFIED-COPILOT-001 (Release A): the v27 build keeps working on a database with 0028 — one new table, flofi_account_recipients

@@ -49,6 +49,7 @@ export async function disableProject(deps: AdminDeps, projectId: string): Promis
   for (const environment of DEVELOPER_ENVIRONMENTS) {
     const requester = { kind: 'DEVELOPER_PROJECT' as const, ref: developerRequesterRef(projectId, environment) };
     for (const h of await deps.handoffs.listForRequester(requester, now, 1_000)) {
+      if (h.status === 'REVOKED' && disabled && h.endedAt?.getTime() === now.getTime()) revokedApprovals++;
       if (h.status !== 'PENDING' && h.status !== 'CLAIMED') continue;
       if ((await deps.handoffs.revokeForRequester(h.handoffId, requester, now))?.status === 'REVOKED') revokedApprovals++;
     }

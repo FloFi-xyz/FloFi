@@ -156,6 +156,7 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
     'Você não poderá mais entrar com esta carteira, a menos que seja sua única forma de entrar.',
   '{0} linked to your FloFi account. It is also your active wallet in FloFi now.': '{0} vinculada à sua conta FloFi. Agora ela também é sua carteira ativa no FloFi.',
   'Delete FloFi account': 'Excluir conta FloFi', 'Delete account': 'Excluir conta',
+  'Deleting your account also disables your developer projects and revokes their credentials.': 'Excluir sua conta também desativa seus projetos de desenvolvimento e revoga as credenciais deles.',
   'Delete your FloFi account? Your sign-in identities, sessions, saved wallet addresses and saved recipients are deleted from FloFi.':
     'Excluir sua conta FloFi? Suas identidades de login, sessões, endereços de carteira salvos e destinatários salvos são excluídos do FloFi.',
   'Wallets created or imported with Turnkey are not deleted and FloFi can no longer show or export them: export them first if you want to keep using them.':

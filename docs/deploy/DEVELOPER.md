@@ -38,8 +38,8 @@ Check after a redeploy: `GET https://<deployment>/api/developer/v1/capabilities`
 
 ## 3. Projects and keys (operator CLI)
 
-There is no self-service portal. The operator manages projects and sandbox keys with a CLI that runs on plain Node 24 against the
-deployment's database:
+The operator manages legacy projects and sandbox keys with a CLI that runs on plain Node 24 against the deployment's database.
+For account-owned projects, see [Account-owned Developer Console](#account-owned-developer-console).
 
 ```bash
 export DATABASE_URL='postgres://…'            # the deployment's database
@@ -112,3 +112,25 @@ simulations, approvals, reconciled executions, webhook deliveries). There is no 
   the flows' owner-execution switches and the owner's legal review.
 - **Evidence honesty:** on a deployment whose flows run against MOCKED harnesses, every developer-facing fact says so
   (`mockedHarness`, `provenance: MOCKED`, evidence `MOCKED`).
+
+## Account-owned Developer Console
+
+Deploy the build carrying the [0034 schema certificate](SCHEMA-COMPATIBILITY.md#26-certificate-0034_developer_project_ownership)
+to every database consumer before the operator applies 0034. Verify the runtime
+role can access the new ownership relation and run the credential, endpoint and
+handoff shutdown statements. Set `FLOFI_DEVELOPER_CONSOLE=enabled` on the web
+deployment alongside the Developer API and FloFi accounts. From
+`/developers/console`, a signed-in FloFi account can create and manage its
+projects. Legacy operator-managed projects stay on the existing CLI path.
+
+On a disposable local database with 0034 applied, set
+`FLOFI_DEVELOPER_CONSOLE_TEST_KEYS=ALLOW_LOCAL_ONLY` and use an HTTP loopback
+`FLOFI_PUBLIC_ORIGIN` to exercise key issuance and rotation through the console.
+Use `FLOFI_NETWORK_SCOPE=ENGINEERING_TESTNETS` for the existing test-funds
+strategy quickstart. This test configuration is unavailable on hosted deployments.
+
+Disabling a project revokes its keys, open approvals, endpoints and pending
+deliveries. A delivery already in flight can complete. Account deletion also
+removes the project association and its description. The project ID and existing
+workflow records remain available for reconciliation. For operational rollback,
+turn off the console and retain a build certified for the installed schema.
