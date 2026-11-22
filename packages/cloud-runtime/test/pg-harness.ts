@@ -6,7 +6,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { CERTIFIED_FORWARD_MIGRATIONS, createDatabase, loadMigrations, migrate, SHIPPED_MIGRATIONS, type Database, type Migration } from '../src/index.js';
+import { CERTIFIED_FORWARD_MIGRATIONS, createDatabase, forwardMigrationSqlUrl, loadMigrations, migrate, SHIPPED_MIGRATIONS, type Database, type Migration } from '../src/index.js';
 
 /**
  * Release certification only (BUILD-CHAT-E2E-001), never set in CI: FLOFI_TEST_CERTIFIED_AHEAD=1 migrates every test database one certified
@@ -17,8 +17,9 @@ async function certifiedAhead(): Promise<readonly Migration[]> {
   const head = JSON.stringify(SHIPPED_MIGRATIONS.at(-1));
   const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => JSON.stringify(c.base) === head);
   if (!certificate) throw new Error('NO_CERTIFIED_FORWARD_MIGRATION');
-  const ahead = await Promise.all(certificate.migrations.map(async ({ version, name, sha256 }) => {
-    const sql = await readFile(new URL(`./fixtures/${String(version).padStart(4, '0')}_${name}.sql`, import.meta.url), 'utf8');
+  const ahead = await Promise.all(certificate.migrations.map(async identity => {
+    const { version, name, sha256 } = identity;
+    const sql = await readFile(forwardMigrationSqlUrl(identity), 'utf8');
     if (createHash('sha256').update(sql).digest('hex') !== sha256) throw new Error('CERTIFIED_FIXTURE_MISMATCH');
     return { version, name, sql, sha256 };
   }));

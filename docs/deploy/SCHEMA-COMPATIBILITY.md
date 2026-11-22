@@ -28,8 +28,8 @@ identity — in a reviewed **forward-compatibility certificate** that the build 
 * **Error codes are unchanged** (`SCHEMA_NOT_MIGRATED`, `MIGRATION_HISTORY_MISMATCH`), so readiness, the web's classified errors and
   every client keep their existing behavior. `MIGRATION_CERTIFICATE_INVALID` only appears for a malformed manifest, which the unit
   suite rejects before a build exists.
-* **No migration during a user request.** Applications only read the ledger; migrations run only through `main.ts migrate` (Railway
-  pre-deploy, the opt-in Vercel Preview build step).
+* **Migration entry points.** Applications read the ledger on user requests. Railway pre-deploy and the opt-in Vercel Preview step
+  run `main.ts migrate`. Optional migrations have explicit operator commands.
 * `assertSchemaCurrent` (strict, exact) is unchanged and still exported; no production path uses it any more.
 
 Where the check runs:
@@ -67,8 +67,8 @@ Rules, enforced by `packages/cloud-runtime/test/forward-compatibility.test.ts`:
 
 * the base is a migration this repository shipped, byte for byte; at most one certificate per base; newer migrations are contiguous
   from `base.version + 1`, with valid names and SHA-256s; the `assessment` anchor exists;
-* until a certified migration ships, its exact SQL is a test fixture (`packages/cloud-runtime/test/fixtures/NNNN_name.sql`) whose
-  SHA-256 equals the certificate, so the PostgreSQL suites prove the certificate on the real bytes;
+* the PostgreSQL suites use the exact SQL pinned by the certificate. The published forward migrations through 0034 use
+  `packages/cloud-runtime/test/fixtures`. Optional migrations from 0035 use `packages/cloud-runtime/optional-migrations`;
 * once it ships, the shipped identity must equal the certified one — otherwise every build deployed with that certificate would refuse
   the database the moment the migration is applied;
 * certificates are never removed: they are the record of what earlier releases were told to accept.
@@ -83,8 +83,8 @@ never assessed against it. The only thing an old binary can verify is an identit
 1. Write the migration so the previous build's code keeps its meaning: expand only (new tables/columns with defaults, new indexes,
    new triggers on new tables). Never drop, rename, re-type, tighten a constraint the previous build writes against, add a trigger
    or rule to a table it writes, or rewrite data it reads. Bound its locks (`SET LOCAL lock_timeout`), as 0012 does.
-2. Freeze its bytes. Add its SQL as `packages/cloud-runtime/test/fixtures/NNNN_name.sql` and a certificate whose `base` is the
-   current newest shipped migration — in a release that ships **before** the migration (Release A).
+2. Freeze its bytes and record the SQL in the applicable forward-migration directory. Pin it in a certificate whose `base` is the
+   current newest shipped migration. Ship the certificate **before** applying the migration (Release A).
 3. Assess it against the previous build, in a section of this document: every object it creates or changes, every query/write of the
    previous build that touches what it changes, the locks it holds and what waits for them. Extend
    `forward-compatibility.pg.test.ts` with its catalog diff (nothing removed or redefined; additions listed) and lock list.
@@ -1197,3 +1197,20 @@ owner's `developer-projects-migrate` admin command requires schema 33 and
 applies only 0034. Earlier binaries without the extended certificate refuse
 schema 34. Leave the console release control off until the schema and account
 configuration are verified. The migration does not enable live keys.
+
+## 27. Certificate 0035_studio_integrations
+
+0035 follows 0034 and adds Studio proposal versions, evidence and events.
+Both tables are scoped to a tenant and a project ownership record. Account
+deletion cascades to Studio versions and events. Studio application events are
+appended with each state change and share its transaction. The shipped schema
+remains 28. The exact SQL is in `packages/cloud-runtime/optional-migrations`.
+
+Deploy a build with the 0035 certificate to every consumer of the database
+before the owner authorizes `studio-migrate`. Rehearse on a dedicated Neon
+preview and verify that the runtime role can read the new tables, write versions
+and append events under the migration role's default grants. On schema 34 the
+Developer Console remains available and shows Studio as unavailable. The
+operator command requires 34 and is repeatable. After 0035, any rollback binary
+must recognize its exact identity. The previous schema-34 build refuses 0035.
+The migration records proposals and evidence according to project ownership.

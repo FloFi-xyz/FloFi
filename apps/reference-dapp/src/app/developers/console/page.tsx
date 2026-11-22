@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { SessionGuard } from '../../../components/account/session-guard';
 import { ConsoleForm, DeveloperPlayground } from '../../../components/site/developer-console';
+import { DeveloperStudio } from '../../../components/site/developer-studio';
 import { projectCopy } from '../../../components/site/site-copy';
 import { SiteShell } from '../../../components/site/site-shell';
 import { siteLanguage } from '../../../components/site/site-language';
 import styles from '../../../components/site/site.module.css';
 import { DEVELOPER_CONSOLE_PATH, developerConsoleHost } from '../../../server/developer-console-host';
 import { DEVELOPER_SCOPES } from '../../../developer/config';
+import { createStudioStore, studioInstalled } from '../../../studio/integration-store';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'FloFi Developer Console', robots: { index: false, follow: false }, referrer: 'no-referrer' };
@@ -26,6 +28,11 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
     id ? host.store.details(id) : null,
     id ? host.store.activity(id, new Date()) : [],
   ]) : [[], null, []] as const;
+  const studio = selected && host.status === 'signed-in'
+    ? await (async () => await studioInstalled(host.db)
+      ? createStudioStore(host.db, host.tenantId, host.session.accountId).list(selected.id)
+      : null)().catch(() => null)
+    : null;
   const locale = language === 'PT' ? 'pt-BR' : 'en';
   return <SiteShell language={language} page="developers" skipTo="developer-console">
     <SessionGuard/>
@@ -97,6 +104,7 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
               </li>)}</ul>
             </>}
           </details>
+          <DeveloperStudio language={language} projectId={selected.id} active={selected.status === 'ACTIVE'} versions={studio} now={new Date().toISOString()}/>
           {selected.status === 'ACTIVE' && <DeveloperPlayground language={language} projectId={selected.id}/>}
         </section>}
       </>}

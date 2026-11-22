@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, schemaCompatibility, schemaCompatibilityState, SHIPPED_MIGRATIONS, type Database,
+import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, forwardMigrationSqlUrl, schemaCompatibility, schemaCompatibilityState, SHIPPED_MIGRATIONS, type Database,
   type ForwardCompatibilityCertificate, type MigrationIdentity } from '../src/index.js';
 import * as baseline from './baseline/migrations-fa7816b.js';
 
@@ -37,9 +37,9 @@ describe('BUILD-DB-COMPAT-001 forward-compatibility manifest', () => {
         // that certificate would refuse the database the moment it is applied.
         if (m.version <= SHIPPED_MIGRATIONS.length) expect(SHIPPED_MIGRATIONS[m.version - 1]).toEqual(m);
       });
-      // Until it ships, a certified migration's exact SQL is a test fixture, so the PostgreSQL suites prove the certificate on the real bytes.
+      // Until it ships, the exact SQL is stored with the certificate, so the PostgreSQL suites prove the certificate on the real bytes.
       for (const m of certificate.migrations.filter(m => m.version > SHIPPED_MIGRATIONS.length)) {
-        const fixture = new URL(`./fixtures/${String(m.version).padStart(4, '0')}_${m.name}.sql`, import.meta.url);
+        const fixture = forwardMigrationSqlUrl(m);
         expect(sha256(await readFile(fixture, 'utf8'))).toBe(m.sha256);
       }
       // The reviewed assessment exists where the certificate says.
@@ -135,14 +135,13 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
       // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): extended again with 0033, the owner's guarded purge of an attempt that
       // provably never reached a chain (certificate-0033.pg.test.ts).
       { version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' },
-      { version: 34, name: 'developer_project_ownership', sha256: '7c698ed7779703abdd6110b39802aa0dad50c74798d6b1eb11a5e35bb4ea1485' }]);
+      { version: 34, name: 'developer_project_ownership', sha256: '7c698ed7779703abdd6110b39802aa0dad50c74798d6b1eb11a5e35bb4ea1485' },
+      { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' }]);
   });
   it('classifies each FinOps-era certificate prefix and keeps the legacy refusal messages', async () => {
     const shipped = SHIPPED_MIGRATIONS.slice(0, 28);
     const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
-    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (intentional): the v28 certificate now also names 0032 `single_step_runs` and 0033
-    // `workflow_run_purge`, so the uncertified example below moved from version 32 to 33 and then to 34. Every prefix is still classified.
-    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32, 33, 34]);
+    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32, 33, 34, 35]);
     expect(schemaCompatibilityState(shipped, shipped)).toBe('exact');
     for (const [index, migration] of certificate.migrations.entries()) {
       const ahead = [...shipped, ...certificate.migrations.slice(0, index + 1)];
@@ -153,7 +152,7 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
     const last = ahead.at(-1)!;
     const cases = [
       { ledger: shipped.slice(0, -1), state: 'behind', message: 'SCHEMA_NOT_MIGRATED' },
-      { ledger: [...ahead, { version: 35, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [...ahead, { version: 36, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...ahead.slice(0, -1), edit(last, { sha256: 'a'.repeat(64) })], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [edit(shipped[0]!, { name: 'edited' }), ...ahead.slice(1)], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...shipped, last], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },

@@ -85,7 +85,7 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: certificate for 0031 position_his
     // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 extended this same base-28 certificate with 0032 and 0033 (proven by certificate-0032.pg.test.ts
     // and certificate-0033.pg.test.ts); 0029–0031 keep their exact identities and order.
     expect(CERTIFICATE.migrations.map(m => [m.version, m.name])).toEqual([[29, 'finops_ledger'], [30, 'finops_sync'], [31, 'position_history_purge'],
-      [32, 'single_step_runs'], [33, 'workflow_run_purge'], [34, 'developer_project_ownership']]);
+      [32, 'single_step_runs'], [33, 'workflow_run_purge'], [34, 'developer_project_ownership'], [35, 'studio_integrations']]);
     expect((await fixture(31)).sha256).toBe('c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d');
     expect(SHIPPED_MIGRATIONS.find(m => m.version === 16)!.sha256).toBe('a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f');
     expect(sha(await readFile(new URL('../migrations/0016_owner_history_purge.sql', import.meta.url), 'utf8'))).toBe(SHIPPED_MIGRATIONS[15]!.sha256);

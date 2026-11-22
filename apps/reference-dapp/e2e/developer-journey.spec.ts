@@ -164,7 +164,7 @@ test('a FloFi account creates an isolated project and rotates a server credentia
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
   try {
     for (const command of ['finops-migrate', 'finops-sync-migrate', 'position-purge-migrate', 'single-step-runs-migrate',
-      'workflow-run-purge-migrate', 'developer-projects-migrate'] as const) await runAdminCommand(command, {}, db, 'default');
+      'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate'] as const) await runAdminCommand(command, {}, db, 'default');
   } finally { await db.close(); }
 
   const { context, unexpected } = await guardedContext(browser);
@@ -185,6 +185,35 @@ test('a FloFi account creates an isolated project and rotates a server credentia
     await expect(page).toHaveURL(/\/developers\/console\?project=prj_[a-z2-7]{26}$/);
     const projectUrl = page.url();
     await expect(page.getByRole('heading', { name: 'Portfolio integration' })).toBeVisible();
+
+    const studio = page.getByRole('region', { name: 'FloFi Studio' });
+    await expect(studio.getByRole('heading', { name: 'My integrations' })).toBeVisible();
+    await studio.getByRole('textbox', { name: 'Integration name' }).fill('HyperEVM');
+    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('hyperevm');
+    await studio.getByRole('button', { name: 'Save draft' }).click();
+    const network = studio.getByRole('article').filter({ has: page.getByRole('heading', { name: 'HyperEVM', exact: true }) });
+    await expect(network).toContainText('Version 1 · Certification status Draft');
+    await expect(network.getByRole('button', { name: 'Verify' })).toBeVisible();
+    await expect(network.getByRole('button', { name: 'Submit for certification' })).toHaveCount(0);
+    await studio.getByText('New integration', { exact: true }).click();
+    await studio.getByRole('textbox', { name: 'Integration name' }).fill('Duplicate HyperEVM');
+    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('hyperevm');
+    await studio.getByRole('button', { name: 'Save draft' }).click();
+    await expect(studio.getByRole('alert')).toHaveText('This slug is already used in the project.');
+    await expect(studio.getByRole('textbox', { name: 'Integration name' })).toHaveValue('Duplicate HyperEVM');
+    await expect(studio.getByRole('textbox', { name: 'Integration slug' })).toHaveValue('hyperevm');
+    await studio.getByLabel('Integration category').selectOption('vault');
+    await studio.getByRole('button', { name: 'Use Savings Dai configuration' }).click();
+    await studio.getByRole('textbox', { name: 'Integration name' }).fill('Savings Dai');
+    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('savings-dai');
+    await studio.getByRole('button', { name: 'Save draft' }).click();
+    await expect(studio.getByRole('heading', { name: 'Savings Dai' })).toBeVisible();
+    await chooseLanguage(context, 'PT');
+    await page.reload();
+    await expect(studio.getByRole('heading', { name: 'Minhas integrações' })).toBeVisible();
+    await expect(network).toContainText('Versão 1 · Status da certificação Rascunho');
+    await chooseLanguage(context, 'EN');
+    await page.reload();
 
     await page.getByText('Generate key (sandbox)', { exact: true }).click();
     await page.getByRole('checkbox', { name: 'strategies' }).check();
@@ -223,6 +252,7 @@ test('a FloFi account creates an isolated project and rotates a server credentia
     await other.goto(projectUrl);
     await expect(other.getByText('Project not found.')).toBeVisible();
     await expect(other.getByRole('heading', { name: 'Portfolio integration' })).toHaveCount(0);
+    await expect(other.getByRole('region', { name: 'FloFi Studio' })).toHaveCount(0);
     expect(unexpected).toEqual([]);
   } finally { await context.close(); }
 });
