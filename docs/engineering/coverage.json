@@ -1901,6 +1901,18 @@
     "app.backend.owner-history.pg": {
       "path": "apps/reference-dapp/backend/owner-history.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.studio.integration-probe": {
+      "path": "apps/reference-dapp/src/studio/integration-probe.test.ts",
+      "stage": "unit"
+    },
+    "app.studio.integration-store.pg": {
+      "path": "apps/reference-dapp/src/studio/integration-store.pg.test.ts",
+      "stage": "postgres"
+    },
+    "e2e.developer-journey": {
+      "path": "apps/reference-dapp/e2e/developer-journey.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -2084,7 +2096,8 @@
     "app.editor.single-card-strategy",
     "app.components.editor-workflow-run-single-card",
     "app.user-funded.decline-proof",
-    "app.state.router-store"
+    "app.state.router-store",
+    "app.studio.integration-probe"
   ],
   "modules": [
     {
@@ -9011,6 +9024,34 @@
         "Legacy reason/note text written inline before migration 0027 stays in the append-only audit table; removing it needs a separately approved phase.",
         "Database backups (Neon point-in-time recovery) keep deleted text and destroyed keys until their window passes."
       ]
+    },
+    {
+      "id": "studio--developers",
+      "primary": "flofi-developers",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-protocol-integrations",
+        "flofi-security"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/app/studio-integration-action.ts",
+        "apps/reference-dapp/src/components/site/developer-studio.tsx",
+        "apps/reference-dapp/src/studio/integration-manifest.ts",
+        "apps/reference-dapp/src/studio/integration-probe.ts",
+        "apps/reference-dapp/src/studio/integration-store.ts",
+        "packages/cloud-runtime/optional-migrations/0035_studio_integrations.sql"
+      ],
+      "suites": [
+        "app.studio.integration-probe",
+        "app.studio.integration-store.pg",
+        "e2e.developer-journey"
+      ],
+      "gaps": [
+        "Mainnet read evidence is collected separately from closed browser and unit suites.",
+        "HyperEVM transfer, vault writes, financial certification and publication require canonical runtime support and signed acceptance."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -9085,6 +9126,7 @@
     "cloud-runtime.certificate-0033.pg",
     "app.backend.workflow-run-purge-migrate.pg",
     "cloud-runtime.list-runs-single-card.pg",
-    "app.backend.owner-history.pg"
+    "app.backend.owner-history.pg",
+    "app.studio.integration-store.pg"
   ]
 }

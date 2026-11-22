@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, createDatabase, createFilesystemEvidenceStore, createHttpServer, createLogger,
+import { assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, forwardMigrationSqlUrl, createDatabase, createFilesystemEvidenceStore, createHttpServer, createLogger,
   createPostgresWorkQueue, createWorker, loadMigrations, migrate, SHIPPED_MIGRATIONS, sweep, type Database, type Migration, type Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createRobinhoodTransferChain, TRANSFER_OWNER as owner } from '../e2e/robinhood-transfer-harness.mjs';
@@ -61,7 +61,7 @@ beforeAll(async () => {
   if (!CERTIFICATE) return;
   THIS = await loadMigrations();
   const certified = await Promise.all(CERTIFICATE.migrations.map(async m => {
-    const sql = await readFile(new URL(`../../../packages/cloud-runtime/test/fixtures/${String(m.version).padStart(4, '0')}_${m.name}.sql`, import.meta.url), 'utf8');
+    const sql = await readFile(forwardMigrationSqlUrl(m), 'utf8');
     if (createHash('sha256').update(sql).digest('hex') !== m.sha256) throw new Error('CERTIFIED_FIXTURE_MISMATCH');
     return { ...m, sql };
   }));

@@ -2,11 +2,12 @@
 /** BUILD-ADMIN-001: the operator CLI's commands (`backend/admin-cli.ts`), importable by tests without starting the process. */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { CERTIFIED_FORWARD_MIGRATIONS, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
+import { CERTIFIED_FORWARD_MIGRATIONS, forwardMigrationSqlUrl, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { indexRunFacts } from './analytics/indexer.ts';
 import { historicalReconciliation } from './support/historical-reconciliation.ts';
 import { supportPrivacyConfig } from './support/privacy.ts';
 import { createAdminStore, type AdminRole } from './store.ts';
+import { studioInstalled, studioReviewQueue } from '../studio/integration-store.ts';
 import { activateRetention, applyRetention, completePrivacyRequest, decidePrivacyRequest, openPrivacyRequest, placeLegalHold, privacyAccess, privacyErase,
   releaseLegalHold, REQUEST_KINDS, RETENTION_POLICIES, retentionReport, revokeRetention, walletSubject, type RequestKind, type RetentionPolicy } from './privacy-ops.ts';
 
@@ -17,7 +18,7 @@ import { activateRetention, applyRetention, completePrivacyRequest, decidePrivac
  */
 export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit', 'index', 'retention-report', 'retention-activate', 'retention-revoke', 'retention-apply',
   'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate', 'position-purge-migrate',
-  'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'reconcile-history'] as const;
+  'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate', 'studio-queue', 'reconcile-history'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -54,16 +55,22 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'audit': return { events: await store.recentAudit(limitOf(flag('limit'), 50, 200)) };
     // Reads run logs and writes only the derived analytics cache; never touches an execution.
     case 'index': return { index: await indexRunFacts(db, tenantId, { limit: limitOf(flag('limit'), 2_000, 50_000), budgetMs: 10 * 60_000 }) };
+    case 'studio-queue': {
+      if (!await studioInstalled(db)) throw new Error('STUDIO_REQUIRES_SCHEMA_35');
+      return { pending: await studioReviewQueue(db, tenantId, limitOf(flag('limit'), 50, 200), io.now()) };
+    }
     case 'finops-migrate':
     case 'finops-sync-migrate':
     case 'position-purge-migrate':
     case 'single-step-runs-migrate':
     case 'workflow-run-purge-migrate':
-    case 'developer-projects-migrate': {
+    case 'developer-projects-migrate':
+    case 'studio-migrate': {
       const activateSync = command === 'finops-sync-migrate', positionPurge = command === 'position-purge-migrate', singleStep = command === 'single-step-runs-migrate';
       const runPurge = command === 'workflow-run-purge-migrate';
       const projects = command === 'developer-projects-migrate';
-      const count = projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
+      const studio = command === 'studio-migrate';
+      const count = studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
       const target = await db.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1');
       if (activateSync && (target.rows[0]?.version ?? 0) < 29) throw new Error('FINOPS_LEDGER_NOT_MIGRATED');
       // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: 0031 follows the optional FinOps 0029/0030, which keep their own owner-run procedures; this
@@ -76,21 +83,21 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       // this command never applies them implicitly. On exact schema 32 it applies only the certified 0033; on 33 a rerun applies nothing.
       if (runPurge && (target.rows[0]?.version ?? 0) < 32) throw new Error('WORKFLOW_RUN_PURGE_REQUIRES_SCHEMA_32');
       if (projects && (target.rows[0]?.version ?? 0) < 33) throw new Error('DEVELOPER_PROJECTS_REQUIRES_SCHEMA_33');
+      if (studio && (target.rows[0]?.version ?? 0) < 34) throw new Error('STUDIO_REQUIRES_SCHEMA_34');
       const migrations = await loadMigrations();
       // A command whose last migration is already applied verifies a newer certified schema against the shipped history (and the base-28
       // certificate) and leaves it alone: e.g. `finops-sync-migrate` on schema 31, or `single-step-runs-migrate` on schema 33.
       if ((target.rows[0]?.version ?? 0) > 28 + count) return { applied: await migrate(db, migrations) };
       const identities = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.slice(0, count);
       if (identities?.length !== count || (singleStep && identities[3]?.name !== 'single_step_runs') || (runPurge && identities[4]?.name !== 'workflow_run_purge')
-        || (projects && identities[5]?.name !== 'developer_project_ownership'))
-        throw new Error(projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
+        || (projects && identities[5]?.name !== 'developer_project_ownership') || (studio && identities[6]?.name !== 'studio_integrations'))
+        throw new Error(studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
           : positionPurge ? 'POSITION_PURGE_MIGRATION_NOT_CERTIFIED' : 'FINOPS_MIGRATION_NOT_CERTIFIED');
       // A later release that ships 0029/0030 in its own migration list applies them as ordinary migrations; never twice.
       const migrationsToApply = await Promise.all(identities.filter(identity => !migrations.some(shipped => shipped.version === identity.version)).map(async identity => {
-        const filename = String(identity.version).padStart(4, '0') + '_' + identity.name + '.sql';
-        const sql = await readFile(new URL('../../../../packages/cloud-runtime/test/fixtures/' + filename, import.meta.url), 'utf8');
+        const sql = await readFile(forwardMigrationSqlUrl(identity), 'utf8');
         if (createHash('sha256').update(sql).digest('hex') !== identity.sha256)
-          throw new Error(identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
+          throw new Error(identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
             : identity.version === 31 ? 'POSITION_PURGE_MIGRATION_DIGEST_MISMATCH' : 'FINOPS_MIGRATION_DIGEST_MISMATCH');
         return { ...identity, sql };
       }));

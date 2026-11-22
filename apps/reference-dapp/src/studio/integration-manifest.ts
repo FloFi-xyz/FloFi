@@ -1,71 +1,86 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** FloFi Studio proposal schema. A manifest NEVER grants capability or financial authority. */
+import { isChecksumAddress } from '@defi-workflow-engine/action-registry';
+
+/** A proposal declares configuration and intent. The execution registry owns financial capabilities. */
 export type StudioKind = 'network' | 'vault' | 'staking' | 'cex';
 type Base = { readonly schemaVersion: 1; readonly slug: string; readonly name: string };
-export type NetworkIntegration = Base & { readonly kind: 'network'; readonly chainRef: string;
-  readonly rpcUrl: string; readonly nativeSymbol: string; readonly explorerUrl: string };
+export type NetworkIntegration = Base & { readonly kind: 'network'; readonly chainRef: string };
 export type VaultIntegration = Base & { readonly kind: 'vault'; readonly standard: 'ERC-4626';
   readonly chainRef: string; readonly contractAddress: string; readonly underlyingAsset: string };
 export type StakingIntegration = Base & { readonly kind: 'staking'; readonly protocol: string;
   readonly chainRef: string; readonly contractAddress: string };
 export type CexIntegration = Base & { readonly kind: 'cex'; readonly provider: string;
-  readonly access: 'user-scoped'; readonly operations: readonly ('balances' | 'trades')[] };
+  readonly access: 'user-scoped'; readonly withdrawals: false };
 export type StudioIntegration = NetworkIntegration | VaultIntegration | StakingIntegration | CexIntegration;
+
+export interface StakingReadConnector {
+  readPosition(manifest: StakingIntegration, walletAddress: string): Promise<readonly {
+    readonly asset: string; readonly stakedBaseUnits: string; readonly claimableBaseUnits: string;
+  }[]>;
+}
+
+/** A future credential broker resolves the opaque connection within this account and grants balances-read access. */
+export interface CexReadConnector {
+  readBalances(manifest: CexIntegration, scope: {
+    readonly tenantId: string; readonly accountId: string; readonly connectionId: string;
+  }): Promise<readonly { readonly asset: string; readonly available: string; readonly locked: string }[]>;
+}
 
 const SLUG = /^[a-z][a-z0-9-]{1,49}$/;
 const CAIP_EVM = /^eip155:[1-9][0-9]{0,9}$/;
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-const SYMBOL = /^[A-Z][A-Z0-9]{1,11}$/;
-const LABEL = /^[A-Za-z0-9][A-Za-z0-9 .()_-]{1,79}$/;
-const fail = (): never => { throw new Error('STUDIO_MANIFEST_INVALID'); };
-const record = (v: unknown): Record<string, unknown> =>
-  v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail();
-const exact = (v: Record<string, unknown>, allowed: readonly string[]) => {
-  if (Object.keys(v).some(key => !allowed.includes(key)) || allowed.some(key => !(key in v))) fail();
-};
-const str = (v: unknown, pattern: RegExp): string =>
-  typeof v === 'string' && pattern.test(v) ? v : fail();
-const url = (v: unknown): string => {
-  if (typeof v !== 'string' || v.length > 240) return fail();
-  let parsed: URL;
-  try { parsed = new URL(v); } catch { return fail(); }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || parsed.search ||
-    parsed.port || parsed.href !== v || parsed.hostname.endsWith('.')) return fail();
-  return v;
-};
-const baseKeys = ['schemaVersion', 'kind', 'slug', 'name'];
-const chain = (v: unknown): string => str(v, CAIP_EVM);
-const address = (v: unknown): string => str(v, EVM_ADDRESS);
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const LABEL = /^[\p{L}\p{N}][\p{L}\p{N} .()_-]{1,79}$/u;
+const BASE_KEYS = ['schemaVersion', 'kind', 'slug', 'name'];
+const invalid = (): never => { throw new Error('STUDIO_MANIFEST_INVALID'); };
 
-/** Strict, versioned, closed schema; no keys, headers, URL credentials or execution metadata. */
+function fields(input: Record<string, unknown>, extra: readonly string[]) {
+  const keys = [...BASE_KEYS, ...extra];
+  if (Object.keys(input).length !== keys.length || keys.some(key => !Object.hasOwn(input, key))) invalid();
+}
+
+const text = (value: unknown, pattern: RegExp) => typeof value === 'string' && pattern.test(value) ? value : invalid();
+const chain = (value: unknown) => text(value, CAIP_EVM);
+function address(value: unknown) {
+  const raw = text(value, ADDRESS), body = raw.slice(2);
+  const normalized = raw.toLowerCase();
+  if (body !== body.toLowerCase() && body !== body.toUpperCase() && !isChecksumAddress(raw)) return invalid();
+  if (/^0x0{40}$/.test(normalized)) return invalid();
+  return normalized;
+}
+
+/** Closed manifest version with no caller-selected RPC endpoints, credentials or execution metadata. */
 export function parseStudioIntegration(input: unknown): StudioIntegration {
-  const v = record(input);
-  if (v.schemaVersion !== 1) fail();
-  const slug = str(v.slug, SLUG), name = str(v.name, LABEL);
-  const common = { schemaVersion: 1 as const, slug, name };
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid();
+  const v = input as Record<string, unknown>;
+  if (v.schemaVersion !== 1) return invalid();
+  const common = { schemaVersion: 1 as const, slug: text(v.slug, SLUG), name: text(v.name, LABEL) };
   switch (v.kind) {
     case 'network':
-      exact(v, [...baseKeys, 'chainRef', 'rpcUrl', 'nativeSymbol', 'explorerUrl']);
-      return Object.freeze({ ...common, kind: 'network', chainRef: chain(v.chainRef),
-        rpcUrl: url(v.rpcUrl), nativeSymbol: str(v.nativeSymbol, SYMBOL), explorerUrl: url(v.explorerUrl) });
+      fields(v, ['chainRef']);
+      return Object.freeze({ ...common, kind: v.kind, chainRef: chain(v.chainRef) });
     case 'vault':
-      exact(v, [...baseKeys, 'standard', 'chainRef', 'contractAddress', 'underlyingAsset']);
-      if (v.standard !== 'ERC-4626') fail();
-      return Object.freeze({ ...common, kind: 'vault', standard: 'ERC-4626', chainRef: chain(v.chainRef),
+      fields(v, ['standard', 'chainRef', 'contractAddress', 'underlyingAsset']);
+      if (v.standard !== 'ERC-4626') return invalid();
+      return Object.freeze({ ...common, kind: v.kind, standard: v.standard, chainRef: chain(v.chainRef),
         contractAddress: address(v.contractAddress), underlyingAsset: address(v.underlyingAsset) });
     case 'staking':
-      exact(v, [...baseKeys, 'protocol', 'chainRef', 'contractAddress']);
-      return Object.freeze({ ...common, kind: 'staking', protocol: str(v.protocol, LABEL), chainRef: chain(v.chainRef),
+      fields(v, ['protocol', 'chainRef', 'contractAddress']);
+      return Object.freeze({ ...common, kind: v.kind, protocol: text(v.protocol, LABEL), chainRef: chain(v.chainRef),
         contractAddress: address(v.contractAddress) });
-    case 'cex': {
-      exact(v, [...baseKeys, 'provider', 'access', 'operations']);
-      if (v.access !== 'user-scoped' || !Array.isArray(v.operations) || v.operations.length === 0 ||
-        v.operations.length > 2 || new Set(v.operations).size !== v.operations.length ||
-        v.operations.some(item => item !== 'balances' && item !== 'trades')) fail();
-      const operations = v.operations as ('balances' | 'trades')[];
-      return Object.freeze({ ...common, kind: 'cex', provider: str(v.provider, LABEL),
-        access: 'user-scoped', operations: Object.freeze([...operations]) });
-    }
-    default: return fail();
+    case 'cex':
+      fields(v, ['provider', 'access', 'withdrawals']);
+      if (v.access !== 'user-scoped' || v.withdrawals !== false) return invalid();
+      return Object.freeze({ ...common, kind: v.kind, provider: text(v.provider, LABEL), access: v.access, withdrawals: false });
+    default: return invalid();
   }
 }
+
+export const HYPEREVM = Object.freeze({
+  chainRef: 'eip155:999', chainId: 999, name: 'HyperEVM', rpcUrl: 'https://rpc.hyperliquid.xyz/evm',
+  nativeSymbol: 'HYPE', decimals: 18, explorer: 'https://hyperevmscan.io/',
+});
+
+export const SAVINGS_DAI = Object.freeze({
+  chainRef: 'eip155:1', contractAddress: '0x83f20f44975d03b1b09e64809b757c47f942beea',
+  underlyingAsset: '0x6b175474e89094c44da98b954eedeac495271d0f',
+});

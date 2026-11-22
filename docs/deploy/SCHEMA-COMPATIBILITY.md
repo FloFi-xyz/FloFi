@@ -1197,3 +1197,20 @@ owner's `developer-projects-migrate` admin command requires schema 33 and
 applies only 0034. Earlier binaries without the extended certificate refuse
 schema 34. Leave the console release control off until the schema and account
 configuration are verified. The migration does not enable live keys.
+
+## 27. Certificate 0035_studio_integrations
+
+0035 follows 0034 and adds Studio proposal versions, evidence and events.
+Both tables are scoped to a tenant and a project ownership record. Account
+deletion cascades to Studio versions and events. Studio application events are
+appended with each state change and share its transaction. The shipped schema
+remains 28. The exact SQL is in `packages/cloud-runtime/optional-migrations`.
+
+Deploy a build with the 0035 certificate to every consumer of the database
+before the owner authorizes `studio-migrate`. Rehearse on a dedicated Neon
+preview and verify that the runtime role can read the new tables, write versions
+and append events under the migration role's default grants. On schema 34 the
+Developer Console remains available and shows Studio as unavailable. The
+operator command requires 34 and is repeatable. After 0035, any rollback binary
+must recognize its exact identity. The previous schema-34 build refuses 0035.
+The migration records proposals and evidence according to project ownership.
