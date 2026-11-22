@@ -166,7 +166,9 @@ for the authoritative recorded result. FloFi excludes executions of edited workf
 Only executions of your approvals that their owner shares. Absent, unshared and other projects' executions are all
 `404 NOT_FOUND`. Execution: `status`, `provenance`, `reconciled`, `terminal`, `errorCode`, `attentionRequired`, `owner` (the wallet
 that claimed and signed), `attempts[] {attemptId, step, state, transactionHash, reconciled, updatedAt}`, timestamps,
-`accessBasis: "OWNER_SHARED_WITH_PROJECT"`. Evidence: `evidence {bundleHash, environment, outcome, canonical, bundle} | null`
+`accessBasis: "OWNER_SHARED_WITH_PROJECT"`. `terminal` follows FloFi's canonical run lifecycle: completed, failed and refunded
+runs are final, as is a wallet request the owner declined before anything was sent. A run that needs owner or operator
+intervention is not terminal. `reconciled` is true only for a completed run with recorded evidence. Evidence: `evidence {bundleHash, environment, outcome, canonical, bundle} | null`
 with `reason: "NO_RECONCILED_EVIDENCE_YET"` until reconciliation. `environment` is copied from FloFi's Evidence Bundle and never
 upgraded. Never calldata, nonces, Review commitments or journal internals.
 

@@ -2,6 +2,7 @@
 // BUILD-FLOFI-AUTH-WALLETS-001: the shared signing contract: strict bindings and summaries, and failure classes that never call a possible
 // signature a refusal.
 import { describe, expect, it } from 'vitest';
+import { EXTERNAL_STEP_REFUSALS } from '../workflow-runs/external-step';
 import { classifySigningFailure, floFiWalletMessage, FLOFI_WALLET_MESSAGES, isSigningFlow, parseSigningContext, parseSigningHeader, parseSigningSummary, PRE_SIGNATURE_CODES, signingContextOf, signingHeaderValue, SIGNING_FLOWS, FLOFI_WALLET_EVM_CHAIN_IDS, FLOFI_WALLET_SOLANA_CHAIN } from './flofi-signing';
 
 const RUN = 'bas-' + 'a'.repeat(24);
@@ -51,6 +52,10 @@ describe('failure classes (spec §5)', () => {
     for (const code of ['FLOFI_WALLET_ALREADY_SIGNED', 'FLOFI_WALLET_CLOSED', 'MANAGED_ACTIVITY_NOT_COMPLETED', 'MANAGED_RESPONSE_INVALID', 'FLOFI_WALLET_SUBMISSION_UNKNOWN', '', 'anything'])
       expect(classifySigningFailure(code)).toBe('unknown');
     expect(PRE_SIGNATURE_CODES.has('FLOFI_WALLET_REJECTED')).toBe(false);
+  });
+  it('classifies every live developer approval re-check as a refusal, never as a possible signature', () => {
+    // Otherwise a step refused before signing would be reported UNKNOWN and left UNCERTAIN although nothing was signed.
+    for (const code of EXTERNAL_STEP_REFUSALS) expect(classifySigningFailure(code)).toBe('refused');
   });
   it('has owner-facing text for every product-side code, without wording that reads as a decline for an unknown outcome', () => {
     for (const code of ['FLOFI_WALLET_NOT_OPEN', 'FLOFI_WALLET_LOCKED', 'FLOFI_WALLET_FLOW_NOT_SUPPORTED', 'FLOFI_WALLET_SUBMISSION_UNKNOWN', 'FLOFI_WALLET_SIGNATURE_UNKNOWN'])

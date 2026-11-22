@@ -6,8 +6,7 @@
  * nothing.
  */
 import type { Composition, WorkflowComposition } from '../engine/strategy-engine';
-import { canonicalRunLifecycle } from '../domain/canonical-execution-status';
-import { APPROVAL_REQUIRES, handoffFindings, pickRow, planNamespace, reviewWorkflow, type CapabilityFact, type ExecutionPlan, type Gates, type HandoffRecord,
+import { APPROVAL_REQUIRES, canonicalRunLifecycle, handoffFindings, pickRow, planNamespace, reviewWorkflow, type CapabilityFact, type ExecutionPlan, type Gates, type HandoffRecord,
   type OwnedRun, type PlanStep, type RunProgress, type SimulationPreview } from '../platform/index.ts';
 import type { DeveloperEnvironment } from './config.ts';
 import { publicReason } from './errors.ts';
@@ -98,7 +97,7 @@ export function executionView(found: OwnedRun, approvalId: string): ExecutionBod
   const attempts = Array.isArray(run.attempts) ? run.attempts : [];
   const lifecycle = canonicalRunLifecycle({ ...facts, status: found.run.status, attempts });
   return { id: found.run.runId, object: 'execution', approvalId, status: found.run.status, provenance: String(found.run.provenance),
-    reconciled: lifecycle.completed, terminal: lifecycle.final, errorCode: nullable(facts.errorCode, isString), attentionRequired: nullable(facts.attentionRequired, isBoolean),
+    reconciled: lifecycle.completed && facts.hasEvidence === true, terminal: lifecycle.final, errorCode: nullable(facts.errorCode, isString), attentionRequired: nullable(facts.attentionRequired, isBoolean),
     owner: found.owner, attempts: attempts.slice(0, 64).map(a => {
       const p = pickRow(a, ['attemptId', 'step', 'state', 'transactionHash', 'reconciled', 'updatedAt']);
       return { attemptId: nullable(p.attemptId, isString), step: nullable(p.step, isString), state: nullable(p.state, isString),

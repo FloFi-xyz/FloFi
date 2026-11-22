@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { semanticWorkflowHash, type Composition } from '../engine/strategy-engine';
+// The backend imports this module under plain Node: runtime imports carry `.ts` and avoid the engine facade, whose imports
+// are extensionless. The step hash is the canonical semanticWorkflowHash, computed as the flows compute it (router-service.ts).
+import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
+import type { Composition } from '../engine/strategy-engine';
 import type { Workflow } from '../domain/initial-workflow';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
-import { normalizePrincipal } from '../server/run-ownership';
+import { normalizePrincipal } from '../server/run-ownership.ts';
 import type { RunRecord } from './pg-store';
 
 const EXTERNAL_WORKFLOW = /^(wfr_[a-z2-7]{26})-step-([0-7])$/;
@@ -11,6 +14,10 @@ export const isExternalStepWorkflow = (workflowId: string) => EXTERNAL_WORKFLOW.
 export const DEVELOPER_LIVE_HEADER = 'x-flofi-developer-live';
 const ISSUES_WALLET_REQUEST = new Set(['begin', 'beginGasless', 'beginSwap', 'beginLiquidity', 'handoff']);
 export const issuesWalletRequest = (method: string) => ISSUES_WALLET_REQUEST.has(method);
+const stepHash = (workflow: Workflow) => hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
+/** Every code `externalWalletRequestRefusal` returns. Each precedes any wallet request, so signing classifies it as a refusal. */
+export const EXTERNAL_STEP_REFUSALS = ['LIVE_MODE_DISABLED', 'WALLET_SESSION_REQUIRED', 'HANDOFF_WORKFLOW_MISMATCH',
+  'DEVELOPER_PROJECT_DISABLED', 'WORKFLOW_RUN_EXPIRED', 'WORKFLOW_RUN_NO_STEP'] as const;
 
 export function isLiveDeveloperRun(run: Pick<RunRecord, 'requester'>): boolean {
   return run.requester.kind === 'DEVELOPER_PROJECT' && run.requester.ref.endsWith('.production');
@@ -21,7 +28,7 @@ export function isLiveDeveloperRun(run: Pick<RunRecord, 'requester'>): boolean {
 export function executionStep(run: Pick<RunRecord, 'runId' | 'requester'>, stepIndex: number, composition: Composition): Composition {
   if (!isLiveDeveloperRun(run)) return composition;
   const workflow = { ...composition.workflow, workflowId: `${run.runId}-step-${stepIndex}` };
-  return { ...composition, workflow, workflowHash: semanticWorkflowHash(workflow) };
+  return { ...composition, workflow, workflowHash: stepHash(workflow) };
 }
 
 export function externalStepWorkflow(record: unknown, workflowId?: string): Workflow | undefined {
@@ -60,7 +67,7 @@ export async function externalWalletRequestRefusal(db: Database, input: {
       AND a.environment = 'production' AND a.workflow_hash = r.workflow_hash AND h.workflow_hash = r.workflow_hash
       AND h.requester_kind = r.requester_kind AND h.requester_ref = r.requester_ref AND h.funds_class = 'REAL_FUNDS'
       AND h.claimed_namespace = r.owner_namespace AND h.claimed_address = r.owner_account AND h.status = 'APPLIED'`,
-  [input.tenantId, match[1], Number(match[2]), input.flow, semanticWorkflowHash(workflow), principal, input.executionId]);
+  [input.tenantId, match[1], Number(match[2]), input.flow, stepHash(workflow), principal, input.executionId]);
   if (!step) return 'HANDOFF_WORKFLOW_MISMATCH';
   if (!step.active) return 'DEVELOPER_PROJECT_DISABLED';
   if (step.expired) return 'WORKFLOW_RUN_EXPIRED';
