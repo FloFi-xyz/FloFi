@@ -246,17 +246,22 @@ describe('BUILD-DEVELOPER-001 developer store: events, endpoints and deliveries'
     expect(JSON.stringify(after)).not.toContain('hooks.example');
   });
 
-  it('claims OPEN approval bindings least recently synced first, and stops at DONE', async () => {
+  it('claims OPEN approvals by least recent sync or creation and stops at DONE', async () => {
     const a = await project('A'), s = await strategyFor(a.d.store, a.scope);
     const hs = [developerHandoff(a.scope, s.strategyId, s.workflowHash), developerHandoff(a.scope, s.strategyId, s.workflowHash)];
-    for (const h of hs) await a.d.handoffs.create(h, new Date(), RULES);
+    const expiresAt = at('2026-10-07T13:05:00Z');
+    for (const h of hs) await a.d.handoffs.create({ ...h, expiresAt }, at('2026-10-07T12:55:00Z'), RULES);
     const first = await a.d.store.approvalsToSync({ scope: a.scope }, 1, at('2026-10-07T13:00:00Z'));
     expect(first).toHaveLength(1);
     const second = await a.d.store.approvalsToSync({ scope: a.scope }, 1, at('2026-10-07T13:00:01Z'));
     expect(second[0]!.handoffId).not.toBe(first[0]!.handoffId);
     await a.d.store.markSynced(first[0]!.handoffId, true, at('2026-10-07T13:00:02Z'));
-    const rest = await a.d.store.approvalsToSync({ scope: a.scope }, 10, at('2026-10-07T13:00:03Z'));
+    const newer = developerHandoff(a.scope, s.strategyId, s.workflowHash);
+    await a.d.handoffs.create({ ...newer, expiresAt }, at('2026-10-07T13:00:02Z'), RULES);
+    const rest = await a.d.store.approvalsToSync({ scope: a.scope }, 1, at('2026-10-07T13:00:03Z'));
     expect(rest.map(r => r.handoffId)).toEqual([second[0]!.handoffId]);
+    const next = await a.d.store.approvalsToSync({ scope: a.scope }, 1, at('2026-10-07T13:00:04Z'));
+    expect(next.map(r => r.handoffId)).toEqual([newer.handoffId]);
     expect(await a.d.store.approvalsToSync({ handoffId: first[0]!.handoffId }, 10, new Date())).toEqual([]);
     expect(await deps('other').store.approvalsToSync({}, 10, new Date())).toEqual([]);
   });

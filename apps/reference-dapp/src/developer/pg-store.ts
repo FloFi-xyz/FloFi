@@ -163,11 +163,12 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
     async approvalsToSync(filter, limit, now) {
       return (await db.query(`WITH picked AS (SELECT tenant_id, handoff_id FROM developer_approvals WHERE tenant_id = $1 AND sync_state = 'OPEN'
           AND ($2::text IS NULL OR handoff_id = $2) AND ($3::text IS NULL OR (project_id = $3 AND environment = $4)) AND (synced_at IS NULL OR synced_at <= $7)
-          ORDER BY synced_at NULLS FIRST, created_at LIMIT $5 FOR UPDATE SKIP LOCKED)
+          AND (NOT $8::boolean OR environment = 'sandbox')
+          ORDER BY COALESCE(synced_at, created_at), handoff_id LIMIT $5 FOR UPDATE SKIP LOCKED)
         UPDATE developer_approvals a SET synced_at = $6 FROM picked WHERE a.tenant_id = picked.tenant_id AND a.handoff_id = picked.handoff_id
         RETURNING a.handoff_id, a.project_id, a.environment, a.strategy_id, a.workflow_hash, a.sync_state, a.created_at`,
       [tenantId, filter.handoffId ?? null, filter.scope?.projectId ?? null, filter.scope?.environment ?? null, limit, now,
-        new Date(now.getTime() - (filter.minAgeMs ?? 0))])).rows.map(row => ({
+        new Date(now.getTime() - (filter.minAgeMs ?? 0)), filter.sandboxOnly === true])).rows.map(row => ({
         handoffId: String(row.handoff_id), projectId: String(row.project_id), environment: row.environment as DeveloperEnvironment, strategyId: String(row.strategy_id),
         workflowHash: String(row.workflow_hash), syncState: row.sync_state as 'OPEN' | 'DONE', createdAt: date(row.created_at) }));
     },
@@ -179,10 +180,11 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
       const leaseToken = randomBytes(16).toString('hex'), leasedUntil = new Date(now.getTime() + leaseMs);
       const claimed = (await db.query(`WITH due AS (SELECT tenant_id, delivery_id FROM developer_webhook_deliveries WHERE tenant_id = $1 AND status = 'PENDING'
           AND next_attempt_at <= $2 AND (leased_until IS NULL OR leased_until < $2) AND ($3::text IS NULL OR (project_id = $3 AND environment = $4))
+          AND (NOT $8::boolean OR environment = 'sandbox')
           ORDER BY next_attempt_at, delivery_id LIMIT $5 FOR UPDATE SKIP LOCKED)
         UPDATE developer_webhook_deliveries d SET attempts = d.attempts + 1, lease_token = $6, leased_until = $7, last_attempt_at = $2, updated_at = $2
         FROM due WHERE d.tenant_id = due.tenant_id AND d.delivery_id = due.delivery_id RETURNING d.delivery_id`,
-      [tenantId, now, filter.scope?.projectId ?? null, filter.scope?.environment ?? null, limit, leaseToken, leasedUntil])).rows.map(r => String(r.delivery_id));
+      [tenantId, now, filter.scope?.projectId ?? null, filter.scope?.environment ?? null, limit, leaseToken, leasedUntil, filter.sandboxOnly === true])).rows.map(r => String(r.delivery_id));
       if (claimed.length === 0) return [];
       const rows = (await db.query(`SELECT d.delivery_id, d.project_id, d.environment, d.endpoint_id, d.attempts, w.url, w.status AS endpoint_status, e.*
         FROM developer_webhook_deliveries d JOIN developer_webhook_endpoints w ON w.tenant_id = d.tenant_id AND w.endpoint_id = d.endpoint_id

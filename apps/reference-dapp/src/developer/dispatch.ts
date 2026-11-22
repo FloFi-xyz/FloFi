@@ -85,13 +85,10 @@ async function attempt(deps: DispatchDeps, transport: WebhookTransport, claim: D
     return status;
   };
   if (!await deps.store.projectActive(scope.projectId)) return settle('DEAD', null, 'PROJECT_DISABLED', null);
-  if (claim.environment === 'production') {
-    if (!deps.config.live) return settle('DEAD', null, 'LIVE_MODE_DISABLED', null);
-    if (claim.event.type.startsWith('execution.')) {
-      const h = await deps.handoffs?.forRequester(claim.event.approvalId, { kind: 'DEVELOPER_PROJECT',
-        ref: developerRequesterRef(scope.projectId, scope.environment) }, now);
-      if (h?.status !== 'APPLIED' || !h.shareStatus) return settle('DEAD', null, 'SHARING_WITHDRAWN', null);
-    }
+  if (claim.environment === 'production' && claim.event.type.startsWith('execution.')) {
+    const h = await deps.handoffs?.forRequester(claim.event.approvalId, { kind: 'DEVELOPER_PROJECT',
+      ref: developerRequesterRef(scope.projectId, scope.environment) }, now);
+    if (h?.status !== 'APPLIED' || !h.shareStatus) return settle('DEAD', null, 'SHARING_WITHDRAWN', null);
   }
   if (!claim.endpointActive) return settle('DEAD', null, 'ENDPOINT_DELETED', null);
   const envelope = eventEnvelope(claim.event);
@@ -110,7 +107,7 @@ async function attempt(deps: DispatchDeps, transport: WebhookTransport, claim: D
 
 /** Leases up to `limit` due deliveries (optionally of one project) and attempts them concurrently. */
 export async function dispatchDeliveries(deps: DispatchDeps, filter: { readonly scope?: ProjectScope }, limit: number): Promise<DispatchSummary> {
-  const claims = await deps.store.claimDeliveries(filter, limit, deps.now?.() ?? new Date(), LEASE_MS);
+  const claims = await deps.store.claimDeliveries({ ...filter, sandboxOnly: deps.config.live !== true }, limit, deps.now?.() ?? new Date(), LEASE_MS);
   const transport = deps.transport ?? webhookTransport(deps.config);
   const outcomes = await Promise.all(claims.map(claim => attempt(deps, transport, claim).catch(() => 'PENDING' as const)));
   return { attempted: claims.length, succeeded: outcomes.filter(o => o === 'SUCCEEDED').length, retrying: outcomes.filter(o => o === 'PENDING').length,
@@ -118,11 +115,15 @@ export async function dispatchDeliveries(deps: DispatchDeps, filter: { readonly 
 }
 
 export type NotifyDeps = DispatchDeps & { readonly handoffs: HandoffStore; readonly runtime: EngineRuntime; readonly workflowRuns?: ApprovalRunReader };
-/** Derives the events of some open approvals, then delivers what is due. Every failure is contained: notifications never block FloFi. */
+/** Derives the events of some open approvals, then delivers what is due, including when approval sync fails. */
 export async function syncAndDispatch(deps: NotifyDeps, filter: SyncFilter, budget: { readonly approvals: number; readonly deliveries: number }) {
-  const approvals = await syncDeveloperApprovals({ store: deps.store, handoffs: deps.handoffs, runtime: deps.runtime, now: deps.now?.() ?? new Date(), ...(deps.workflowRuns ? { workflowRuns: deps.workflowRuns } : {}) }, filter, budget.approvals);
+  const sync = await syncDeveloperApprovals({ store: deps.store, handoffs: deps.handoffs, runtime: deps.runtime, now: deps.now?.() ?? new Date(),
+    ...(deps.workflowRuns ? { workflowRuns: deps.workflowRuns } : {}) },
+  { ...filter, sandboxOnly: deps.config.live !== true }, budget.approvals)
+    .then(approvals => ({ approvals }), (error: unknown) => ({ error }));
   const deliveries = await dispatchDeliveries(deps, filter.scope ? { scope: filter.scope } : {}, budget.deliveries);
-  return { approvals, deliveries };
+  if ('error' in sync) throw sync.error;
+  return { approvals: sync.approvals, deliveries };
 }
 
 /**
