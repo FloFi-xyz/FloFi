@@ -359,7 +359,7 @@ export const SITE_NETWORKS = [
 export type SiteNetwork = (typeof SITE_NETWORKS)[number];
 export const DEVELOPER_ENDPOINTS = [
   ['GET', '/capabilities'], ['POST', '/strategies'], ['POST', '/strategies/{id}/validate'],
-  ['POST', '/strategies/{id}/simulate'], ['POST', '/approvals'],
+  ['POST', '/strategies/{id}/simulate'], ['POST', '/strategies/{id}/simulate-workflow'], ['POST', '/approvals'],
 ] as const;
 
 export const projectCopy = {

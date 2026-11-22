@@ -13,7 +13,7 @@
  *
  * Payloads carry ids, states and evidence facts only: never a wallet, a secret, calldata or a transaction.
  */
-import { sharedRunsRead, TERMINAL, type EngineRuntime, type HandoffRecord, type HandoffStore, type RunProgress } from '../platform/index.ts';
+import { approvalWorkflowResults, sharedRunsRead, TERMINAL, type ApprovalRunReader, type EngineRuntime, type HandoffRecord, type HandoffStore, type RunProgress } from '../platform/index.ts';
 import { developerRequesterRef, type ApprovalBinding, type DeveloperEventType, type DeveloperStore, type NewEvent } from './store.ts';
 
 /** An APPLIED approval keeps being watched for runs this long; after that (or once it ended) it is settled. */
@@ -42,7 +42,18 @@ export function deriveEvents(binding: ApprovalBinding, h: HandoffRecord, runs: r
   return events;
 }
 
-export type SyncDeps = { readonly store: DeveloperStore; readonly handoffs: HandoffStore; readonly runtime: EngineRuntime; readonly now: Date };
+export async function exactRunProgress(h: HandoffRecord, reader: ApprovalRunReader) {
+  const found = await approvalWorkflowResults(h, reader);
+  const runs: RunProgress[] | null = found ? found.steps.flatMap(step => step.outcome?.kind === 'OWNER_RUN' ? [{
+    executionId: step.outcome.executionId, flow: step.outcome.flow!, status: step.outcome.status,
+    terminal: ['RECONCILED', 'FAILED', 'SKIPPED'].includes(step.state), reconciled: step.state === 'RECONCILED',
+    errorCode: step.code, evidenceEnvironment: step.outcome.evidence?.environment ?? null, evidenceOutcome: step.outcome.evidence?.outcome ?? null,
+    evidenceBundleHash: step.outcome.evidence?.bundleHash ?? null, updatedAt: step.updatedAt.toISOString(),
+  }] : []) : null;
+  return { found, runs };
+}
+
+export type SyncDeps = { readonly store: DeveloperStore; readonly handoffs: HandoffStore; readonly runtime: EngineRuntime; readonly now: Date; readonly workflowRuns?: ApprovalRunReader };
 export type SyncFilter = Parameters<DeveloperStore['approvalsToSync']>[0];
 /**
  * Re-derives the events of up to `limit` open developer approvals (least recently synced first) and records the new ones, fanned out to
@@ -57,14 +68,24 @@ export async function syncDeveloperApprovals(deps: SyncDeps, filter: SyncFilter,
     if (!h) { await deps.store.markSynced(binding.handoffId, true, deps.now); continue; }
     // A runtime failure leaves the runs for the next sweep; the approval's own events are still derived. BUILD-FLOFI-E2E-RELIABILITY-001: a run
     // read that failed (or was incomplete) never lets the approval settle, so its run events are synced later instead of being lost.
-    const read = await sharedRunsRead(h, deps.runtime, deps.handoffs).catch(() => undefined), readFailed = read === undefined || read?.complete === false;
-    const runs = read ? read.runs : null;
+    const live = binding.environment === 'production';
+    const read = live
+      ? await (deps.workflowRuns ? exactRunProgress(h, deps.workflowRuns) : Promise.reject(new Error('WORKFLOW_READ_UNAVAILABLE'))).catch(() => undefined)
+      : await sharedRunsRead(h, deps.runtime, deps.handoffs).catch(() => undefined);
+    const readFailed = read === undefined || read !== null && 'complete' in read && !read.complete;
+    const runs = read?.runs ?? null;
     const recorded = await deps.store.recordEvents(scope, deriveEvents(binding, h, runs), deps.now);
-    const step = h.plan.steps[0];
-    for (const event of recorded) if (event.type === 'execution.reconciled')
+    const liveRun = read && 'found' in read ? read.found?.run : null;
+    const exactSteps = read && 'found' in read ? read.found?.steps : undefined;
+    for (const event of recorded) {
+      if (event.type !== 'execution.reconciled') continue;
+      const index = live ? exactSteps?.find(step => step.outcome?.executionId === event.data.executionId)?.stepIndex : 0;
+      const step = index === undefined ? undefined : h.plan.steps[index];
       await deps.store.incrementUsage(scope, 'execution.reconciled', step ? `${step.network}:${step.protocol}` : '', deps.now);
-    const applied = h.appliedAt === null ? null : deps.now.getTime() - h.appliedAt.getTime();
-    const settled = TERMINAL.includes(h.status) && !readFailed
+    }
+    const watchFrom = live ? (liveRun?.completedAt ?? liveRun?.expiresAt ?? h.expiresAt) : h.appliedAt;
+    const applied = watchFrom === null ? null : deps.now.getTime() - watchFrom.getTime();
+    const settled = TERMINAL.includes(h.status) && !readFailed && (!liveRun || ['CANCELLED', 'COMPLETED', 'FAILED', 'EXPIRED'].includes(liveRun.state))
       || applied !== null && applied > APPLIED_WATCH_MS + (readFailed ? INCOMPLETE_READ_GRACE_MS : 0);
     await deps.store.markSynced(binding.handoffId, settled, deps.now);
   }

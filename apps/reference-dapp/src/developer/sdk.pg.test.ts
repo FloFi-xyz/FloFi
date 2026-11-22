@@ -34,6 +34,7 @@ describe('BUILD-DEVELOPER-001 SDK parity', () => {
     expectTypeOf<Sdk.Strategy>().toEqualTypeOf<Static<typeof Server.StrategyView>>();
     expectTypeOf<Sdk.StrategyValidation>().toEqualTypeOf<Static<typeof Server.StrategyValidationView>>();
     expectTypeOf<Sdk.Simulation>().toEqualTypeOf<Static<typeof Server.SimulationView>>();
+    expectTypeOf<Sdk.WorkflowSimulation>().toEqualTypeOf<Static<typeof Server.WorkflowSimulationView>>();
     expectTypeOf<Sdk.Approval>().toEqualTypeOf<Static<typeof Server.ApprovalView>>();
     expectTypeOf<Sdk.Execution>().toEqualTypeOf<Static<typeof Server.ExecutionView>>();
     expectTypeOf<Sdk.Evidence>().toEqualTypeOf<Static<typeof Server.EvidenceView>>();

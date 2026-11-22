@@ -10,6 +10,7 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
+import { DEVELOPER_LIVE_HEADER } from '../workflow-runs/external-step.ts';
 import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
 import { betaIdentityHeaders, currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
 
@@ -48,7 +49,7 @@ export function cloudApiBaseUrl(env: Readonly<Record<string, string | undefined>
 
 export async function callCloudFlow<T>(flow: string, method: string, args: readonly unknown[], options: {
   env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; principal?: string | null;
-  timeoutMs?: number; maxAttempts?: number; correlationId?: string; betaIdentity?: BetaRequestIdentity | null;
+  timeoutMs?: number; maxAttempts?: number; correlationId?: string; betaIdentity?: BetaRequestIdentity | null; developerLive?: boolean;
   /** The caller's deadline: aborts the request in flight and ends the retries (`CLOUD_API_DEADLINE_EXCEEDED`). */
   signal?: AbortSignal } = {}): Promise<FlowResult<T>> {
   const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;
@@ -66,7 +67,8 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
     try {
       response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 240_000, signal),
         headers: { 'content-type': 'application/json', traceparent, ...betaIdentityHeaders(options.betaIdentity ?? currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
-          ...key ? { 'idempotency-key': key } : {}, ...options.principal ? { [WALLET_PRINCIPAL_HEADER]: options.principal } : {} }, body: JSON.stringify({ args }) });
+          ...key ? { 'idempotency-key': key } : {}, ...options.principal ? { [WALLET_PRINCIPAL_HEADER]: options.principal } : {},
+          ...options.developerLive ? { [DEVELOPER_LIVE_HEADER]: 'enabled' } : {} }, body: JSON.stringify({ args }) });
     } catch (error) {
       // The caller stopped waiting: no retry (a mutation that may have arrived is UNKNOWN to the caller, never "not sent").
       if (deadlineEnded(error, signal)) return DEADLINE;

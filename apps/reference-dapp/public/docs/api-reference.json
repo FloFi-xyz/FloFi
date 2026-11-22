@@ -4,7 +4,7 @@
     "title": "FloFi Developer API",
     "version": "1.0.0",
     "summary": "Developers build the experience. FloFi handles the DeFi workflow lifecycle.",
-    "description": "Server-side Developer API v1. Where the operator enables the API and issues sandbox keys, authenticated projects can discover capabilities. This document lists the public product’s mainnet inputs. Sandbox keys cannot create mainnet strategies, and live keys are refused. Creation, validation, previews and new handoffs can be tested with test-funds strategies in a local engineering deployment using the engineering schema. The key can request a handoff but only the end user in FloFi can prove wallet ownership, review the fresh simulation and manifest, and sign. Execution status and reconciled evidence require the user’s sharing consent.",
+    "description": "Server-side Developer API v1. Production keys are available on a FloFi deployment after explicit live activation. This contract describes mainnet inputs. Test-funds keys work on configured engineering deployments. The key can request a handoff but only the end user in FloFi can prove wallet ownership, review the fresh simulation and manifest, and sign. Execution status and reconciled evidence require the user’s sharing consent.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -235,7 +235,7 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": false,
-            "description": "Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). The same key with another body is IDEMPOTENCY_CONFLICT.",
+            "description": "Required for production credentials. Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). The same key with another body is IDEMPOTENCY_CONFLICT.",
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9._:-]{8,128}$"
@@ -863,6 +863,230 @@
         }
       }
     },
+    "/strategies/{id}/simulate-workflow": {
+      "post": {
+        "operationId": "simulateWorkflow",
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "Read-only previews of a composed workflow.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "A strategy id.",
+            "schema": {
+              "type": "string",
+              "pattern": "^str_[a-z2-7]{26}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The account whose public balances the preview reads.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateStrategyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-step facts and any steps that await settlement.",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowSimulation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST or INVALID_STRATEGY",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: missing, malformed, unknown or revoked key, or disabled project",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN (INSUFFICIENT_SCOPE, BROWSER_ORIGIN_FORBIDDEN, LIVE_MODE_DISABLED, WEBHOOK_ENDPOINT_LIMIT) or MAINNET_DISABLED",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: absent or another project's resource (indistinguishable)",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "STRATEGY_CHANGED, STRATEGY_STALE, IDEMPOTENCY_CONFLICT or IDEMPOTENCY_IN_PROGRESS",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "CAPABILITY_NOT_SUPPORTED, REVIEW_BLOCKED or SIMULATION_FAILED",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (see Retry-After)",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_ERROR",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (see Retry-After when given)",
+            "headers": {
+              "request-id": {
+                "description": "This request's id (quote it to FloFi support).",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^req_[a-z2-7]{26}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/approvals": {
       "post": {
         "operationId": "createApproval",
@@ -875,7 +1099,7 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": false,
-            "description": "Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). The same key with another body is IDEMPOTENCY_CONFLICT.",
+            "description": "Required for production credentials. Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). The same key with another body is IDEMPOTENCY_CONFLICT.",
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9._:-]{8,128}$"
@@ -1649,7 +1873,7 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": false,
-            "description": "Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). The same key with another body is IDEMPOTENCY_CONFLICT.",
+            "description": "Required for production credentials. Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). The same key with another body is IDEMPOTENCY_CONFLICT.",
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9._:-]{8,128}$"
@@ -2211,7 +2435,7 @@
       "apiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "A FloFi Developer API key (`flofi_sk_test_…`). Server-side only: browser requests are refused."
+        "description": "A FloFi Developer API key (`flofi_sk_live_…` or `flofi_sk_test_…`). Server-side only: browser requests are refused."
       },
       "dispatchToken": {
         "type": "http",
@@ -3854,6 +4078,27 @@
             "pattern": "^0x[0-9a-f]{64}$",
             "description": "The workflowHash of that strategy, as returned when it was created. A different hash is refused (STRATEGY_CHANGED).",
             "type": "string"
+          },
+          "returnTarget": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "url",
+              "state"
+            ],
+            "properties": {
+              "url": {
+                "minLength": 10,
+                "maxLength": 2048,
+                "description": "Public HTTPS return URL without credentials, query or fragment.",
+                "type": "string"
+              },
+              "state": {
+                "pattern": "^[A-Za-z0-9_-]{16,128}$",
+                "description": "Non-secret correlation value bound to the caller’s session.",
+                "type": "string"
+              }
+            }
           }
         }
       },
@@ -3921,7 +4166,7 @@
             "type": "string"
           },
           "environment": {
-            "description": "The credential environment. Only `sandbox` exists in this release.",
+            "description": "The credential environment. Production is available when enabled by a FloFi release.",
             "anyOf": [
               {
                 "const": "sandbox",
@@ -4177,7 +4422,7 @@
             "type": "string"
           },
           "environment": {
-            "description": "The credential environment. Only `sandbox` exists in this release.",
+            "description": "The credential environment. Production is available when enabled by a FloFi release.",
             "anyOf": [
               {
                 "const": "sandbox",
@@ -4908,6 +5153,203 @@
           }
         }
       },
+      "WorkflowSimulation": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "object",
+          "strategyId",
+          "workflowHash",
+          "status",
+          "steps",
+          "executionSimulation",
+          "authorizable",
+          "persisted",
+          "authority"
+        ],
+        "properties": {
+          "object": {
+            "const": "workflow_simulation",
+            "type": "string"
+          },
+          "strategyId": {
+            "pattern": "^str_[a-z2-7]{26}$",
+            "description": "A FloFi Developer strategy id.",
+            "type": "string"
+          },
+          "workflowHash": {
+            "pattern": "^0x[0-9a-f]{64}$",
+            "description": "The semantic workflow hash FloFi computed for the strategy.",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "const": "STEP_PREVIEWS_AVAILABLE",
+                "type": "string"
+              },
+              {
+                "const": "INCOMPLETE",
+                "type": "string"
+              }
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "index",
+                "workflowHash",
+                "state",
+                "reason",
+                "amountFrom",
+                "simulationSubject",
+                "subjectSource",
+                "provenance",
+                "observedAt",
+                "expiresAt",
+                "facts"
+              ],
+              "properties": {
+                "index": {
+                  "type": "integer"
+                },
+                "workflowHash": {
+                  "pattern": "^0x[0-9a-f]{64}$",
+                  "description": "The semantic workflow hash FloFi computed for the strategy.",
+                  "type": "string"
+                },
+                "state": {
+                  "anyOf": [
+                    {
+                      "const": "SIMULATED",
+                      "type": "string"
+                    },
+                    {
+                      "const": "AWAITING_PRODUCER_SETTLEMENT",
+                      "type": "string"
+                    },
+                    {
+                      "const": "NOT_COMPLETED",
+                      "type": "string"
+                    },
+                    {
+                      "const": "FAILED",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "amountFrom": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "simulationSubject": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "subjectSource": {
+                  "anyOf": [
+                    {
+                      "const": "REQUEST",
+                      "type": "string"
+                    },
+                    {
+                      "const": "PUBLIC_QUOTE_SUBJECT",
+                      "type": "string"
+                    },
+                    {
+                      "const": "NONE",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "provenance": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "observedAt": {
+                  "anyOf": [
+                    {
+                      "description": "RFC 3339 timestamp.",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "description": "RFC 3339 timestamp.",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "facts": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "patternProperties": {
+                        "^(.*)$": {}
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "executionSimulation": {
+            "const": "FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION",
+            "type": "string"
+          },
+          "authorizable": {
+            "const": false,
+            "type": "boolean"
+          },
+          "persisted": {
+            "const": false,
+            "type": "boolean"
+          },
+          "authority": {
+            "description": "What this object authorizes: nothing. Only the owner's wallet, in FloFi, can sign.",
+            "const": "NONE",
+            "type": "string"
+          }
+        }
+      },
       "Approval": {
         "additionalProperties": false,
         "type": "object",
@@ -4946,7 +5388,7 @@
             "type": "string"
           },
           "environment": {
-            "description": "The credential environment. Only `sandbox` exists in this release.",
+            "description": "The credential environment. Production is available when enabled by a FloFi release.",
             "anyOf": [
               {
                 "const": "sandbox",
@@ -5174,6 +5616,190 @@
           "statusShared": {
             "description": "The owner chose to share run status and evidence with this project (off by default).",
             "type": "boolean"
+          },
+          "workflowRun": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "id",
+                  "state",
+                  "mode",
+                  "errorCode",
+                  "updatedAt",
+                  "steps",
+                  "groups"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "errorCode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "updatedAt": {
+                    "description": "RFC 3339 timestamp.",
+                    "type": "string"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "index",
+                        "state",
+                        "errorCode",
+                        "executionId",
+                        "evidence",
+                        "submissions"
+                      ],
+                      "properties": {
+                        "index": {
+                          "type": "integer"
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "executionId": {
+                          "anyOf": [
+                            {
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                              "description": "A FloFi execution (run) id. It is a lookup key, not an access grant.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "evidence": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "environment",
+                                "outcome",
+                                "bundleHash"
+                              ],
+                              "properties": {
+                                "environment": {
+                                  "type": "string"
+                                },
+                                "outcome": {
+                                  "type": "string"
+                                },
+                                "bundleHash": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "submissions": {
+                          "type": "array",
+                          "items": {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "chain",
+                              "hash"
+                            ],
+                            "properties": {
+                              "chain": {
+                                "type": "string"
+                              },
+                              "hash": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "groups": {
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "index",
+                        "chain",
+                        "state",
+                        "errorCode"
+                      ],
+                      "properties": {
+                        "index": {
+                          "type": "integer"
+                        },
+                        "chain": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "errorCode": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "executions": {
             "type": "array",
@@ -5567,7 +6193,7 @@
             "type": "string"
           },
           "environment": {
-            "description": "The credential environment. Only `sandbox` exists in this release.",
+            "description": "The credential environment. Production is available when enabled by a FloFi release.",
             "anyOf": [
               {
                 "const": "sandbox",
@@ -5724,7 +6350,7 @@
             "type": "string"
           },
           "environment": {
-            "description": "The credential environment. Only `sandbox` exists in this release.",
+            "description": "The credential environment. Production is available when enabled by a FloFi release.",
             "anyOf": [
               {
                 "const": "sandbox",

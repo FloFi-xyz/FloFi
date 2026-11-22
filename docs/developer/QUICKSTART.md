@@ -5,6 +5,8 @@ deployment** with a sandbox key and the MOCKED Base Sepolia → Arbitrum Sepolia
 where signing is blocked. The execution and evidence examples illustrate access when a user has shared an eligible run.
 [API reference](API.md) · [Webhooks](WEBHOOKS.md)
 
+For a deployment with explicitly activated live credentials, see the [mainnet integration](#mainnet-integration).
+
 Hosted FloFi is mainnet-only. The Developer API refuses test-network strategies on hosted deployments and mainnet strategies
 with sandbox keys. On local engineering deployments, obtain a sandbox key through the Developer Console or the operator CLI.
 Live keys are refused on the currently released API.
@@ -174,6 +176,64 @@ To retire a webhook endpoint, call `await flofi.webhookEndpoints.delete(endpoint
 `evidence.environment` states exactly what was proven, copied from FloFi's Evidence Bundle and never upgraded: `MOCKED` is not a
 testnet execution. An execution that was not shared with your project, never existed or belongs to another project is
 `404 NOT_FOUND` — the three cases look identical.
+
+## Mainnet integration
+
+Use this path when FloFi has explicitly activated live access for the deployment. Create an account-owned project in
+the Developer Console and generate a production credential with the scopes your backend needs. The workflow below uses
+`strategies` and `approvals`. Add `webhooks` to register a receiver and `executions` to read shared executions and evidence.
+Use the same server-only SDK initialization above with your live key and the production origin.
+
+The example discovers an eligible mainnet route at runtime. Supply the public preview address and the stable IDs for the
+strategy creation and approval creation from your backend. Use a strategy that reflects the user's request.
+
+```ts
+const capabilities = await flofi.capabilities.list({ network: 'base', action: 'bridge' });
+const row = capabilities.data.find(row =>
+  row.destinationNetwork === 'arbitrum-one' &&
+  row.operations.compose.available &&
+  row.operations.simulate.available &&
+  row.operations.approve.available &&
+  !row.availability.mockedHarness
+);
+if (capabilities.environment !== 'production' || !row) {
+  throw new Error('Live route unavailable on this deployment');
+}
+
+const strategy = await flofi.strategies.create(
+  { strategy: row.exampleStrategy },
+  { idempotencyKey: strategyRequestId },
+);
+const validation = await flofi.strategies.validate(strategy.id);
+if (!validation.availability.approvable) {
+  throw new Error(validation.availability.reason ?? 'NOT_APPROVABLE');
+}
+const preview = await flofi.strategies.simulateWorkflow(strategy.id, { simulationSubject });
+// Show the step outcomes. An INCOMPLETE preview can include dependencies awaiting settlement.
+```
+
+Register a signed webhook receiver as in step 6 if you need notifications. Once the user elects to continue, create an
+approval from the same stored strategy and hash. Supply a non-secret `state` of 16–128 URL-safe characters if your app
+offers a return link.
+
+```ts
+const approval = await flofi.approvals.create({
+  strategy,
+  returnTarget: { url: 'https://app.example.com/flofi/return', state },
+}, { idempotencyKey: approvalRequestId });
+// Record approval.id and state against your authenticated user's request.
+// Give approval.approvalUrl privately to that user.
+```
+
+Use separate idempotency keys for separate creation requests. Reuse a key only to retry the same request and body.
+When the user follows the return link, verify the returned `approvalId` and `state` against that user's backend session.
+`APPLIED` means the proposal was loaded in FloFi. The user still reviews a fresh simulation and Manifest and signs each
+eligible step with their wallet. For a dependent step FloFi uses the previous step's reconciled output.
+
+Use verified webhooks or poll the approval record. The user's opt-in enables `workflowRun` and execution results for this
+approval. A pending or uncertain submission may still require recovery or reconciliation. Read the execution and evidence routes
+as in step 10. The evidence environment and outcome describe what FloFi recorded. Grouped or delegated execution is outside
+the live Developer API handoff path. The local browser journey and synthetic PostgreSQL evidence cover the test environment.
 
 ## Errors and retries
 

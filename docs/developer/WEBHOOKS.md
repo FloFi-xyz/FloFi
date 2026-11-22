@@ -4,8 +4,9 @@ FloFi tells your server when an approval or a shared execution changes, with sig
 [Standard Webhooks](https://www.standardwebhooks.com/). Webhooks are **notifications, never inputs**: no FloFi state depends on
 a delivery or on your response. A failing endpoint never blocks or alters an approval, a claim, a run or an API answer.
 
-Your deployment's operator enables the API. Use a sandbox key with the `webhooks` scope to register or delete an endpoint.
-A registered endpoint can receive events only when matching project activity generates them and the deployment dispatches them.
+Use a project key with the `webhooks` scope to register or delete an endpoint. Production keys require live activation.
+Each endpoint receives events for its project and environment when matching activity generates them and the deployment dispatches
+them. Include an `Idempotency-Key` header when registering a production endpoint over HTTP. The SDK supplies the header.
 
 ## Events
 
@@ -18,9 +19,10 @@ A registered endpoint can receive events only when matching project activity gen
 | `execution.failed` | that run ended with an error, unreconciled | `executionId`, `status`, `errorCode` |
 | `execution.reconciled` | that run reconciled | `executionId`, `status`, `evidence {environment, outcome, bundleHash}` |
 
-`execution.*` events exist only while the end user shares this execution's status with your project (off by default) at the time the event is generated.
-Previously queued events may still be delivered. Fetch the resource for its current share state and honor a resulting `404`. Payloads
-carry ids, states and evidence facts: never a wallet address, a secret, calldata or a transaction.
+`execution.*` events are generated while the end user shares this execution's status with your project. Sharing is off by default.
+For production deliveries, FloFi checks consent again before dispatching queued execution events. A delivery already in flight
+can complete. Sandbox deliveries queued before withdrawal may still arrive. Fetch the resource for its current share state and
+honor a resulting `404`. Payloads contain IDs, states and evidence facts.
 
 ## Envelope
 
@@ -112,8 +114,8 @@ FloFi's serverless runtime has no background worker. Events are derived and deli
 2. right after the end user's transitions on `/approve` (claim, apply, sharing changes);
 3. whenever the deployment's scheduler calls FloFi's internal dispatch endpoint (an operator setting).
 
-On a deployment without a scheduler, an `execution.*` event can therefore wait until your next API call. `GET /approvals/{id}`
-always computes the current state, so polling it is a reliable fallback.
+Live operation requires a working deployment scheduler. On an engineering deployment without a scheduler, an
+`execution.*` event can wait until your next API call. Poll `GET /approvals/{id}` for the latest status recorded by FloFi.
 
 ## Secrets and rotation
 

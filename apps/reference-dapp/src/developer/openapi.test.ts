@@ -38,7 +38,7 @@ describe('BUILD-DEVELOPER-001 OpenAPI document', () => {
     const documented = Object.entries(doc.paths).flatMap(([path, ops]) => Object.keys(ops).map(method => `${method.toUpperCase()} ${path.replace('{id}', '{id}')}`))
       .filter(route => route !== 'GET /internal/dispatch').sort();
     expect(documented).toEqual(DEVELOPER_ROUTE_TABLE.map(r => `${r.method} ${r.template}`).sort());
-    expect(DEVELOPER_ROUTE_TABLE).toHaveLength(10);
+    expect(DEVELOPER_ROUTE_TABLE).toHaveLength(11);
     // Creating POSTs document their Idempotency-Key; nothing else does.
     for (const [path, ops] of Object.entries(doc.paths)) for (const [method, op] of Object.entries(ops))
       expect((op.parameters ?? []).some(p => p.name === 'Idempotency-Key'), `${method} ${path}`).toBe(['/strategies', '/approvals', '/webhook-endpoints'].includes(path));

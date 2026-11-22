@@ -91,6 +91,7 @@ export interface HandoffStore {
   readonly bindRuns: (handoffId: string, runIds: readonly string[]) => Promise<void>;
   /** The claimant's choice to share run status with the requester. */
   readonly setSharing: (digest: Buffer, wallet: WalletRef, share: boolean, now: Date, kinds?: Kinds) => Promise<HandoffRecord | null>;
+  readonly setLiveDeveloperSharing: (handoffId: string, wallet: WalletRef, share: boolean) => Promise<HandoffRecord | null>;
   /** One requester's handoffs, newest first. */
   readonly listForRequester: (requester: RequesterScope, now: Date, limit: number) => Promise<readonly HandoffRecord[]>;
   /** BUILD-MCP-002 forms, kept for its callers: the requester is the MCP account. */
@@ -237,6 +238,13 @@ export function createPgHandoffStore(db: Database, tenantId: string): HandoffSto
       await tx.query('UPDATE mcp_handoffs SET share_status = $3 WHERE tenant_id = $1 AND handoff_id = $2', [tenantId, h.handoffId, share]);
       return { ...h, shareStatus: share };
     }),
+    async setLiveDeveloperSharing(handoffId, wallet, share) {
+      const row = (await db.query(`UPDATE mcp_handoffs SET share_status=$5
+        WHERE tenant_id=$1 AND handoff_id=$2 AND claimed_namespace=$3 AND claimed_address=$4
+          AND status='APPLIED' AND requester_kind='DEVELOPER_PROJECT' AND requester_ref LIKE '%.production'
+        RETURNING *`, [tenantId, handoffId, wallet.namespace, wallet.address, share])).rows[0];
+      return row ? recordOf(row) : null;
+    },
     listForRequester,
     forAccount: (handoffId, accountId, now) => forRequester(handoffId, mcpAccount(accountId), now),
     revoke: (handoffId, accountId, now) => revokeForRequester(handoffId, mcpAccount(accountId), now),

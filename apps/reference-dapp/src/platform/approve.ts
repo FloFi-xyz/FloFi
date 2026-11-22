@@ -84,6 +84,16 @@ const viewerOf = async (profile: ApprovalKindProfile, wallets: readonly WalletRe
 const claimantOf = (h: HandoffRecord, wallets: readonly WalletRef[]) =>
   wallets.find(w => w.namespace === h.claimed?.namespace && w.address === h.claimed.address) ?? refuse('HANDOFF_NOT_FOUND');
 
+async function assertLiveRunAuthority(h: HandoffRecord, profile: ApprovalKindProfile, wallets: readonly WalletRef[], expiresAt: Date, now: Date) {
+  if (h.requesterKind !== 'DEVELOPER_PROJECT' || !h.requesterRef.endsWith('.production')) return;
+  if (h.status !== 'CLAIMED' && h.status !== 'APPLIED') return refuse(`APPROVAL_${h.status}`);
+  if (h.status === 'CLAIMED' && (h.claimExpiresAt ?? now) <= now) return refuse('APPROVAL_EXPIRED');
+  if (expiresAt <= now) return refuse('WORKFLOW_RUN_EXPIRED');
+  const verdict = profile.claimPolicy && await profile.claimPolicy(h, claimantOf(h, wallets));
+  if (!verdict) return refuse('LIVE_MODE_DISABLED');
+  if (!verdict.ok) return refuse(verdict.code);
+}
+
 /** Nonsecret MCP fallback. Only the creating account's existing HttpOnly OAuth cookie can turn an id into a handoff session. */
 export async function openBrowserApproval(surface: ApprovalSurface, approvalId: unknown, origin: string) {
   if (typeof approvalId !== 'string' || !/^apr_[a-z2-7]{26}$/.test(approvalId)) return refuse('HANDOFF_NOT_FOUND');
@@ -106,7 +116,9 @@ export async function resumeApproval(surface: ApprovalSurface, approvalId: unkno
   // BUILD-CHAT-E2E-001: a sequence resumes at its run's current step (each step was re-verified when it became ready).
   if (h.plan.kind === 'SEQUENTIAL') {
     const runs = surface.workflowRuns ?? refuse('WORKFLOW_RUNS_NOT_ENABLED');
-    return continueSequential(runs, await ownedRun(runs, h.handoffId, wallets), wallets, approvalView(h, null, await viewerOf(profile, wallets)));
+    const run = await ownedRun(runs, h.handoffId, wallets);
+    await assertLiveRunAuthority(h, profile, wallets, run.expiresAt, runs.now());
+    return continueSequential(runs, run, wallets, approvalView(h, null, await viewerOf(profile, wallets)));
   }
   const verified = await verifyHandoff(h, surface.runtime, profile.policy);
   if (!verified.ok) return refuse(verified.code);
@@ -163,6 +175,7 @@ export async function claimApproval(surface: ApprovalSurface, secret: unknown, w
   const verified = await verifyHandoff(current, surface.runtime, profile.policy);
   // The requester's own rule reads only the handoff's immutable requester data, so deciding it before the row lock is exact.
   const rule = profile.claimPolicy ? await profile.claimPolicy(current, wallet) : { ok: true } as const;
+  if (current.requesterKind === 'DEVELOPER_PROJECT' && current.requesterRef.endsWith('.production') && !rule.ok) return refuse(rule.code);
   const claimed = await surface.handoffs.claim(digest, wallet, now, CLAIM_SECONDS, h => h.workflowHash !== current.workflowHash ? { ok: false, code: 'HANDOFF_STALE', stale: true }
     : !verified.ok ? { ok: false, code: verified.code, ...'stale' in verified && verified.stale ? { stale: true } : {} }
       : !rule.ok ? { ok: false, code: rule.code } : { ok: true, share: share === true }, kinds);
@@ -185,6 +198,7 @@ export async function applyApproval(surface: ApprovalSurface, secret: unknown, w
   // BUILD-CHAT-E2E-001: a sequence's editor holds the run's current step, which must hash exactly to the step the run loaded for its owner.
   if (current.plan.kind === 'SEQUENTIAL') {
     const runs = surface.workflowRuns ?? refuse('WORKFLOW_RUNS_NOT_ENABLED'), run = await ownedRun(runs, current.handoffId, wallets);
+    await assertLiveRunAuthority(current, profile, wallets, run.expiresAt, now);
     const step = (await runs.store.steps(run.runId))[run.currentStep];
     if (!step || step.state !== 'AWAITING_OWNER' || step.workflowHash !== appliedHash) refuse('HANDOFF_WORKFLOW_MISMATCH');
     const applied = await surface.handoffs.apply(digest, claimantOf(current, wallets), now, kinds);
@@ -201,14 +215,16 @@ export async function applyApproval(surface: ApprovalSurface, secret: unknown, w
 
 // ── BUILD-CHAT-E2E-001: a multi-step approval's workflow run, for its proven owner wallets ─────────────────────────────────────────
 /** The run's handoff and the base view, for the run's own proven wallets (another wallet sees nothing). */
-async function runContext(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]) {
+async function runContext(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], requireLiveAuthority = false) {
   const runs = surface.workflowRuns ?? refuse('WORKFLOW_RUNS_NOT_ENABLED');
   if (typeof approvalId !== 'string' || !/^apr_[a-z2-7]{26}$/.test(approvalId)) return refuse('WORKFLOW_RUN_NOT_FOUND');
   let h: HandoffRecord | null = null;
   for (const wallet of wallets) { h = await surface.handoffs.forRunOwner(approvalId, wallet); if (h) break; }
   if (!h) return refuse('WORKFLOW_RUN_NOT_FOUND');
   const profile = surface.profiles[h.requesterKind] ?? refuse('WORKFLOW_RUN_NOT_FOUND');
-  return { runs, run: await ownedRun(runs, approvalId, wallets), base: approvalView(h, null, await viewerOf(profile, wallets)) };
+  const run = await ownedRun(runs, approvalId, wallets);
+  if (requireLiveAuthority) await assertLiveRunAuthority(h, profile, wallets, run.expiresAt, runs.now());
+  return { runs, run, base: approvalView(h, null, await viewerOf(profile, wallets)) };
 }
 /** The run's status for its owner, read-only (polled by the signing surface; it never loads or resolves a step). */
 export async function workflowRunStatus(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
@@ -217,12 +233,12 @@ export async function workflowRunStatus(surface: ApprovalSurface, approvalId: un
 }
 /** The run's status and, when one waits for the owner, the step to sign now (also after a reload, in another browser, by id + wallet proof). */
 export async function workflowRunContinue(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
-  const c = await runContext(surface, approvalId, wallets);
+  const c = await runContext(surface, approvalId, wallets, true);
   return continueSequential(c.runs, c.run, wallets, c.base);
 }
 /** The owner chose to confirm each step in their wallet. */
 export async function workflowRunStart(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
-  const c = await runContext(surface, approvalId, wallets);
+  const c = await runContext(surface, approvalId, wallets, true);
   return startSequential(c.runs, c.run, wallets, c.base);
 }
 /** The owner ends the run (nothing in flight), or stops a delegated run by revoking its authorization. */
@@ -246,7 +262,7 @@ export async function workflowRunUserFundedWalletRejected(surface: ApprovalSurfa
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function workflowRunResume(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
-  const c = await runContext(surface, approvalId, wallets);
+  const c = await runContext(surface, approvalId, wallets, true);
   return resumeSequential(c.runs, c.run, wallets, c.base);
 }
 /** The Universal Workflow Authorization Review of the run: the exact workflow grants the owner's wallet signs ONCE (delegated mode). */
@@ -370,4 +386,14 @@ export async function shareApproval(surface: ApprovalSurface, secret: unknown, w
   const { handoff: current, digest, kinds } = await locate(surface, secret, now);
   const updated = await surface.handoffs.setSharing(digest, claimantOf(current, wallets), share === true, now, kinds) ?? refuse('HANDOFF_NOT_FOUND');
   return { statusShared: updated.shareStatus };
+}
+
+/** An applied live approval's claimant may change sharing after the link was consumed. */
+export async function shareAppliedDeveloperApproval(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], share: boolean) {
+  if (typeof approvalId !== 'string' || !/^apr_[a-z2-7]{26}$/.test(approvalId)) return refuse('HANDOFF_NOT_FOUND');
+  for (const wallet of wallets) {
+    const updated = await surface.handoffs.setLiveDeveloperSharing(approvalId, wallet, share === true);
+    if (updated) return { statusShared: updated.shareStatus };
+  }
+  return refuse('HANDOFF_NOT_FOUND');
 }

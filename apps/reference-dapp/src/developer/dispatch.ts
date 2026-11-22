@@ -13,15 +13,15 @@
  * the internal dispatch endpoint for a scheduler (Vercel Cron or any other).
  */
 import { request as httpRequest } from 'node:http';
-import { createPgHandoffStore, deploymentEngineRuntime, pinnedHttpsRequest, resolveApprovalSecret, assertSafeOutput, type EngineRuntime,
-  type HandoffStore } from '../platform/index.ts';
+import { createPgHandoffStore, createPgWorkflowRunStore, deploymentEngineRuntime, pinnedHttpsRequest, resolveApprovalSecret, assertSafeOutput, type EngineRuntime,
+  type ApprovalRunReader, type HandoffStore } from '../platform/index.ts';
 import { platformStateHost } from '../server/platform-state-host.ts';
 import { DEVELOPER_LINK_PREFIX, developerApprovalLinkScheme } from './approval-profile.ts';
 import { readDeveloperConfig, type DeveloperConfig } from './config.ts';
 import { syncDeveloperApprovals, type SyncFilter } from './events.ts';
 import { createPgDeveloperStore } from './pg-store.ts';
 import type { WebhookEventBody } from './schemas.ts';
-import { scopeOfRequesterRef, type DeliveryClaim, type DeveloperStore, type EventRecord, type ProjectScope } from './store.ts';
+import { developerRequesterRef, scopeOfRequesterRef, type DeliveryClaim, type DeveloperStore, type EventRecord, type ProjectScope } from './store.ts';
 import { signWebhook, webhookSecretBytes } from './webhooks.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -72,8 +72,8 @@ export function nextAttemptAt(attempts: number, now: Date, random: () => number 
 }
 
 export type DispatchSummary = { readonly attempted: number; readonly succeeded: number; readonly retrying: number; readonly dead: number };
-export type DispatchDeps = { readonly config: Pick<DeveloperConfig, 'keys' | 'webhookLoopback'>; readonly tenantId: string; readonly store: DeveloperStore;
-  readonly transport?: WebhookTransport; readonly now?: () => Date; readonly random?: () => number };
+export type DispatchDeps = { readonly config: Pick<DeveloperConfig, 'keys' | 'webhookLoopback'> & Partial<Pick<DeveloperConfig, 'live'>>; readonly tenantId: string; readonly store: DeveloperStore;
+  readonly transport?: WebhookTransport; readonly now?: () => Date; readonly random?: () => number; readonly handoffs?: HandoffStore };
 const ERROR = /^WEBHOOK_[A-Z_]{2,60}$/;
 
 /** One attempt of one leased delivery, settled by its lease. */
@@ -85,6 +85,11 @@ async function attempt(deps: DispatchDeps, transport: WebhookTransport, claim: D
     return status;
   };
   if (!await deps.store.projectActive(scope.projectId)) return settle('DEAD', null, 'PROJECT_DISABLED', null);
+  if (claim.environment === 'production' && claim.event.type.startsWith('execution.')) {
+    const h = await deps.handoffs?.forRequester(claim.event.approvalId, { kind: 'DEVELOPER_PROJECT',
+      ref: developerRequesterRef(scope.projectId, scope.environment) }, now);
+    if (h?.status !== 'APPLIED' || !h.shareStatus) return settle('DEAD', null, 'SHARING_WITHDRAWN', null);
+  }
   if (!claim.endpointActive) return settle('DEAD', null, 'ENDPOINT_DELETED', null);
   const envelope = eventEnvelope(claim.event);
   try { const { data, ...rest } = envelope; assertSafeOutput(rest); assertSafeOutput(data); } catch { return settle('DEAD', null, 'PAYLOAD_GUARD', null); }
@@ -102,19 +107,23 @@ async function attempt(deps: DispatchDeps, transport: WebhookTransport, claim: D
 
 /** Leases up to `limit` due deliveries (optionally of one project) and attempts them concurrently. */
 export async function dispatchDeliveries(deps: DispatchDeps, filter: { readonly scope?: ProjectScope }, limit: number): Promise<DispatchSummary> {
-  const claims = await deps.store.claimDeliveries(filter, limit, deps.now?.() ?? new Date(), LEASE_MS);
+  const claims = await deps.store.claimDeliveries({ ...filter, sandboxOnly: deps.config.live !== true }, limit, deps.now?.() ?? new Date(), LEASE_MS);
   const transport = deps.transport ?? webhookTransport(deps.config);
   const outcomes = await Promise.all(claims.map(claim => attempt(deps, transport, claim).catch(() => 'PENDING' as const)));
   return { attempted: claims.length, succeeded: outcomes.filter(o => o === 'SUCCEEDED').length, retrying: outcomes.filter(o => o === 'PENDING').length,
     dead: outcomes.filter(o => o === 'DEAD').length };
 }
 
-export type NotifyDeps = DispatchDeps & { readonly handoffs: HandoffStore; readonly runtime: EngineRuntime };
-/** Derives the events of some open approvals, then delivers what is due. Every failure is contained: notifications never block FloFi. */
+export type NotifyDeps = DispatchDeps & { readonly handoffs: HandoffStore; readonly runtime: EngineRuntime; readonly workflowRuns?: ApprovalRunReader };
+/** Derives the events of some open approvals, then delivers what is due, including when approval sync fails. */
 export async function syncAndDispatch(deps: NotifyDeps, filter: SyncFilter, budget: { readonly approvals: number; readonly deliveries: number }) {
-  const approvals = await syncDeveloperApprovals({ store: deps.store, handoffs: deps.handoffs, runtime: deps.runtime, now: deps.now?.() ?? new Date() }, filter, budget.approvals);
+  const sync = await syncDeveloperApprovals({ store: deps.store, handoffs: deps.handoffs, runtime: deps.runtime, now: deps.now?.() ?? new Date(),
+    ...(deps.workflowRuns ? { workflowRuns: deps.workflowRuns } : {}) },
+  { ...filter, sandboxOnly: deps.config.live !== true }, budget.approvals)
+    .then(approvals => ({ approvals }), (error: unknown) => ({ error }));
   const deliveries = await dispatchDeliveries(deps, filter.scope ? { scope: filter.scope } : {}, budget.deliveries);
-  return { approvals, deliveries };
+  if ('error' in sync) throw sync.error;
+  return { approvals: sync.approvals, deliveries };
 }
 
 /**
@@ -133,6 +142,7 @@ export async function developerApprovalChanged(env: Env, secret: unknown): Promi
   if (!h) return;
   const store = createPgDeveloperStore(host.db, host.tenantId), scope = scopeOfRequesterRef(h.requesterRef);
   if (!scope) return;
-  await syncDeveloperApprovals({ store, handoffs, runtime: deploymentEngineRuntime(env), now: new Date() }, { handoffId: h.handoffId }, 1);
-  await dispatchDeliveries({ config, tenantId: host.tenantId, store }, { scope }, 10);
+  if (scope.environment === 'production' && !config.live) return;
+  await syncDeveloperApprovals({ store, handoffs, runtime: deploymentEngineRuntime(env), now: new Date(), workflowRuns: createPgWorkflowRunStore(host.db, host.tenantId) }, { handoffId: h.handoffId }, 1);
+  await dispatchDeliveries({ config, tenantId: host.tenantId, store, handoffs }, { scope }, 10);
 }

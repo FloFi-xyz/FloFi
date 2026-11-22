@@ -1,12 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensureTenant, assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
+import { ensureTenant, assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, createLogger, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
+import { createBackend, type FlowResult } from '../../backend/app.ts';
+import { createRouterHarness } from '../../e2e/router-harness.ts';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
+import { verifyWebhook } from '../../../../packages/developer-sdk/src/index.ts';
 import { createAccountStore } from '../accounts/account-store.ts';
 import { runAdminCommand } from '../admin/cli-commands.ts';
+import { composeStrategy } from '../engine/strategy-engine';
 import { typedId } from '../platform/ids.ts';
+import { applyApproval, claimApproval, resumeApproval, shareAppliedDeveloperApproval, viewApproval, workflowRunContinue, type WalletRef } from '../platform/index.ts';
+import { FLOFI_PRODUCTION_ORIGIN } from '../platform/navigation.ts';
+import { approvalSurface } from '../server/approval-surface.ts';
+import type { RouterRecord } from '../server/router-service.ts';
+import { WALLET_PRINCIPAL_HEADER } from '../server/run-ownership.ts';
+import { DEVELOPER_LIVE_HEADER, externalWalletRequestRefusal } from '../workflow-runs/external-step.ts';
+import { observeOwnerStep } from '../workflow-runs/observe.ts';
 import { createDeveloperConsoleStore, developerOwnershipInstalled } from './console-store.ts';
-import { developerApi, developerConfig, recordingRuntime } from './developer.test-harness.ts';
+import { developerApi, developerConfig, developerEnv, recordingRuntime } from './developer.test-harness.ts';
+import type { WebhookRequest } from './dispatch.ts';
 import { apiKeyDigest } from './keys.ts';
 import { createPgDeveloperStore } from './pg-store.ts';
 
@@ -142,6 +155,136 @@ describe('developer console ownership', () => {
     expect(await store.listKeys(projectId)).toMatchObject([{ keyId: key.keyId, status: 'REVOKED' }]);
   });
 
+  it('binds live-shaped approvals to the exact project and gates further signing after shutdown', async () => {
+    const dispatchToken = randomBytes(24).toString('hex');
+    const env = developerEnv({ VERCEL: '1', VERCEL_ENV: 'production', FLOFI_PUBLIC_ORIGIN: FLOFI_PRODUCTION_ORIGIN,
+      FLOFI_BETA_ACCESS: 'open', FLOFI_WORKFLOW_RUNS: 'enabled',
+      FLOFI_DEVELOPER_CONSOLE: 'enabled', FLOFI_DEVELOPER_LIVE: 'enabled',
+      FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256: createHash('sha256').update(dispatchToken).digest('hex') });
+    const live = developerConfig(env);
+    expect(live.live).toBe(true);
+    const owner = consoleFor(first), other = consoleFor(second);
+    const calls: string[] = [];
+    const runtime = {
+      ...recordingRuntime({ calls, modes: { 'crosschain-router': 'live' } }),
+      sequences: async () => ({ enabled: true, delegation: null }),
+    };
+    const host = { db: t.db, tenantId: tenant };
+    const surface = await approvalSurface(env, () => undefined, { host, runtime });
+    const delivered: WebhookRequest[] = [];
+    const wallet: WalletRef = { namespace: 'eip155', address: '0x' + '1'.repeat(40) };
+    const otherWallet: WalletRef = { ...wallet, address: '0x' + '2'.repeat(40) };
+    const build = async (projects: typeof owner, name: string) => {
+      const projectId = await projects.create(name, '', now());
+      const key = await projects.issue(projectId, 'production', ['strategies', 'approvals', 'executions', 'webhooks'], live, now());
+      const api = developerApi({ db: t.db, env, runtime, transport: async request => { delivered.push(request); return { status: 204 }; } }, key.key);
+      const strategyInput = { strategy: { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5' } };
+      const discovery = await api<{ data: { destinationNetwork: string; executionPlan: { kind: string }; operations: { approve: { available: boolean } } }[] }>(
+        'GET', '/capabilities?network=base&action=bridge');
+      expect(discovery.status).toBe(200);
+      const capability = discovery.body.data.find(row => row.destinationNetwork === 'arbitrum-one' && row.operations.approve.available);
+      expect(capability).toBeDefined();
+      expect((await api('POST', '/strategies', strategyInput)).body.error).toMatchObject({ reason: 'IDEMPOTENCY_KEY_REQUIRED' });
+      const created = await api<{ id: string; workflowHash: string; executionPlan: { kind: string } }>(
+        'POST', '/strategies', strategyInput, { 'idempotency-key': 'project-draft-1' });
+      expect(created.status).toBe(201);
+      expect(created.body.executionPlan.kind).toBe(capability?.executionPlan.kind);
+      const input = { strategyId: created.body.id, workflowHash: created.body.workflowHash,
+        returnTarget: { url: 'https://example.com/flofi/return', state: 'nonsecret-integration-state' } };
+      const unsafe = { ...input, returnTarget: { ...input.returnTarget, url: 'https://example.com/flofi/return#credential' } };
+      expect((await api('POST', '/approvals', unsafe, { 'idempotency-key': 'unsafe-return-target' })).body.error).toMatchObject({ reason: 'RETURN_TARGET_INVALID' });
+      const approval = await api<{ id: string; approvalUrl: string }>('POST', '/approvals', input, { 'idempotency-key': 'project-approval-1' });
+      expect(approval.status).toBe(201);
+      const originalSecret = decodeURIComponent(new URL(approval.body.approvalUrl).hash.slice(1));
+      return { projectId, key, api, input, approvalId: approval.body.id, originalSecret };
+    };
+    const one = await build(owner, 'First integrator'), two = await build(other, 'Second integrator');
+    const endpoint = await two.api<{ secret: string }>('POST', '/webhook-endpoints', { url: 'https://example.com/flofi' },
+      { 'idempotency-key': 'project-webhook-1' });
+    expect(endpoint.status).toBe(201);
+    expect(one.input.workflowHash).toBe(two.input.workflowHash);
+    expect((await two.api('GET', `/approvals/${one.approvalId}`)).status).toBe(404);
+    expect((await developerApi({ db: t.db, env: { ...env, FLOFI_DEVELOPER_LIVE: 'off' }, runtime }, one.key.key)('GET', '/capabilities')).status).toBe(403);
+    const claim = async (project: typeof one) => {
+      const replay = await project.api<{ approvalUrl: string }>('POST', '/approvals', project.input, { 'idempotency-key': 'project-approval-1' });
+      const secret = decodeURIComponent(new URL(replay.body.approvalUrl).hash.slice(1));
+      const proposal = await claimApproval(surface, secret, [wallet], true);
+      expect(proposal.workflow).toBeTruthy();
+      expect(proposal.view.returnTarget).toBeUndefined();
+      const applied = await applyApproval(surface, secret, [wallet], proposal.workflow);
+      expect(applied.returnTarget).toBe(`https://example.com/flofi/return?approvalId=${project.approvalId}&state=nonsecret-integration-state`);
+      const recovery = await resumeApproval(surface, project.approvalId, [wallet]);
+      expect(recovery.view.returnTarget).toBe(applied.returnTarget);
+      expect((await viewApproval(surface, project.originalSecret, [otherWallet])).returnTarget).toBeUndefined();
+      return { proposal, secret };
+    };
+    const firstClaim = await claim(one), secondClaim = await claim(two);
+    expect(firstClaim.proposal.workflowHash).not.toBe(secondClaim.proposal.workflowHash);
+    const workflow = firstClaim.proposal.workflow;
+    if (!workflow) throw new Error('Workflow fixture missing');
+    // Keep the approval policy mainnet-shaped, and route the owner flow only to deterministic in-process RPC and provider fixtures.
+    const router = createRouterHarness({ owner: wallet.address, wallets: [otherWallet.address] });
+    const backend = createBackend({ db: t.db, env: { GRYLOO_ROUTER_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_BETA_ACCESS: 'open' },
+      logger: createLogger({ service: 'developer-test', sink: () => undefined }), tenantId: tenant, holderId: 'developer-test', evidenceStore: null,
+      rpc: { 'crosschain-router': router.baseRpc },
+      routers: { 'crosschain-router': { destinationRpc: router.arbitrumRpc, providers: router.providers } } });
+    const flow = 'crosschain-router';
+    const post = async (method: string, args: unknown[], key = randomBytes(16).toString('hex'), live = true): Promise<FlowResult> => {
+      const route = backend.routes.find(r => r.name === 'flow')!, path = `/v1/flows/${flow}/${method}`;
+      return (await route.handler({ path, method: 'POST', query: new URLSearchParams(), requestId: 'request', body: { args },
+        headers: { 'idempotency-key': key, [WALLET_PRINCIPAL_HEADER]: wallet.address, ...(live ? { [DEVELOPER_LIVE_HEADER]: 'enabled' } : {}) },
+      }, route.pattern.exec(path)!)).body as FlowResult;
+    };
+    const simulated = await post('simulate', [workflow, wallet.address]);
+    expect(simulated.ok).toBe(true);
+    if (!simulated.ok) throw new Error(simulated.code);
+    const record = simulated.value as RouterRecord, beginKey = randomBytes(16).toString('hex');
+    expect(record.provenance).toBe('MOCKED');
+    expect((await post('review', [record.id, record.review.commitment, workflow])).ok).toBe(true);
+    expect(await externalWalletRequestRefusal(t.db, { tenantId: tenant, workflowId: workflow.workflowId, executionId: record.id, flow,
+      principal: otherWallet.address, live: true, record })).toBe('HANDOFF_WORKFLOW_MISMATCH');
+    expect((await post('begin', [record.id, wallet.address, workflow], beginKey)).ok).toBe(true);
+    expect(await post('begin', [record.id, wallet.address, workflow], beginKey, false)).toEqual({ ok: false, code: 'LIVE_MODE_DISABLED' });
+    const runStore = surface.workflowRuns?.store;
+    const secondRun = await runStore?.byHandoff(two.approvalId);
+    if (!runStore || !secondRun) throw new Error('Workflow run fixture missing');
+    // Record a synthetic observation under the exact second handoff. No wallet/provider operations run in this fixture.
+    const executionId = 'xroute-' + 'a'.repeat(32);
+    const evidence = { environment: 'MOCKED', outcome: 'RECONCILED', bundleHash: '0x' + 'b'.repeat(64) };
+    const pending = {
+      kind: 'OWNER_RUN' as const, executionId, flow: 'crosschain-router', status: 'CONFIRMING', evidence: null,
+      transactions: [], spent: [], received: [], observedAt: now().toISOString(),
+    };
+    expect(await runStore.settleOwnerStep(secondRun.runId, 0, 'UNCERTAIN', pending, 'STEP_OUTCOME_PENDING')).toBe('RECORDED');
+    expect((await two.api('GET', `/approvals/${two.approvalId}`)).body).toMatchObject({
+      executions: [{ id: executionId, reconciled: false, terminal: false, evidence: null }],
+    });
+    expect(await runStore.settleOwnerStep(secondRun.runId, 0, 'RECONCILED',
+      { ...pending, executionId: 'xroute-' + 'c'.repeat(32), status: 'RECONCILED', evidence }, null)).toBe('CLAIMED');
+    expect(await runStore.settleOwnerStep(secondRun.runId, 0, 'RECONCILED', { ...pending, status: 'RECONCILED', evidence }, null)).toBe('RECORDED');
+    expect((await two.api('GET', `/approvals/${two.approvalId}`)).body).toMatchObject({
+      executions: [{ id: executionId, reconciled: true, evidence }],
+    });
+    expect((await one.api('GET', `/approvals/${one.approvalId}`)).body).toMatchObject({ executions: [] });
+    expect((await one.api('GET', `/executions/${executionId}/evidence`)).status).toBe(404);
+    expect((await two.api('POST', '/internal/dispatch', undefined, { authorization: `Bearer ${dispatchToken}` })).status).toBe(200);
+    const events = await Promise.all(delivered.map(request => verifyWebhook({
+      payload: request.body, headers: request.headers, secret: endpoint.body.secret,
+    })));
+    expect(events.find(event => event.type === 'execution.reconciled')?.data).toMatchObject({ approvalId: two.approvalId, executionId, evidence });
+    await expect(shareAppliedDeveloperApproval(surface, one.approvalId, [otherWallet], false)).rejects.toThrow('HANDOFF_NOT_FOUND');
+    expect(await shareAppliedDeveloperApproval(surface, one.approvalId, [wallet], false)).toEqual({ statusShared: false });
+    expect((await one.api('GET', `/approvals/${one.approvalId}`)).body).toMatchObject({ workflowRun: null, statusShared: false });
+    expect((await two.api('GET', `/approvals/${two.approvalId}`)).body).toMatchObject({ statusShared: true });
+    await owner.disable(one.projectId, now());
+    expect(await post('begin', [record.id, wallet.address, workflow], beginKey)).toEqual({ ok: false, code: 'DEVELOPER_PROJECT_DISABLED' });
+    expect(await post('handoff', [record.id])).toEqual({ ok: false, code: 'DEVELOPER_PROJECT_DISABLED' });
+    expect((await post('status', [record.id])).ok).toBe(true);
+    await expect(resumeApproval(surface, one.approvalId, [wallet])).rejects.toThrow('DEVELOPER_PROJECT_DISABLED');
+    await expect(workflowRunContinue(surface, one.approvalId, [wallet])).rejects.toThrow('DEVELOPER_PROJECT_DISABLED');
+    expect(calls.every(call => /^(mode:|info:|runs$|journal$)/.test(call))).toBe(true);
+  });
+
   it('closes dependent resources on account deletion and leaves its project identity for history', async () => {
     const id = account('c');
     await t.db.query('INSERT INTO flofi_accounts (tenant_id, account_id) VALUES ($1,$2)', [tenant, id]);
@@ -156,5 +299,23 @@ describe('developer console ownership', () => {
     expect((await api('GET', '/capabilities')).status).toBe(401);
     expect((await t.db.query('SELECT status FROM developer_projects WHERE tenant_id=$1 AND project_id=$2', [tenant, project])).rows[0]?.status).toBe('DISABLED');
     expect((await t.db.query('SELECT status FROM developer_webhook_endpoints WHERE tenant_id=$1 AND project_id=$2', [tenant, project])).rows[0]?.status).toBe('DELETED');
+  });
+
+  it('looks up a pinned execution directly and still verifies the reviewed workflow', async () => {
+    const composed = composeStrategy({ action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5' });
+    if (!composed.ok) throw new Error('Reference strategy fixture missing');
+    const at = now(), flow = 'crosschain-router', pinnedExecutionId = 'xroute-' + 'a'.repeat(32), wallet = '0x' + '1'.repeat(40);
+    const runtime = recordingRuntime({
+      runList: async () => { throw new Error('Pinned observation must not scan the listing'); },
+      runs: async (id, owner) => ({ ok: true, value: id === pinnedExecutionId && owner === wallet ? {
+        runId: id, flow, workflowId: composed.workflow.workflowId, ownerAccount: wallet, status: 'CONFIRMING', provenance: 'MOCKED',
+        needsObservation: true, attentionRequired: false, hasEvidence: false, errorCode: null, attempts: [],
+        createdAt: at.toISOString(), updatedAt: at.toISOString(),
+      } : null }),
+      record: async () => ({ ok: true, value: { review: { workflow: composed.workflow } } }),
+    });
+    const step = { flow, wallet, workflowHash: composed.workflowHash, claimedAt: at, chain: 'eip155:8453', now: at, pinnedExecutionId };
+    expect(await observeOwnerStep(runtime, step)).toMatchObject({ verdict: 'UNCERTAIN', outcome: { executionId: pinnedExecutionId, evidence: null } });
+    expect(await observeOwnerStep(runtime, { ...step, workflowHash: '0x' + '2'.repeat(64) })).toMatchObject({ verdict: 'UNAVAILABLE' });
   });
 });

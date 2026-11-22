@@ -22,7 +22,7 @@ export async function developerConsoleHost(env: typeof process.env = process.env
   if (!session) return { status: 'signed-out' } as const;
   if (account && betaAccessMode(env) === 'beta'
     && await isOtherAccountOfBoardedPerson(session.accountId, await account.store.identities(session.accountId), env)) return { status: 'other-account' } as const;
-  const environment = !isHostedDeployment(env) && env.FLOFI_DEVELOPER_CONSOLE_TEST_KEYS === 'ALLOW_LOCAL_ONLY'
+  const environment = config.live ? 'production' as const : !isHostedDeployment(env) && env.FLOFI_DEVELOPER_CONSOLE_TEST_KEYS === 'ALLOW_LOCAL_ONLY'
     && new URL(config.origin).protocol === 'http:' ? 'sandbox' as const : null;
   return { status: 'signed-in', ...state, session, config, environment,
     store: createDeveloperConsoleStore(state.db, state.tenantId, session.accountId) } as const;

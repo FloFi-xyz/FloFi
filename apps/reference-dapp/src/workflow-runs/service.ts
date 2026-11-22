@@ -42,6 +42,7 @@ import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } fr
 import type { GroupRecord } from './pg-store.ts';
 import type { ReviewedGas } from './execution-groups.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
+import { executionStep, isLiveDeveloperRun } from './external-step.ts';
 import { presentedDeliveryState } from './run-step-phase.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -72,7 +73,8 @@ export function assertRunWallets(run: RunRecord, wallets: readonly WalletRef[]):
  * 0032). Every other requester's run still needs at least two steps.
  */
 export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, workflow: WorkflowComposition, wallets: readonly WalletRef[]): Promise<RunRecord> {
-  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' ? 1 : 2;
+  const externalLive = h.requesterKind === 'DEVELOPER_PROJECT' && h.requesterRef.endsWith('.production') && h.fundsClass === 'REAL_FUNDS';
+  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' || externalLive ? 1 : 2;
   if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < minimumSteps || h.plan.steps.length !== workflow.steps.length
     || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
   // A database without migration 0032 refuses the row by its CHECK: refused here with a closed code first (e.g. a one-step handoff issued before an
@@ -96,9 +98,13 @@ export async function ownerAuthorizationPlan(deps: WorkflowRunDeps, run: RunReco
   if (!workflow.ok) return refuse('WORKFLOW_RUN_STALE');
   // A run is always evaluated as a run (also the Editor's run of one step: its per-step facts and the workflow-run gate).
   const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policyFor(run.requester.kind), { run: true });
-  const grants = deps.delegationFacts && deps.grantsOf ? await deps.grantsOf(run.owner) : null;
-  return authorizationPlan(workflow, gates, deps.delegationFacts, grants ? { grants, now: deps.now().getTime() } : undefined,
-    deps.userFundedFacts ? { facts: deps.userFundedFacts, ...wallets ? { wallets } : {}, evmOwner: run.wallets.eip155 ?? null } : undefined);
+  const liveDeveloper = isLiveDeveloperRun(run);
+  if (liveDeveloper && gates.enabledByDeployment.mockedHarness) return refuse('MAINNET_RUNTIME_REQUIRED');
+  const delegation = liveDeveloper ? null : deps.delegationFacts;
+  const userFunded = liveDeveloper ? undefined : deps.userFundedFacts;
+  const grants = delegation && deps.grantsOf ? await deps.grantsOf(run.owner) : null;
+  return authorizationPlan(workflow, gates, delegation, grants ? { grants, now: deps.now().getTime() } : undefined,
+    userFunded ? { facts: userFunded, ...wallets ? { wallets } : {}, evmOwner: run.wallets.eip155 ?? null } : undefined);
 }
 
 /** Confirm each step: the run starts (any unsigned delegated authorization of it is revoked) and its first step is resolved. */
@@ -123,6 +129,7 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   if (run.mode !== 'CONFIRM_EACH_STEP' && run.mode !== 'USER_FUNDED') return null;
   await advanceRun(runnerDeps(deps), run.runId);
   const fresh = (await deps.store.byId(run.runId))!;
+  if (isLiveDeveloperRun(fresh) && fresh.expiresAt <= deps.now()) return null;
   if (fresh.state !== 'RUNNING' && fresh.state !== 'ATTENTION') return null;
   let step = (await deps.store.steps(run.runId))[fresh.currentStep];
   if (!step || !step.strategy || !step.workflowHash || !['READY', 'AWAITING_OWNER'].includes(step.state)) return null;
@@ -137,8 +144,10 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
     if (circleAskPending(g, step.stepIndex)) return null;
   }
   // The exact step the run resolved, re-composed now: a different hash is a stale step, never silently replaced.
-  const composed = composeWorkflowBound(step.strategy, step.workflowHash);
+  const composed = composeWorkflowBound(step.strategy, undefined);
   if (!composed.ok || composed.steps.length !== 1) return refuse('WORKFLOW_STEP_STALE');
+  const execution = executionStep(fresh, step.stepIndex, composed.steps[0]!);
+  if (execution.workflowHash !== step.workflowHash) return refuse('WORKFLOW_STEP_STALE');
   // BUILD-FLOFI-MAINNET-PRODUCT-001: a run started on a test network before FloFi became Mainnet-only signs no further step in the public product.
   if (networkScope() !== 'ENGINEERING' && strategyTestNetworks(composed).length) return refuse(TEST_NETWORK_NOT_AVAILABLE);
   if (step.state === 'READY') step = await deps.store.stepTransition(run.runId, step.stepIndex, ['READY'], 'AWAITING_OWNER', { claimedAt: deps.now() }, 'STEP_LOADED')
@@ -146,7 +155,7 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   if (step.state !== 'AWAITING_OWNER') return null;
   // The worker observes the step's own flow runs from now on (deduplicated: one open advance item per run).
   await deps.store.advanceLater(run.runId, 5_000);
-  return { stepIndex: step.stepIndex, stepCount: fresh.stepCount, strategy: step.strategy!, workflowHash: step.workflowHash!, composition: composed.steps[0]! };
+  return { stepIndex: step.stepIndex, stepCount: fresh.stepCount, strategy: step.strategy!, workflowHash: execution.workflowHash, composition: execution };
 }
 
 /**

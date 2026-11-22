@@ -5735,6 +5735,7 @@
       "sources": [
         "apps/reference-dapp/src/platform/approval-link-format.ts",
         "apps/reference-dapp/src/platform/approval-links.ts",
+        "apps/reference-dapp/src/platform/approval-workflow-results.ts",
         "apps/reference-dapp/src/platform/approvals.ts",
         "apps/reference-dapp/src/platform/approve.ts",
         "apps/reference-dapp/src/platform/capabilities.ts",
@@ -8788,6 +8789,7 @@
       "sources": [
         "apps/reference-dapp/src/workflow-runs/authorization-plan.ts",
         "apps/reference-dapp/src/workflow-runs/execution-groups.ts",
+        "apps/reference-dapp/src/workflow-runs/external-step.ts",
         "apps/reference-dapp/src/workflow-runs/facts.ts",
         "apps/reference-dapp/src/workflow-runs/observe.ts",
         "apps/reference-dapp/src/workflow-runs/pg-store.ts",

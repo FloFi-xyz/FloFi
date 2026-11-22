@@ -24,7 +24,7 @@ import { ENGINE_VERSION, evaluateWorkflowGates, handoffFindings, type ExecutionP
 import { assertSafeOutput } from '../mcp/simulation.ts';
 import { newId } from '../mcp/oauth/crypto.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
-import { mintApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
+import { developerReturnTarget, mintApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { REQUESTER_REF, type ApprovalRequesterKind, type HandoffRecord, type HandoffStore, type RequesterScope, type WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
 import type { WorkflowRunClaim } from './workflow-run-approvals.ts';
@@ -117,15 +117,17 @@ function requesterValid(requester: ApprovalRequester): boolean {
  * external surface keeps its one-step SINGLE_FLOW contract. The stored strategy and hash are the step's own either way (a one-step workflow
  * composes to the same strategy and hash as its step).
  */
-export async function requestApproval(deps: ApprovalDeps, requester: ApprovalRequester, strategy: unknown, workflowHash: string,
-  options: { readonly singleStepRun?: boolean } = {}) {
+export async function prepareApprovalRequest(deps: ApprovalDeps, requester: ApprovalRequester, strategy: unknown, workflowHash: string,
+  options: { readonly singleStepRun?: boolean; readonly ownerStepsOnly?: boolean } = {}) {
   // A surface may only mint links for the requester kinds its scheme serves, for a requester the store can persist.
   if (!deps.scheme.kinds.includes(requester.kind) || !requesterValid(requester)) return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
-  if (options.singleStepRun && requester.kind !== 'EDITOR_SESSION') return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
+  const externalLive = requester.kind === 'DEVELOPER_PROJECT' && requester.ref.endsWith('.production') && options.ownerStepsOnly;
+  if (options.singleStepRun && requester.kind !== 'EDITOR_SESSION' && !externalLive) return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
   const workflow = composeWorkflowBound(strategy, workflowHash);
   if (!workflow.ok) return { ok: false, code: workflow.code, extra: { issues: workflow.issues } } satisfies Failure;
   // A one-step run is only ever a run of exactly one step (a longer workflow is a sequence anyway).
   if (options.singleStepRun && workflow.steps.length !== 1) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' } satisfies Failure;
+  if (externalLive && workflow.fundsClass !== 'REAL_FUNDS') return { ok: false, code: 'TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY' } satisfies Failure;
   const sequence = workflow.steps.length > 1 || options.singleStepRun === true;
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product hands off mainnet workflows only; a test network is never mapped to its mainnet.
   const test = networkScope() === 'ENGINEERING' ? [] : strategyTestNetworks(workflow);
@@ -133,6 +135,8 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
     networks: [...new Set(test.map(t => t.network))], mainnets: [...new Set(test.map(t => t.mainnet).filter((m): m is string => m !== null))] } } satisfies Failure;
   // A sequence is handed off only when it is SEQUENTIAL and every step's facts allow it (BUILD-CHAT-E2E-001); every step's facts are reported.
   const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy, { run: sequence });
+  if (options.ownerStepsOnly && (gates.enabledByDeployment.mockedHarness || gates.supportedByCode.modes?.confirmEachStep))
+    return { ok: false, code: gates.supportedByCode.modes?.confirmEachStep ?? 'MAINNET_RUNTIME_REQUIRED' } satisfies Failure;
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason!, extra: { gates: gateView(gates), executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView) } } satisfies Failure;
   const composition = workflow.steps[0]!;
   // Every step's review is checked; a blocker in any step refuses the whole workflow before anything is stored.
@@ -145,17 +149,17 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
   // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): every read happens BEFORE the approval is written, so nothing after `create` can fail (or time
   // out) and turn a committed approval into what reads as "nothing created".
   const sequenceFacts = sequence ? await deps.runtime.sequences?.() ?? null : null;
-  const delegation = sequenceFacts?.delegation ?? null, userFundedFacts = sequenceFacts?.userFunded ?? null;
+  const delegation = options.ownerStepsOnly ? null : sequenceFacts?.delegation ?? null;
+  const userFundedFacts = options.ownerStepsOnly ? null : sequenceFacts?.userFunded ?? null;
   const { secret, digest } = mintApprovalSecret(deps.scheme), handoffId = newId('apr'), expiresAt = new Date(deps.now.getTime() + deps.rules.handoffSeconds * 1000);
   // A sequence's handoff holds the whole canonical workflow (v2 strategy, sequence hash, SEQUENTIAL plan); its run starts at the claim.
   const stored = sequence ? { strategy: workflow.strategy, workflowHash: workflow.workflowHash } : { strategy: composition.strategy, workflowHash: composition.workflowHash };
-  const created = await deps.handoffs.create({ handoffId, requester: requesterScope(requester), grantId: requester.kind === 'MCP_ACCOUNT' ? requester.grantId : null,
+  const draft = { handoffId, requester: requesterScope(requester), grantId: requester.kind === 'MCP_ACCOUNT' ? requester.grantId : null,
     requesterContext: requester.kind === 'MCP_ACCOUNT' ? {} : requester.context ?? {}, clientId: requester.clientId, clientName: requester.displayName,
     secretDigest: digest, strategy: stored.strategy, workflowHash: stored.workflowHash, engineVersion: ENGINE_VERSION,
-    networkEnvironment: gates.plan.networkEnvironment, fundsClass: gates.plan.fundsClass, plan: gates.plan, expiresAt },
-  deps.now, { maxPending: deps.rules.maxPending, supersedeSameWorkflow: deps.rules.supersedeSameWorkflow });
-  if (!created.ok) return { ok: false, code: created.code } satisfies Failure;
-  return { ok: true as const, value: { approvalId: handoffId, approvalUrl: approvalUrl(deps.origin, secret), workflowHash: stored.workflowHash,
+    networkEnvironment: gates.plan.networkEnvironment, fundsClass: gates.plan.fundsClass, plan: gates.plan, expiresAt };
+  const rules = { maxPending: deps.rules.maxPending, supersedeSameWorkflow: deps.rules.supersedeSameWorkflow };
+  return { ok: true as const, draft, rules, value: { approvalId: handoffId, approvalUrl: approvalUrl(deps.origin, secret), workflowHash: stored.workflowHash,
     expiresAt: expiresAt.toISOString(), status: 'PENDING', networkEnvironment: gates.plan.networkEnvironment, fundsClass: gates.plan.fundsClass,
     executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView), authority: AUTHORITY_NONE, requires: [...APPROVAL_REQUIRES],
     walletNamespace: planNamespace(gates.plan), walletNamespaces: planNamespaces(gates.plan), gates: gateView(gates),
@@ -165,6 +169,15 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
     ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, delegation, undefined, userFundedFacts ? { facts: userFundedFacts } : undefined) } : {},
     // What FloFi's flow still requires of the owner before anything can be signed (cleared by the fresh simulation and Review).
     preExecution } };
+}
+
+export async function requestApproval(...args: Parameters<typeof prepareApprovalRequest>) {
+  const prepared = await prepareApprovalRequest(...args);
+  if (!prepared.ok) return prepared;
+  const [deps] = args;
+  const created = await deps.handoffs.create(prepared.draft, deps.now, prepared.rules);
+  if (!created.ok) return { ok: false, code: created.code } satisfies Failure;
+  return { ok: true as const, value: prepared.value };
 }
 
 /** One of this requester's handoffs (never another requester's), with lazy expiry, or `APPROVAL_NOT_FOUND`. */
@@ -208,6 +221,8 @@ export async function verifyHandoff(h: HandoffRecord, runtime: EngineRuntime, po
   if (networkScope() !== 'ENGINEERING' && strategyTestNetworks(workflow).length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE };
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a stored SEQUENTIAL plan is re-verified as a workflow run (also an Editor run of one step).
   const gates = await evaluateWorkflowGates(workflow, runtime, policy, { run: h.plan.kind === 'SEQUENTIAL' });
+  if (h.requesterKind === 'DEVELOPER_PROJECT' && h.requesterRef.endsWith('.production') && gates.enabledByDeployment.mockedHarness)
+    return { ok: false, code: 'MAINNET_RUNTIME_REQUIRED' };
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason! };
   return { ok: true, composition: workflow.steps[0]!, workflow, gates };
 }
@@ -223,7 +238,12 @@ const viewerScope = (viewer: ApprovalViewer): RequesterScope | null =>
 export function approvalView(h: HandoffRecord, verified: Verified | null, viewer: ApprovalViewer) {
   const claimedByViewer = h.claimed !== null && viewer.wallets.some(w => w.namespace === h.claimed!.namespace && w.address === h.claimed!.address);
   const own = viewerScope(viewer), sameRequester = own !== null && own.kind === h.requesterKind && own.ref === h.requesterRef;
+  const developerProjectId = h.requesterKind === 'DEVELOPER_PROJECT' && h.requesterRef.endsWith('.production') ? h.clientId : null;
+  const rawTarget = h.requesterContext.returnTarget;
+  const returnTarget = h.requesterKind === 'DEVELOPER_PROJECT' && h.status === 'APPLIED' && claimedByViewer && rawTarget && typeof rawTarget === 'object'
+    ? developerReturnTarget((rawTarget as Record<string, unknown>).url, (rawTarget as Record<string, unknown>).state, h.handoffId) : null;
   return { approvalId: h.handoffId, status: h.status, clientName: h.clientName, requesterKind: h.requesterKind, external: true, createdAt: h.createdAt.toISOString(),
+    ...(developerProjectId ? { developerProjectId } : {}), ...(returnTarget ? { returnTarget } : {}),
     expiresAt: h.expiresAt.toISOString(),
     networkEnvironment: h.networkEnvironment, fundsClass: h.fundsClass, workflowHash: h.workflowHash, executionPlan: h.plan.kind, steps: h.plan.steps.map(stepView),
     walletNamespace: planNamespace(h.plan), walletNamespaces: planNamespaces(h.plan),

@@ -36,3 +36,18 @@ export function resolveApprovalSecret(schemes: readonly ApprovalLinkScheme[], pr
   const scheme = schemes.find(s => presented.startsWith(s.prefix) && presented.length === s.prefix.length + 43);
   return scheme ? { digest: approvalSecretDigest(scheme, presented), kinds: scheme.kinds } : null;
 }
+/** A developer-supplied return target. FloFi adds only non-secret correlation identifiers. */
+export function developerReturnTarget(url: unknown, state: unknown, approvalId?: string): string | null {
+  if (typeof url !== 'string' || url.length > 2_048 || /[\s?#]/.test(url)
+    || typeof state !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(state)) return null;
+  let target: URL;
+  try { target = new URL(url); } catch { return null; }
+  if (target.protocol !== 'https:' || target.port || target.username || target.password
+    || !target.hostname.includes('.') || /^[\d.]+$/.test(target.hostname)
+    || /\.(localhost|local|internal)\.?$/i.test(target.hostname)) return null;
+  if (approvalId) {
+    target.searchParams.set('approvalId', approvalId);
+    target.searchParams.set('state', state);
+  }
+  return target.href;
+}

@@ -15,10 +15,12 @@
  * The developer never signs, submits, reviews or approves anything; the owner does all of that in FloFi with their own wallet.
  */
 import { approvalLinkScheme, HANDOFF_SECONDS, type ApprovalContributor, type ApprovalLinkScheme, type ApprovalRequester, type HandoffRules } from '../platform/index.ts';
-import { readDeveloperConfig, SANDBOX_POLICY, type DeveloperConfig } from './config.ts';
+import { MAINNET_POLICY, readDeveloperConfig, SANDBOX_POLICY, type DeveloperConfig } from './config.ts';
 import type { PlanLimits } from './limits.ts';
 import { DEVELOPER_LINK_PREFIX } from './link-format.ts';
+import { developerOwnershipInstalled } from './console-store.ts';
 import { createPgDeveloperStore } from './pg-store.ts';
+import type { CreateApprovalRequestBody } from './schemas.ts';
 import { developerRequesterRef, scopeOfRequesterRef, type DeveloperPrincipal } from './store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -28,8 +30,10 @@ export const developerApprovalLinkScheme = (config: Pick<DeveloperConfig, 'keys'
 export const developerHandoffRules = (limits: PlanLimits): HandoffRules => Object.freeze({ handoffSeconds: HANDOFF_SECONDS, maxPending: limits.pendingApprovals,
   rate: Object.freeze([limits.approvalsPerHour, 3_600] as const), supersedeSameWorkflow: false });
 /** The requester of an approval for one immutable strategy of the principal's project and environment. */
-export const developerRequester = (principal: DeveloperPrincipal, strategyId: string): ApprovalRequester => ({ kind: 'DEVELOPER_PROJECT',
-  ref: developerRequesterRef(principal.projectId, principal.environment), clientId: principal.projectId, displayName: principal.projectName, context: { strategyId } });
+export const developerRequester = (principal: DeveloperPrincipal, strategyId: string, returnTarget?: CreateApprovalRequestBody['returnTarget']): ApprovalRequester => ({
+  kind: 'DEVELOPER_PROJECT', ref: developerRequesterRef(principal.projectId, principal.environment), clientId: principal.projectId,
+  displayName: principal.projectName, context: { strategyId, ...(returnTarget ? { returnTarget } : {}) },
+});
 
 /** The Developer API's contribution to /approve, or null while it is not enabled on this deployment. */
 export function developerApprovalContributor(env: Env): ApprovalContributor | null {
@@ -37,10 +41,13 @@ export function developerApprovalContributor(env: Env): ApprovalContributor | nu
   if (!config.enabled) return null;
   return host => {
     const store = createPgDeveloperStore(host.db, host.tenantId);
-    return { scheme: developerApprovalLinkScheme(config), profiles: { DEVELOPER_PROJECT: { policy: SANDBOX_POLICY, claimPolicy: async h => {
+    const policy = config.live && MAINNET_POLICY.ok ? { ...MAINNET_POLICY, testFunds: true } : SANDBOX_POLICY;
+    return { scheme: developerApprovalLinkScheme(config), profiles: { DEVELOPER_PROJECT: { policy, claimPolicy: async h => {
       const scope = scopeOfRequesterRef(h.requesterRef);
-      // Production (live) credentials do not exist in this build; a non-sandbox approval is never claimable.
-      if (!scope || scope.environment !== 'sandbox') return { ok: false, code: 'LIVE_MODE_DISABLED' };
+      if (!scope || scope.environment === 'production'
+        && (!config.live || h.fundsClass !== 'REAL_FUNDS' || h.plan.kind !== 'SEQUENTIAL' || !await developerOwnershipInstalled(host.db)))
+        return { ok: false, code: 'LIVE_MODE_DISABLED' };
+      if (scope.environment === 'sandbox' && h.fundsClass !== 'TEST_FUNDS') return { ok: false, code: 'SANDBOX_TEST_FUNDS_ONLY' };
       return await store.projectActive(scope.projectId) ? { ok: true } : { ok: false, code: 'DEVELOPER_PROJECT_DISABLED' };
     } } } };
   };

@@ -135,7 +135,7 @@ export function createDeveloperConsoleStore(db: Database, tenantId: string, acco
       });
     },
     async issue(id: string, environment: DeveloperEnvironment, scopes: readonly string[], config: DeveloperConfig, now: Date, rotate?: string) {
-      if (config.tenantId !== tenantId || environment !== 'sandbox') throw new Error('LIVE_MODE_DISABLED');
+      if (config.tenantId !== tenantId || environment === 'production' && !config.live) throw new Error('LIVE_MODE_DISABLED');
       if (rotate !== undefined && !KEY_ID.test(rotate)) throw new Error('KEY_NOT_FOUND');
       const selected = rotate ? null : validatedScopes(scopes);
       const { key, hint } = newApiKey(environment);

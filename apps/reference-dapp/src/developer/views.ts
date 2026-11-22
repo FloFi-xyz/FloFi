@@ -6,7 +6,7 @@
  * nothing.
  */
 import type { Composition, WorkflowComposition } from '../engine/strategy-engine';
-import { APPROVAL_REQUIRES, handoffFindings, pickRow, planNamespace, reviewWorkflow, type CapabilityFact, type ExecutionPlan, type Gates, type HandoffRecord,
+import { APPROVAL_REQUIRES, canonicalRunLifecycle, handoffFindings, pickRow, planNamespace, reviewWorkflow, type CapabilityFact, type ExecutionPlan, type Gates, type HandoffRecord,
   type OwnedRun, type PlanStep, type RunProgress, type SimulationPreview } from '../platform/index.ts';
 import type { DeveloperEnvironment } from './config.ts';
 import { publicReason } from './errors.ts';
@@ -62,7 +62,9 @@ export function simulationView(strategyId: string, preview: SimulationPreview): 
 
 export function capabilityView(fact: CapabilityFact, environment: DeveloperEnvironment): CapabilityBody {
   const { row, gates } = fact, sandbox = environment === 'sandbox', composable = !sandbox || row.funds === 'TEST_FUNDS';
-  const approve = !composable ? 'SANDBOX_TEST_FUNDS_ONLY' : reason(gates.handoff.reason);
+  const liveRefusal = sandbox ? null : gates.enabledByDeployment.mockedHarness ? 'MAINNET_RUNTIME_REQUIRED'
+    : reason(gates.supportedByCode.modes?.confirmEachStep ?? null);
+  const approve = !composable ? 'SANDBOX_TEST_FUNDS_ONLY' : liveRefusal ?? reason(gates.handoff.reason);
   return { object: 'capability', action: row.action, network: row.network, destinationNetwork: row.destinationNetwork, fundsClass: row.funds,
     networkEnvironment: row.publicEnvironment, executionPlan: { kind: gates.plan.kind, steps: gates.plan.steps.length },
     operations: { compose: { available: composable, reason: composable ? null : 'SANDBOX_TEST_FUNDS_ONLY' },
@@ -92,10 +94,11 @@ const isString = (v: unknown): v is string => typeof v === 'string', isBoolean =
 /** A run the owner shared with this project, read as its owner: status and attempts only (never calldata, nonces or the journal). */
 export function executionView(found: OwnedRun, approvalId: string): ExecutionBody {
   const run = found.run as unknown as Record<string, unknown>, facts = pickRow(run, ['errorCode', 'needsObservation', 'attentionRequired', 'hasEvidence', 'createdAt', 'updatedAt']);
-  const errorCode = nullable(facts.errorCode, isString), reconciled = facts.hasEvidence === true;
-  return { id: found.run.runId, object: 'execution', approvalId, status: found.run.status, provenance: String(found.run.provenance), reconciled,
-    terminal: facts.needsObservation !== true && (reconciled || errorCode !== null), errorCode, attentionRequired: nullable(facts.attentionRequired, isBoolean),
-    owner: found.owner, attempts: (Array.isArray(run.attempts) ? run.attempts : []).slice(0, 64).map(a => {
+  const attempts = Array.isArray(run.attempts) ? run.attempts : [];
+  const lifecycle = canonicalRunLifecycle({ ...facts, status: found.run.status, attempts });
+  return { id: found.run.runId, object: 'execution', approvalId, status: found.run.status, provenance: String(found.run.provenance),
+    reconciled: lifecycle.completed && facts.hasEvidence === true, terminal: lifecycle.final, errorCode: nullable(facts.errorCode, isString), attentionRequired: nullable(facts.attentionRequired, isBoolean),
+    owner: found.owner, attempts: attempts.slice(0, 64).map(a => {
       const p = pickRow(a, ['attemptId', 'step', 'state', 'transactionHash', 'reconciled', 'updatedAt']);
       return { attemptId: nullable(p.attemptId, isString), step: nullable(p.step, isString), state: nullable(p.state, isString),
         transactionHash: nullable(p.transactionHash, isString), reconciled: nullable(p.reconciled, isBoolean), updatedAt: nullable(p.updatedAt, isString) };

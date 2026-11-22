@@ -11,6 +11,8 @@ import type { CloudRun } from '../server/flow-runtime.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { refuse } from './refusal.ts';
 import { canonicalRunLifecycle } from '../domain/canonical-execution-status.ts';
+// The Developer API reads the same lifecycle through the platform surface.
+export { canonicalRunLifecycle };
 
 export type OwnedRun = { readonly run: CloudRun; readonly owner: string };
 type Row = Record<string, unknown>;

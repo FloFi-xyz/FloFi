@@ -49,13 +49,16 @@ that belongs to that caller. See the [Node.js quickstart](../../docs/developer/Q
 and storing its ID alongside your own request.
 
 Any valid sandbox key can discover capabilities on a deployment where it was issued. Hosted FloFi is mainnet-only, while the
-API refuses mainnet strategies and live keys. Use the [local MOCKED Quickstart](../../docs/developer/QUICKSTART.md) for tested
-examples of `strategies.create`, `strategies.validate`, `strategies.simulate` and `approvals.create`. The example reaches Review
-with signing blocked. In an eligible workflow the user reviews and signs in FloFi. Sharing execution status and evidence
-requires their consent.
+[local MOCKED quickstart](../../docs/developer/QUICKSTART.md) uses test funds and reaches Review with signing blocked.
+
+When a deployment explicitly activates live access, put the production key from the Developer Console in `FLOFI_API_KEY` and
+follow the [mainnet integration](../../docs/developer/QUICKSTART.md#mainnet-integration).
+Use `strategies.simulateWorkflow` for a read-only preview per step and `approvals.create` to hand off the exact workflow.
+The user reviews and signs each eligible step in FloFi. Access to `workflowRun`, execution status and evidence depends on their consent.
 
 - `FloFiError` exposes `status`, `code`, `reason`, `requestId`, `issues` and `retryAfter`.
-- Creating POSTs use your `idempotencyKey` or a generated one. The key is reused across the client's own retries.
+- Creating POSTs use your `idempotencyKey` or a generated one. The client reuses it across its own retries. Supply a stable key
+  for retries that can span calls or process restarts.
 - GETs and creating POSTs can retry network errors, `409 IDEMPOTENCY_IN_PROGRESS`, `429`, `502`, `503` and `504`.
   The client uses `Retry-After` up to its configured delay ceiling.
 - `verifyWebhook` verifies the raw body and headers. Deduplicate on `webhook-id` and use a fresh API read for current state.

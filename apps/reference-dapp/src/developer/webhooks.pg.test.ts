@@ -6,19 +6,19 @@
  * FloFi outcome; rotation by replacement works with two secrets; /approve transitions notify at once; the scheduler endpoint is
  * bearer-protected; payloads carry no wallet, secret or executable material.
  */
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { composeStrategy } from '../engine/strategy-engine';
-import { applyApproval, claimApproval, createPgHandoffStore, shareApproval, type WalletRef } from '../platform/index.ts';
+import { applyApproval, claimApproval, createPgHandoffStore, ENGINE_VERSION, executionPlan, shareApproval, typedId, type WalletRef } from '../platform/index.ts';
 import { approvalSurface } from '../server/approval-surface.ts';
 import { developerApi, developerConfig, developerEnv, developerProject, ORIGIN, recordingRuntime, type ApiResponse } from './developer.test-harness.ts';
 import { deriveEvents } from './events.ts';
 import { developerApprovalChanged, dispatchDeliveries, nextAttemptAt, syncAndDispatch, WEBHOOK_MAX_ATTEMPTS, type WebhookRequest, type WebhookTransport } from './dispatch.ts';
 import { createPgDeveloperStore } from './pg-store.ts';
-import type { ApprovalBinding } from './store.ts';
+import { developerRequesterRef, type ApprovalBinding } from './store.ts';
 import { signWebhook, webhookSecret, webhookSecretBytes } from './webhooks.ts';
 
 let t: TestDatabase;
@@ -220,6 +220,59 @@ describe('BUILD-DEVELOPER-001 webhook delivery', () => {
     expect(JSON.parse(box.received.find(r => r.body.includes('execution.reconciled'))!.body).data.evidence).toEqual({ environment: 'MOCKED', outcome: 'RECONCILED',
       bundleHash: '0x' + '9'.repeat(64) });
     expect((await t.db.query(`SELECT count FROM developer_usage WHERE project_id = $1 AND metric = 'execution.reconciled'`, [p.projectId])).rows).toEqual([{ count: '1' }]);
+  });
+
+  it('preserves queued production deliveries during pause and rechecks sharing when delivery resumes', async () => {
+    const { projectId } = await developerProject(t.db);
+    const scope = { projectId, environment: 'production' } as const;
+    const store = createPgDeveloperStore(t.db, 'default'), handoffs = createPgHandoffStore(t.db, 'default');
+    const clock = new Date(), now = () => clock, box = inbox();
+    const config = developerConfig(LOOPBACK_ENV), runtime = recordingRuntime();
+    const deps = { config, tenantId: 'default', store, handoffs, transport: box.transport, runtime, now };
+    const mainnet = composeStrategy({ ...BRIDGE, sourceNetwork: 'base', destinationNetwork: 'arbitrum-one' });
+    if (!mainnet.ok) throw new Error(mainnet.code);
+    const plan = { ...executionPlan(mainnet), kind: 'SEQUENTIAL' as const, flow: null };
+    const handoffId = typedId('apr'), strategyId = typedId('str'), secretDigest = randomBytes(32);
+    const requester = { kind: 'DEVELOPER_PROJECT', ref: developerRequesterRef(projectId, 'production') } as const;
+    const strategy = { strategy: mainnet.strategy, workflowHash: mainnet.workflowHash, engineVersion: ENGINE_VERSION, fundsClass: 'REAL_FUNDS' as const,
+      networkEnvironment: 'MAINNET', plan };
+    await store.createStrategy({ ...strategy, ...scope, strategyId }, clock);
+    await handoffs.create({ ...strategy, handoffId, requester, requesterContext: { strategyId }, secretDigest, grantId: null,
+      clientId: projectId, clientName: 'Acme Wallet', expiresAt: new Date(clock.getTime() + 900_000) }, clock, { maxPending: 5, supersedeSameWorkflow: false });
+    await handoffs.claim(secretDigest, WALLET, clock, 300, () => ({ ok: true, share: true }));
+    expect(await handoffs.apply(secretDigest, WALLET, clock)).toMatchObject({ ok: true, handoff: { shareStatus: true } });
+    await store.createEndpoint(scope, 'https://hooks.example.com/paused', [], 5, clock);
+    await store.recordEvents(scope, [
+      { type: 'approval.applied', approvalId: handoffId, dedupeKey: `approval.applied:${handoffId}`, data: { approvalId: handoffId } },
+      { type: 'execution.started', approvalId: handoffId, dedupeKey: 'execution.started:run-paused', data: { executionId: 'run-paused' } },
+    ], clock);
+
+    const filter = { scope };
+    expect(await syncAndDispatch(deps, filter, { approvals: 5, deliveries: 10 })).toMatchObject({ approvals: 0, deliveries: { attempted: 0 } });
+    expect(box.received).toHaveLength(0);
+    expect((await store.listDeliveries(projectId, 10)).map(d => [d.status, d.attempts])).toEqual([['PENDING', 0], ['PENDING', 0]]);
+
+    expect(await handoffs.setLiveDeveloperSharing(handoffId, WALLET, false)).toMatchObject({ shareStatus: false });
+    expect(await dispatchDeliveries({ ...deps, config: { ...config, live: true } }, filter, 10)).toEqual({ attempted: 2, succeeded: 1, retrying: 0, dead: 1 });
+    expect(box.received.map(request => JSON.parse(request.body).type)).toEqual(['approval.applied']);
+    expect(await store.listDeliveries(projectId, 10)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: 'approval.applied', status: 'SUCCEEDED', attempts: 1 }),
+      expect.objectContaining({ eventType: 'execution.started', status: 'DEAD', attempts: 1, lastError: 'SHARING_WITHDRAWN' }),
+    ]));
+  });
+
+  it('attempts already queued deliveries before propagating an approval sync failure', async () => {
+    const { projectId } = await developerProject(t.db);
+    const scope = { projectId, environment: 'sandbox' } as const;
+    const store = createPgDeveloperStore(t.db, 'default'), handoffs = createPgHandoffStore(t.db, 'default'), box = inbox();
+    const clock = new Date(), now = () => clock, handoffId = typedId('apr'), failure = new Error('APPROVAL_SYNC_FAILED');
+    await store.createEndpoint(scope, 'https://hooks.example.com/pending', [], 5, clock);
+    await store.recordEvents(scope, [{ type: 'approval.applied', approvalId: handoffId, dedupeKey: `approval.applied:${handoffId}`, data: {} }], clock);
+    const deps = { config: developerConfig(LOOPBACK_ENV), tenantId: 'default', store: { ...store, approvalsToSync: async () => { throw failure; } },
+      handoffs, runtime: recordingRuntime(), transport: box.transport, now };
+    await expect(syncAndDispatch(deps, { scope }, { approvals: 5, deliveries: 10 })).rejects.toBe(failure);
+    expect(box.received).toHaveLength(1);
+    expect(await store.listDeliveries(projectId, 10)).toMatchObject([{ status: 'SUCCEEDED', attempts: 1 }]);
   });
 });
 

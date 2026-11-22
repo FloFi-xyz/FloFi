@@ -77,6 +77,9 @@ export const portugueseReview: Readonly<Record<string, string>> = {
   'No compatible wallet is available inside this chat. This host or wallet does not expose a signer here. Nothing was authorized. Opening FloFi is an optional external fallback.': 'Não há uma carteira compatível disponível nesta conversa. Este host ou carteira não disponibiliza aqui um assinante. Nada foi autorizado. Abrir a FloFi é uma alternativa externa opcional.',
   // BUILD-FLOFI-UX-UI-002: the compact /approve notice inside the workspace.
   'From {0}': 'De {0}', 'Proposal details': 'Detalhes da proposta', 'Use another wallet': 'Usar outra carteira', 'Restore proposal': 'Restaurar proposta',
+  'From {0} (unverified project name)': 'De {0} (nome do projeto não verificado)',
+  'Developer project ID': 'ID do projeto de desenvolvedor',
+  'Return to {0}': 'Voltar para {0}',
   'Close approval': 'Fechar aprovação', 'Loading your exact proposal…': 'Carregando a sua proposta exata…',
   'Simulate the workflow, review the Strategy Manifest, then sign each transaction in your wallet.': 'Simule o fluxo, revise o Strategy Manifest e assine cada transação na sua carteira.',
   'The proposal is on your Canvas. Connect your wallet to load it for a fresh simulation, your review and your signature.': 'A proposta já está no seu Canvas. Conecte a sua carteira para carregá-la para uma nova simulação, a sua revisão e a sua assinatura.',

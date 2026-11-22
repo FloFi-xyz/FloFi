@@ -23,24 +23,27 @@ Notifications: [WEBHOOKS.md](WEBHOOKS.md).
 
 ```
 Authorization: Bearer flofi_sk_test_<43 base64url characters>
+Authorization: Bearer flofi_sk_live_<43 base64url characters>
 ```
 
-Keys are issued by the deployment's operator (no self-service in this release) and are shown once. FloFi stores only an HMAC
-digest. The key is looked up on every request, so revocation and project disabling take effect immediately. Missing, malformed,
-unknown, revoked and disabled-project keys all answer `401 UNAUTHORIZED` with `WWW-Authenticate: Bearer realm="flofi-developer"`.
+Use the prefix for your environment. The Developer Console issues scoped keys for eligible account-owned projects.
+The operator CLI issues sandbox keys for legacy projects. FloFi shows each key once and stores its HMAC digest.
+The key is looked up on every request. Missing, malformed, unknown, revoked and disabled-project keys answer
+`401 UNAUTHORIZED` with `WWW-Authenticate: Bearer realm="flofi-developer"`. A deployment with live access disabled
+answers `403 FORBIDDEN` (`LIVE_MODE_DISABLED`) for the live prefix.
 
 ## Environments
 
 | Environment | Key prefix | In this release |
 | --- | --- | --- |
 | `sandbox` | `flofi_sk_test_` | Issued. Test-funds strategies only; every mainnet is off. A strategy touching a mainnet is refused at creation (`403 MAINNET_DISABLED`, `SANDBOX_TEST_FUNDS_ONLY`). |
-| `production` | `flofi_sk_live_` | Reserved. Live keys cannot be issued and are refused (`403 FORBIDDEN`, `LIVE_MODE_DISABLED`). |
+| `production` | `flofi_sk_live_` | Requires explicit production activation and an account-owned project. Only eligible mainnet workflows can be handed off for per-step wallet review and signing in FloFi. |
 
 Hosted FloFi (including Vercel Preview) is mainnet-only. Its public OpenAPI describes public inputs and does not grant
-operation eligibility. Any valid sandbox key can discover capabilities. A valid test-network strategy in that deployment
-returns `400 INVALID_STRATEGY` (`TEST_NETWORK_NOT_AVAILABLE`), while a valid mainnet strategy returns `403 MAINNET_DISABLED`
-(`SANDBOX_TEST_FUNDS_ONLY`). Webhook registration and scoped reads still follow their project permissions and resource checks.
-Use the local engineering sandbox for the test-network input examples in the [Quickstart](QUICKSTART.md).
+operation eligibility. Any valid key can discover capabilities. Hosted test-network strategies return `400 INVALID_STRATEGY`
+(`TEST_NETWORK_NOT_AVAILABLE`). Mainnet strategies submitted with a sandbox key return `403 MAINNET_DISABLED`
+(`SANDBOX_TEST_FUNDS_ONLY`). Use the local engineering sandbox for the test-network examples in the [Quickstart](QUICKSTART.md).
+Confirm live availability on your deployment before using the [mainnet integration](QUICKSTART.md#mainnet-integration).
 
 Responses carry `environment`. When a deployment runs a flow against MOCKED chains, capabilities and validations report
 `mockedHarness: true`, simulations `provenance: "MOCKED"`, and evidence `environment: "MOCKED"`.
@@ -50,13 +53,13 @@ Responses carry `environment`. When a deployment runs a flow against MOCKED chai
 | Scope | Routes |
 | --- | --- |
 | *(any valid key)* | `GET /capabilities` |
-| `strategies` | `POST /strategies`, `POST /strategies/{id}/validate`, `POST /strategies/{id}/simulate` |
+| `strategies` | `POST /strategies`, `POST /strategies/{id}/validate`, `POST /strategies/{id}/simulate`, `POST /strategies/{id}/simulate-workflow` |
 | `approvals` | `POST /approvals`, `GET /approvals/{id}` |
 | `executions` | `GET /executions/{id}`, `GET /executions/{id}/evidence` |
 | `webhooks` | `POST /webhook-endpoints`, `DELETE /webhook-endpoints/{id}` |
 
-A new key gets all four scopes unless the operator narrows it. A missing scope is `403 FORBIDDEN` (`INSUFFICIENT_SCOPE`). No scope
-can execute, sign, submit or approve a Review.
+The project owner selects scopes in the Console. The legacy operator CLI defaults to all four. A missing scope is
+`403 FORBIDDEN` (`INSUFFICIENT_SCOPE`). No scope can execute, sign, submit or approve a Review.
 
 ## Endpoints
 
@@ -66,6 +69,7 @@ can execute, sign, submit or approve a Review.
 | `POST /strategies` | `strategies` | 201 `strategy` | Store an immutable canonical StrategySpec; returns hash, plan, inline validation and availability |
 | `POST /strategies/{id}/validate` | `strategies` | 200 `strategy_validation` | Re-check against the current engine and deployment |
 | `POST /strategies/{id}/simulate` | `strategies` | 200 `simulation` | FloFi's read-only simulation preview |
+| `POST /strategies/{id}/simulate-workflow` | `strategies` | 200 `workflow_simulation` | Read-only per-step previews and unresolved dependencies |
 | `POST /approvals` | `approvals` | 201 `approval` | Hand the strategy to its owner: returns the FloFi approval link |
 | `GET /approvals/{id}` | `approvals` | 200 `approval` | The approval's current state and the executions the owner shares |
 | `GET /executions/{id}` | `executions` | 200 `execution` | A shared execution's status and attempts |
@@ -94,7 +98,7 @@ enabledByDeployment, enabledByPolicy, demonstratedEvidence, mockedHarness}`, `su
 
 - The strategy is immutable: there is no update endpoint and the database refuses changes. A changed intent is a new strategy.
 - `executionPlan.kind`: `SINGLE_FLOW` (one action, one FloFi flow), `COMPOSITE_FLOW` (the Base Sepolia lending composition),
-  `SEQUENTIAL` (several steps, each with its own flow, executed in order by a workflow run where the deployment enables workflow runs),
+  `SEQUENTIAL` (steps executed in order by a workflow run, including eligible one-step live handoffs),
   `NOT_EXECUTABLE` with its reason (e.g. a step without an owner flow, or `DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED` for a bound amount).
 - `validation.preExecution` lists what FloFi's own flow does with the owner before anything can be signed (for example a fresh
   route quote); these are not blockers.
@@ -114,12 +118,26 @@ constants `preview: true`, `persisted: false`, `authorizable: false`,
 `subjectRole: "SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION"`. One step at a time: a multi-step strategy is
 `422 CAPABILITY_NOT_SUPPORTED` (`SIMULATE_ONE_STEP_AT_A_TIME`). Never calldata, unsigned transactions or signatures.
 
+### `POST /strategies/{id}/simulate-workflow`
+
+Uses the same request body as `simulate` and returns one entry per step of the canonical workflow. Each entry reports its
+workflow hash, state, amount dependencies and the public simulation subject and its source. A step using a different wallet
+family uses a public quote subject, identified by `subjectSource: "PUBLIC_QUOTE_SUBJECT"`. The overall status is
+`STEP_PREVIEWS_AVAILABLE` when all steps simulated or `INCOMPLETE` when any step could not be simulated, including when a
+step awaits a previous step's settlement. FloFi runs a fresh simulation with the owner's actual wallet and reconciled amounts
+before authorizing each live step. The preview is read-only and carries `authority: "NONE"`.
+
 ### `POST /approvals`
 
 Body: `{ "strategyId": "str_…", "workflowHash": "0x…" }` (the SDK also accepts `{ strategy }`). FloFi re-composes the stored
 strategy, requires the same hash (`409 STRATEGY_CHANGED` otherwise; `409 STRATEGY_STALE` if the engine changed), evaluates the
 four availability facts (`422 CAPABILITY_NOT_SUPPORTED` with the reason) and the Strategy Review (`422 REVIEW_BLOCKED`, with each
 blocker as an `issues` entry `{ "path": "/strategy", "rule": "<finding code>" }`).
+
+Supply an optional `returnTarget` object with `url` and `state` to show a return link after the user applies the proposal.
+Use a public HTTPS URL without credentials, a query or a fragment. FloFi adds the opaque `approvalId` and your non-secret
+correlation `state` to the link. Store this state with the requesting user's session and verify both values when the user
+returns. Use the backend's credential to fetch the latest status.
 
 Response: `id`, `strategyId`, `workflowHash`, `status`, `approvalUrl` (`https://<deployment>/approve#flofi_dhs_…`, secret in the
 fragment), `approvalUrlExpiresAt`, `expiresAt` (15 minutes), `networkEnvironment`, `fundsClass`, `executionPlan`,
@@ -139,14 +157,18 @@ Always computed fresh (lapsed approvals are expired on read). `status`: `PENDING
 `APPLIED` (the proposal is in the owner's FloFi workflow); terminal `EXPIRED`, `SUPERSEDED`, `REVOKED`, `STALE`. While the owner
 shares status (`statusShared: true`, off by default), `executions[]` lists the runs whose reviewed workflow hashes **exactly** to
 this approval's: `{id, status, reconciled, terminal, errorCode, evidence {environment, outcome, bundleHash} | null, updatedAt}`.
-An execution of an edited workflow is never reported as this approval's.
+For production approvals, `workflowRun` reports the exact linked run and its per-step state, submissions and evidence summaries
+while sharing is enabled. A pending execution or submission can require reconciliation. Use the execution and evidence routes
+for the authoritative recorded result. FloFi excludes executions of edited workflows.
 
 ### `GET /executions/{id}` and `GET /executions/{id}/evidence`
 
 Only executions of your approvals that their owner shares. Absent, unshared and other projects' executions are all
 `404 NOT_FOUND`. Execution: `status`, `provenance`, `reconciled`, `terminal`, `errorCode`, `attentionRequired`, `owner` (the wallet
 that claimed and signed), `attempts[] {attemptId, step, state, transactionHash, reconciled, updatedAt}`, timestamps,
-`accessBasis: "OWNER_SHARED_WITH_PROJECT"`. Evidence: `evidence {bundleHash, environment, outcome, canonical, bundle} | null`
+`accessBasis: "OWNER_SHARED_WITH_PROJECT"`. `terminal` follows FloFi's canonical run lifecycle: completed, failed and refunded
+runs are final, as is a wallet request the owner declined before anything was sent. A run that needs owner or operator
+intervention is not terminal. `reconciled` is true only for a completed run with recorded evidence. Evidence: `evidence {bundleHash, environment, outcome, canonical, bundle} | null`
 with `reason: "NO_RECONCILED_EVIDENCE_YET"` until reconciliation. `environment` is copied from FloFi's Evidence Bundle and never
 upgraded. Never calldata, nonces, Review commitments or journal internals.
 
@@ -160,7 +182,8 @@ stops its pending deliveries; its secret is never used again.
 ## Idempotency
 
 Send `Idempotency-Key: <UUID>` on `POST /strategies`, `POST /approvals` and `POST /webhook-endpoints` (the SDK does this for you).
-Keys are scoped to your project, environment and operation, and kept 24 hours.
+The header is required with production credentials. Keys are scoped to your project, environment and operation and kept for
+24 hours. Persist your own key when a logical request can be retried across SDK calls or process restarts.
 
 | Case | Answer |
 | --- | --- |
@@ -196,7 +219,7 @@ secrets.
 
 | HTTP | `code` | Typical `reason` |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST` | `SCHEMA_INVALID`, `MALFORMED_JSON`, `CONTENT_TYPE_NOT_JSON`, `QUERY_NOT_ALLOWED`, `BODY_NOT_ALLOWED`, `IDEMPOTENCY_KEY_INVALID`, `SIMULATION_SUBJECT_INVALID`, `WEBHOOK_URL_*` |
+| 400 | `INVALID_REQUEST` | `SCHEMA_INVALID`, `MALFORMED_JSON`, `CONTENT_TYPE_NOT_JSON`, `QUERY_NOT_ALLOWED`, `BODY_NOT_ALLOWED`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_INVALID`, `RETURN_TARGET_INVALID`, `SIMULATION_SUBJECT_INVALID`, `WEBHOOK_URL_*` |
 | 413 | `INVALID_REQUEST` | `REQUEST_TOO_LARGE` |
 | 400 | `INVALID_STRATEGY` | `STRATEGY_SCHEMA_INVALID`, engine refusal codes, `TEST_NETWORK_NOT_AVAILABLE` on a public deployment |
 | 401 | `UNAUTHORIZED` | `API_KEY_REQUIRED`, `API_KEY_INVALID` |
@@ -222,5 +245,4 @@ malformed id answers like an absent resource.
 
 Documented in the build plan and deferred: key introspection (`GET /me`), flat network and asset lists, strategy retrieval, strategy and approval
 listing, approval revocation and standalone fresh-link endpoints, event browsing, webhook endpoint listing, in-place secret rotation,
-test events and delivery browsing, a usage API, production keys, OAuth client credentials and publishable keys. They will be
-additive to v1.
+test events and delivery browsing, a usage API, OAuth client credentials and publishable keys.

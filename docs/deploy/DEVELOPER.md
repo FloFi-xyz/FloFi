@@ -17,7 +17,7 @@ PostgreSQL. It is **off unless enabled**, and it fails closed: every configurati
 - `FLOFI_PUBLIC_ORIGIN`: the exact public origin approval links point to (shared with MCP).
 - For the local walkthrough, use the non-hosted engineering scope (`FLOFI_NETWORK_SCOPE=ENGINEERING_TESTNETS`) with the
   repository's loopback MOCKED bridge fixture. Hosted production and Preview are mainnet-only and ignore that scope. Sandbox
-  keys can discover capabilities there, and the API policy blocks new mainnet strategies.
+  keys can discover capabilities there. Mainnet strategy creation requires an activated production key.
 
 ## 2. Enable it (server-side variables, never `NEXT_PUBLIC_*`)
 
@@ -58,7 +58,8 @@ $CLI deliveries --project prj_… --tenant default [--limit 50]      # read-only
   branch is its own tenant, as for MCP). Exactly one is required.
 - **Keys** are sandbox keys (`flofi_sk_test_…`) with all four scopes unless `--scopes strategies,approvals,…` narrows them.
   A key is shown **once**: with `--key-file` it is written to a new mode-0600 file (never overwriting an existing one); without
-  it, it is printed to your terminal. Hand it to the integrator through a secret channel. Production keys cannot be issued.
+  it, it is printed to your terminal. Hand it to the integrator through a secret channel. Production keys are issued through the
+  Console for account-owned projects after explicit live activation.
 - **The project name** is shown to end users on `/approve` ("Created by *name*, a third-party app registered with FloFi"). Set it
   to the integrator's verified product name: it is a phishing surface.
 - Errors print a fixed code (for example `TENANT_REQUIRED`, `KEY_FILE_EXISTS`), never a stack, connection string or secret.
@@ -69,13 +70,15 @@ $CLI deliveries --project prj_… --tenant default [--limit 50]      # read-only
 `/approve` serves developer approvals beside MCP ones. The page names the project, states that FloFi did not create the
 proposal and that it is not financial advice, requires a wallet proof (EIP-4361 or Sign-In With Solana), and places the
 re-composed proposal into FloFi's existing flow, where the user simulates, reviews and signs. Sharing run status and evidence with
-the project is a checkbox, **off by default**. A claim also requires the project to be active and the approval to be sandbox.
+the project is a checkbox, **off by default**. A claim requires an active project and an approval eligible under its environment's
+policy. Live handoffs use the durable workflow runner with a separate confirmation for each step. The wallet owner can withdraw
+status sharing for an applied live approval.
 
 ## 5. Webhook delivery and the scheduler
 
 Developer webhook delivery runs in the web deployment. Events are derived from durable state and delivered after Developer API requests
-(a bounded sweep for that project) and after `/approve` transitions. Without a scheduler, an `execution.*` notification waits for
-the integrator's next request or the next `/approve` action; `GET /approvals/{id}` is always current.
+(a bounded sweep for that project) and after `/approve` transitions. Without a scheduler, an `execution.*` notification can wait
+for the integrator's next request or the next `/approve` action. `GET /approvals/{id}` returns the latest recorded status.
 
 To deliver promptly, give the deployment a scheduler (an **owner action**; this build adds no cron entry):
 
@@ -107,9 +110,7 @@ simulations, approvals, reconciled executions, webhook deliveries). There is no 
 - **Compromised key:** `revoke-key` (effective on the next request; there is no cache). **Abusive integrator:**
   `disable-project` (every key stops and open approvals are revoked).
 - **Retention:** events 30 days; unreferenced strategies 90 days; abuse-limit windows one day; idempotency records 24 hours.
-- **Mainnet:** not reachable. Sandbox keys are test-funds only (strategies touching a mainnet are refused at creation), and live
-  keys are refused. Enabling production developer access would need a separate build: live keys, a per-project mainnet policy,
-  the flows' owner-execution switches and the owner's legal review.
+- **Mainnet** access follows the production release policy below. Sandbox keys are test-funds only.
 - **Evidence honesty:** on a deployment whose flows run against MOCKED harnesses, every developer-facing fact says so
   (`mockedHarness`, `provenance: MOCKED`, evidence `MOCKED`).
 
@@ -134,3 +135,23 @@ deliveries. A delivery already in flight can complete. Account deletion also
 removes the project association and its description. The project ID and existing
 workflow records remain available for reconciliation. For operational rollback,
 turn off the console and retain a build certified for the installed schema.
+
+## Live production release
+
+Keep `FLOFI_DEVELOPER_LIVE` off pending owner authorization. Public rollout requires a security review and acceptance of the
+external wallet journey in an eligible environment. Sandbox and simulated-wallet checks exercise their own test environments.
+
+- Verify that every database consumer accepts the exact certified 0034 migration and that the required predecessor migrations
+  are installed. Apply 0034 through the owner-run migration procedure above. The one-step workflow runner requires 0032 and 0033.
+- The live policy requires the canonical production `FLOFI_PUBLIC_ORIGIN`, `FLOFI_DEVELOPER=enabled`,
+  `FLOFI_DEVELOPER_CONSOLE=enabled`, `FLOFI_BETA_ACCESS=open`, `FLOFI_WORKFLOW_RUNS=enabled`, and
+  `FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256`. Use the existing financial runtime and the owner-execution switches for the intended
+  registry capabilities. Confirm the eligibility reported by the API on that deployment.
+- The owner configures and verifies the scheduler from section 5. Check that scheduled sweeps happen without integrator traffic
+  and that a receiver can verify a signed delivery. A configured token digest gives the route authenticated access.
+- Verify the external integration with a Console-issued key, exact strategy hash, preview, hosted wallet review and explicit
+  owner confirmation. Check that the run reconciles and that scoped API results and signed webhooks reflect user consent.
+
+After approval to activate, `FLOFI_DEVELOPER_LIVE=enabled` allows eligible production projects to issue live credentials.
+Turning the control off suspends live access. Retain the database state required by the deployed runtime to reconcile existing
+wallet submissions.

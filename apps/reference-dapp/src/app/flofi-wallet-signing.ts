@@ -18,6 +18,7 @@ import { createManagedWalletEvm, type ManagedEvmBroadcast, type ManagedEvmExpect
 import { resolveManagedSigning, type CircleSigningRun, type ManagedSigningDeps, type ManagedSigningRequest, type ManagedSigningResult } from '../server/managed-signing';
 import { platformStateHost } from '../server/platform-state-host';
 import { createPgWorkflowRunStore } from '../workflow-runs/pg-store';
+import { externalStepWorkflow, externalWalletRequestRefusal } from '../workflow-runs/external-step';
 import type { SigningContext, SigningFlow } from '../wallet/flofi-signing';
 import { jupiterStatus } from './jupiter-action';
 import { solanaTransferStatus } from './solana-transfer-action';
@@ -108,13 +109,32 @@ export const PRIVY_EVM_SIGNING_WINDOW_MS = 20_000;
 export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: readonly AccountWallet[], options: { readonly claim: boolean },
   deps: ManagedSigningDeps = signingDeps(wallets)) {
   return async (context: SigningContext, request: ManagedSigningRequest): Promise<ManagedSigningResult> => {
-    const resolved = await resolveManagedSigning(context, request, deps);
+    let record: unknown;
+    const resolved = await resolveManagedSigning(context, request, {
+      ...deps, load: async (flow, runId) => { record = await deps.load(flow, runId); return record; },
+    });
     if (!resolved.ok || !options.claim) return resolved;
     // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a typed-data signature must also reach FloFi's relay before its Review closes.
     // Owner requirement: so must a Circle upgrade's EIP-7702 authorization.
     if ((resolved.value.evm || resolved.value.typedData || resolved.value.authorization) && resolved.value.expiresAtMs - (deps.now ?? Date.now)() < PRIVY_EVM_SIGNING_WINDOW_MS) return { ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' };
     let claimed: boolean;
-    try { claimed = await claimAttempt(store, 'signature', resolved.value.attempt, resolved.value.expiresAtMs); }
+    try {
+      const workflow = externalStepWorkflow(record);
+      if (workflow) {
+        // Loaded only for an external step: Next's request APIs are absent where this module is imported outside a request.
+        const [{ readDeveloperConfig }, { currentSolanaSession, currentWalletSession }] = await Promise.all([
+          import('../developer/config.ts'), import('../server/session-principal.ts')]);
+        const config = readDeveloperConfig(process.env);
+        if (!config.enabled || !config.live) return { ok: false, code: 'LIVE_MODE_DISABLED' };
+        const session = await (request.ecosystem === 'solana' ? currentSolanaSession() : currentWalletSession());
+        if (session?.account !== resolved.value.owner) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
+        const host = await platformStateHost(process.env);
+        const code = await externalWalletRequestRefusal(host.db, { tenantId: host.tenantId, workflowId: workflow.workflowId,
+          flow: context.flow, executionId: context.runId, principal: session.account, live: true, record });
+        if (code) return { ok: false, code };
+      }
+      claimed = await claimAttempt(store, 'signature', resolved.value.attempt, resolved.value.expiresAtMs);
+    }
     catch { return { ok: false, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }; }
     return claimed ? resolved : { ok: false, code: 'FLOFI_WALLET_ALREADY_SIGNED' };
   };

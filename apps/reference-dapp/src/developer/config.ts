@@ -10,11 +10,12 @@
  *   FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256=<hex>    optional: SHA-256 of the scheduler bearer for the internal dispatch endpoint
  *   FLOFI_DEVELOPER_WEBHOOK_LOOPBACK=ALLOW_LOCAL_ONLY  tests only: `http://127.0.0.1` webhook endpoints on a non-hosted server
  *
- * Only SANDBOX credentials exist in this build: their policy is test funds only, every mainnet off. Nothing here is financial
- * authority — a developer credential never signs, submits or approves; the end user's wallet does, in FloFi.
+ * Production access is an explicit release. The account console, open product access, durable workflow runs and
+ * authenticated scheduled dispatch must all be configured. The end user's wallet retains financial authority.
  */
 import { createHash, hkdfSync, timingSafeEqual } from 'node:crypto';
-import { deploymentTenant, isHostedDeployment, publicOrigin } from '../server/deployment.ts';
+import { PUBLIC_NETWORK_IDS } from '../engine/strategy-spec.ts';
+import { deploymentEnvironment, deploymentTenant, isHostedDeployment, publicOrigin } from '../server/deployment.ts';
 import type { HandoffPolicy } from '../platform/index.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -25,11 +26,13 @@ export type DeveloperScope = (typeof DEVELOPER_SCOPES)[number];
 export type DeveloperKeys = { readonly apiKey: Buffer; readonly handoff: Buffer; readonly webhook: Buffer };
 export type DeveloperConfig = {
   readonly enabled: true; readonly tenantId: string; readonly origin: string; readonly keys: DeveloperKeys;
-  readonly dispatchTokenDigest: Buffer | null; readonly webhookLoopback: boolean;
+  readonly dispatchTokenDigest: Buffer | null; readonly webhookLoopback: boolean; readonly live: boolean;
 };
 export type DeveloperConfigResult = DeveloperConfig | { readonly enabled: false; readonly code: 'DEVELOPER_API_NOT_ENABLED' | 'DEVELOPER_CONFIGURATION_INVALID'; readonly reason?: string };
 /** The handoff policy of sandbox credentials: test funds only; no mainnet network, whatever else the deployment allows. */
 export const SANDBOX_POLICY: HandoffPolicy = Object.freeze({ ok: true, testFunds: true, mainnetNetworks: Object.freeze([]) });
+
+export const MAINNET_POLICY: HandoffPolicy = Object.freeze({ ok: true, testFunds: false, mainnetNetworks: PUBLIC_NETWORK_IDS });
 
 const invalid = (reason: string) => ({ enabled: false, code: 'DEVELOPER_CONFIGURATION_INVALID', reason } as const);
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest();
@@ -55,7 +58,10 @@ export function readDeveloperConfig(env: Env): DeveloperConfigResult {
   if (loopback !== '' && loopback !== 'ALLOW_LOCAL_ONLY') return invalid('FLOFI_DEVELOPER_WEBHOOK_LOOPBACK');
   // Loopback webhook endpoints are a local test seam only; a hosted deployment with it set is misconfigured.
   if (loopback === 'ALLOW_LOCAL_ONLY' && isHostedDeployment(env)) return invalid('FLOFI_DEVELOPER_WEBHOOK_LOOPBACK_HOSTED');
-  return Object.freeze({ enabled: true, tenantId, origin,
+  const live = env.FLOFI_DEVELOPER_LIVE === 'enabled' && deploymentEnvironment(env) === 'production'
+    && env.FLOFI_BETA_ACCESS === 'open' && env.FLOFI_WORKFLOW_RUNS === 'enabled'
+    && env.FLOFI_DEVELOPER_CONSOLE === 'enabled' && dispatch !== '';
+  return Object.freeze({ enabled: true, tenantId, origin, live,
     keys: Object.freeze({ apiKey: developerKey(secret, 'api-key'), handoff: developerKey(secret, 'handoff'), webhook: developerKey(secret, 'webhook') }),
     dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), webhookLoopback: loopback === 'ALLOW_LOCAL_ONLY' });
 }

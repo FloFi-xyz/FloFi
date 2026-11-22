@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-DEVELOPER-001: Developer API credentials. A key is `flofi_sk_test_` (sandbox) or `flofi_sk_live_` (production; not issuable in
- * this build) followed by 256 random bits in base64url. The server keeps only `HMAC-SHA-256(api-key key, key)`; the key itself is shown
+ * unless the deployment's mainnet release is active) followed by 256 random bits in base64url. The server keeps only `HMAC-SHA-256(api-key key, key)`; the key itself is shown
  * once to the operator and never stored, logged or returned. A key authenticates an integration — never a wallet, never a person —
  * and carries no financial authority.
  */

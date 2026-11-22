@@ -519,7 +519,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Chaves sandbox podem consultar capacidades na implantação pública. Estratégias da API com fundos de teste exigem um sandbox local de engenharia. Chaves live e estratégias mainnet da API são recusadas. Leituras com escopo exigem recursos elegíveis do projeto."
+         "Chaves sandbox podem consultar capacidades na implantação pública. Teste estratégias com fundos de teste no sandbox local de engenharia. Estratégias mainnet exigem uma chave live e ativação explícita em produção. Leituras com escopo exigem recursos elegíveis do projeto."
         ]
        }
       ]
@@ -1005,8 +1005,8 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "slug": "developer-api",
     "group": "Integre o FloFi",
     "title": "API para desenvolvedores",
-    "status": "Sandbox · ativado pelo operador",
-    "lead": "Consulte capacidades a partir do servidor e teste estratégias, prévias e aprovações em um sandbox local.",
+    "status": "Mainnet mediante ativação",
+    "lead": "Consulte capacidades no servidor e monte estratégias, prévias e aprovações para o usuário revisar no FloFi.",
     "sections": [
      {
       "id": "availability",
@@ -1015,9 +1015,9 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "note",
         "tone": "warning",
-        "title": "Integração sandbox no servidor",
+        "title": "Disponibilidade por ambiente",
         "text": [
-         "A implantação pública da FloFi expõe a consulta de capacidades autenticada. O operador habilita a API em cada ambiente e emite chaves sandbox. Em uma implantação hospedada, uma chave válida pode consultar capacidades. A API recusa estratégias de mainnet (403 MAINNET_DISABLED) e chaves live (403 FORBIDDEN, LIVE_MODE_DISABLED). Estratégias de teste recebem 400 INVALID_STRATEGY com a razão TEST_NETWORK_NOT_AVAILABLE no produto público. A integração completa usa um sandbox local de engenharia."
+         "Uma chave válida pode consultar capacidades. Em produção, a emissão de chaves live para projetos de uma conta depende de ativação explícita. Enquanto o acesso live estiver desativado, a API retorna 403 FORBIDDEN com LIVE_MODE_DISABLED para chaves live. Estratégias de mainnet enviadas com uma chave sandbox recebem 403 MAINNET_DISABLED. Estratégias de teste recebem 400 INVALID_STRATEGY com a razão TEST_NETWORK_NOT_AVAILABLE no produto público. Use um sandbox local de engenharia para testar com fundos de teste."
         ]
        },
        {
@@ -1029,7 +1029,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          },
          ". Envie ",
          {
-          "code": "Authorization: Bearer <sandbox key>"
+          "code": "Authorization: Bearer <project key>"
          },
          " a partir de um cofre de segredos no servidor. Pedidos com Origin ou Sec-Fetch-Site são recusados; não há credenciais de API no navegador nem atalhos de CORS."
         ]
@@ -1095,6 +1095,17 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
           ],
           [
            "Prévia somente leitura para um endereço público"
+          ]
+         ],
+         [
+          [
+           "POST"
+          ],
+          [
+           "/strategies/{id}/simulate-workflow"
+          ],
+          [
+           "Prévia por etapa com as dependências que ainda aguardam liquidação"
           ]
          ],
          [
@@ -1179,7 +1190,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Uma chave sandbox ativa pode chamar GET /capabilities sem escopo adicional. Filtre por network ou action e confira operations.*.available e reason. A resposta indica suporte no código, habilitação na implantação, política e evidência demonstrada. Para os demais endpoints, use strategies (estratégias, validação e prévias), approvals (criação e consulta de aprovações), executions (execução e evidência compartilhadas) ou webhooks (registro e remoção)."
+         "Uma chave ativa pode chamar GET /capabilities sem escopo adicional. Filtre por network ou action e confira operations.*.available e reason. A resposta indica suporte no código, habilitação na implantação, política e evidência demonstrada. Para os demais endpoints, use strategies (estratégias, validação e prévias), approvals (criação e consulta de aprovações), executions (execução e evidência compartilhadas) ou webhooks (registro e remoção)."
         ]
        }
       ]
@@ -1191,7 +1202,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Use uma chave sandbox com os escopos strategies e approvals, o cliente do SDK configurado para a implantação local e o endereço público de teste em simulationSubject. As redes Base Sepolia e Arbitrum Sepolia do exemplo usam fixtures. A prévia não autoriza o fluxo. O usuário comprova a carteira, simula de novo, revisa e assina no FloFi. Consulte ",
+         "Use uma chave sandbox com os escopos strategies e approvals, o cliente do SDK configurado para a implantação local e o endereço público de teste em simulationSubject. As redes Base Sepolia e Arbitrum Sepolia do exemplo usam fixtures. A prévia tem autoridade NONE. Consulte ",
          {
           "link": "Autorização na carteira",
           "href": "/docs/wallet-authorization"
@@ -1206,7 +1217,31 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        },
        {
         "kind": "p",
-        "text": ["O teste de navegador MOCKED chega à revisão com a assinatura bloqueada. Envie o link de aprovação em privado. A aprovação original expira em 15 minutos e o segredo do link fica no fragmento da URL. A consulta da aprovação acompanha o handoff. Status de execuções e evidências de reconciliação exigem o consentimento do usuário, desativado por padrão. A prévia da API aceita fluxos elegíveis de uma etapa."]
+        "text": ["O teste de navegador MOCKED chega à revisão com a assinatura bloqueada. Envie o link de aprovação em privado. A aprovação original expira em 15 minutos e o segredo do link fica no fragmento da URL. Status de execuções e evidências de reconciliação exigem o consentimento do usuário, desativado por padrão."]
+       }
+      ]
+     },
+     {
+      "id": "mainnet-integration",
+      "title": "Integre com mainnet",
+      "blocks": [
+       {
+        "kind": "p",
+        "text": [
+         "Após a ativação live, crie um projeto no Developer Console e gere uma chave de produção com os escopos necessários. Consulte as capacidades da implantação, crie uma estratégia mainnet elegível e valide o hash do workflow. Use simulate para uma etapa ou simulateWorkflow para prévias por etapa, incluindo dependências que aguardam liquidação."
+        ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         "Envie ao usuário o link da aprovação vinculada ao hash exato. O usuário comprova a carteira e, para cada etapa, revisa uma simulação nova e o Manifest antes de confirmar na carteira. APPLIED indica que o FloFi carregou a proposta. A integração pode informar returnTarget com uma URL HTTPS e um state sem segredos, associado à sessão do usuário no backend."
+        ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         "Consulte a aprovação ou verifique webhooks assinados. O acesso ao status de execução, ao workflowRun e às evidências depende do consentimento do usuário. Use o resultado reconciliado para confirmar o desfecho. As verificações de sandbox exercitam o ambiente de teste."
+        ]
        }
       ]
      },
@@ -1217,7 +1252,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Valores são strings decimais. Estratégias são imutáveis; crie uma nova se a intenção mudar. A criação de estratégia, aprovação e endpoint de webhook aceita Idempotency-Key por projeto, ambiente e operação durante 24 horas. A mesma chave com um corpo diferente gera IDEMPOTENCY_CONFLICT."
+         "Valores são strings decimais. Estratégias são imutáveis. Crie uma nova se a intenção mudar. A criação de estratégia, aprovação e endpoint de webhook exige Idempotency-Key em produção. A chave vale por projeto, ambiente e operação durante 24 horas. A mesma chave com um corpo diferente gera IDEMPOTENCY_CONFLICT."
         ]
        },
        {
@@ -1228,7 +1263,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "O plano gratuito documentado permite 300 pedidos/minuto, 30 simulações/hora, 60 aprovações criadas/hora, 100 aprovações abertas e cinco endpoints de webhook ativos. Respeite o Retry-After. Listar estratégias, GET /me, chaves live e execução genérica de vários passos não fazem parte da v1."
+         "O plano gratuito permite 300 pedidos/minuto, 30 simulações/hora, 60 aprovações criadas/hora, 100 aprovações abertas e cinco endpoints de webhook ativos. Respeite o Retry-After."
         ]
        }
       ]
@@ -1298,7 +1333,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Use a origem da implantação em FLOFI_BASE_URL. O SDK anexa o caminho da API. Em ambiente hospedado, use a consulta para descoberta. Em sandbox local, use exampleStrategy de uma linha disponível e guarde a estratégia canônica e o hash. Continue no ",
+         "Use a origem da implantação em FLOFI_BASE_URL. O SDK anexa o caminho da API. Consulte as capacidades para identificar operações disponíveis e guarde a estratégia canônica e o hash. Continue no ",
          {
           "link": "tutorial da API para desenvolvedores",
           "href": "/docs/developer-api#strategy-to-handoff"
@@ -1320,7 +1355,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Registre um endereço HTTPS na porta 443 com webhookEndpoints.create e guarde o segredo retornado uma única vez. Remova-o com webhookEndpoints.delete. Verifique o corpo bruto antes de interpretar ou reserializar, deduplique por webhook-id e consulte o recurso para obter o estado atual. A entrega depende da configuração do operador. A ordem de entrega não é garantida. Eventos execution.* são gerados enquanto o usuário compartilha o status. Uma entrega já enfileirada ainda pode chegar depois que ele parar de compartilhar. Notificações não autorizam um fluxo nem mudam o estado financeiro dele."
+         "Registre um endereço HTTPS na porta 443 com webhookEndpoints.create e guarde o segredo retornado uma única vez. Remova-o com webhookEndpoints.delete. Verifique o corpo bruto, deduplique por webhook-id e consulte o recurso para obter o estado atual. O operador configura o agendamento de entregas. Em produção, o FloFi verifica o consentimento novamente ao enviar um evento de execução enfileirado. Uma entrega em andamento pode concluir após a retirada do consentimento."
         ]
        }
       ]
@@ -1730,7 +1765,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Chaves de desenvolvedor autenticam projetos de servidor e são guardadas como digests. Chaves live e estratégias de mainnet são recusadas na versão sandbox. Pedidos à API para desenvolvedores vindos do navegador são rejeitados. Os segredos das passagens de aprovação viajam no fragmento da URL, e o compartilhamento de status vem desligado por padrão."
+         "Chaves de desenvolvedor autenticam projetos de servidor e são guardadas como digests. Estratégias mainnet exigem ativação live em produção. Pedidos à API para desenvolvedores vindos do navegador são rejeitados. Os segredos das passagens de aprovação viajam no fragmento da URL, e o compartilhamento de status vem desligado por padrão."
         ]
        },
        {
@@ -2484,7 +2519,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Sandbox keys can discover capabilities on the public deployment. Test-fund API strategies require a local engineering sandbox. The API refuses live keys and mainnet strategies. Scoped reads require eligible project resources."
+         "Sandbox keys can discover capabilities on the public deployment. Test strategies with test funds in a local engineering sandbox. Mainnet strategies require a live key and explicit production activation. Scoped reads require eligible project resources."
         ]
        }
       ]
@@ -2970,8 +3005,8 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "slug": "developer-api",
     "group": "Integrate FloFi",
     "title": "Developer API",
-    "status": "Sandbox · operator enabled",
-    "lead": "Discover capabilities from your server and test strategies, previews and handoffs in a local sandbox.",
+    "status": "Mainnet requires activation",
+    "lead": "Discover capabilities from your server and prepare strategies, previews and approvals for users to review in FloFi.",
     "sections": [
      {
       "id": "availability",
@@ -2980,9 +3015,9 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "note",
         "tone": "warning",
-        "title": "Server-side sandbox integration",
+        "title": "Availability by environment",
         "text": [
-         "The public FloFi deployment exposes authenticated capability discovery. The operator enables the API per environment and issues sandbox keys. On a hosted deployment, a valid key can discover capabilities. The API refuses mainnet strategies (403 MAINNET_DISABLED) and live keys (403 FORBIDDEN, LIVE_MODE_DISABLED). Test-network strategies return 400 INVALID_STRATEGY with reason TEST_NETWORK_NOT_AVAILABLE in the public product. Use a local engineering sandbox for the full integration."
+         "Any valid key can discover capabilities. Live key issuance for account-owned projects requires explicit production activation. While live access is disabled, the API returns 403 FORBIDDEN with LIVE_MODE_DISABLED for live keys. Mainnet strategies submitted with a sandbox key return 403 MAINNET_DISABLED. Test-network strategies return 400 INVALID_STRATEGY with reason TEST_NETWORK_NOT_AVAILABLE in the public product. Use a local engineering sandbox to test with test funds."
         ]
        },
        {
@@ -2994,7 +3029,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          },
          ". Send ",
          {
-          "code": "Authorization: Bearer <sandbox key>"
+          "code": "Authorization: Bearer <project key>"
          },
          " from a server secret store. Requests carrying Origin or Sec-Fetch-Site are refused; there are no browser API credentials or CORS shortcuts."
         ]
@@ -3060,6 +3095,17 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
           ],
           [
            "Read-only preview for a public subject"
+          ]
+         ],
+         [
+          [
+           "POST"
+          ],
+          [
+           "/strategies/{id}/simulate-workflow"
+          ],
+          [
+           "Per-step preview showing dependencies that still need to settle"
           ]
          ],
          [
@@ -3144,7 +3190,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "An active sandbox key can call GET /capabilities without an additional scope. Filter by network or action and check operations.*.available and reason. The response distinguishes code support, deployment enablement, policy and demonstrated evidence. Other endpoints require strategies (strategies, validation and previews), approvals (approval creation and reads), executions (shared execution and evidence) or webhooks (registration and removal)."
+         "An active key can call GET /capabilities without an additional scope. Filter by network or action and check operations.*.available and reason. The response distinguishes code support, deployment enablement, policy and demonstrated evidence. Other endpoints require strategies (strategies, validation and previews), approvals (approval creation and reads), executions (shared execution and evidence) or webhooks (registration and removal)."
         ]
        }
       ]
@@ -3156,7 +3202,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Use a sandbox key with strategies and approvals scopes, the SDK client configured for the local deployment and a public test wallet address as simulationSubject. The sample uses fixtures for Base Sepolia and Arbitrum Sepolia. The preview grants no authority. The user proves wallet ownership, runs a fresh simulation, reviews and signs in FloFi. See ",
+         "Use a sandbox key with strategies and approvals scopes, the SDK client configured for the local deployment and a public test wallet address as simulationSubject. The sample uses fixtures for Base Sepolia and Arbitrum Sepolia. The preview has authority NONE. See ",
          {
           "link": "Wallet Authorization",
           "href": "/docs/wallet-authorization"
@@ -3171,7 +3217,31 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        },
        {
         "kind": "p",
-        "text": ["The MOCKED browser test reaches Review with signing blocked. Deliver the approval link privately. The original approval expires after 15 minutes and the link secret stays in the URL fragment. Poll approval status to track the handoff. Execution status and reconciliation evidence require user consent, which is off by default. API previews accept eligible single-step flows."]
+        "text": ["The MOCKED browser test reaches Review with signing blocked. Deliver the approval link privately. The original approval expires after 15 minutes and the link secret stays in the URL fragment. Execution status and reconciliation evidence require user consent, which is off by default."]
+       }
+      ]
+     },
+     {
+      "id": "mainnet-integration",
+      "title": "Integrate with mainnet",
+      "blocks": [
+       {
+        "kind": "p",
+        "text": [
+         "After live activation, create a project in the Developer Console and generate a production key with the scopes you need. Discover deployment capabilities, create an eligible mainnet strategy and validate the workflow hash. Use simulate for one step or simulateWorkflow for per-step previews, including dependencies that await settlement."
+        ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         "Send the user the approval link bound to the exact hash. The user proves wallet ownership and reviews a fresh simulation and Manifest for each step before confirming in their wallet. APPLIED means FloFi loaded the proposal. The integration can supply a returnTarget with an HTTPS URL and a non-secret state bound to the user's backend session."
+        ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         "Poll the approval or verify signed webhooks. Access to execution status, workflowRun and evidence depends on user consent. Check the reconciled result to confirm the outcome. Sandbox checks exercise the test environment."
+        ]
        }
       ]
      },
@@ -3182,7 +3252,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Amounts are decimal strings. Strategies are immutable; create a new one for a changed intent. Strategy, approval and webhook endpoint creation accept an Idempotency-Key scoped to project, environment and operation for 24 hours. Same key with a changed body yields IDEMPOTENCY_CONFLICT."
+         "Amounts are decimal strings. Strategies are immutable. Create a new one for a changed intent. In production, strategy, approval and webhook endpoint creation require an Idempotency-Key scoped to project, environment and operation for 24 hours. The same key with a changed body yields IDEMPOTENCY_CONFLICT."
         ]
        },
        {
@@ -3193,7 +3263,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "The documented free plan permits 300 requests/minute, 30 simulations/hour, 60 approval creations/hour, 100 open approvals and five active webhook endpoints. Respect Retry-After. Listing strategies, GET /me, live keys and general arbitrary multi-step execution are not part of v1."
+         "The free plan permits 300 requests/minute, 30 simulations/hour, 60 approval creations/hour, 100 open approvals and five active webhook endpoints. Respect Retry-After."
         ]
        }
       ]
@@ -3263,7 +3333,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Set FLOFI_BASE_URL to the deployment origin. The SDK appends the API path. Use this call for discovery on hosted deployments. In a local sandbox, use an available row’s exampleStrategy and retain the canonical strategy and hash. Continue with the ",
+         "Set FLOFI_BASE_URL to the deployment origin. The SDK appends the API path. Discover available operations and retain the canonical strategy and hash. Continue with the ",
          {
           "link": "Developer API tutorial",
           "href": "/docs/developer-api#strategy-to-handoff"
@@ -3285,7 +3355,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Register an HTTPS URL on port 443 with webhookEndpoints.create and store the secret returned once. Remove the endpoint with webhookEndpoints.delete. Verify the raw body before parsing or re-serialization, deduplicate by webhook-id and fetch the resource for its current state. Delivery depends on operator configuration. Delivery ordering is not guaranteed. execution.* events are generated while the user shares status. A queued delivery can still arrive after sharing ends. Notifications do not authorize a workflow or change its financial state."
+         "Register an HTTPS URL on port 443 with webhookEndpoints.create and store the secret returned once. Remove the endpoint with webhookEndpoints.delete. Verify the raw body, deduplicate by webhook-id and fetch the resource for its current state. The operator configures scheduled delivery. In production, FloFi rechecks consent when dispatching a queued execution event. A delivery in flight can finish after the user withdraws consent."
         ]
        }
       ]
@@ -3695,7 +3765,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Developer keys authenticate server projects and are stored as digests. Live keys and mainnet strategies are refused in the sandbox release. Browser-origin Developer API requests are rejected. Approval handoff secrets travel in URL fragments, and execution status sharing is off by default."
+         "Developer keys authenticate server projects and are stored as digests. Mainnet strategies require live production activation. Browser-origin Developer API requests are rejected. Approval handoff secrets travel in URL fragments, and execution status sharing is off by default."
         ]
        },
        {
