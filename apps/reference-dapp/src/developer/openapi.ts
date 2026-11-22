@@ -8,7 +8,7 @@
 import type { TSchema } from '@sinclair/typebox';
 import { PUBLIC_NETWORK_IDS, PUBLIC_STRATEGY_ACTIONS } from '../engine/strategy-spec';
 import { ApprovalView, CapabilityList, CreateApprovalRequest, PublicCreateStrategyRequest, CreateWebhookEndpointRequest, DeletedView, ErrorView, EvidenceView, ExecutionView,
-  SimulateStrategyRequest, SimulationView, StrategyValidationView, StrategyView, ValidateStrategyRequest, WebhookEndpointView, WebhookEventView } from './schemas.ts';
+  SimulateStrategyRequest, SimulationView, StrategyValidationView, StrategyView, ValidateStrategyRequest, WebhookEndpointView, WebhookEventView, WorkflowSimulationView } from './schemas.ts';
 
 const plain = (schema: TSchema): Record<string, unknown> => JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -25,7 +25,7 @@ const ERRORS: Readonly<Record<string, string>> = Object.freeze({
 const errors = (...statuses: number[]) => Object.fromEntries(statuses.map(s => [String(s), { description: ERRORS[s], headers: { 'request-id': REQUEST_ID },
   content: { 'application/json': { schema: ref('Error') } } }]));
 const COMMON = [401, 403, 429, 500, 503];
-const IDEMPOTENCY = { name: 'Idempotency-Key', in: 'header', required: false, description: 'Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). ' +
+const IDEMPOTENCY = { name: 'Idempotency-Key', in: 'header', required: false, description: 'Required for production credentials. Makes this creation safe to retry (8–128 of `A-Z a-z 0-9 . _ : -`, kept 24 h). ' +
   'The same key with another body is IDEMPOTENCY_CONFLICT.', schema: { type: 'string', pattern: '^[A-Za-z0-9._:-]{8,128}$' } };
 const REPLAYED = { 'idempotent-replayed': { description: '`true` when this is the stored result of an earlier request with the same Idempotency-Key.', schema: { type: 'string' } } };
 const id = (prefix: string, description: string) => ({ name: 'id', in: 'path', required: true, description, schema: { type: 'string', pattern: `^${prefix}_[a-z2-7]{26}$` } });
@@ -37,9 +37,8 @@ export function developerOpenApi(): Record<string, unknown> {
     openapi: '3.1.0',
     info: { title: 'FloFi Developer API', version: '1.0.0',
       summary: 'Developers build the experience. FloFi handles the DeFi workflow lifecycle.',
-      description: 'Server-side Developer API v1. Where the operator enables the API and issues sandbox keys, authenticated projects can discover ' +
-        'capabilities. This document lists the public product’s mainnet inputs. Sandbox keys cannot create mainnet strategies, and live keys are refused. ' +
-        'Creation, validation, previews and new handoffs can be tested with test-funds strategies in a local engineering deployment using the engineering schema. ' +
+      description: 'Server-side Developer API v1. Production keys are available on a FloFi deployment after explicit live activation. ' +
+        'This contract describes mainnet inputs. Test-funds keys work on configured engineering deployments. ' +
         'The key can request a handoff but only the end user in FloFi can prove wallet ownership, review the fresh simulation and manifest, and sign. ' +
         'Execution status and reconciled evidence require the user’s sharing consent.',
       license: { name: 'Apache-2.0', identifier: 'Apache-2.0' } },
@@ -60,6 +59,9 @@ export function developerOpenApi(): Record<string, unknown> {
       '/strategies/{id}/simulate': { post: { operationId: 'simulateStrategy', tags: ['Strategies'], summary: 'FloFi\'s own read-only simulation preview (never authorizable).',
         parameters: [id('str', 'A strategy id.')], requestBody: body('SimulateStrategyRequest', 'The account whose public balances the preview reads.'),
         responses: { ...ok('200', 'Simulation', 'The allowlisted facts of the flow\'s own simulation; nothing persisted, signed or sent.'), ...errors(400, 404, 409, 422, ...COMMON) } } },
+      '/strategies/{id}/simulate-workflow': { post: { operationId: 'simulateWorkflow', tags: ['Strategies'], summary: 'Read-only previews of a composed workflow.',
+        parameters: [id('str', 'A strategy id.')], requestBody: body('SimulateStrategyRequest', 'The account whose public balances the preview reads.'),
+        responses: { ...ok('200', 'WorkflowSimulation', 'Per-step facts and any steps that await settlement.'), ...errors(400, 404, 409, 422, ...COMMON) } } },
       '/approvals': { post: { operationId: 'createApproval', tags: ['Approvals'], summary: 'Hand one strategy revision to its owner in FloFi (scope `approvals`).',
         parameters: [IDEMPOTENCY], requestBody: body('CreateApprovalRequest', 'The strategy and its exact workflow hash.'),
         responses: { ...ok('201', 'Approval', 'A PENDING approval and the FloFi link to give the end user (authority NONE).', REPLAYED),
@@ -88,11 +90,11 @@ export function developerOpenApi(): Record<string, unknown> {
       requestBody: { required: true, content: { 'application/json': { schema: ref('WebhookEvent') } } },
       responses: { 200: { description: 'Any 2xx acknowledges; anything else is retried (30 s, 2 min, 10 min, 30 min, 1 h, 3 h, 6 h, 12 h, 24 h), then dropped.' } } } } },
     components: {
-      securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'A FloFi Developer API key (`flofi_sk_test_…`). Server-side only: browser requests are refused.' },
+      securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'A FloFi Developer API key (`flofi_sk_live_…` or `flofi_sk_test_…`). Server-side only: browser requests are refused.' },
         dispatchToken: { type: 'http', scheme: 'bearer', description: 'The scheduler token whose SHA-256 is FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256.' } },
       schemas: { CreateStrategyRequest: plain(PublicCreateStrategyRequest), ValidateStrategyRequest: plain(ValidateStrategyRequest), SimulateStrategyRequest: plain(SimulateStrategyRequest),
         CreateApprovalRequest: plain(CreateApprovalRequest), CreateWebhookEndpointRequest: plain(CreateWebhookEndpointRequest), CapabilityList: plain(CapabilityList),
-        Strategy: plain(StrategyView), StrategyValidation: plain(StrategyValidationView), Simulation: plain(SimulationView), Approval: plain(ApprovalView),
+        Strategy: plain(StrategyView), StrategyValidation: plain(StrategyValidationView), Simulation: plain(SimulationView), WorkflowSimulation: plain(WorkflowSimulationView), Approval: plain(ApprovalView),
         Execution: plain(ExecutionView), Evidence: plain(EvidenceView), WebhookEndpoint: plain(WebhookEndpointView), DeletedWebhookEndpoint: plain(DeletedView),
         WebhookEvent: plain(WebhookEventView), Error: plain(ErrorView) } },
   };

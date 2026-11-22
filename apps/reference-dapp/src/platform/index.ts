@@ -15,6 +15,7 @@ export * from './capabilities.ts';
 export * from './preview.ts';
 export * from './executions.ts';
 export * from './approvals.ts';
+export * from './approval-workflow-results.ts';
 export * from './approval-link-format.ts';
 export * from './approval-links.ts';
 export * from './approve.ts';
@@ -31,4 +32,4 @@ export { credentialDigest, credentialOf, newCredential, newId } from '../mcp/oau
 // BUILD-CHAT-E2E-001: the workflow run service, as every surface sees it (status views, authorization plans); surfaces never import it directly.
 export type { AuthorizationPlan, DelegationFacts } from '../workflow-runs/authorization-plan.ts';
 export type { RunView } from '../workflow-runs/service.ts';
-export type { WorkflowRunStore } from '../workflow-runs/pg-store.ts';
+export { createPgWorkflowRunStore, type WorkflowRunStore } from '../workflow-runs/pg-store.ts';

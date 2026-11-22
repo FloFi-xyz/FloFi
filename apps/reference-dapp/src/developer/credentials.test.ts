@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { developerKey, readDeveloperConfig, SANDBOX_POLICY, type DeveloperConfig } from './config.ts';
 import { API_KEY_PREFIX, apiKeyDigest, newApiKey, presentedKey } from './keys.ts';
 import { projectNameValid } from './admin.ts';
+import { FLOFI_PRODUCTION_ORIGIN } from '../platform/navigation.ts';
 
 const SECRET = 'd'.repeat(48);
 const BASE = { FLOFI_DEVELOPER: 'enabled', FLOFI_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_DEVELOPER_SECRET: SECRET };
@@ -54,6 +55,17 @@ describe('BUILD-DEVELOPER-001 developer configuration', () => {
   it('sandbox policy: test funds only, every mainnet off', () => {
     expect(SANDBOX_POLICY).toEqual({ ok: true, testFunds: true, mainnetNetworks: [] });
     expect(Object.isFrozen(SANDBOX_POLICY)).toBe(true);
+  });
+
+  it('keeps live credentials disabled unless the production release prerequisites hold together', () => {
+    const liveSettings = { ...BASE, VERCEL_ENV: 'production', FLOFI_PUBLIC_ORIGIN: FLOFI_PRODUCTION_ORIGIN,
+      FLOFI_DEVELOPER_LIVE: 'enabled', FLOFI_DEVELOPER_CONSOLE: 'enabled', FLOFI_BETA_ACCESS: 'open',
+      FLOFI_WORKFLOW_RUNS: 'enabled', FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256: 'a'.repeat(64) };
+    expect(enabled(liveSettings).live).toBe(true);
+    for (const key of ['VERCEL_ENV', 'FLOFI_DEVELOPER_LIVE', 'FLOFI_DEVELOPER_CONSOLE', 'FLOFI_BETA_ACCESS',
+      'FLOFI_WORKFLOW_RUNS', 'FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256'] as const) {
+      expect(enabled({ ...liveSettings, [key]: undefined }).live, key).toBe(false);
+    }
   });
 });
 

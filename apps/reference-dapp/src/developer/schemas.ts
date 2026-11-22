@@ -24,7 +24,7 @@ export const WorkflowHash = Type.String({ pattern: '^0x[0-9a-f]{64}$', descripti
 export const ExecutionId = Type.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', description: 'A FloFi execution (run) id. It is a lookup key, not an access grant.' });
 export const EventType = literals(DEVELOPER_EVENT_TYPES);
 const Timestamp = Type.String({ description: 'RFC 3339 timestamp.' });
-const Environment = literals(['sandbox', 'production'] as const, 'The credential environment. Only `sandbox` exists in this release.');
+const Environment = literals(['sandbox', 'production'] as const, 'The credential environment. Production is available when enabled by a FloFi release.');
 const FundsClass = literals(['TEST_FUNDS', 'REAL_FUNDS'] as const);
 const Authority = Type.Literal('NONE', { description: 'What this object authorizes: nothing. Only the owner\'s wallet, in FloFi, can sign.' });
 const Codes = Type.Array(Type.String({ pattern: '^[A-Z][A-Z0-9_]{2,80}$' }));
@@ -42,7 +42,12 @@ export const SimulateStrategyRequest = Type.Object({ simulationSubject: Type.Str
   description: 'The account whose PUBLIC balances and allowances the read-only simulation reads (EVM address or Solana public key). It is not authenticated, ' +
     'not an owner and grants nothing; nothing is stored for it.' }) }, strict);
 export const CreateApprovalRequest = Type.Object({ strategyId: StrategyId, workflowHash: Type.String({ pattern: '^0x[0-9a-f]{64}$',
-  description: 'The workflowHash of that strategy, as returned when it was created. A different hash is refused (STRATEGY_CHANGED).' }) }, strict);
+  description: 'The workflowHash of that strategy, as returned when it was created. A different hash is refused (STRATEGY_CHANGED).' }),
+  returnTarget: Type.Optional(Type.Object({
+    url: Type.String({ minLength: 10, maxLength: 2048, description: 'Public HTTPS return URL without credentials, query or fragment.' }),
+    state: Type.String({ pattern: '^[A-Za-z0-9_-]{16,128}$', description: 'Non-secret correlation value bound to the caller’s session.' }),
+  }, strict)),
+}, strict);
 export const CreateWebhookEndpointRequest = Type.Object({ url: Type.String({ minLength: 10, maxLength: 2048, description: 'An https URL on port 443.' }),
   events: Type.Optional(Type.Array(EventType, { maxItems: DEVELOPER_EVENT_TYPES.length, uniqueItems: true, description: 'Event types to receive; omitted or empty = all.' })) }, strict);
 
@@ -85,15 +90,35 @@ export const SimulationView = Type.Object({ object: Type.Literal('simulation'), 
   authority: Authority }, strict);
 
 const EvidenceSummary = Type.Object({ environment: Type.String(), outcome: Type.String(), bundleHash: Type.String() }, strict);
+export const WorkflowSimulationView = Type.Object({
+  object: Type.Literal('workflow_simulation'), strategyId: StrategyId, workflowHash: WorkflowHash,
+  status: literals(['STEP_PREVIEWS_AVAILABLE', 'INCOMPLETE'] as const),
+  steps: Type.Array(Type.Object({ index: Type.Integer(), workflowHash: WorkflowHash,
+    state: literals(['SIMULATED', 'AWAITING_PRODUCER_SETTLEMENT', 'NOT_COMPLETED', 'FAILED'] as const), reason: Nullable(Type.String()),
+    amountFrom: Type.Array(Type.Integer()), simulationSubject: Nullable(Type.String()),
+    subjectSource: literals(['REQUEST', 'PUBLIC_QUOTE_SUBJECT', 'NONE'] as const),
+    provenance: Nullable(Type.String()), observedAt: Nullable(Timestamp), expiresAt: Nullable(Timestamp),
+    facts: Nullable(Type.Record(Type.String(), Type.Unknown())) }, strict)),
+  executionSimulation: Type.Literal('FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION'),
+  authorizable: Type.Literal(false), persisted: Type.Literal(false), authority: Authority,
+}, strict);
+
 export const ApprovalExecutionView = Type.Object({ id: ExecutionId, status: Type.String(), reconciled: Type.Boolean(), terminal: Type.Boolean(), errorCode: Nullable(Type.String()),
   evidence: Nullable(EvidenceSummary), updatedAt: Timestamp }, strict);
+export const ApprovalWorkflowRunView = Type.Object({
+  id: Type.String(), state: Type.String(), mode: Nullable(Type.String()), errorCode: Nullable(Type.String()),
+  updatedAt: Timestamp, steps: Type.Array(Type.Object({ index: Type.Integer(), state: Type.String(), errorCode: Nullable(Type.String()),
+    executionId: Nullable(ExecutionId), evidence: Nullable(Type.Object({ environment: Type.String(), outcome: Type.String(), bundleHash: Nullable(Type.String()) }, strict)),
+    submissions: Type.Array(Type.Object({ chain: Type.String(), hash: Type.String() }, strict)) }, strict)),
+  groups: Type.Array(Type.Object({ index: Type.Integer(), chain: Type.String(), state: Type.String(), errorCode: Nullable(Type.String()) }, strict)),
+}, strict);
 export const ApprovalView = Type.Object({ id: ApprovalId, object: Type.Literal('approval'), environment: Environment, strategyId: StrategyId, workflowHash: WorkflowHash,
   status: literals(['PENDING', 'CLAIMED', 'APPLIED', 'EXPIRED', 'SUPERSEDED', 'REVOKED', 'STALE'] as const),
   approvalUrl: Nullable(Type.String({ description: 'The FloFi link to send to the end user (its secret is in the fragment). Returned on creation; never stored by FloFi.' })),
   approvalUrlExpiresAt: Nullable(Timestamp), expiresAt: Timestamp, networkEnvironment: Type.String(), fundsClass: FundsClass, executionPlan: PlanView,
   walletNamespace: literals(['eip155', 'solana'] as const), requires: Type.Array(Type.String()), claimed: Type.Boolean(), applied: Type.Boolean(),
   statusShared: Type.Boolean({ description: 'The owner chose to share run status and evidence with this project (off by default).' }),
-  executions: Type.Array(ApprovalExecutionView), executionsVisible: Type.Boolean(), note: Nullable(Type.String()), createdAt: Timestamp, authority: Authority }, strict);
+  workflowRun: Type.Optional(Nullable(ApprovalWorkflowRunView)), executions: Type.Array(ApprovalExecutionView), executionsVisible: Type.Boolean(), note: Nullable(Type.String()), createdAt: Timestamp, authority: Authority }, strict);
 const Attempt = Type.Object({ attemptId: Nullable(Type.String()), step: Nullable(Type.String()), state: Nullable(Type.String()), transactionHash: Nullable(Type.String()),
   reconciled: Nullable(Type.Boolean()), updatedAt: Nullable(Type.String()) }, strict);
 export const ExecutionView = Type.Object({ id: ExecutionId, object: Type.Literal('execution'), approvalId: ApprovalId, status: Type.String(), provenance: Type.String(),
@@ -120,7 +145,9 @@ export type CapabilityBody = Static<typeof CapabilityView>;
 export type StrategyBody = Static<typeof StrategyView>;
 export type StrategyValidationBody = Static<typeof StrategyValidationView>;
 export type SimulationBody = Static<typeof SimulationView>;
+export type WorkflowSimulationBody = Static<typeof WorkflowSimulationView>;
 export type ApprovalBody = Static<typeof ApprovalView>;
+export type CreateApprovalRequestBody = Static<typeof CreateApprovalRequest>;
 export type ExecutionBody = Static<typeof ExecutionView>;
 export type EvidenceBody = Static<typeof EvidenceView>;
 export type WebhookEndpointBody = Static<typeof WebhookEndpointView>;

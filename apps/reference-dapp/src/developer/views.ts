@@ -60,9 +60,11 @@ export function simulationView(strategyId: string, preview: SimulationPreview): 
       'A simulation is evidence of what would happen at the observed block, not a guarantee and not an execution.'] };
 }
 
-export function capabilityView(fact: CapabilityFact, environment: DeveloperEnvironment): CapabilityBody {
+export function capabilityView(fact: CapabilityFact, environment: DeveloperEnvironment, workflowRunsEnabled = false): CapabilityBody {
   const { row, gates } = fact, sandbox = environment === 'sandbox', composable = !sandbox || row.funds === 'TEST_FUNDS';
-  const approve = !composable ? 'SANDBOX_TEST_FUNDS_ONLY' : reason(gates.handoff.reason);
+  const liveRefusal = sandbox ? null : !workflowRunsEnabled ? 'WORKFLOW_RUNS_NOT_ENABLED'
+    : gates.enabledByDeployment.mockedHarness ? 'MAINNET_RUNTIME_REQUIRED' : null;
+  const approve = !composable ? 'SANDBOX_TEST_FUNDS_ONLY' : liveRefusal ?? reason(gates.handoff.reason);
   return { object: 'capability', action: row.action, network: row.network, destinationNetwork: row.destinationNetwork, fundsClass: row.funds,
     networkEnvironment: row.publicEnvironment, executionPlan: { kind: gates.plan.kind, steps: gates.plan.steps.length },
     operations: { compose: { available: composable, reason: composable ? null : 'SANDBOX_TEST_FUNDS_ONLY' },

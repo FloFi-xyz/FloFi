@@ -121,6 +121,11 @@ strategy, requires the same hash (`409 STRATEGY_CHANGED` otherwise; `409 STRATEG
 four availability facts (`422 CAPABILITY_NOT_SUPPORTED` with the reason) and the Strategy Review (`422 REVIEW_BLOCKED`, with each
 blocker as an `issues` entry `{ "path": "/strategy", "rule": "<finding code>" }`).
 
+Supply an optional `returnTarget` object with `url` and `state` to show a return link after the user applies the proposal.
+Use a public HTTPS URL without credentials, a query or a fragment. FloFi adds the opaque `approvalId` and your non-secret
+correlation `state` to the link. Store this state with the requesting user's session and verify both values when the user
+returns. Use the backend's credential to fetch the latest status.
+
 Response: `id`, `strategyId`, `workflowHash`, `status`, `approvalUrl` (`https://<deployment>/approve#flofi_dhs_…`, secret in the
 fragment), `approvalUrlExpiresAt`, `expiresAt` (15 minutes), `networkEnvironment`, `fundsClass`, `executionPlan`,
 `walletNamespace` (`eip155` or `solana`), `requires[]`, `claimed`, `applied`, `statusShared`, `executions[]`,

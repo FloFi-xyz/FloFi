@@ -20,7 +20,7 @@ export type SimulateStrategyRequest = {
   /** The account whose PUBLIC balances the read-only simulation reads. Not an owner, not authenticated, grants nothing. */
   simulationSubject: string;
 };
-export type CreateApprovalRequest = { strategyId: string; workflowHash: string };
+export type CreateApprovalRequest = { strategyId: string; workflowHash: string; returnTarget?: { url: string; state: string } };
 export type CreateWebhookEndpointRequest = { url: string; events?: DeveloperEventType[] };
 
 export type PlanStep = { index: number; action: string; network: string; destinationNetwork: string | null; kind: string; protocol: string; fundsClass: FundsClass;
@@ -51,6 +51,20 @@ export type Simulation = { object: 'simulation'; strategyId: string; workflowHas
   canonicalArtifacts: Record<string, unknown> | null; notes: string[]; authority: Authority };
 
 export type EvidenceSummary = { environment: string; outcome: string; bundleHash: string };
+export type WorkflowSimulation = {
+  object: 'workflow_simulation'; strategyId: string; workflowHash: string; status: 'STEP_PREVIEWS_AVAILABLE' | 'INCOMPLETE';
+  steps: { index: number; workflowHash: string; state: 'SIMULATED' | 'AWAITING_PRODUCER_SETTLEMENT' | 'NOT_COMPLETED' | 'FAILED';
+    reason: string | null; amountFrom: number[]; simulationSubject: string | null; subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'NONE';
+    provenance: string | null; observedAt: string | null; expiresAt: string | null;
+    facts: Record<string, unknown> | null }[];
+  executionSimulation: 'FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION'; authorizable: false; persisted: false; authority: Authority;
+};
+export type ApprovalWorkflowRun = {
+  id: string; state: string; mode: string | null; errorCode: string | null; updatedAt: string;
+  steps: { index: number; state: string; errorCode: string | null; executionId: string | null;
+    evidence: { environment: string; outcome: string; bundleHash: string | null } | null; submissions: { chain: string; hash: string }[] }[];
+  groups: { index: number; chain: string; state: string; errorCode: string | null }[];
+};
 export type ApprovalExecution = { id: string; status: string; reconciled: boolean; terminal: boolean; errorCode: string | null; evidence: EvidenceSummary | null;
   updatedAt: string };
 export type Approval = { id: string; object: 'approval'; environment: Environment; strategyId: string; workflowHash: string; status: ApprovalStatus;
@@ -58,7 +72,7 @@ export type Approval = { id: string; object: 'approval'; environment: Environmen
   approvalUrl: string | null; approvalUrlExpiresAt: string | null; expiresAt: string; networkEnvironment: string; fundsClass: FundsClass; executionPlan: ExecutionPlan;
   walletNamespace: 'eip155' | 'solana'; requires: string[]; claimed: boolean; applied: boolean;
   /** The owner chose to share run status and evidence with your project (off by default). */
-  statusShared: boolean; executions: ApprovalExecution[]; executionsVisible: boolean; note: string | null; createdAt: string; authority: Authority };
+  statusShared: boolean; workflowRun?: ApprovalWorkflowRun | null; executions: ApprovalExecution[]; executionsVisible: boolean; note: string | null; createdAt: string; authority: Authority };
 export type Attempt = { attemptId: string | null; step: string | null; state: string | null; transactionHash: string | null; reconciled: boolean | null; updatedAt: string | null };
 export type Execution = { id: string; object: 'execution'; approvalId: string; status: string; provenance: string; reconciled: boolean; terminal: boolean;
   errorCode: string | null; attentionRequired: boolean | null; owner: string; attempts: Attempt[]; createdAt: string | null; updatedAt: string | null;

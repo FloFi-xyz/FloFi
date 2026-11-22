@@ -4,7 +4,7 @@
  * passes the request through). Order of checks, each failing closed before any engine work:
  *
  *   enablement → browser refusal (an `Origin` or `Sec-Fetch-Site` header: API keys are server-side only, no CORS) → API key (a
- *   live key is refused: no production in this build) → the project's request rate → route and method → scope → closed input
+ *   live key requires explicit production activation and account ownership) → the project's request rate → route and method → scope → closed input
  *   schemas → idempotency → the operation (`service.ts`) → the output guard → the response.
  *
  * A key is digested and looked up in PostgreSQL on every request (revocation and disabling are immediate). Every response carries a
@@ -18,20 +18,21 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { TSchema } from '@sinclair/typebox';
-import { createIdempotencyStore, IDEMPOTENCY_KEY, requestHash } from '@defi-workflow-engine/cloud-runtime';
+import { createIdempotencyStore, IDEMPOTENCY_KEY, requestHash, type Database, type Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { compileSchema, strategyInputIssues } from '../engine/strategy-spec';
-import { assertSafeOutput, createPgHandoffStore, deploymentEngineRuntime, fixedWindow, typedId, type ApprovalHost, type EngineRuntime } from '../platform/index.ts';
+import { assertSafeOutput, createPgHandoffStore, createPgWorkflowRunStore, deploymentEngineRuntime, fixedWindow, typedId, type ApprovalHost, type EngineRuntime } from '../platform/index.ts';
 import { platformStateHost } from '../server/platform-state-host.ts';
 import { readDeveloperConfig, type DeveloperConfig, type DeveloperScope } from './config.ts';
+import { developerOwnershipInstalled } from './console-store.ts';
 import { syncAndDispatch, type WebhookTransport } from './dispatch.ts';
 import { classify, DeveloperError, fail, PUBLIC_ERRORS } from './errors.ts';
 import { apiKeyDigest, presentedKey } from './keys.ts';
 import { limitsOf } from './limits.ts';
 import { createPgDeveloperStore } from './pg-store.ts';
 import { CapabilitiesQuery, CreateApprovalRequest, CreateStrategyRequest, CreateWebhookEndpointRequest, SimulateStrategyRequest, ValidateStrategyRequest,
-  type ApprovalBody, type WebhookEndpointBody } from './schemas.ts';
+  type ApprovalBody, type CreateApprovalRequestBody, type WebhookEndpointBody } from './schemas.ts';
 import { createApproval, createStrategy, createWebhookEndpoint, deleteWebhookEndpoint, getApproval, getEvidence, getExecution, limitBucket, listCapabilities,
-  replayApproval, simulateStoredStrategy, validateStoredStrategy, type DeveloperContext } from './service.ts';
+  replayApproval, simulateStoredStrategy, simulateStoredWorkflow, validateStoredStrategy, type DeveloperContext, type DeveloperWrite } from './service.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Fields = Readonly<Record<string, string | number | boolean | null>>;
@@ -77,12 +78,15 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', path: new RegExp(`^/strategies/${ID('str')}/simulate$`), template: '/strategies/{id}/simulate', scope: 'strategies', input: SimulateStrategyRequest,
     status: 200, metric: body => ({ metric: 'simulation.run', dimension: String((body as { kind?: unknown }).kind ?? '') }),
     run: (ctx, i) => simulateStoredStrategy(ctx, i.params[0]!, i.body as { simulationSubject: string }) },
+  { method: 'POST', path: new RegExp(`^/strategies/${ID('str')}/simulate-workflow$`), template: '/strategies/{id}/simulate-workflow', scope: 'strategies',
+    input: SimulateStrategyRequest, status: 200, metric: () => ({ metric: 'simulation.run', dimension: 'WORKFLOW' }),
+    run: (ctx, i) => simulateStoredWorkflow(ctx, i.params[0]!, i.body as { simulationSubject: string }) },
   { method: 'POST', path: /^\/approvals$/, template: '/approvals', scope: 'approvals', input: CreateApprovalRequest, status: 201,
     // The approval link is a credential to SEE the proposal: never stored; a replay mints a fresh short-lived one.
     idempotent: { operation: 'approvals.create', stored: body => ({ ...body as ApprovalBody, approvalUrl: null, approvalUrlExpiresAt: null }),
       replay: (ctx, stored) => replayApproval(ctx, stored as ApprovalBody) },
     metric: body => ({ metric: 'approval.create', dimension: (body as ApprovalBody).executionPlan.kind }),
-    run: (ctx, i) => createApproval(ctx, i.body as { strategyId: string; workflowHash: string }) },
+    run: (ctx, i) => createApproval(ctx, i.body as CreateApprovalRequestBody) },
   { method: 'GET', path: new RegExp(`^/approvals/${ID('apr')}$`), template: '/approvals/{id}', scope: 'approvals', input: null, status: 200,
     run: (ctx, i) => getApproval(ctx, i.params[0]!) },
   { method: 'GET', path: new RegExp(`^/executions/${EXECUTION}$`), template: '/executions/{id}', scope: 'executions', input: null, status: 200,
@@ -100,7 +104,7 @@ const ROUTES: readonly Route[] = [
 export const DEVELOPER_ROUTE_TABLE = Object.freeze(ROUTES.map(r => Object.freeze({ method: r.method, template: r.template, scope: r.scope })));
 /** Shapes of resource paths whose id is malformed: answered exactly like an absent resource. */
 const RESOURCE_SHAPES: readonly { readonly path: RegExp; readonly methods: readonly Method[] }[] = [
-  { path: /^\/strategies\/[^/]+\/(validate|simulate)$/, methods: ['POST'] }, { path: /^\/approvals\/[^/]+$/, methods: ['GET'] },
+  { path: /^\/strategies\/[^/]+\/(validate|simulate|simulate-workflow)$/, methods: ['POST'] }, { path: /^\/approvals\/[^/]+$/, methods: ['GET'] },
   { path: /^\/executions\/[^/]+(\/evidence)?$/, methods: ['GET'] }, { path: /^\/webhook-endpoints\/[^/]+$/, methods: ['DELETE'] },
 ];
 type Validator = { readonly check: (value: unknown) => boolean; readonly issues: (value: unknown) => readonly { readonly path: string; readonly rule: string }[] };
@@ -143,8 +147,23 @@ function guardOutput(body: unknown): void {
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   const declared = Number(request.headers.get('content-length') ?? '0');
   if (Number.isFinite(declared) && declared > DEVELOPER_MAX_BODY_BYTES) fail('INVALID_REQUEST', 'REQUEST_TOO_LARGE', { status: 413 });
-  const text = await request.text();
-  if (Buffer.byteLength(text, 'utf8') > DEVELOPER_MAX_BODY_BYTES) fail('INVALID_REQUEST', 'REQUEST_TOO_LARGE', { status: 413 });
+  const reader = request.body?.getReader();
+  if (!reader) return null;
+  let size = 0, text = '';
+  const decoder = new TextDecoder('utf-8');
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > DEVELOPER_MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        fail('INVALID_REQUEST', 'REQUEST_TOO_LARGE', { status: 413 });
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally { reader.releaseLock(); }
   if (text.trim() === '') return null;
   if (!/^application\/json\s*(;|$)/i.test(request.headers.get('content-type') ?? '')) fail('INVALID_REQUEST', 'CONTENT_TYPE_NOT_JSON');
   let value: unknown;
@@ -183,6 +202,7 @@ async function internalDispatch(request: Request, method: string, config: Develo
   if (!timingSafeEqual(createHash('sha256').update(bearer, 'utf8').digest(), config.dispatchTokenDigest)) fail('UNAUTHORIZED', 'DISPATCH_TOKEN_INVALID');
   const host = await hostOf(env, options), store = createPgDeveloperStore(host.db, host.tenantId);
   const result = await syncAndDispatch({ config, tenantId: host.tenantId, store, handoffs: createPgHandoffStore(host.db, host.tenantId),
+    workflowRuns: createPgWorkflowRunStore(host.db, host.tenantId),
     runtime: options.runtime ?? deploymentEngineRuntime(env), ...options.transport ? { transport: options.transport } : {}, ...options.now ? { now: options.now } : {} },
   {}, SCHEDULED_SWEEP);
   if (Math.random() < 0.1) await store.purge(options.now?.() ?? new Date());
@@ -213,16 +233,22 @@ export async function handleDeveloperRequest(request: Request, options: Develope
     if (request.headers.get('origin') !== null || request.headers.get('sec-fetch-site') !== null) fail('FORBIDDEN', 'BROWSER_ORIGIN_FORBIDDEN');
     const presented = presentedKey(request.headers.get('authorization'));
     if (!presented.ok) return fail('UNAUTHORIZED', presented.reason === 'MISSING' ? 'API_KEY_REQUIRED' : 'API_KEY_INVALID');
-    if (presented.environment !== 'sandbox') return fail('FORBIDDEN', 'LIVE_MODE_DISABLED');
+    if (presented.environment === 'production' && !config.live) return fail('FORBIDDEN', 'LIVE_MODE_DISABLED');
     const host = await hostOf(env, options);
     if (host.tenantId !== config.tenantId) fail('SERVICE_UNAVAILABLE', 'DEVELOPER_STORE_UNAVAILABLE');
+    if (presented.environment === 'production' && !await developerOwnershipInstalled(host.db))
+      fail('FORBIDDEN', 'LIVE_MODE_DISABLED');
     const store = createPgDeveloperStore(host.db, host.tenantId);
     const principal = await store.authenticate(apiKeyDigest(config, presented.key), now).catch(() => fail('SERVICE_UNAVAILABLE', 'DEVELOPER_STORE_UNAVAILABLE'));
     if (!principal || principal.environment !== presented.environment) return fail('UNAUTHORIZED', 'API_KEY_INVALID');
+    if (principal.environment === 'production' && !(await host.db.query(
+      'SELECT 1 FROM developer_project_owners WHERE tenant_id=$1 AND project_id=$2', [host.tenantId, principal.projectId])).rowCount)
+      return fail('UNAUTHORIZED', 'API_KEY_INVALID');
     Object.assign(log, { tenant: host.tenantId, project: principal.projectId, key: principal.keyId, environment: principal.environment });
     const scope = { projectId: principal.projectId, environment: principal.environment }, limits = limitsOf(principal.plan), window = fixedWindow(host.db, host.tenantId);
     const rate = await window.hit(limitBucket(scope, 'requests'), limits.requestsPerMinute, 60, now);
     if (!rate.allowed) fail('RATE_LIMITED', 'REQUESTS_PER_MINUTE', { retryAfter: (rate.resetAt.getTime() - now.getTime()) / 1000 });
+    await store.incrementUsage(scope, 'api.request', '', now);
 
     const route = ROUTES.find(r => r.method === method && r.path.test(path));
     if (!route) {
@@ -242,25 +268,61 @@ export async function handleDeveloperRequest(request: Request, options: Develope
       if (route.input) body = checked(route.input, read ?? {});
       else if (read !== null) fail('INVALID_REQUEST', 'BODY_NOT_ALLOWED');
     }
+    const transactionDb = (tx: Queryable): Database => ({ query: tx.query, transaction: callback => callback(tx), close: async () => undefined });
+    const credentialStores = async (tx: Queryable, db: Database) => {
+      const active = await tx.query("SELECT 1 FROM developer_projects WHERE tenant_id=$1 AND project_id=$2 AND status='ACTIVE' FOR SHARE",
+        [host.tenantId, scope.projectId]);
+      if (!active.rowCount) return fail('FORBIDDEN', 'DEVELOPER_PROJECT_DISABLED');
+      const credential = await tx.query(`SELECT 1 FROM developer_api_keys
+        WHERE tenant_id=$1 AND project_id=$2 AND environment=$3 AND key_id=$4 AND status='ACTIVE' FOR SHARE`,
+        [host.tenantId, scope.projectId, scope.environment, principal.keyId]);
+      if (!credential.rowCount) return fail('UNAUTHORIZED', 'API_KEY_INVALID');
+      return { store: createPgDeveloperStore(db, host.tenantId), handoffs: createPgHandoffStore(db, host.tenantId) };
+    };
     const ctx: DeveloperContext = { config, tenantId: host.tenantId, principal, scope, store, handoffs: createPgHandoffStore(host.db, host.tenantId),
-      runtime: options.runtime ?? deploymentEngineRuntime(env), limits, allow: window.allow, now };
+      runtime: options.runtime ?? deploymentEngineRuntime(env), limits, allow: window.allow, now, signal: request.signal,
+      workflowRuns: createPgWorkflowRunStore(host.db, host.tenantId),
+      write: work => host.db.transaction(async tx => work(await credentialStores(tx, transactionDb(tx)))) };
     const input: Input = { params: route.path.exec(path)!.slice(1), body, query };
 
     let result: unknown, replayed = false;
     const key = route.idempotent ? request.headers.get('idempotency-key') : null;
+    if (principal.environment === 'production' && route.idempotent && key === null) fail('INVALID_REQUEST', 'IDEMPOTENCY_KEY_REQUIRED');
     if (route.idempotent && key !== null) {
       if (!IDEMPOTENCY_KEY.test(key)) fail('INVALID_REQUEST', 'IDEMPOTENCY_KEY_INVALID');
-      const idem = createIdempotencyStore({ db: host.db, tenantId: host.tenantId });
-      const scopeName = `developer/${principal.projectId.slice(4)}/${principal.environment}/${route.idempotent.operation}`, hash = requestHash(scopeName, body);
-      const begun = await idem.begin(scopeName, key, hash);
-      if (begun.kind === 'CONFLICT') fail('IDEMPOTENCY_CONFLICT', 'IDEMPOTENCY_CONFLICT');
-      if (begun.kind === 'IN_PROGRESS') fail('IDEMPOTENCY_IN_PROGRESS', 'IDEMPOTENCY_IN_PROGRESS', { retryAfter: 1 });
-      if (begun.kind === 'REPLAY') {
+      const spec = route.idempotent;
+      const scopeName = `developer/${principal.projectId.slice(4)}/${principal.environment}/${spec.operation}`, hash = requestHash(scopeName, body);
+      const replay = async (stored: unknown) => {
         replayed = true;
-        result = route.idempotent.replay ? await route.idempotent.replay(ctx, begun.response) : begun.response;
-      } else {
-        try { result = await route.run(ctx, input); } catch (error) { await idem.release(scopeName, key, hash).catch(() => undefined); throw error; }
-        await idem.complete(scopeName, key, hash, route.idempotent.stored(result));
+        return spec.replay ? spec.replay(ctx, stored) : stored;
+      };
+      // Serve completed replays before any provider read. Contending requests check again while writing.
+      const previous = (await host.db.query<{ request_sha256: string; response: unknown }>(
+        "SELECT request_sha256,response FROM api_idempotency WHERE tenant_id=$1 AND scope=$2 AND idempotency_key=$3 AND state='COMPLETED' AND expires_at>=now()",
+        [host.tenantId, scopeName, key])).rows[0];
+      if (previous && previous.request_sha256 !== hash) fail('IDEMPOTENCY_CONFLICT', 'IDEMPOTENCY_CONFLICT');
+      if (previous) result = await replay(previous.response);
+      else {
+        const write: DeveloperWrite = async work => {
+          const outcome = await host.db.transaction(async tx => {
+            const lock = await tx.query<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS locked',
+              [`flofi.developer/idempotency/${host.tenantId}/${scopeName}/${key}`]);
+            if (!lock.rows[0]?.locked) return fail('IDEMPOTENCY_IN_PROGRESS', 'IDEMPOTENCY_IN_PROGRESS', { retryAfter: 1 });
+            // Repository calls borrow the same transaction. No provider calls occur in the write callback.
+            const db = transactionDb(tx);
+            const idem = createIdempotencyStore({ db, tenantId: host.tenantId });
+            const begun = await idem.begin(scopeName, key, hash);
+            if (begun.kind === 'CONFLICT') return fail('IDEMPOTENCY_CONFLICT', 'IDEMPOTENCY_CONFLICT');
+            if (begun.kind === 'IN_PROGRESS') return fail('IDEMPOTENCY_IN_PROGRESS', 'IDEMPOTENCY_IN_PROGRESS', { retryAfter: 1 });
+            if (begun.kind === 'REPLAY') return { kind: 'replay' as const, body: begun.response };
+            const output = await work(await credentialStores(tx, db));
+            guardOutput(output);
+            await idem.complete(scopeName, key, hash, spec.stored(output));
+            return { kind: 'created' as const, body: output };
+          });
+          return outcome.kind === 'replay' ? await replay(outcome.body) as Awaited<ReturnType<typeof work>> : outcome.body;
+        };
+        result = await route.run({ ...ctx, write }, input);
       }
     } else result = await route.run(ctx, input);
 
@@ -269,7 +331,7 @@ export async function handleDeveloperRequest(request: Request, options: Develope
       if (route.metric && !replayed) { const m = route.metric(result); await store.incrementUsage(scope, m.metric, m.dimension, now); }
       // This project's notifications advance with its own traffic (the embedded runtime has no worker).
       await syncAndDispatch({ config, tenantId: host.tenantId, store, handoffs: ctx.handoffs, runtime: ctx.runtime, ...options.transport ? { transport: options.transport } : {},
-        now: clock }, { scope, minAgeMs: AFTER_REQUEST_SWEEP.minAgeMs }, AFTER_REQUEST_SWEEP);
+        now: clock, workflowRuns: createPgWorkflowRunStore(host.db, host.tenantId) }, { scope, minAgeMs: AFTER_REQUEST_SWEEP.minAgeMs }, AFTER_REQUEST_SWEEP);
       // Bounded retention, opportunistically.
       if (Math.random() < 0.01) await store.purge(now);
     };

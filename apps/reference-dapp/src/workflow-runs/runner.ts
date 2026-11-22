@@ -27,6 +27,7 @@ import { assetKey } from '../delegation/steps.ts';
 import type { DelegationStore, ExecutionRecord, StepRecord as DelegatedStepRecord } from '../delegation/pg-store.ts';
 import { evaluateGates, handoffFindings, type HandoffPolicy } from '../mcp/execution.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
+import { executionStep, isLiveDeveloperRun } from './external-step.ts';
 import { observeOwnerStep } from './observe.ts';
 import type { BoundResolution, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { OWNER_EXECUTION_CLAIMED } from './pg-store.ts';
@@ -137,12 +138,13 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
       const alone = composeWorkflowBound(strategy, undefined);
       if (!alone.ok || alone.steps.length !== 1) return stopBefore(deps, run, steps, k, 'WORKFLOW_STEP_STALE');
       const gates = await evaluateGates(alone.steps[0]!, deps.runtime, policy);
+      if (isLiveDeveloperRun(run) && gates.enabledByDeployment.mockedHarness) return stopBefore(deps, run, steps, k, 'MAINNET_RUNTIME_REQUIRED');
       if (!gates.handoff.allowed) return stopBefore(deps, run, steps, k, gates.handoff.reason ?? 'WORKFLOW_STEP_NOT_EXECUTABLE');
       if (handoffFindings(alone.steps[0]!).blockers.length) return stopBefore(deps, run, steps, k, 'REVIEW_BLOCKED');
       const namespace = namespaceOf(networkOf(strategy));
       if (!run.wallets[namespace]) return stopBefore(deps, run, steps, k, namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
       const ready = await deps.store.stepTransition(run.runId, k, ['PENDING'], 'READY', {
-        flow: gates.plan.flow!, strategy, workflowHash: alone.workflowHash, ...(bound ? { bound } : {}) });
+        flow: gates.plan.flow!, strategy, workflowHash: executionStep(run, k, alone.steps[0]!).workflowHash, ...(bound ? { bound } : {}) });
       deps.log('workflow_run.step_ready', { run: run.runId, step: k, ...(bound ? { boundUsed: bound.used } : {}) });
       return { ...settled(run), progressed: ready !== null };
     }
@@ -152,14 +154,20 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
     case 'AWAITING_OWNER': case 'UNCERTAIN': {
       const network = networkOf(step.strategy!), wallet = run.wallets[namespaceOf(network)];
       if (!wallet) return { ...settled(run, ADVANCE_RETRY_MS), code: 'WORKFLOW_RUN_WALLET_MISSING' };
+      const pinnedExecutionId = isLiveDeveloperRun(run) && step.outcome?.kind === 'OWNER_RUN' ? step.outcome.executionId : null;
       const verdict = await observeOwnerStep(deps.runtime, { flow: step.flow!, wallet, workflowHash: step.workflowHash!, claimedAt: step.claimedAt!,
-        chain: NETWORK_CHAINS[network], now, ownerWallets: run.wallets });
+        chain: NETWORK_CHAINS[network], now, ownerWallets: run.wallets, ...(pinnedExecutionId ? { pinnedExecutionId } : {}) });
       if ((verdict.verdict === 'OPEN' || verdict.verdict === 'UNAVAILABLE') && step.code === OWNER_EXECUTION_CLAIMED)
         return afterAttention(deps, run, OWNER_EXECUTION_CLAIMED);
       if (verdict.verdict === 'UNAVAILABLE') return { ...settled(run, ADVANCE_RETRY_MS), code: verdict.code };
       // Nothing submitted yet: the owner may still be reviewing or signing; look again a little later.
       if (verdict.verdict === 'OPEN') return settled(run, OPEN_RECHECK_MS);
       if (verdict.verdict === 'UNCERTAIN') {
+        if (isLiveDeveloperRun(run)) {
+          const result = await deps.store.settleOwnerStep(run.runId, k, 'UNCERTAIN', verdict.outcome, verdict.code);
+          if (result === 'MOVED') return { ...settled(run), progressed: true };
+          return afterAttention(deps, run, result === 'CLAIMED' ? OWNER_EXECUTION_CLAIMED : verdict.code);
+        }
         if (step.state !== 'UNCERTAIN' || step.code !== verdict.code) {
           const observed = await deps.store.stepTransition(run.runId, k, [step.state], 'UNCERTAIN', { code: verdict.code });
           if (!observed) return { ...settled(run), progressed: true };

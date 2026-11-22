@@ -21,7 +21,7 @@ import { useLocale } from '../i18n/locale';
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { approvalHandoffPreview, approvalHandoffView, claimApprovalHandoff, markApprovalApplied, openBrowserApprovalHandoff, resumeApprovalHandoff, setApprovalSharing } from '../app/approve-action';
+import { approvalHandoffPreview, approvalHandoffView, claimApprovalHandoff, markApprovalApplied, openBrowserApprovalHandoff, resumeApprovalHandoff, setAppliedDeveloperSharing, setApprovalSharing } from '../app/approve-action';
 import { DEVELOPER_LINK_PREFIX } from '../developer/link-format';
 import { AUTOMATION_LINK_PREFIX } from '../automations/link-format';
 import { EDITOR_LINK_PREFIX } from '../editor/link-format';
@@ -315,10 +315,14 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
     onGateChange?.(blocked);
     return () => onGateChange?.(false);
   }, [blocked, onGateChange]);
+  const appliedDeveloper = view?.requesterKind === 'DEVELOPER_PROJECT' && view.fundsClass === 'REAL_FUNDS'
+    && view.status === 'APPLIED' && view.claimedByYou;
   const toggleShare = (next: boolean) => {
-    setShare(next);
     const current = generation.current;
-    if (claimed && secret && !recovery) void setApprovalSharing(secret, next).then(r => {
+    if (!claimed && !appliedDeveloper) { setShare(next); return; }
+    const result = appliedDeveloper ? setAppliedDeveloperSharing(view.approvalId, next)
+      : secret && !recovery ? setApprovalSharing(secret, next) : null;
+    if (result) void result.then(r => {
       if (current !== generation.current) return;
       if (r.ok) setView(v => v && { ...v, statusShared: r.value.statusShared }); else setError(r.code);
     }).catch(() => { if (current === generation.current) setError('APPROVAL_UNAVAILABLE'); });
@@ -403,7 +407,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   else message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" Connect your wallet to load this proposal for a fresh simulation and your signature.")}</p>;
   return createPortal(<section className="approval-notice approval-compact" data-surface={surface} aria-label={tr('Proposal from {0}', view.clientName)} data-approval-state={loaded ? 'loaded' : recoverable ? 'recoverable' : 'waiting'}>
     <div className="approval-notice-row">
-      <p className="approval-notice-source"><span className="eyebrow">{tr('From {0}', view.clientName)}</span>
+      <p className="approval-notice-source"><span className="eyebrow">{tr(view.developerProjectId ? 'From {0} (unverified project name)' : 'From {0}', view.clientName)}</span>
         <span className="status-badge info" aria-label={tr("Approval status")}>{tr(STATUS_TEXT[view.status] ?? view.status)}</span>
         <span className="approval-network">{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr(networks)}{real ? <> · <strong>{tr('Real funds')}</strong></> : null}</span></p>
       {message}
@@ -416,16 +420,20 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
           ? run(async () => { const current = generation.current, result = unwrap(await markApprovalApplied(secret!, state.workflow)); if (current === generation.current) setView(result); })
           : claim())}>{tr('Retry loading proposal')}</button>}
         {!claimed && <button type="button" className="quiet" disabled={busy} onClick={close}>{tr('Close approval')}</button>}
+        {loaded && view.returnTarget && <a className="secondary" href={view.returnTarget} referrerPolicy="no-referrer">
+          {tr('Return to {0}', new URL(view.returnTarget).hostname)}
+        </a>}
       </div>
     </div>
     {errorText && <p className="error-banner" role="alert">{tr(errorText)}</p>}
     {otherNamespace && !claimed && <p className="muted">{tr('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.')}</p>}
     {view.workflowRun && <WorkflowRunPanel claim={view.workflowRun} approvalId={view.approvalId} secret={secret && SECRET.test(secret) ? secret : null}
       onProposal={onRunProposal} onError={setError}/>}
-    {!fromAutomation && !fromEditor && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}
+    {!fromAutomation && !fromEditor && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery && !appliedDeveloper)} checked={claimed || appliedDeveloper ? view.statusShared : share === true}
       onChange={e => toggleShare(e.target.checked)}/>{tr("Share status and evidence with {0}", view.clientName)}</label>}
     <details className="approval-details"><summary>{tr('Proposal details')}</summary>
       {facts}
+      {view.developerProjectId && <p className="muted">{tr('Developer project ID')} <code>{view.developerProjectId}</code></p>}
       <p className="muted approval-ai">{view.requesterKind === 'DEVELOPER_PROJECT'
         ? tr("Created by {0}, a third-party app registered with FloFi, not by FloFi. It is not financial advice; you decide, and only your wallet can sign.", view.clientName)
         : fromEditor ? tr('Started by you from the FloFi Editor. It is not financial advice; you decide, and only your wallet can sign.')

@@ -1102,6 +1102,17 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "POST"
           ],
           [
+           "/strategies/{id}/simulate-workflow"
+          ],
+          [
+           "Prévia por etapa com as dependências que ainda aguardam liquidação"
+          ]
+         ],
+         [
+          [
+           "POST"
+          ],
+          [
            "/approvals"
           ],
           [
@@ -3055,6 +3066,17 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
           ],
           [
            "Read-only preview for a public subject"
+          ]
+         ],
+         [
+          [
+           "POST"
+          ],
+          [
+           "/strategies/{id}/simulate-workflow"
+          ],
+          [
+           "Per-step preview showing dependencies that still need to settle"
           ]
          ],
          [

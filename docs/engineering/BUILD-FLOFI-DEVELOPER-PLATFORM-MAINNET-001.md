@@ -24,3 +24,22 @@ The inspection began on `ec152f67` (main after PR #233). The public page and ref
 - **C** requires an installable SDK, tested examples, docs consistent with the API, a server-side playground, and a project-scoped dashboard of measured activity. A registry publication and public activation each require their own confirmed release.
 
 No evidence from the platform build can stand in for a production rollout or a wallet owner's real transaction.
+
+## Delivery B verification and rollout
+
+The production credential policy requires the configured production origin, open product access, the console, the workflow runner,
+authenticated dispatch configuration and the certified ownership migration. PostgreSQL tests exercise this configuration with
+isolated projects and a disposable runtime. The test for identical strategies uses the same wallet across two projects, proves
+distinct step identities, and verifies that only the consented project receives the synthetic result and signed event.
+
+The live path uses the existing per-step wallet review and reconciliation. Grouped execution remains unavailable on this
+external path until its results and evidence have exact project attribution. An uncertain step can report its durably attributed
+execution identity. Reconciled evidence remains conditional on the flow recording it and the wallet owner sharing results.
+
+An integration can supply a return target when it creates the approval. FloFi stores it with that proposal and shows it to the
+proven claimant after the proposal is applied. The partner correlates the returned approval ID and non-secret state with its
+authenticated session and reads status from its backend. FloFi presents a link the claimant can choose to open.
+
+Public activation still requires production scheduler verification and an external browser journey through wallet confirmation
+and evidence reconciliation. Production credentials depend on the
+owner's specific activation decision after security validation.

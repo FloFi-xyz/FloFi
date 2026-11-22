@@ -18,7 +18,7 @@ import { withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from '
 import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { developerApprovalChanged } from '../developer/dispatch';
-import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
+import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareAppliedDeveloperApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
 import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
@@ -136,6 +136,10 @@ export async function setApprovalSharing(secret: string, share: boolean): Promis
 const runAction = async <T>(work: (approvals: ApprovalSurface, wallets: Awaited<ReturnType<typeof currentWalletPrincipals>>) => Promise<T>): Promise<Result<T>> => {
   try { return { ok: true, value: await work(await surface(), await currentWalletPrincipals()) }; } catch (cause) { return failure(cause); }
 };
+
+export async function setAppliedDeveloperSharing(approvalId: string, share: boolean): Promise<Result<{ statusShared: boolean }>> {
+  return withFlightOwner(() => runAction((s, w) => shareAppliedDeveloperApproval(s, approvalId, w, share)));
+}
 /** The run's status for its owner, read-only (it never loads or resolves a step). */
 export async function workflowRunStatusHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
   return withFlightOwner(async () => { return runAction((s, w) => workflowRunStatus(s, approvalId, w));

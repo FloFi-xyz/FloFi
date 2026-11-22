@@ -11,12 +11,12 @@
  */
 import { FloFiError, type Issue } from './errors.js';
 import type { Approval, CapabilitiesQuery, CapabilityList, CreateApprovalRequest, CreateStrategyRequest, CreateWebhookEndpointRequest, DeletedWebhookEndpoint, ErrorBody,
-  Evidence, Execution, SimulateStrategyRequest, Simulation, Strategy, StrategyValidation, WebhookEndpoint } from './types.js';
+  Evidence, Execution, SimulateStrategyRequest, Simulation, Strategy, StrategyValidation, WebhookEndpoint, WorkflowSimulation } from './types.js';
 
 export const SDK_VERSION = '0.1.0';
 export const API_PATH = '/api/developer/v1';
 export type FloFiOptions = {
-  /** Your FloFi Developer API key (`flofi_sk_test_…`). Keep it in your server's secret store. */
+  /** Your FloFi Developer API key (`flofi_sk_live_…` or `flofi_sk_test_…`). Keep it in your server's secret store. */
   readonly apiKey: string;
   /** The FloFi deployment's origin, e.g. `https://flofi.example`. */
   readonly baseUrl: string;
@@ -82,11 +82,14 @@ export class FloFi {
     /** FloFi's own read-only simulation preview: nothing is stored, signed or sent, and it authorizes nothing. */
     simulate: (strategyId: string, body: SimulateStrategyRequest, options?: RequestOptions) =>
       this.#call<Simulation>({ method: 'POST', path: `/strategies/${id(strategyId)}/simulate`, body, timeoutMs: 300_000, ...options ? { options } : {} }),
+    simulateWorkflow: (strategyId: string, body: SimulateStrategyRequest, options?: RequestOptions) =>
+      this.#call<WorkflowSimulation>({ method: 'POST', path: `/strategies/${id(strategyId)}/simulate-workflow`, body, timeoutMs: 300_000, ...options ? { options } : {} }),
   };
   /** Approval handoffs: a FloFi link where the end user proves a wallet, re-simulates, reviews and signs — or not. */
   readonly approvals = {
-    create: (body: CreateApprovalRequest | { readonly strategy: Pick<Strategy, 'id' | 'workflowHash'> }, options?: RequestOptions) => {
-      const request: CreateApprovalRequest = 'strategy' in body ? { strategyId: body.strategy.id, workflowHash: body.strategy.workflowHash } : body;
+    create: (body: CreateApprovalRequest | ({ readonly strategy: Pick<Strategy, 'id' | 'workflowHash'> } & Pick<CreateApprovalRequest, 'returnTarget'>), options?: RequestOptions) => {
+      const request: CreateApprovalRequest = 'strategy' in body ? { strategyId: body.strategy.id, workflowHash: body.strategy.workflowHash,
+        ...(body.returnTarget ? { returnTarget: body.returnTarget } : {}) } : body;
       return this.#call<Approval>({ method: 'POST', path: '/approvals', body: request, idempotent: true, ...options ? { options } : {} });
     },
     get: (approvalId: string, options?: RequestOptions) => this.#call<Approval>({ method: 'GET', path: `/approvals/${id(approvalId)}`, ...options ? { options } : {} }),

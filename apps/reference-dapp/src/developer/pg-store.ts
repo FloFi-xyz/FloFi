@@ -107,6 +107,16 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
       return row ? strategyOf(row) : null;
     },
     async approvalForRun(scope, runId) {
+      if (scope.environment === 'production') {
+        const { rows } = await db.query(`SELECT h.handoff_id FROM developer_approvals a
+          JOIN mcp_handoffs h ON (h.tenant_id,h.handoff_id)=(a.tenant_id,a.handoff_id)
+          JOIN workflow_runs r ON (r.tenant_id,r.handoff_id)=(a.tenant_id,a.handoff_id)
+          JOIN workflow_run_steps s ON (s.tenant_id,s.run_id)=(r.tenant_id,r.run_id)
+          WHERE a.tenant_id=$1 AND a.project_id=$2 AND a.environment='production' AND h.status='APPLIED' AND h.share_status
+            AND r.requester_kind='DEVELOPER_PROJECT' AND r.requester_ref=h.requester_ref AND r.workflow_hash=a.workflow_hash
+            AND s.outcome->>'kind'='OWNER_RUN' AND s.outcome->>'executionId'=$3 LIMIT 2`, [tenantId, scope.projectId, runId]);
+        return rows.length === 1 ? String(rows[0]!.handoff_id) : null;
+      }
       const row = (await db.query(`SELECT a.handoff_id FROM developer_approvals a JOIN mcp_handoffs h ON h.tenant_id = a.tenant_id AND h.handoff_id = a.handoff_id
         WHERE a.tenant_id = $1 AND a.project_id = $2 AND a.environment = $3 AND h.status = 'APPLIED' AND h.share_status AND h.run_ids @> ARRAY[$4]::text[]
         ORDER BY a.created_at DESC LIMIT 1`, [tenantId, scope.projectId, scope.environment, runId])).rows[0];

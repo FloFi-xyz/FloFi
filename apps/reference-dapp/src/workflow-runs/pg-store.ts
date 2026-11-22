@@ -199,22 +199,26 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         return stepUpdate(tx, runId, stepIndex, from, to, patch, kind);
       });
     },
-    /** One wallet execution can settle one workflow step. Its immutable outcome is also the durable claim, including older records. */
-    async settleOwnerStep(runId: string, stepIndex: number, to: 'RECONCILED' | 'FAILED', outcome: OwnerStepOutcome,
+    /** One wallet execution belongs to one workflow step. Its observed or final outcome is also the durable claim. */
+    async settleOwnerStep(runId: string, stepIndex: number, to: 'RECONCILED' | 'FAILED' | 'UNCERTAIN', outcome: OwnerStepOutcome,
       code: string | null): Promise<'RECORDED' | 'CLAIMED' | 'MOVED'> {
       return db.transaction(async tx => {
         // The lookup after the advisory lock must see the other transaction's committed step, even with a different session default.
         await tx.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         const run = await lockRun(tx, runId);
         if (!run || !['RUNNING', 'ATTENTION'].includes(run.state) || run.currentStep !== stepIndex) return 'MOVED';
-        const { rows: [step] } = await tx.query<{ state: 'AWAITING_OWNER' | 'UNCERTAIN'; code: string | null }>(`SELECT state, code FROM workflow_run_steps
+        const { rows: [step] } = await tx.query<{ state: 'AWAITING_OWNER' | 'UNCERTAIN'; code: string | null; execution_id: string | null }>(`
+          SELECT state, code, outcome->>'executionId' AS execution_id FROM workflow_run_steps
           WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3 AND flow = $4 AND state IN ('AWAITING_OWNER', 'UNCERTAIN')`, [tenantId, runId, stepIndex, outcome.flow]);
         if (!step) return 'MOVED';
+        if (step.execution_id && step.execution_id !== outcome.executionId) return 'CLAIMED';
+        if (to === 'UNCERTAIN' && step.state === 'UNCERTAIN' && step.execution_id === outcome.executionId && step.code === code) return 'RECORDED';
         const key = JSON.stringify(['flofi.workflow-owner-execution', tenantId, outcome.flow, outcome.executionId]);
         await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
         const { rows: [claim] } = await tx.query(`SELECT 1 FROM workflow_run_steps
-          WHERE tenant_id = $1 AND state IN ('RECONCILED', 'FAILED') AND outcome->>'kind' = 'OWNER_RUN'
-            AND COALESCE(outcome->>'flow', flow) = $2 AND outcome->>'executionId' = $3 LIMIT 1`, [tenantId, outcome.flow, outcome.executionId]);
+          WHERE tenant_id = $1 AND state IN ('RECONCILED', 'FAILED', 'UNCERTAIN') AND outcome->>'kind' = 'OWNER_RUN'
+            AND COALESCE(outcome->>'flow', flow) = $2 AND outcome->>'executionId' = $3 AND (run_id,step_index) <> ($4,$5)
+          LIMIT 1`, [tenantId, outcome.flow, outcome.executionId, runId, stepIndex]);
         if (claim) {
           // Persist the contest even if the candidate later drops out of the bounded scan. No subsequent status read can reopen signing.
           if (step.state !== 'UNCERTAIN' || step.code !== OWNER_EXECUTION_CLAIMED)

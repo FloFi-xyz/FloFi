@@ -73,7 +73,9 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       expect((await flofi.strategies.validate(strategy.id)).availability.approvable).toBe(true);
       expect(await flofi.strategies.simulate(strategy.id, { simulationSubject: owner.address })).toMatchObject({ provenance: 'MOCKED', authorizable: false });
       const endpoint = await flofi.webhookEndpoints.create({ url: `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/flofi` });
-      const created = await flofi.approvals.create({ strategy });
+      const created = await flofi.approvals.create({ strategy, returnTarget: {
+        url: 'https://example.com/flofi/return', state: 'sandbox-integration-state',
+      } });
       expect(created.approvalUrl).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve#flofi_dhs_[A-Za-z0-9_-]{43}$`));
       expect(await journeySends()).toBe(0);
 
@@ -100,6 +102,9 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       await proveConnectedEvmWallet(page, region, owner.address);
       // BUILD-FLOFI-UX-UI-002: the proof loads the exact proposal; no separate Load step.
       await expect(region.getByRole('status')).toContainText('Ready for your review.');
+      const returnLink = region.getByRole('link', { name: 'Return to example.com' });
+      await expect(returnLink).toHaveAttribute('href', `https://example.com/flofi/return?approvalId=${created.id}&state=sandbox-integration-state`);
+      await expect(returnLink).toHaveAttribute('referrerpolicy', 'no-referrer');
       await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
       // FloFi prepares the fresh simulation for that wallet; MOCKED evidence keeps the one owner action disabled.
       await expect(signingSurface(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
