@@ -536,6 +536,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const destinationSurface: DestinationSurface = surface !== 'signing' ? 'editor' : onViewInFloFi ? 'approve' : 'approve-embedded';
   // The proposal whose automatic preparation /approve holds (see `destinationHoldsPreparation` below): its new reads do not continue by themselves.
   const destinationHeld = useRef<string | null>(null);
+  const holdPreparation = () => { if (simulationSource.kind === 'universal') destinationHeld.current = state.workflow.workflowId; };
   const destinationIssueIn = (shown: 'EN' | 'PT', on: DestinationSurface = destinationSurface): string | null => {
     if (!(simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown && universal.destinationIssue && universal.details
       && !universalRefreshes())) return null;
@@ -552,9 +553,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const destinationEcosystemLabel = universal.details ? UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const : null;
   // A wallet connected here is the first one FloFi uses (session tier), so Connect also settles a choice between several wallets.
   const destinationActions = destinationBlocked && destinationEcosystemLabel && universal.destinationIssue !== DESTINATION_ISSUE.LOADING ? {
+      // Wallet-execution review: the owner's own Connect or Try again holds the preparation at once (also while a wallet is still restoring),
+      // so a destination resolved by it is simulated only when the owner chooses Simulate.
       connect: { label: destinationEcosystemLabel === 'Solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet',
-        run: async () => destinationEcosystemLabel === 'Solana' ? Boolean(await jupiter.connect('solana:mainnet')) : Boolean(await connectedWallet.connect()) },
-      retry: universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE ? retryAccountWallets : null, canvas: destinationSurface === 'approve' } : null;
+        run: async () => { holdPreparation(); return destinationEcosystemLabel === 'Solana' ? Boolean(await jupiter.connect('solana:mainnet')) : Boolean(await connectedWallet.connect()); } },
+      retry: universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE ? () => { holdPreparation(); retryAccountWallets(); } : null, canvas: destinationSurface === 'approve' } : null;
   const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);

@@ -1171,6 +1171,17 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 chat resumes after the d
     expect(last(render()).text).toBe(READY);
     expect(simulate).not.toHaveBeenCalled();
   });
+  it('wallet-execution review: another signing wallet while reading ends the promise, said once', async () => {
+    await asked();
+    const other = () => harness.render(() => useFlofiConversation({ owner: { namespace: 'eip155', address: '0x2222222222222222222222222222222222222222' }, epoch: 0, bridge, direct,
+      interfaceLanguage: 'EN' }));
+    other(); await flush();
+    expect(last(other()).text).toBe(DROPPED);
+    settled(); other(); await flush();
+    expect(texts(other()).filter(text => text === DROPPED)).toHaveLength(1);
+    expect(texts(other()).some(text => text === READY)).toBe(false);
+    expect(simulate).not.toHaveBeenCalled();
+  });
   it('a message from the owner (without any change) replaces the waiting request: nothing is said for it afterwards', async () => {
     const chat = await asked();
     render().send('explain'); await flush();

@@ -332,6 +332,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (ownerKey !== null) lastOwner.current = ownerKey;
     if (changed && !direct) open(conversationKey, null, true);
     else if (changed) {
+      // Wallet-execution review: the chat promised to continue after reading the wallets; another wallet ends that promise, said once.
+      const promised = resume.current?.until === 'WALLETS' ? resume.current : null;
+      if (promised && promised.scope === session.current) say(promised.scope, promised.language, (_, c) => [c.walletsResumeDropped, { options: [c.review] }]);
       copilot.clear();
       watch.current = null; reviewLock.current = null; resume.current = null; handover.current = null; requote.current = null; lastReview.current = null;
     }
@@ -532,7 +535,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // (a run, or a step-by-step workflow between its steps) is described with its status and next action, never refused as a Review.
       if (workflowExecuting(view)) { reportProgress(scope, language, action); return; }
       // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: only the destination's wallets are missing because they are still being read: said once,
-      // and the review continues by itself when they are (never armed again from that same resume).
+      // and the review continues by itself when they are (never armed again from that same resume; never while the workflow executes, above).
       const loading = view.destinationLoading;
       if (loading && view.simulationBlocked === loading.reason && auto?.network === undefined) {
         resume.current = { scope, language, until: 'WALLETS', error: null, context: { workflowId: view.workflow.workflowId, revision: view.workflow.revision,
@@ -547,8 +550,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       return;
     }
     // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (wallet-execution, chat and workflow reviews): a review FloFi continues by itself — after the
-    // destination's wallets are read, a network switch, an applied edit or a runtime's answer, also between the steps of a step-by-step workflow —
-    // never starts a simulation that may ask the wallet to sign in (FIX-07): it offers the Review, which the owner starts.
+    // destination's wallets are read, a network switch, an applied edit or a runtime's answer — never starts a simulation that may ask the wallet
+    // to sign in (FIX-07): it offers the Review, which the owner starts.
     if (auto && view.manualSimulation) {
       const network = auto.network, switched = auto.switched;
       say(scope, language, (_, c) => [network !== undefined ? c.walletsReadyReview(network) : switched !== undefined ? c.switchedReview(switched) : c.resumeReadyReview,

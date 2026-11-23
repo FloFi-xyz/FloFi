@@ -157,8 +157,11 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: an account read that fa
     expect(resolveDestinationWallet('solana', { session: [], account: [], saved: [] })).toEqual({ kind: 'NONE' });
   });
   it('one Privy embedded wallet while the read failed: offered to choose, not filled (the account may hold another of that ecosystem)', () => {
-    expect(resolveDestinationWallet('solana', { session: [], account: [wallet('solana', FLOFI_SOL, 'FloFi Wallet', 'ACCOUNT')], saved: [], ...failed }))
-      .toMatchObject({ kind: 'CHOOSE', candidates: [{ address: FLOFI_SOL }] });
+    const embedded = resolveDestinationWallet('solana', { session: [], account: [wallet('solana', FLOFI_SOL, 'FloFi Wallet', 'ACCOUNT')], saved: [], ...failed });
+    expect(embedded).toMatchObject({ kind: 'CHOOSE', unconfirmed: true, candidates: [{ address: FLOFI_SOL }] });
+    // Reviews: that choice is the failed read (never "more than one wallet"): the requirement and its issue say so.
+    expect(destinationRequirement('CONNECTED_DESTINATION_WALLET', embedded)).toEqual({ kind: 'UNAVAILABLE' });
+    expect(destinationIssue(destinationRequirement('CONNECTED_DESTINATION_WALLET', embedded))).toBe('UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE');
     expect(resolveDestinationWallet('solana', { session: [], account: [], saved: [wallet('solana', SAVED_SOL, 'Phantom', 'SAVED')], ...failed }))
       .toMatchObject({ kind: 'CHOOSE', candidates: [{ address: SAVED_SOL }] });
   });
