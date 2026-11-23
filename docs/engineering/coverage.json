@@ -418,6 +418,14 @@
       "path": "apps/reference-dapp/src/domain/destination-wallet.test.ts",
       "stage": "unit"
     },
+    "app.state.destination-wallets": {
+      "path": "apps/reference-dapp/src/state/destination-wallets.test.ts",
+      "stage": "unit"
+    },
+    "app.components.signing-destination": {
+      "path": "apps/reference-dapp/src/components/signing-destination.test.tsx",
+      "stage": "unit"
+    },
     "app.domain.editor-overview": {
       "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
       "stage": "unit"
@@ -1888,6 +1896,10 @@
     },
     "cloud-runtime.certificate-0033.pg": {
       "path": "packages/cloud-runtime/test/certificate-0033.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.security-0016-runtime-privileges.pg": {
+      "path": "packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts",
       "stage": "postgres"
     },
     "app.backend.workflow-run-purge-migrate.pg": {
@@ -3688,7 +3700,9 @@
         "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql",
         "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql",
         "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.reversal.sql",
-        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql"
+        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql",
+        "docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql",
+        "docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql"
       ],
       "suites": [
         "app.learning.automatic",
@@ -3712,7 +3726,8 @@
         "app.backend.single-step-runs-migrate.pg",
         "cloud-runtime.certificate-0033.pg",
         "app.backend.workflow-run-purge-migrate.pg",
-        "app.backend.owner-history.pg"
+        "app.backend.owner-history.pg",
+        "cloud-runtime.security-0016-runtime-privileges.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -4151,7 +4166,8 @@
         "app.e2e.orca-position-management",
         "app.e2e.simulate-panel-disclosure",
         "app.e2e.dashboard-run-details",
-        "app.components.editor-workflow-run-single-card"
+        "app.components.editor-workflow-run-single-card",
+        "app.components.signing-destination"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -8093,7 +8109,8 @@
         "reference-reconciler.bridge",
         "app.state.settlement-sync",
         "app.domain.execution-ux-reliability",
-        "app.state.router-store"
+        "app.state.router-store",
+        "app.state.destination-wallets"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -9195,6 +9212,7 @@
     "cloud-runtime.list-runs-single-card.pg",
     "app.backend.owner-history.pg",
     "app.studio.integration-store.pg",
-    "app.studio.certification-store.pg"
+    "app.studio.certification-store.pg",
+    "cloud-runtime.security-0016-runtime-privileges.pg"
   ]
 }

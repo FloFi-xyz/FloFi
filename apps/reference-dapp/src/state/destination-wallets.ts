@@ -6,7 +6,7 @@
  * public addresses saved in Credentials → Wallets — resolved by `resolveDestinationWallet`. Public addresses only; nothing here connects,
  * signs or sends, and nothing is written to the workflow by itself.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFloFiPrivy } from '../accounts/privy-context';
 import { accountState } from '../app/account-action';
 import { resolveDestinationWallet, type DestinationCandidate, type DestinationEcosystem, type DestinationInventory, type DestinationResolution } from '../domain/destination-wallet';
@@ -14,45 +14,123 @@ import { useCredentials } from './credentials-store';
 import { useOptionalJupiter } from './jupiter-store';
 
 type AccountWallets = readonly { readonly ecosystem: DestinationEcosystem; readonly address: string; readonly providerName: string }[];
-/** BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (security review): a read that failed is not "no wallets" (`failed`), and is never cached. */
-type AccountRead = { readonly wallets: AccountWallets; readonly failed: boolean };
 /**
- * The signed-in account's wallets (public data; a failure or a signed-out visitor is simply "none"), shared by this page's readers. Review P2: the
- * value belongs to ONE session — it is read again when the page observes another Privy user (or none), and after `ACCOUNT_WALLETS_FRESH_MS`, so a
+ * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (security review): a read that failed is not "no wallets" (`failed`), and is never cached.
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: why it failed (`TIMEOUT`, `UNAVAILABLE`: the server could not read the signed-in account,
+ * `MALFORMED`: the answer did not have the account's shape, `NETWORK`: the request itself failed), after FloFi's own bounded retry.
+ */
+export type AccountReadFailure = 'TIMEOUT' | 'UNAVAILABLE' | 'MALFORMED' | 'NETWORK';
+export type AccountRead = { readonly wallets: AccountWallets; readonly failed: false } | { readonly wallets: AccountWallets; readonly failed: true; readonly reason: AccountReadFailure };
+/**
+ * The signed-in account's wallets (public data; a signed-out visitor simply has none), shared by this page's readers. Review P2: the value
+ * belongs to ONE session — it is read again when the page observes another Privy user (or none), and after `ACCOUNT_WALLETS_FRESH_MS`, so a
  * sign-out and sign-in without a reload never fills another account's wallet. Never written to Web Storage.
  */
 export const ACCOUNT_WALLETS_FRESH_MS = 60_000;
 /** How long a destination waits for Privy to restore a signed-in session before it stops counting Privy's wallets as "still loading". */
 export const PRIVY_RESTORE_WAIT_MS = 10_000;
-/** Wallet-execution review: an account read that never answers ends as a failed read (no wallets known), never an endless "checking". */
-export const ACCOUNT_WALLETS_READ_TIMEOUT_MS = 15_000;
+/**
+ * Wallet-execution review: an account read that never answers ends as a failed read (no wallets known), never an endless "checking".
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: per attempt. A failed attempt (timeout, a server that could not read the account, a malformed
+ * answer, a network error) is tried once more after `ACCOUNT_WALLETS_RETRY_DELAY_MS`: `ACCOUNT_WALLETS_ATTEMPTS` attempts in all, so a read
+ * settles within about 22 s. The read only reads public account data; nothing written, connected or signed is ever retried.
+ */
+export const ACCOUNT_WALLETS_READ_TIMEOUT_MS = 10_000;
+export const ACCOUNT_WALLETS_ATTEMPTS = 2;
+export const ACCOUNT_WALLETS_RETRY_DELAY_MS = 2_000;
+/** The most wallets an account answer may carry (FloFi's own account limits are far lower): anything above is not an account's shape. */
+const ACCOUNT_WALLETS_MAX = 64;
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/, SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+/** A wallet's display name: 1–64 characters, no control character. */
+const displayName = (value: string) => value.length >= 1 && value.length <= 64 && ![...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
+class AccountReadError extends Error { constructor(readonly reason: AccountReadFailure) { super(`ACCOUNT_WALLETS_${reason}`); } }
+/**
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the account's wallets from an `accountState()` answer, checked before anything is mapped. Not
+ * an object, an account without a wallet list, more than `ACCOUNT_WALLETS_MAX` entries, or ANY entry without a known ecosystem, a public
+ * address of that ecosystem and a provider name is `MALFORMED` as a whole — never a partial list, which could leave one wallet and fill it
+ * automatically while the account really holds two. A signed-out visitor (`account: null`) has none; a server that could not read the
+ * signed-in account is `UNAVAILABLE`.
+ */
+export function accountWalletsFrom(state: unknown, signedIn = false): AccountWallets {
+  if (!state || typeof state !== 'object') throw new AccountReadError('MALFORMED');
+  const { account, accountUnavailable } = state as { account?: unknown; accountUnavailable?: unknown };
+  if (accountUnavailable === true) throw new AccountReadError('UNAVAILABLE');
+  // Review (wallet-execution, security): a person signed in to Privy whose FloFi session the server does not see (expired, another browser
+  // session) has wallets FloFi cannot read now: that is "could not check", never "none" — an embedded wallet is then chosen, not filled.
+  if (account === null) { if (signedIn) throw new AccountReadError('UNAVAILABLE'); return []; }
+  const wallets = account && typeof account === 'object' ? (account as { wallets?: unknown }).wallets : undefined;
+  if (!Array.isArray(wallets) || wallets.length > ACCOUNT_WALLETS_MAX) throw new AccountReadError('MALFORMED');
+  return wallets.map(entry => {
+    const wallet = entry && typeof entry === 'object' ? entry as { ecosystem?: unknown; address?: unknown; provider?: unknown; providerName?: unknown } : {};
+    const { ecosystem, address, provider, providerName } = wallet;
+    if ((ecosystem !== 'evm' && ecosystem !== 'solana') || typeof address !== 'string' || !(ecosystem === 'evm' ? EVM_ADDRESS : SOLANA_ADDRESS).test(address)
+      || typeof provider !== 'string' || typeof providerName !== 'string' || !displayName(providerName)) throw new AccountReadError('MALFORMED');
+    return { ecosystem, address, providerName: provider === 'privy' || provider === 'turnkey' ? 'FloFi Wallet' : providerName };
+  });
+}
+/**
+ * One account read with FloFi's bounded retry: at most `attempts` attempts (never more than 3), each limited to `timeoutMs`; attempt n+1 starts
+ * `delayMs × n` after attempt n failed. `stale()` ends it early once its answer can no longer be used (another session, an invalidation):
+ * nothing is retried for a reader that is gone. Pure and injectable for tests; the page uses `accountState`.
+ */
+export async function fetchAccountWallets(read: () => Promise<unknown>, options: { readonly attempts?: number; readonly timeoutMs?: number; readonly delayMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>; readonly stale?: () => boolean; readonly signedIn?: boolean } = {}): Promise<AccountRead> {
+  const attempts = Math.max(1, Math.min(options.attempts ?? ACCOUNT_WALLETS_ATTEMPTS, 3)), timeoutMs = options.timeoutMs ?? ACCOUNT_WALLETS_READ_TIMEOUT_MS;
+  const sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  let reason: AccountReadFailure = 'NETWORK';
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new AccountReadError('TIMEOUT')), timeoutMs); });
+    try { return { failed: false, wallets: accountWalletsFrom(await Promise.race([read(), timeout]), options.signedIn) }; }
+    catch (error) { reason = error instanceof AccountReadError ? error.reason : 'NETWORK'; }
+    finally { clearTimeout(timer); }
+    if (attempt === attempts || options.stale?.()) break;
+    await sleep((options.delayMs ?? ACCOUNT_WALLETS_RETRY_DELAY_MS) * attempt);
+    if (options.stale?.()) break;
+  }
+  return { failed: true, reason, wallets: [] };
+}
 /** One Privy wait per page (every reader agrees on whether Privy is still restoring), started by the first reader. */
 let privyWaitEnds: number | null = null;
 let accountRead: { readonly key: string; readonly at: number; readonly promise: Promise<AccountRead> } | null = null;
-const accountListeners = new Set<() => void>();
+/** `invalidate`: every reader reads again. `recovered`: a read succeeded after a failed one; only readers still holding a failure read again. */
+type AccountSignal = 'invalidate' | 'recovered';
+const accountListeners = new Set<(signal: AccountSignal) => void>();
+/** Whether this page's latest account read failed: the browser coming back online then reads again once (no polling, no loop). */
+let lastReadFailed = false, onlineHooked = false;
+function hookOnline(): void {
+  if (onlineHooked || typeof window === 'undefined') return;
+  onlineHooked = true;
+  window.addEventListener('online', () => { if (lastReadFailed) { lastReadFailed = false; invalidateAccountWallets(); } });
+}
 /**
  * Review (round 2): the account's wallets changed in this page (a wallet linked, removed or renamed in Settings → Wallets): the next read asks the
  * server again and every mounted reader re-reads now, so Simulate never binds a wallet the account no longer has.
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: also the owner's explicit "Try again" after a failed read, and the browser coming back online.
  */
-export function invalidateAccountWallets(): void { accountRead = null; for (const listener of accountListeners) listener(); }
+export function invalidateAccountWallets(): void { accountRead = null; for (const listener of accountListeners) listener('invalidate'); }
+/** The owner's explicit retry after FloFi's own attempts failed (same as an invalidation: one new bounded read for every reader). */
+export const retryAccountWallets = invalidateAccountWallets;
 function readAccountWallets(key: string, now = Date.now()): Promise<AccountRead> {
   if (accountRead?.key === key && now - accountRead.at < ACCOUNT_WALLETS_FRESH_MS) return accountRead.promise;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('ACCOUNT_WALLETS_READ_TIMEOUT')), ACCOUNT_WALLETS_READ_TIMEOUT_MS); });
-  const promise: Promise<AccountRead> = Promise.race([accountState(), timeout]).finally(() => clearTimeout(timer)).then(state => {
-    // Workflow review: the server could not read a signed-in account: that is a failed read too, never "no wallets".
-    if (state.accountUnavailable) throw new Error('ACCOUNT_VIEW_UNAVAILABLE');
-    return state;
-  }).then(state => ({ failed: false, wallets: state.account?.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address,
-    providerName: wallet.provider === 'privy' || wallet.provider === 'turnkey' ? 'FloFi Wallet' : wallet.providerName })) ?? [] }), () => {
+  const entry: { key: string; at: number; promise: Promise<AccountRead> } = { key, at: now, promise: Promise.resolve({ failed: false, wallets: [] }) };
+  // A read superseded by another session's or by an invalidation stops retrying; its answer reaches no reader of another session (each reader
+  // checks its own session before using it).
+  entry.promise = fetchAccountWallets(accountState, { stale: () => accountRead !== entry, signedIn: key !== 'signed-out' }).then(read => {
     // A failure is forgotten at once: the next reader asks again instead of reusing "no wallets" for a minute.
-    if (accountRead?.promise === promise) accountRead = null;
-    return { failed: true, wallets: [] };
+    if (accountRead === entry) {
+      // Wallet-execution review: a read that succeeds after another reader's failed one updates EVERY reader (each re-reads this fresh answer
+      // from the cache), so the Bridge card, the store's Simulate gate and the chat never disagree until a reload.
+      const recovered = lastReadFailed && !read.failed;
+      lastReadFailed = read.failed;
+      if (read.failed) accountRead = null;
+      if (recovered) queueMicrotask(() => { for (const listener of accountListeners) listener('recovered'); });
+    }
+    return read;
   });
-  accountRead = { key, at: now, promise };
-  return promise;
+  accountRead = entry;
+  return entry.promise;
 }
-
 /** The connected EVM wallet as the caller's wallet store reports it (callers already hold it). */
 export type SessionEvmWallet = { readonly account: string | null; readonly provider?: { readonly name: string } | null } | null | undefined;
 /**
@@ -79,7 +157,14 @@ export function useDestinationInventory(evm: SessionEvmWallet): DestinationInven
     const timer = setTimeout(() => setPrivyWait(false), Math.max(0, privyWaitEnds - Date.now()));
     return () => clearTimeout(timer);
   }, []);
-  useEffect(() => { const listener = () => setGeneration(n => n + 1); accountListeners.add(listener); return () => { accountListeners.delete(listener); }; }, []);
+  // A reader that already holds a good answer does not read again on another reader's recovery (no flash of "checking").
+  const failedNow = useRef(false);
+  failedNow.current = accountFailed;
+  useEffect(() => {
+    hookOnline();
+    const listener = (signal: AccountSignal) => { if (signal === 'invalidate' || failedNow.current) setGeneration(n => n + 1); };
+    accountListeners.add(listener); return () => { accountListeners.delete(listener); };
+  }, []);
   const readKey = `${sessionKey}:${generation}`;
   // Security review: while Privy is still restoring a session (after a reload) the signed-in person is not known yet, so nothing is read (or
   // cached) under "signed out" meanwhile; the read starts once Privy answers, or once the bounded wait ends.

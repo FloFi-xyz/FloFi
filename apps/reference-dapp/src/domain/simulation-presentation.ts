@@ -180,6 +180,8 @@ export function destinationWalletMessage(error: string): string | null {
   if (error === 'UNIVERSAL_DESTINATION_WALLET_REQUIRED') return 'Choose the wallet that receives the funds on the destination network, or enter its public address, then simulate again. Your source wallet does not need to change. Nothing was signed or sent.';
   if (error === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'More than one of your wallets can receive on the destination network. Choose one on the Bridge card, or enter its public address, then simulate again. Nothing was signed or sent.';
   if (error === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for the destination network. Try again in a moment. Nothing was signed or sent.';
+  // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the account's wallets could not be read (FloFi already retried): not "you have no wallet".
+  if (error === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read your account’s wallets for the destination network. Try again, or enter the destination’s public address, then simulate again. Nothing was signed or sent.';
   if (error === 'UNIVERSAL_DESTINATION_WALLET_INVALID') return 'The destination wallet is not a valid address on the destination network. Check it on the Bridge card, then simulate again. Nothing was signed or sent.';
   return null;
 }

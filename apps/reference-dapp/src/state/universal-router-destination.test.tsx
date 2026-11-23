@@ -65,6 +65,16 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 universal router store de
     await router.simulate();
     expect(fixture.calls).toEqual([]);
   });
+  it('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the account\'s wallets could not be read: UNAVAILABLE, refused before any sign-in', async () => {
+    bridge('arbitrum-one', 'solana');
+    fixture.solana = { kind: 'UNAVAILABLE' };
+    const router = mount();
+    expect(router.destination).toEqual({ kind: 'UNAVAILABLE' });
+    expect(router.destinationIssue).toBe('UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE');
+    fixture.calls = [];
+    await router.simulate();
+    expect(fixture.calls).toEqual([]);
+  });
   it('a resolved Solana wallet (Phantom, or a Privy embedded one) fills the destination: no issue, and Simulate proceeds to the source sign-in', async () => {
     bridge('arbitrum-one', 'solana');
     fixture.solana = phantom;

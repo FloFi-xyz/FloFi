@@ -136,7 +136,7 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error(`${X}_RUN_MISSING`); await poll(record.id); }); }
   return <Context.Provider value={{ record, owner: session?.account.address ?? null, network, walletChain, busy: busy || recovering, error, retired, recovered,
-    executionEnabled: enabled[cluster], signing, connect: () => solana.connect(walletChain), simulate, review, execute, observe }}>
+    executionEnabled: enabled[cluster], signing, connect: async () => { await solana.connect(walletChain); }, simulate, review, execute, observe }}>
     {signing && <WalletPendingNotice/>}
     <div data-solana-transfer-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

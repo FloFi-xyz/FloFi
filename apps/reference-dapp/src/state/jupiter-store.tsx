@@ -57,8 +57,11 @@ type Store = { record: JupiterRecord | null; owner: string | null; network: Sola
   restoring: boolean;
   /** The cluster the current Solana workflow signs on; a session on another cluster is not this flow's owner. */
   walletChain: SolanaWalletChain;
-  /** Opens the canonical wallet selector (Solana wallets) for `chain` and connects only the wallet the owner picks. */
-  connect(chain?: SolanaWalletChain): Promise<void>;
+  /**
+   * Opens the canonical wallet selector (Solana wallets) for `chain` and connects only the wallet the owner picks. BUILD-FLOFI-SECURITY-0016-
+   * WALLET-RECOVERY-001: answers the session it connected, or null when none was (the selector closed, the wallet refused, another request busy).
+   */
+  connect(chain?: SolanaWalletChain): Promise<SolanaSession | null>;
   /** Connects one Wallet Standard wallet by its selector key. Returns the session, or null when the wallet refused. */
   connectWith(name: string, chain: SolanaWalletChain): Promise<SolanaSession | null>;
   /** The same connection with the failure's closed code (for an actionable message). */
@@ -198,12 +201,12 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
    * The owner picks a wallet in the canonical selector, even if it is the only one; nothing connects implicitly.
    * `chain` lets another Solana flow on the same session (BUILD-015 Devnet liquidity) ask for its own cluster explicitly.
    */
-  async function connect(chain: SolanaWalletChain = neededChain) {
-    if (busyRef.current) return;
+  async function connect(chain: SolanaWalletChain = neededChain): Promise<SolanaSession | null> {
+    if (busyRef.current) return null;
     setError(null);
     // A chosen wallet that cannot sign on `chain` fails closed with ${prefix}_SOLANA_WALLET_REQUIRED.
     const choice = await selector.choose({ ecosystems: ['solana'], solanaChain: chain });
-    if (choice) await connectWith(choice.key, chain);
+    return choice ? connectWith(choice.key, chain) : null;
   }
   async function connectWithResult(name: string, chain: SolanaWalletChain): Promise<{ readonly ok: true; readonly session: SolanaSession } | { readonly ok: false; readonly code: string }> {
     if (busyRef.current) return { ok: false, code: `${runtime.prefix}_BUSY` };

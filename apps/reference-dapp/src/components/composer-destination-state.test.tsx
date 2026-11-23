@@ -79,3 +79,28 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 destination field states'
     expect(html).not.toContain('aria-required');
   });
 });
+
+/** BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the account's wallets could not be read after FloFi's own retry. */
+describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 destination field: account wallets unavailable', () => {
+  it('unavailable: amber with its own text (never "you have no wallet"), Try again, Connect, and the typed-address field; PT too', () => {
+    expect(destinationFieldState('unavailable')).toBe('attention');
+    const html = render(field({ status: 'unavailable', onConnect: vi.fn(), onRetry: vi.fn() }));
+    expect(html).toContain('data-destination-state="attention"');
+    expect(html).toContain('FloFi could not read which Solana wallets your account has for Solana. Try again, connect one, or enter its public address.');
+    expect(html).not.toContain('Required: a wallet');
+    expect(html).toContain('>Try again</button>'); expect(html).toContain('>Connect a Solana wallet</button>');
+    expect(html).toContain('placeholder="Solana address"');
+    const pt = render(field({ status: 'unavailable', onConnect: vi.fn(), onRetry: vi.fn() }), 'PT');
+    expect(pt).toContain('A FloFi não conseguiu ler quais carteiras Solana a sua conta tem para Solana. Tente novamente, conecte uma ou informe o endereço público dela.');
+    // Wallets FloFi knows while the account read failed (e.g. one Privy embedded wallet): offered to choose, under the same "could not read" text.
+    const known = render(field({ status: 'unavailable', onRetry: vi.fn(), candidates: [{ address: PHANTOM, label: 'Solana · FloFi Wallet' }] }));
+    expect(known).toContain('Choose one of your wallets, try again, or enter its public address.');
+    expect(known).toContain('>Solana · FloFi Wallet</button>'); expect(known).not.toContain('more than one');
+    expect(pt).toContain('>Tentar novamente</button>');
+  });
+  it('Try again is offered only when FloFi could not read the account (not while loading, not for a valid or typed address)', () => {
+    expect(render(field({ status: 'loading' }))).not.toContain('Try again');
+    expect(render(field({ status: 'valid', value: PHANTOM }))).not.toContain('Try again');
+    expect(render(field({ status: 'required', onConnect: vi.fn() }))).not.toContain('Try again');
+  });
+});

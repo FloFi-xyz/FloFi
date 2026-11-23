@@ -7,7 +7,7 @@
  * one "Authorize in wallet" action, then the live status and the receipt. It never builds, signs or sends a transaction itself; the wallet's
  * confirmation stays mandatory and the existing runtimes keep every gate. "Open Canvas" explicitly shows the same proposal on the optional Canvas.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
 import { projectReview } from '../domain/review-presentation';
 import { projectSimulation, simulationStatusPresentation } from '../domain/simulation-presentation';
@@ -31,9 +31,15 @@ export type SigningSurfaceProps = ExecutionControlsState & {
   simulationReason?: string | null;
   /**
    * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (workflow review): a bridge handed off here (chat, MCP, a channel) whose receiving wallet is not
-   * resolved says so, in the status, instead of a disabled Simulate with no reason; the owner fixes it on the Bridge card ("Open in FloFi").
+   * resolved says so, in the status, instead of a disabled Simulate with no reason.
+   * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: said ONCE (the status; not again under Simulate), worded for this page (it has no Bridge
+   * card), with what can be done here: connect a wallet of the destination ecosystem, read the account's wallets again after a failed read; a
+   * choice or a typed address goes through the Canvas ("Open Canvas"). `destinationLoading`: the wallets are still being read (continues by itself).
    */
   destinationIssue?: string | null;
+  destinationLoading?: boolean;
+  destinationActions?: { readonly connect: { readonly label: string; run(): Promise<boolean> } | null; readonly retry: (() => void) | null;
+    /** Whether this page offers "Open Canvas" (the embedded MCP approval does not). */ readonly canvas?: boolean } | null;
   /** The proposal is not loaded for the proven wallet yet: no simulation or authorization is offered. */
   gated: boolean;
   /** Why authorization cannot proceed with the connected wallet (e.g. it is not the wallet that loaded the proposal). */
@@ -70,11 +76,18 @@ export function SigningSurface(props: SigningSurfaceProps) {
   if (props.gated) status = { label: 'Connect your wallet', message: 'Connect the wallet that will sign. Nothing is authorized until you confirm in your wallet.', tone: 'neutral' };
   else if (live) status = { label: result?.label ?? live.label, message: result?.message ?? live.message, tone: result?.tone ?? (live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : 'attention') };
   else if (props.walletIssue) status = { label: 'Wallet changed', message: props.walletIssue, tone: 'blocked' };
-  else if (!authorization.key && props.destinationIssue) status = { label: 'Destination wallet needed', message: props.destinationIssue, tone: 'attention' };
+  else if (!authorization.key && props.destinationIssue) status = props.destinationLoading ? { label: 'Checking your wallets', message: props.destinationIssue, tone: 'neutral' }
+    : { label: 'Destination wallet needed', message: props.destinationIssue, tone: 'attention' };
   else if (!authorization.key) { const s = simulationStatusPresentation(simulation, Boolean(props.invalidWorkflow), source.state.busy); status = { label: s.label, message: s.message, tone: s.tone }; }
   else status = { label: c.view.canExecute || review.canApprove ? 'Ready to authorize' : c.view.label, message: c.view.canExecute || review.canApprove
     ? 'Check the details, then authorize. Your wallet shows the exact transaction for your confirmation.' : c.view.message, tone: c.view.canExecute || review.canApprove ? 'ready' : 'blocked' };
   const final = isFinalExecutionResult(live);
+  // Workflow review: also next to an expired Review whose "Simulate again" is what the destination blocks (its reason is then shown under it).
+  // MCP review: only where Simulate is the action (no Review, or one that expired), never beside a Review that can still be authorized.
+  const destinationShown = !props.gated && !live && !props.walletIssue && Boolean(props.destinationIssue)
+    && (!authorization.key || review.status === 'expired' || review.status === 'invalidated' || review.simulationBlocked);
+  // Frontend-UX review: Connect and Try again replace themselves (the reason changes), so focus moves to the status that says what happened.
+  const statusRef = useRef<HTMLDivElement>(null);
   return <main id="workspace" className="main signing-surface" tabIndex={-1} aria-label={tr('Authorize with your wallet')}>
     <div className="signing-column">
       {props.approvalSlot && <div className="signing-proposal" ref={props.approvalSlot}/>}
@@ -106,7 +119,9 @@ export function SigningSurface(props: SigningSurfaceProps) {
         </dl>
         {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
         <ReviewTokenPermissions review={review}/>
-        <div className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
+        <div ref={statusRef} tabIndex={-1} className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
+        {destinationShown && props.destinationActions && <DestinationActions actions={props.destinationActions}
+          focusStatus={() => requestAnimationFrame(() => statusRef.current?.focus())}/>}
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
         {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
           {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
@@ -120,7 +135,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
         <div className="signing-actions-row">
           {!props.gated && !final && props.connectWallet && (!wallet.account || props.walletIssue) ? <button type="button" className="primary" onClick={props.connectWallet}>{tr(props.walletIssue ? 'Use another wallet' : 'Connect Wallet')}</button>
             : !props.gated && !final && props.networkAction ? <button type="button" className="primary" disabled={props.networkAction.disabled} onClick={props.networkAction.request}>{tr(props.networkAction.label)}</button>
-            : !props.gated && !final && <CanvasLifecycleAction {...props} controls={c} simulate={props.simulate} simulationDisabled={props.simulationDisabled || Boolean(props.walletIssue)}/>}
+            : !props.gated && !final && <CanvasLifecycleAction {...props} controls={c} simulate={props.simulate} simulationDisabled={props.simulationDisabled || Boolean(props.walletIssue)}
+              reasonShown={Boolean(props.simulationReason) && props.simulationReason === status.message}/>}
           {final && props.startNewWorkflow && <button type="button" className="secondary" onClick={props.startNewWorkflow}>{tr('Create new workflow')}</button>}
         </div>
         {props.walletRequestError && <p className="simulation-warning-blocking" role="status">{tr(props.walletRequestError)}</p>}
@@ -130,4 +146,24 @@ export function SigningSurface(props: SigningSurfaceProps) {
       {props.footer}
     </div>
   </main>;
+}
+/**
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: what /approve itself offers for a missing receiving wallet. Connect reads a wallet's public
+ * address (the source wallet still signs; nothing is signed here); a connection that did not happen says so. Try again reads the account's
+ * wallets once more. Neither starts a simulation, and the page does not prepare one by itself once the destination resolves (app-shell
+ * `preparedAfterDestination`): the owner chooses Simulate, whose source sign-in is then the owner's own request.
+ */
+function DestinationActions({ actions, focusStatus }: { actions: NonNullable<SigningSurfaceProps['destinationActions']>; focusStatus: () => void }) {
+  const { t: tr } = useLocale();
+  const [failed, setFailed] = useState(false), [busy, setBusy] = useState(false);
+  const connect = actions.connect, retry = actions.retry;
+  return <div className="signing-destination-actions">
+    {retry && <button type="button" className="secondary" onClick={() => { setFailed(false); retry(); focusStatus(); }}>{tr('Try again')}</button>}
+    {connect && <button type="button" className="secondary" disabled={busy} onClick={() => {
+      setFailed(false); setBusy(true);
+      void connect.run().then(ok => setFailed(!ok), () => setFailed(true)).finally(() => { setBusy(false); focusStatus(); });
+    }}>{tr(connect.label)}</button>}
+    {/* One persistent live region, so a failed connection is announced when it appears. */}
+    <p className="muted" role="status">{failed ? tr(actions.canvas === false ? 'No wallet was connected.' : 'No wallet was connected. You can still open the Canvas to enter its public address.') : null}</p>
+  </div>;
 }

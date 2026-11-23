@@ -21,7 +21,8 @@ import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { translate, useLocale } from '../i18n/locale';
-import { destinationIssueMessage } from '../domain/destination-wallet';
+import { destinationHoldsPreparation, destinationIssueMessage, DESTINATION_ISSUE, destinationWalletPhrase, type DestinationSurface } from '../domain/destination-wallet';
+import { retryAccountWallets } from '../state/destination-wallets';
 
 import { WithdrawPanel } from './withdraw-panel';
 import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
@@ -530,11 +531,33 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     catch { return false; }
   };
   // Workflow review: an unavailable (or not yet answered) universal router is said first; the destination is asked only where it can be used.
-  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown
-    && universal.destinationIssue && universal.details && !universalRefreshes()
-    ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel,
-      UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM') : null;
+  // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: worded for the surface that shows it (the Editor has the Bridge card; /approve does not).
+  // The embedded MCP approval (no "Open Canvas") never points at a Canvas it does not have.
+  const destinationSurface: DestinationSurface = surface !== 'signing' ? 'editor' : onViewInFloFi ? 'approve' : 'approve-embedded';
+  // The proposal whose automatic preparation /approve holds (see `destinationHoldsPreparation` below): its new reads do not continue by themselves.
+  const destinationHeld = useRef<string | null>(null);
+  const holdPreparation = () => { if (simulationSource.kind === 'universal') destinationHeld.current = state.workflow.workflowId; };
+  const destinationIssueIn = (shown: 'EN' | 'PT', on: DestinationSurface = destinationSurface): string | null => {
+    if (!(simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown && universal.destinationIssue && universal.details
+      && !universalRefreshes())) return null;
+    const ecosystem = UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const;
+    return translate(shown, destinationIssueMessage(universal.destinationIssue, on, destinationHeld.current === state.workflow.workflowId), universal.details.destinationLabel, ecosystem,
+      translate(shown, destinationWalletPhrase(ecosystem)));
+  };
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
+  // The account's wallets are still being read for this bridge's destination: the chat says so once and continues by itself when they are.
+  const destinationLoading = destinationBlocked && universal.destinationIssue === DESTINATION_ISSUE.LOADING && universal.details
+    ? { network: universal.details.destinationLabel, reason: destinationBlocked } : null;
+  // What the owner can do about it where no Bridge card is shown (/approve): connect a wallet of the destination ecosystem (it only reads its
+  // public address; nothing is signed) and, after a failed account read, read it again. Choosing or typing an address happens on the Canvas.
+  const destinationEcosystemLabel = universal.details ? UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const : null;
+  // A wallet connected here is the first one FloFi uses (session tier), so Connect also settles a choice between several wallets.
+  const destinationActions = destinationBlocked && destinationEcosystemLabel && universal.destinationIssue !== DESTINATION_ISSUE.LOADING ? {
+      // Wallet-execution review: the owner's own Connect or Try again holds the preparation at once (also while a wallet is still restoring),
+      // so a destination resolved by it is simulated only when the owner chooses Simulate.
+      connect: { label: destinationEcosystemLabel === 'Solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet',
+        run: async () => { holdPreparation(); return destinationEcosystemLabel === 'Solana' ? Boolean(await jupiter.connect('solana:mainnet')) : Boolean(await connectedWallet.connect()); } },
+      retry: universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE ? () => { holdPreparation(); retryAccountWallets(); } : null, canvas: destinationSurface === 'approve' } : null;
   const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);
@@ -718,11 +741,24 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       spends: continuationSimulation && continuationSimulation.input !== '—' ? continuationSimulation.input : continuationStep.funding?.bound ?? continuationStep.amount,
       receives: continuationSimulation?.result ?? null,
       previous: previousStep ? { number: previousStep.number, delivered: previousStep.delivered } : null,
-      status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction || destinationBlocked ? 'BLOCKED'
+      // Workflow review: the destination blocks only a new simulation; a Review that can still be authorized is READY, not "blocked".
+      status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction
+        || destinationBlocked && canvasAction.kind === 'simulate' ? 'BLOCKED'
         : (canvasAction.kind === 'approve' || canvasAction.kind === 'execute') && !canvasAction.disabled ? 'READY' : 'SIMULATE',
-      reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null) ?? destinationBlocked
+      reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null)
+        ?? (canvasAction.kind === 'simulate' ? destinationBlocked : null)
         ?? (simulationSource.state.error ? simulationError(simulationSource.state.error, simulationSource.kind) : null) } : null;
+  // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security and wallet-execution reviews): a universal bridge whose receiving wallet was missing
+  // here is not prepared by itself once it resolves (a connected wallet, Try again, a recovered read): its simulation may ask the source wallet
+  // to sign in, so the owner chooses Simulate. A proposal that arrived with its destination already resolved is prepared as before.
+  const destinationHold = destinationHoldsPreparation({ kind: simulationSource.kind, held: destinationHeld.current, key: state.workflow.workflowId,
+    // MCP review: a session wallet still restoring silently (it will resolve the destination by itself) never holds the preparation either.
+    blocked: Boolean(destinationBlocked) && Boolean(approvalWallet) && !approvalGate && universal.destinationIssue !== DESTINATION_ISSUE.LOADING
+      && !connectedWallet.restoring && !jupiter.restoring });
+  destinationHeld.current = destinationHold.held;
+  const preparedAfterDestination = destinationHold.holds;
   const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)
+    && !preparedAfterDestination
     ? `${state.workflow.workflowId}:${state.workflow.revision}:${restorationEpoch}:${signer}:${reviewBinding.wallet.chain}:${connectedWallet.revision}:${jupiter.revision}` : null;
   const preparedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -904,6 +940,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
+      // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the destination's wallets are still being read (the chat waits and resumes by itself).
+      destinationLoading,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
       simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.'
@@ -973,7 +1011,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>
     {flightNoticeView}
     <SigningSurface {...lifecycleState} controls={lifecycleControls} workflowName={workflowName} simulate={simulateAgain} simulationDisabled={simulationDisabled || !actionable}
-      simulationReason={simulationReason} destinationIssue={destinationBlocked}
+      simulationReason={simulationReason} destinationIssue={destinationBlocked} destinationLoading={Boolean(destinationLoading)} destinationActions={destinationActions}
       gated={approvalGate} walletIssue={walletIssue} networkAction={networkAction} walletRequestError={walletConnection.notice ? tr(...walletConnection.notice) : null} connectWallet={() => void walletConnection.connect()} approvalSlot={approvalSlot} onViewInFloFi={onViewInFloFi}
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;

@@ -2109,3 +2109,9 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .token-amount-exact{display:block;margin-top:2px;font-size:.85em;overflow-wrap:anywhere}
 .token-amount-exact [title]{word-break:break-all}
 .token-amount-exact button{word-break:normal;white-space:nowrap}
+/* BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve's destination actions (Try again, Connect a wallet), spaced and at least 24 px tall. */
+.signing-destination-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
+.signing-destination-actions button{min-height:32px}
+.signing-destination-actions p{flex-basis:100%;margin:0}
+/* The live region stays in the accessibility tree while empty (so a failed connection is announced), only visually collapsed. */
+.signing-destination-actions p:empty{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}

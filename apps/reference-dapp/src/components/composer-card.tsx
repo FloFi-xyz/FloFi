@@ -144,19 +144,25 @@ function RecipientField({ recipient, formId, onCommit, onLeave }: { recipient: C
  */
 export type CardDestination = { network: string; value: string; auto: string | null; autoAddress: string | null;
   candidates: readonly { readonly address: string; readonly label: string }[];
-  /** BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: `loading` = the account's wallets are still being read (never shown as missing). */
-  status: 'valid' | 'loading' | 'choose' | 'required' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void;
+  /**
+   * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: `loading` = the account's wallets are still being read (never shown as missing).
+   * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: `unavailable` = they could not be read after FloFi's own retry (never "you have none").
+   */
+  status: 'valid' | 'loading' | 'choose' | 'required' | 'unavailable' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void;
   /** The kind of wallet the destination needs ('Solana' or 'EVM'), named in the warning so the owner knows which wallet to bring. */
   ecosystem?: 'Solana' | 'EVM';
   /** Connect a wallet of the destination ecosystem in this page (the existing wallet connection; it signs nothing). Rejects when none connected. */
-  onConnect?: (() => Promise<void>) | undefined };
+  onConnect?: (() => Promise<void>) | undefined;
+  /** The account's wallets could not be read: read them again (one new bounded read; nothing is connected or signed). */
+  onRetry?: (() => void) | undefined };
 /**
  * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the field's visual state. `attention` (amber): a required wallet is missing or a choice is
  * pending; `error` (red): the typed address is invalid or of the wrong network; `loading`: wallets are still being read; otherwise normal.
  * Simulate stays blocked for `attention` and `error` (and `loading`) by the shared gate; the colour only repeats what the text says.
  */
 export const destinationFieldState = (status: CardDestination['status']): 'normal' | 'attention' | 'error' | 'loading' =>
-  status === 'invalid' || status === 'wrong-ecosystem' ? 'error' : status === 'choose' || status === 'required' ? 'attention' : status === 'loading' ? 'loading' : 'normal';
+  status === 'invalid' || status === 'wrong-ecosystem' ? 'error' : status === 'choose' || status === 'required' || status === 'unavailable' ? 'attention'
+    : status === 'loading' ? 'loading' : 'normal';
 /**
  * Review round 2: with several wallets to choose from (`choose`) each one is a visible button that fills the field (the datalist stays as a
  * typing convenience). A destination drafted on its own (no amount draft, whose own form already says so) shows "Press Enter to apply" and
@@ -177,6 +183,10 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
       : tr('Choose one of your wallets or enter an address.')
     : destination.status === 'required' ? ecosystem ? tr('Required: a wallet that can receive on {0} ({1} address). Connect one or enter its public address.', destination.network, ecosystem)
       : tr('Enter the destination address on {0}.', destination.network)
+    : destination.status === 'unavailable' ? destination.candidates.length
+      ? tr('FloFi could not read which {1} wallets your account has for {0}. Choose one of your wallets, try again, or enter its public address.', destination.network, ecosystem ?? '')
+      : destination.onConnect ? tr('FloFi could not read which {1} wallets your account has for {0}. Try again, connect one, or enter its public address.', destination.network, ecosystem ?? '')
+      : tr('FloFi could not read which {1} wallets your account has for {0}. Try again, or enter its public address.', destination.network, ecosystem ?? '')
     : destination.status === 'loading' ? tr('Checking your wallets for {0}…', destination.network) : null;
   const automatic = !message && !destination.value && destination.auto ? destination.auto : null;
   const applying = pending && Boolean(onCommit);
@@ -197,12 +207,14 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
       {message ? <span id={note} className={state === 'error' ? 'composer-recipient-error' : state === 'attention' ? 'composer-destination-note composer-destination-warning' : 'composer-destination-note'}>
         {state === 'attention' || state === 'error' ? <span className="composer-destination-icon" aria-hidden="true">!</span> : null}{message}</span>
         : automatic ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', automatic)}</span> : null}
-      {connectFailed && destination.status === 'required' && <span className="composer-destination-note">{tr('No wallet was connected. You can enter its public address instead.')}</span>}
+      {connectFailed && (destination.status === 'required' || destination.status === 'unavailable') && <span className="composer-destination-note">{tr('No wallet was connected. You can enter its public address instead.')}</span>}
     </span>
-    {destination.status === 'choose' && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
+    {(destination.status === 'choose' || destination.status === 'unavailable') && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
       {destination.candidates.map(candidate => <button key={candidate.address} type="button" className="composer-destination-choice" title={candidate.address}
         onClick={() => { destination.onChange(candidate.address); field.current?.focus(); }}>{candidate.label}</button>)}</div>}
-    {destination.status === 'required' && destination.onConnect && <button type="button" className="composer-destination-choice composer-destination-connect"
+    {destination.onRetry && <button type="button" className="composer-destination-choice composer-destination-connect"
+      onClick={() => { setConnectFailed(false); destination.onRetry?.(); field.current?.focus(); }}>{tr('Try again')}</button>}
+    {(destination.status === 'required' || destination.status === 'unavailable') && destination.onConnect && <button type="button" className="composer-destination-choice composer-destination-connect"
       onClick={connect}>{ecosystem === 'Solana' ? tr('Connect a Solana wallet') : tr('Connect an EVM wallet')}</button>}
     {applying && <div className="composer-amount-actions composer-amount-direct">
       <span id={hint} className="composer-amount-hint">{tr('Press Enter to apply')}</span>

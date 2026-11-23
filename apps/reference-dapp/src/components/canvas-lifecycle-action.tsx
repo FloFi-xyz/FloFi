@@ -12,6 +12,11 @@ import { FloFiWalletLockHint } from './flofi-wallet-continue';
 export function CanvasLifecycleAction(props: ExecutionControlsState & {
   controls: ExecutionControls; simulate?: () => void | Promise<void>; simulationDisabled?: boolean;
   simulationReason?: string | null;
+  /**
+   * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the surface already shows `simulationReason` as its status (the /approve signing surface), so
+   * it is not repeated under the button (one message per reason); the disabled button keeps it as its description.
+   */
+  reasonShown?: boolean;
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: which step of a sequence this control serves (a result never stands for the whole workflow). */
   sequenceNote?: string | null;
   onExecute?: () => void; workflowName?: string;
@@ -51,12 +56,12 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
     {/* UX-003: simulating / waiting for the wallet keep the CTA position as a locked, active button; a duplicate request cannot start. */}
     {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(label)}</button>
       : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled}
-        title={action.kind === 'simulate' && disabled && props.simulationReason ? t(props.simulationReason) : undefined}
+        title={action.kind === 'simulate' && disabled && props.simulationReason && !props.reasonShown ? t(props.simulationReason) : undefined}
         aria-description={action.kind === 'simulate' ? t(disabled && props.simulationReason ? props.simulationReason : 'Check amounts, fees and conditions before continuing.') : undefined} onClick={act}>{t(label)}</button>}
     {c.live?.steps.some(step => step.operations.some(operation => operation.state === 'wallet')) && <WalletPendingNotice/>}
     {(action.kind === 'approve' || action.kind === 'execute' || action.kind === 'continue') && <FloFiWalletLockHint account={props.wallet.account} issue={floFiIssue}/>}
     {action.kind === 'recover' && c.lastCheckedAt && <p className="muted"><time dateTime={c.lastCheckedAt}>{t('Last checked at {0}',new Date(c.lastCheckedAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US'))}</time></p>}
-    {action.kind === 'simulate' && disabled && props.simulationReason && props.workflow.nodes.some(node => !node.actionType.startsWith('mock-')) &&
+    {action.kind === 'simulate' && disabled && props.simulationReason && !props.reasonShown && props.workflow.nodes.some(node => !node.actionType.startsWith('mock-')) &&
       <p role="status">{t(props.simulationReason)}</p>}
   </div>;
 }

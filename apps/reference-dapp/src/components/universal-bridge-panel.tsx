@@ -2,9 +2,9 @@
 'use client';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { destinationWalletMessage, requotedMessage } from '../domain/simulation-presentation';
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
-import { localizedProvider, useDestinationWallets } from '../state/destination-wallets';
+import { localizedProvider, retryAccountWallets, useDestinationWallets } from '../state/destination-wallets';
 import type { DestinationInventory } from '../domain/destination-wallet';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
@@ -162,7 +162,7 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     return next;
   });
   const cross = UNIVERSAL_NETWORKS[input.source].ecosystem !== UNIVERSAL_NETWORKS[input.destination].ecosystem;
-  const destinations = useDestinationWallets(useOptionalBuild009Wallet()), destinationListId = useId();
+  const destinations = useDestinationWallets(useOptionalBuild009Wallet()), destinationListId = useId(), destinationInput = useRef<HTMLInputElement>(null);
   const destinationEcosystem = destinationEcosystemOf(input.destination);
   const destinationResolution = destinationEcosystem === 'evm' ? destinations.evm : destinations.solana;
   const sessionDestination = destinations.inventory.session.find(entry => entry.ecosystem === destinationEcosystem) ?? null;
@@ -173,11 +173,16 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
       (entry.ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index);
   const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null, destinationMessageId = useId();
   const destinationMessage = destinationCheck && !destinationCheck.ok ? tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)
-    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
+    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' && !destinationResolution.unconfirmed ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
     : !input.recipient && cross && destinationResolution.kind === 'NONE' ? tr('Required: a wallet that can receive on {0} ({1} address). Connect one or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
+    : !input.recipient && cross && (destinationResolution.kind === 'UNAVAILABLE' || destinationResolution.kind === 'CHOOSE' && destinationResolution.unconfirmed)
+      ? tr('FloFi could not read which {1} wallets your account has for {0}. Try again, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
     : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? tr('Checking your wallets for {0}…', UNIVERSAL_NETWORKS[input.destination].name) : null;
+  // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: after FloFi's own retry failed, the owner may read the account's wallets again (or type the address).
+  const destinationRetry = !input.recipient && cross && destinations.inventory.accountUnavailable && destinationResolution.kind !== 'RESOLVED';
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the same field states as the Canvas card (amber: missing or a choice; red: invalid; loading).
-  const destinationState = destinationCheck && !destinationCheck.ok ? 'error' : !input.recipient && cross && (destinationResolution.kind === 'CHOOSE' || destinationResolution.kind === 'NONE') ? 'attention'
+  const destinationState = destinationCheck && !destinationCheck.ok ? 'error' : !input.recipient && cross && (destinationResolution.kind === 'CHOOSE' || destinationResolution.kind === 'NONE'
+    || destinationResolution.kind === 'UNAVAILABLE') ? 'attention'
     : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? 'loading' : 'normal';
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -210,13 +215,14 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
         Credentials; several: a choice), editable to any public address of the destination network, checked as the server checks it. */}
     {/* Review round 2: the field's accessible name is its visible label; the message under it is its description; with no automatic wallet
         (several to choose from, or none) the placeholder names the kind of address, never "your connected wallet". */}
-    <label className="universal-destination" data-destination-state={destinationState}>{tr('Destination wallet')}<input autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
+    <label className="universal-destination" data-destination-state={destinationState}>{tr('Destination wallet')}<input ref={destinationInput} autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
       list={destinationChoices.length ? destinationListId : undefined} title={input.recipient || autoDestination?.address || undefined}
       aria-invalid={destinationCheck && !destinationCheck.ok || undefined} aria-describedby={destinationMessage ? destinationMessageId : undefined}
       placeholder={autoDestination ? destinationLabel(input.destination, localizedProvider(autoDestination, tr))
         : cross ? tr(destinationEcosystem === 'solana' ? 'Solana address' : 'Address (0x…)') : tr('Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
     {destinationChoices.length > 0 && <datalist id={destinationListId}>{destinationChoices.map(choice => <option key={choice.address} value={choice.address} label={destinationLabel(input.destination, localizedProvider(choice, tr))}/>)}</datalist>}
     {destinationMessage && <small id={destinationMessageId} role="status" className={destinationState === 'error' ? 'composer-recipient-error' : destinationState === 'attention' ? 'composer-destination-warning' : undefined}>{destinationMessage}</small>}
+    {destinationRetry && <button type="button" className="composer-destination-choice composer-destination-connect" onClick={() => { retryAccountWallets(); destinationInput.current?.focus(); }}>{tr('Try again')}</button>}
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}

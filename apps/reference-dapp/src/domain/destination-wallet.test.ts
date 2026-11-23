@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { readUniversalBridgeNode } from '@defi-workflow-engine/workflow-contracts';
 import { actionReviewValue, canvasAmountCommand, canvasAmountMessage, keptBridgeRecipient } from './canvas-action-setup';
-import { boundRecipientOwned, checkDestinationAddress, destinationLabel, resolveDestinationWallet, type DestinationCandidate } from './destination-wallet';
+import { destinationWalletMessage } from './simulation-presentation';
+import { translate } from '../i18n/translate';
+import { boundRecipientOwned, checkDestinationAddress, DESTINATION_ISSUE, destinationHoldsPreparation, destinationIssue, destinationIssueMessage, destinationLabel, destinationRequirement, resolveDestinationWallet,
+  type DestinationCandidate } from './destination-wallet';
 import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
 import { createRouterNode, routerDetails } from './router-authoring';
 import { universalBridgeDetails } from './universal-bridge-authoring';
@@ -140,5 +143,66 @@ describe('Review round 3: which bound recipients the chat Review may call the ow
     expect(boundRecipientOwned('CONNECTED_DESTINATION_WALLET', SOL, [])).toBe(false);
     expect(boundRecipientOwned('CONNECTED_DESTINATION_WALLET', SOL, [SOL.toLowerCase()])).toBe(false);
     expect(boundRecipientOwned('EXPLICIT', SOL, [SOL])).toBe(false);
+  });
+});
+
+describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: an account read that failed is "could not check", never "none" or a silent pick', () => {
+  const failed = { loading: false, accountUnavailable: true } as const;
+  it('no other wallet known: UNAVAILABLE, a blocking issue of its own (not the server\'s REQUIRED)', () => {
+    const resolution = resolveDestinationWallet('solana', { session: [], account: [], saved: [], ...failed });
+    expect(resolution).toEqual({ kind: 'UNAVAILABLE' });
+    const requirement = destinationRequirement('CONNECTED_DESTINATION_WALLET', resolution);
+    expect(requirement).toEqual({ kind: 'UNAVAILABLE' });
+    expect(destinationIssue(requirement)).toBe('UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE');
+    expect(resolveDestinationWallet('solana', { session: [], account: [], saved: [] })).toEqual({ kind: 'NONE' });
+  });
+  it('one Privy embedded wallet while the read failed: offered to choose, not filled (the account may hold another of that ecosystem)', () => {
+    const embedded = resolveDestinationWallet('solana', { session: [], account: [wallet('solana', FLOFI_SOL, 'FloFi Wallet', 'ACCOUNT')], saved: [], ...failed });
+    expect(embedded).toMatchObject({ kind: 'CHOOSE', unconfirmed: true, candidates: [{ address: FLOFI_SOL }] });
+    // Reviews: that choice is the failed read (never "more than one wallet"): the requirement and its issue say so.
+    expect(destinationRequirement('CONNECTED_DESTINATION_WALLET', embedded)).toEqual({ kind: 'UNAVAILABLE' });
+    expect(destinationIssue(destinationRequirement('CONNECTED_DESTINATION_WALLET', embedded))).toBe('UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE');
+    expect(resolveDestinationWallet('solana', { session: [], account: [], saved: [wallet('solana', SAVED_SOL, 'Phantom', 'SAVED')], ...failed }))
+      .toMatchObject({ kind: 'CHOOSE', candidates: [{ address: SAVED_SOL }] });
+  });
+  it('a wallet connected in this session still answers at once; EVM → EVM and a typed address never depend on the account read', () => {
+    expect(resolveDestinationWallet('solana', { session: [wallet('solana', PHANTOM, 'Phantom', 'SESSION')], account: [], saved: [], ...failed }))
+      .toMatchObject({ kind: 'RESOLVED', wallet: { address: PHANTOM } });
+    expect(destinationRequirement('CONNECTED_OWNER', { kind: 'UNAVAILABLE' })).toEqual({ kind: 'OWNER' });
+    expect(destinationRequirement(PHANTOM, { kind: 'UNAVAILABLE' })).toEqual({ kind: 'EXPLICIT', address: PHANTOM });
+  });
+  it('every issue has a message per surface; /approve never names the Bridge card', () => {
+    for (const issue of Object.values(DESTINATION_ISSUE)) {
+      expect(destinationIssueMessage(issue, 'editor')).toContain('{0}');
+      expect(destinationIssueMessage(issue, 'approve')).toContain('{0}');
+      expect(destinationIssueMessage(issue, 'approve')).not.toMatch(/Bridge card/);
+    }
+  });
+});
+
+describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve does not prepare a bridge by itself once its missing destination resolves', () => {
+  it('holds automatic preparation for the revision the destination was missing for; a proposal that arrived resolved is prepared as before', () => {
+    // Arrived with its destination resolved: prepared automatically (unchanged).
+    expect(destinationHoldsPreparation({ kind: 'universal', blocked: false, held: null, key: 'wf:3' })).toEqual({ held: null, holds: false });
+    // Missing, then resolved (Connect, Try again, a recovered read): held, so the owner chooses Simulate (its sign-in is the owner's request).
+    const missing = destinationHoldsPreparation({ kind: 'universal', blocked: true, held: null, key: 'wf:3' });
+    expect(missing).toEqual({ held: 'wf:3', holds: true });
+    expect(destinationHoldsPreparation({ kind: 'universal', blocked: false, held: missing.held, key: 'wf:3' })).toEqual({ held: 'wf:3', holds: true });
+    // The key is the proposal (workflow id): a choice or typed address on the Canvas (a new revision) stays held; another proposal starts afresh;
+    // other runtimes are never held. The caller never passes `blocked` for a destination still being read (it resolves by itself, as on arrival).
+    expect(destinationHoldsPreparation({ kind: 'universal', blocked: false, held: 'wf:3', key: 'wf:4' })).toMatchObject({ holds: false });
+    expect(destinationHoldsPreparation({ kind: 'public', blocked: true, held: null, key: 'wf:3' })).toEqual({ held: null, holds: false });
+  });
+});
+
+describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (bridge review): every destination message has its Portuguese', () => {
+  it('each issue on each surface, each destination refusal code, and the wallet phrases', () => {
+    for (const issue of Object.values(DESTINATION_ISSUE)) for (const surface of ['editor', 'approve', 'approve-embedded'] as const)
+      expect(translate('PT', destinationIssueMessage(issue, surface)), `${issue}/${surface}`).not.toBe(destinationIssueMessage(issue, surface));
+    for (const code of [...Object.values(DESTINATION_ISSUE), 'UNIVERSAL_DESTINATION_WALLET_INVALID']) {
+      const english = destinationWalletMessage(code)!;
+      expect(english, code).toBeTruthy(); expect(translate('PT', english), code).not.toBe(english);
+    }
+    expect(translate('PT', 'a Solana wallet')).toBe('uma carteira Solana'); expect(translate('PT', 'an EVM wallet')).toBe('uma carteira EVM');
   });
 });
