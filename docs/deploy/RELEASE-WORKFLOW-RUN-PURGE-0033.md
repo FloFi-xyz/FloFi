@@ -157,6 +157,8 @@ the same default privileges in production, so the runtime role can forge a permi
 `purge_unstarted_execution` (reproduced on the same rehearsal branch, rolled back). The application never writes either table directly; the
 analogous remediation, for the owner to decide and apply separately, is
 `REVOKE ALL ON execution_purge_permits FROM <runtime role>; REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON execution_purge_audit FROM <runtime role>;`.
+BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 turned it into a certified, transactional operator file with read-only pre/post verification:
+[SECURITY-0016-RUNTIME-PRIVILEGES.md](./SECURITY-0016-RUNTIME-PRIVILEGES.md) (still an owner-approved production step).
 
 ## Verification (read-only, except the rolled-back probe)
 
