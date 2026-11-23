@@ -183,16 +183,22 @@ export function solanaPoolSimulation(staged: StagedPosition | null, previous: { 
 
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();
 const shortAccount = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
+/**
+ * BUILD-FLOFI-STUDIO-UNIVERSAL-002: third-party Studio metadata an independent FloFi operator certified and published, shown in the Editor only
+ * (never on the Chat landing or an approval surface). It is reference information: no action, network or authoring option comes from it.
+ */
 function PublishedStudioMetadata() {
   const { language } = useLocale();
   const { publishedIntegrations } = useProductBootstrap();
   if (!publishedIntegrations?.length) return null;
   const pt = language === 'PT';
+  const kind = (value: string) => value === 'vault' ? (pt ? 'Cofre' : 'Vault') : (pt ? 'Rede' : 'Network');
   return <details className="shell-details studio-discovery">
-    <summary>{pt ? 'Integrações publicadas' : 'Published integrations'}</summary>
-    <p>{pt ? 'Metadados certificados para consulta.' : 'Certified metadata for discovery.'}</p>
-    <ul>{publishedIntegrations.map(item => <li key={`${item.projectId}/${item.slug}/${item.version}`}>
-      <strong>{item.name}</strong> <code>{item.chainRef}</code> · <code>{item.capabilities.join(', ')}</code>
+    <summary>{pt ? `Integrações de terceiros no FloFi Studio (${publishedIntegrations.length})` : `Third-party integrations in FloFi Studio (${publishedIntegrations.length})`}</summary>
+    <p>{pt ? 'Publicadas por desenvolvedores e revisadas pela FloFi como informação de referência. Ainda não podem ser usadas em ações.'
+      : 'Published by developers and reviewed by FloFi as reference information. They cannot be used in actions yet.'}</p>
+    <ul>{publishedIntegrations.slice(0, 20).map(item => <li key={`${item.projectId}/${item.slug}/${item.version}`}>
+      <strong>{item.name}</strong> · {kind(item.kind)} · <code>{item.chainRef}</code>
     </li>)}</ul>
   </details>;
 }
@@ -975,7 +981,6 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (tab === BUILD_ENTRY) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className="main build-entry-workspace" tabIndex={-1} aria-label={tr('Chat')}>
-      <PublishedStudioMetadata/>
       <p className="editor-restore-status" role="status">{tr('Loading…')}</p>
       <BuildEntry conversation={conversation} workflow={state.workflow} proposal={proposal} actions={orderedActions.length} draft={entryDraft} setDraft={setEntryDraft}
         interactive={interactive} openBuilder={() => setTab('Build')}/>
@@ -1106,7 +1111,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
-      {tab === 'Build' && <PublishedStudioMetadata/>}
+      {tab === 'Build' && surface === 'workspace' && !approvalSlot && !approvalGate && <PublishedStudioMetadata/>}
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary} reviewBlock={reviewBlock} canvasExecution={canvasExecution}
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         actionInFooter={chatFirst && !groupedPrimary && placement === 'footer'} review={executeReview}

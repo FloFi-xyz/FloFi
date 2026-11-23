@@ -14,13 +14,15 @@ export default async function StudioReviewPage() {
   const pt = language === 'PT';
   const installed = await studioCertificationInstalled(page.host.db);
   const rows = installed ? await studioCertificationQueue(page.host.db, page.host.tenantId) : [];
+  const now = new Date().toISOString();
   const empty = installed ? (pt ? 'Nenhum pedido de certificação.' : 'No certification submissions.')
     : (pt ? 'A certificação requer a migração 0036.' : 'Certification requires migration 0036.');
   return <AdminShell active="studio" context={page.context} title="Studio certification"
     description={pt ? 'Revise evidências de mainnet, certifique metadados e gerencie a publicação.' : 'Review mainnet evidence, certify metadata and manage publication.'}>
     <Section id="studio-certification-queue" title={pt ? 'Integrações submetidas' : 'Submitted integrations'}>
-      {rows.length === 0 ? <p className="admin-hint">{empty}</p> : rows.map(row => <StudioReview key={`${row.project_id}.${row.slug}.${row.version}`}
-        row={row} pt={pt} csrf={page.context.csrf} canWrite={adminPermits(page.context, 'write')}/>)}
+      {rows.length === 0 ? <p className="admin-hint">{empty}</p> : <div className="admin-studio-queue">{rows.map(row => <StudioReview
+        key={`${row.project_id}.${row.slug}.${row.version}`} row={row} pt={pt} csrf={page.context.csrf} canWrite={adminPermits(page.context, 'write')}
+        now={now}/>)}</div>}
     </Section>
   </AdminShell>;
 }

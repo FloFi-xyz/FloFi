@@ -1921,6 +1921,10 @@
     "app.studio.certification-store.pg": {
       "path": "apps/reference-dapp/src/studio/certification-store.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.components.admin.studio-review": {
+      "path": "apps/reference-dapp/src/components/admin/studio-review.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2106,7 +2110,8 @@
     "app.user-funded.decline-proof",
     "app.state.router-store",
     "app.studio.integration-probe",
-    "developer-sdk.integration-package"
+    "developer-sdk.integration-package",
+    "app.components.admin.studio-review"
   ],
   "modules": [
     {
@@ -9070,7 +9075,8 @@
         "app.studio.integration-store.pg",
         "e2e.developer-journey",
         "app.studio.certification-store.pg",
-        "app.e2e.admin-console"
+        "app.e2e.admin-console",
+        "app.components.admin.studio-review"
       ],
       "gaps": [
         "Proposal RPC compatibility is reproducible with fixtures. Mainnet identity and execution need independent certification.",

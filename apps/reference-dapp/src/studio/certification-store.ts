@@ -296,7 +296,9 @@ async function requireUniquePublication(q: Queryable, tenantId: string, decision
 export type StudioReviewRow = { readonly project_id: string; readonly slug: string; readonly version: number; readonly generation: number;
   readonly manifest: Record<string, unknown>; readonly manifest_sha256: string; readonly verification: unknown; readonly test_result: unknown;
   readonly status: 'CERTIFICATION_PENDING' | 'ADAPTER_SUBMITTED' | 'CERTIFIED' | 'REJECTED' | 'PUBLISHED' | 'SUSPENDED' | 'REVOKED';
-  readonly catalog_revision: string; readonly published_version: number | null; readonly latest_version: number; readonly decision_reason: string | null };
+  readonly catalog_revision: string; readonly published_version: number | null; readonly latest_version: number; readonly decision_reason: string | null;
+  /** The package's current publication head (any version): its visibility, null when suspended or never published. */
+  readonly published_visibility: Visibility | null; readonly published_suspended: boolean };
 const RESOLVED_STATUS = `CASE WHEN r.revoked THEN 'REVOKED'
       WHEN h.version=s.version AND h.action='SUSPEND' THEN 'SUSPENDED'
       WHEN c.decision='CERTIFIED' AND (s.status<>'CERTIFICATION_PENDING' OR c.source_generation<>s.generation OR p.status<>'ACTIVE') THEN 'SUSPENDED'
@@ -317,9 +319,10 @@ const DECISION_REASON = `coalesce(r.reason,CASE WHEN h.version=s.version THEN h.
 
 export async function studioCertificationQueue(db: Queryable, tenantId: string): Promise<StudioReviewRow[]> {
   return (await db.query<StudioReviewRow>(`SELECT q.project_id,q.slug,q.version,q.generation,q.manifest,q.manifest_sha256,q.verification,q.test_result,
-    q.status,q.catalog_revision,q.published_version,q.latest_version,q.decision_reason FROM (
+    q.status,q.catalog_revision,q.published_version,q.latest_version,q.decision_reason,q.published_visibility,q.published_suspended FROM (
     SELECT s.project_id,s.slug,s.version,s.generation,s.manifest,s.manifest_sha256,s.verification,s.test_result,s.updated_at,
     ${RESOLVED_STATUS} AS status,coalesce(h.revision::text,'0') AS catalog_revision,h.version AS published_version,n.latest_version,
+    h.visibility AS published_visibility,coalesce(h.action='SUSPEND',false) AS published_suspended,
     c.decision IS NULL AND s.manifest->>'schemaVersion'='2' AND n.latest_version=s.version AS awaiting_review,
     ${DECISION_REASON} AS decision_reason ${REVIEW_JOINS}
     CROSS JOIN LATERAL (SELECT max(v.version) AS latest_version FROM studio_integration_versions v
