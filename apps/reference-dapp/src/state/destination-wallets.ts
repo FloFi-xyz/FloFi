@@ -20,6 +20,8 @@ type AccountWallets = readonly { readonly ecosystem: DestinationEcosystem; reado
  * sign-out and sign-in without a reload never fills another account's wallet. Never written to Web Storage.
  */
 export const ACCOUNT_WALLETS_FRESH_MS = 60_000;
+/** How long a destination waits for Privy to restore a signed-in session before it stops counting Privy's wallets as "still loading". */
+export const PRIVY_RESTORE_WAIT_MS = 10_000;
 let accountRead: { readonly key: string; readonly at: number; readonly promise: Promise<AccountWallets> } | null = null;
 const accountListeners = new Set<() => void>();
 /**
@@ -51,14 +53,22 @@ export function useDestinationInventory(evm: SessionEvmWallet): DestinationInven
   const [account, setAccount] = useState<AccountWallets>([]);
   const sessionKey = privy?.userId ?? 'signed-out';
   const [generation, setGeneration] = useState(0);
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: which read the account wallets answer (`null`: still reading). While Privy itself has not
+  // restored the session (after a reload) its embedded wallets are not listed yet either; that wait is bounded so a Privy that never loads
+  // leaves the owner the other tiers and a typed address, never an endless "checking".
+  const [answered, setAnswered] = useState<string | null>(null);
+  const [privyWait, setPrivyWait] = useState(true);
+  useEffect(() => { const timer = setTimeout(() => setPrivyWait(false), PRIVY_RESTORE_WAIT_MS); return () => clearTimeout(timer); }, []);
   useEffect(() => { const listener = () => setGeneration(n => n + 1); accountListeners.add(listener); return () => { accountListeners.delete(listener); }; }, []);
+  const readKey = `${sessionKey}:${generation}`;
   useEffect(() => {
     let live = true;
     // Another session's wallets are dropped at once; this session's are read (or reused while fresh).
-    setAccount([]);
-    void readAccountWallets(sessionKey).then(wallets => { if (live) setAccount(wallets); });
+    setAccount([]); setAnswered(null);
+    void readAccountWallets(sessionKey).then(wallets => { if (live) { setAccount(wallets); setAnswered(readKey); } });
     return () => { live = false; };
-  }, [sessionKey, generation]);
+  }, [sessionKey, generation, readKey]);
+  const loading = answered !== readKey || Boolean(privy && !privy.ready && privyWait);
   const solanaSession = solana?.session?.chain === 'solana:mainnet' ? solana.session : null;
   return useMemo(() => {
     const session: DestinationCandidate[] = [
@@ -68,8 +78,8 @@ export function useDestinationInventory(evm: SessionEvmWallet): DestinationInven
       ...(privy?.embedded ?? []).map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address, providerName: 'FloFi Wallet', source: 'ACCOUNT' as const })),
       ...account.map(wallet => ({ ...wallet, source: 'ACCOUNT' as const }))];
     const saved = credentials.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address, providerName: wallet.providerName, source: 'SAVED' as const }));
-    return { session, account: linked, saved };
-  }, [evm?.account, evm?.provider?.name, solanaSession, privy?.embedded, account, credentials.wallets]);
+    return { session, account: linked, saved, loading };
+  }, [evm?.account, evm?.provider?.name, solanaSession, privy?.embedded, account, credentials.wallets, loading]);
 }
 /** The resolved destination wallet of each ecosystem (see `resolveDestinationWallet`). */
 export function useDestinationWallets(evm: SessionEvmWallet): { readonly inventory: DestinationInventory; readonly evm: DestinationResolution; readonly solana: DestinationResolution } {

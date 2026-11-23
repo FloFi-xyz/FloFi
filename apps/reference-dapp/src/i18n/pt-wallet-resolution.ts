@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+ * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a bridge's receiving wallet (missing, a choice pending, still loading, invalid), wallet sessions,
+ * wallet networks and quote-only providers, each named for what it is instead of "connect the wallet that will sign".
+ */
+export const portugueseWalletResolution: Readonly<Record<string, string>> = {
+  // simulationError
+  'Choose the wallet that receives the funds on the destination network, or enter its public address, then simulate again. Your source wallet does not need to change. Nothing was signed or sent.':
+    'Escolha a carteira que recebe os fundos na rede de destino, ou informe o endereço público dela, e simule de novo. A sua carteira de origem não precisa mudar. Nada foi assinado ou enviado.',
+  'More than one of your wallets can receive on the destination network. Choose one on the Bridge card, or enter its public address, then simulate again. Nothing was signed or sent.':
+    'Mais de uma das suas carteiras pode receber na rede de destino. Escolha uma no card de Bridge, ou informe o endereço público dela, e simule de novo. Nada foi assinado ou enviado.',
+  'FloFi is still reading your wallets for the destination network. Try again in a moment. Nothing was signed or sent.':
+    'A FloFi ainda está lendo as suas carteiras para a rede de destino. Tente de novo em instantes. Nada foi assinado ou enviado.',
+  'The destination wallet is not a valid address on the destination network. Check it on the Bridge card, then simulate again. Nothing was signed or sent.':
+    'A carteira de destino não é um endereço válido na rede de destino. Confira no card de Bridge e simule de novo. Nada foi assinado ou enviado.',
+  'Your wallet sign-in expired. Simulate again and sign the sign-in message; it moves no funds and authorizes no transaction. Nothing was signed or sent.':
+    'O acesso com a sua carteira expirou. Simule de novo e assine a mensagem de acesso; ela não move fundos nem autoriza transações. Nada foi assinado ou enviado.',
+  'Your wallet is on another network than this step\'s source network. Switch your wallet to the source network, then simulate again. Nothing was signed or sent.':
+    'A sua carteira está em outra rede que não a rede de origem desta etapa. Troque a carteira para a rede de origem e simule de novo. Nada foi assinado ou enviado.',
+  'The selected bridge provider is shown for comparison only: FloFi cannot verify and execute its route yet. Choose Best routing, then simulate again. Nothing was signed or sent.':
+    'O provedor de bridge selecionado aparece apenas para comparação: a FloFi ainda não consegue verificar e executar a rota dele. Escolha o melhor roteamento e simule de novo. Nada foi assinado ou enviado.',
+  // Shared gate (Simulate, Canvas and chat), with the destination network.
+  'Choose a destination wallet on {0} or enter its public address. Nothing was signed or sent.':
+    'Escolha uma carteira de destino em {0} ou informe o endereço público dela. Nada foi assinado ou enviado.',
+  'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.':
+    'Você tem mais de uma carteira em {0}. Escolha a que recebe os fundos, ou informe o endereço público dela. Nada foi assinado ou enviado.',
+  'FloFi is still reading your wallets for {0}. Try again in a moment. Nothing was signed or sent.':
+    'A FloFi ainda está lendo as suas carteiras para {0}. Tente de novo em instantes. Nada foi assinado ou enviado.',
+  // Destination wallet field.
+  'Required: the {1} wallet that receives on {0}. Connect one, choose one of your wallets, or enter its public address.':
+    'Obrigatório: a carteira {1} que recebe em {0}. Conecte uma, escolha uma das suas carteiras ou informe o endereço público dela.',
+  'Choose which of your {1} wallets receives on {0}, or enter its public address.':
+    'Escolha qual das suas carteiras {1} recebe em {0}, ou informe o endereço público dela.',
+  'Checking your wallets for {0}…': 'Verificando as suas carteiras para {0}…',
+  'Connect a Solana wallet': 'Conectar uma carteira Solana',
+  'Connect an EVM wallet': 'Conectar uma carteira EVM',
+};

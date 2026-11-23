@@ -21,6 +21,7 @@ import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { translate, useLocale } from '../i18n/locale';
+import { destinationIssueMessage } from '../domain/destination-wallet';
 
 import { WithdrawPanel } from './withdraw-panel';
 import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
@@ -519,7 +520,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-MAINNET-PRODUCT-001: a test-network workflow (saved or handed off before FloFi became Mainnet-only) is never simulated, reviewed or
   // signed in the public product; the Canvas offers the owner's explicit rebuild on its mainnet instead.
   const testNetworkWorkflow = !workflowAllowed(state.workflow, activeNetworkScope());
-  const simulationDisabled = authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a bridge whose receiving wallet is not resolved (none known, several to choose from, or the
+  // account's wallets still loading) is not simulated; the Canvas, the Simulate stage and the chat all say which wallet is missing and on which
+  // network. The store refuses the same before any sign-in, and the server keeps its own refusal: this gate only adds, it relaxes nothing.
+  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && universal.destinationIssue && universal.details
+    ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel) : null;
+  const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
+  const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);
   // BUILD-SOLANA-TRANSFER-UX-001: a proposal loaded for one proven wallet is authorized by that same signer only. A different connected
@@ -769,9 +776,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
     availabilityChecking: 'availabilityKnown' in simulationSource.state && simulationSource.state.availabilityKnown === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null;
-  const simulationReason = sequenceIssue ?? unavailableReason;
+  const simulationReason = sequenceIssue ?? destinationBlocked ?? unavailableReason;
   /** The same reason in a given language (the chat's messages follow the interface language; `unavailableReason` is a catalog key). */
-  const simulationReasonIn = (shown: 'EN' | 'PT') => sequenceIssueIn(shown) ?? (unavailableReason ? translate(shown, unavailableReason) : null);
+  const simulationReasonIn = (shown: 'EN' | 'PT') => sequenceIssueIn(shown) ?? destinationIssueIn(shown) ?? (unavailableReason ? translate(shown, unavailableReason) : null);
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, A2/B2): the whole-workflow Review is this workflow's simulation (read-only: every step together, nothing
   // signed or sent). "Simulate workflow" on Create opens Simulate and runs it there (the same `startReview`), where the owner reads the result
   // before "Review operation" opens Execute; no authorization language on Create. A started run keeps "Open workflow progress" (Execute).

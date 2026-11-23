@@ -14,6 +14,7 @@ import { universalBegin, universalDiscover, universalHandoff, universalInfo, uni
 import { solanaSessionStatus, solanaSignIn, solanaSignInChallenge, walletSessionStatus, walletSignIn, walletSignInChallenge } from '../app/wallet-session-action';
 import { universalBridgeOfWorkflow, type UniversalBridgeDetails } from '../domain/universal-bridge-authoring';
 import { resolvedAddress, useDestinationWallets } from './destination-wallets';
+import { destinationIssue, destinationRequirement, type DestinationIssue, type DestinationRequirement } from '../domain/destination-wallet';
 import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeReviewChange } from '../domain/bridge-review-recovery';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 import { useSettlementSync } from './settlement-sync';
@@ -40,7 +41,12 @@ type Store = { available: boolean; /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until
   /** BUILD-FLOFI-MAINNET-EXEC-002: the last automatic in-place re-quote (the refusal code and the material values it changed), or null. */
   requoted: { readonly code: string; readonly runId: string; readonly changes: readonly BridgeReviewChange[] } | null;
   /** Review round 3: the owner's wallets connected in this session or on the FloFi account (not the device's saved Credentials addresses). */
-  ownDestinations?: readonly string[] };
+  ownDestinations?: readonly string[];
+  /**
+   * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the bridge's recipient as every surface reads it (`destinationRequirement`), and the refusal it
+   * stands for while it blocks Simulate (no destination wallet yet, a choice pending, or the account's wallets still loading), or null.
+   */
+  destination?: DestinationRequirement | null; destinationIssue?: DestinationIssue | null };
 const Context = createContext<Store | null>(null);
 /** FIX-09: how long a simulation waits for the wallet's sign-in signature (a human reads the message) and for the quote round-trip. */
 export const SIGNIN_TIMEOUT_MS = 180_000, SIMULATION_TIMEOUT_MS = 60_000;
@@ -95,6 +101,13 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem
     ? resolvedAddress(destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana) : null;
   const implicitDestination = details?.fields.recipient === 'CONNECTED_DESTINATION_WALLET' ? destinationWallet : null;
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (incident: an EVM → Solana bridge with MetaMask connected and no Solana wallet known): a bridge
+  // whose destination wallet is not resolved is refused HERE, before any sign-in signature, with what is actually missing — the receiving
+  // wallet, never the signing one. Within one ecosystem the recipient is the signing wallet itself (`OWNER`) and nothing more is asked.
+  const destination = details ? destinationRequirement(details.fields.recipient, destinationEcosystem && destinationEcosystem !== ecosystem
+    ? destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana : { kind: 'NONE' }) : null;
+  const destinationBlock = destination ? destinationIssue(destination) : null;
+  const latestDestinationBlock = useRef(destinationBlock); latestDestinationBlock.current = destinationBlock;
   const latestSimulationWallets = useRef<SimulationWallets>({ owner, destination: implicitDestination });
   latestSimulationWallets.current = { owner, destination: implicitDestination };
   // Review round 3: only these may be called "your wallet" in the chat Review; a saved Credentials address is the device's, not proof of control.
@@ -216,6 +229,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     // (production 2026-11-18: "Simulando o fluxo…" forever) or a network call that never settles becomes a coded refusal; busy clears and the
     // owner can retry. A late answer is dropped here (nothing after the timed-out await consumes it), never adopted into a newer state.
     const snapshot = latest.current, wallets = latestSimulationWallets.current;
+    if (latestDestinationBlock.current) throw new Error(latestDestinationBlock.current);
     const account = await bounded(establishSession(), SIGNIN_TIMEOUT_MS, 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT');
     const current = () => latest.current === snapshot && universalSimulationWalletsCurrent(wallets, latestSimulationWallets.current, account);
     if (!current()) return;
@@ -227,6 +241,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   async function refresh() { await operation(async () => {
     if (!record) throw new Error('UNIVERSAL_RUN_MISSING');
     const snapshot = latest.current, wallets = latestSimulationWallets.current;
+    if (latestDestinationBlock.current) throw new Error(latestDestinationBlock.current);
     if (!universalSimulationWalletsCurrent(wallets, wallets, record.owner)) return;
     const result = await bounded(universalRefresh(ecosystemOfRecord(record), record.id, wallets.destination ?? undefined), SIMULATION_TIMEOUT_MS, 'UNIVERSAL_SIMULATION_TIMEOUT');
     if (latest.current !== snapshot || !universalSimulationWalletsCurrent(wallets, latestSimulationWallets.current, record.owner)) return;
@@ -401,7 +416,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     read: shown => universalStatus(ecosystemOfRecord(shown), shown.id), accept });
   return <Context.Provider value={{ available, availabilityKnown, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
     signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork,
-    requoted: requoted && requoted.runId === record?.id ? requoted : null, ownDestinations }}>
+    requoted: requoted && requoted.runId === record?.id ? requoted : null, ownDestinations, destination, destinationIssue: destinationBlock }}>
     {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
     <div data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

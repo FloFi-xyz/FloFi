@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
-import { requotedMessage } from '../domain/simulation-presentation';
+import { destinationWalletMessage, requotedMessage } from '../domain/simulation-presentation';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
 import { localizedProvider, useDestinationWallets } from '../state/destination-wallets';
@@ -60,7 +60,6 @@ const MESSAGES: Readonly<Record<string, string>> = {
   UNIVERSAL_ROUTER_NOT_ENABLED: 'The universal Cross-chain Router is not enabled on this server.', UNIVERSAL_STORAGE_NOT_CONFIGURED: 'Execution storage is not configured on this server.',
   UNIVERSAL_EXECUTION_NOT_ENABLED: 'Owner execution is not enabled on this server. Route discovery, quotes, simulation and Review remain read-only.',
   UNIVERSAL_WALLET_REQUIRED: 'Connect your wallet first.', UNIVERSAL_SOLANA_WALLET_REQUIRED: 'Connect your Solana wallet first.',
-  UNIVERSAL_DESTINATION_WALLET_REQUIRED: 'Connect your wallet on the destination network, or enter a recipient address in the bridge.',
   UNIVERSAL_WRONG_CHAIN: 'Switch your wallet to the source network.',
   UNIVERSAL_WALLET_NONCE_MISMATCH: 'Your wallet would use a different transaction number. Let pending transactions confirm first. Nothing was sent.', UNIVERSAL_WRONG_OWNER: 'Select the wallet account shown in Review.',
   UNIVERSAL_REVIEW_REQUIRED: 'Accept the current Review first.', UNIVERSAL_REVIEW_EXPIRED: 'This Review expired. Get a fresh route and review again.',
@@ -173,8 +172,12 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
       (entry.ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index);
   const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null, destinationMessageId = useId();
   const destinationMessage = destinationCheck && !destinationCheck.ok ? tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)
-    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? tr('Choose one of your wallets or enter an address.')
-    : !input.recipient && cross && destinationResolution.kind === 'NONE' ? tr('Enter the destination address on {0}.', UNIVERSAL_NETWORKS[input.destination].name) : null;
+    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
+    : !input.recipient && cross && destinationResolution.kind === 'NONE' ? tr('Required: the {1} wallet that receives on {0}. Connect one, choose one of your wallets, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
+    : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? tr('Checking your wallets for {0}…', UNIVERSAL_NETWORKS[input.destination].name) : null;
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the same field states as the Canvas card (amber: missing or a choice; red: invalid; loading).
+  const destinationState = destinationCheck && !destinationCheck.ok ? 'error' : !input.recipient && cross && (destinationResolution.kind === 'CHOOSE' || destinationResolution.kind === 'NONE') ? 'attention'
+    : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? 'loading' : 'normal';
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -206,13 +209,13 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
         Credentials; several: a choice), editable to any public address of the destination network, checked as the server checks it. */}
     {/* Review round 2: the field's accessible name is its visible label; the message under it is its description; with no automatic wallet
         (several to choose from, or none) the placeholder names the kind of address, never "your connected wallet". */}
-    <label>{tr('Destination wallet')}<input autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
+    <label className="universal-destination" data-destination-state={destinationState}>{tr('Destination wallet')}<input autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
       list={destinationChoices.length ? destinationListId : undefined} title={input.recipient || autoDestination?.address || undefined}
       aria-invalid={destinationCheck && !destinationCheck.ok || undefined} aria-describedby={destinationMessage ? destinationMessageId : undefined}
       placeholder={autoDestination ? destinationLabel(input.destination, localizedProvider(autoDestination, tr))
         : cross ? tr(destinationEcosystem === 'solana' ? 'Solana address' : 'Address (0x…)') : tr('Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
     {destinationChoices.length > 0 && <datalist id={destinationListId}>{destinationChoices.map(choice => <option key={choice.address} value={choice.address} label={destinationLabel(input.destination, localizedProvider(choice, tr))}/>)}</datalist>}
-    {destinationMessage && <small id={destinationMessageId} role="status">{destinationMessage}</small>}
+    {destinationMessage && <small id={destinationMessageId} role="status" className={destinationState === 'error' ? 'composer-recipient-error' : destinationState === 'attention' ? 'composer-destination-warning' : undefined}>{destinationMessage}</small>}
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
@@ -282,7 +285,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   const canExecute = Boolean(authorized && !router.retired && !pending && fresh > 0 && router.executionEnabled);
   const canRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && ['PREPARED', 'AUTHORIZED'].includes(record.phase) &&
     !record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state)) && (record.requote || fresh === 0));
-  const message = (code: string | null | undefined) => code ? walletNonceMessage(code) ?? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
+  const message = (code: string | null | undefined) => code ? destinationWalletMessage(code) ?? walletNonceMessage(code) ?? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
   const info = router.error ?? record?.error;
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
   const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';

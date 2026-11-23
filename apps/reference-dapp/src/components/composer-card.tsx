@@ -144,7 +144,19 @@ function RecipientField({ recipient, formId, onCommit, onLeave }: { recipient: C
  */
 export type CardDestination = { network: string; value: string; auto: string | null; autoAddress: string | null;
   candidates: readonly { readonly address: string; readonly label: string }[];
-  status: 'valid' | 'choose' | 'required' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void };
+  /** BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: `loading` = the account's wallets are still being read (never shown as missing). */
+  status: 'valid' | 'loading' | 'choose' | 'required' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void;
+  /** The kind of wallet the destination needs ('Solana' or 'EVM'), named in the warning so the owner knows which wallet to bring. */
+  ecosystem?: 'Solana' | 'EVM';
+  /** Connect a wallet of the destination ecosystem in this page (the existing wallet connection; it signs nothing). */
+  onConnect?: (() => void) | undefined };
+/**
+ * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the field's visual state. `attention` (amber): a required wallet is missing or a choice is
+ * pending; `error` (red): the typed address is invalid or of the wrong network; `loading`: wallets are still being read; otherwise normal.
+ * Simulate stays blocked for `attention` and `error` (and `loading`) by the shared gate; the colour only repeats what the text says.
+ */
+export const destinationFieldState = (status: CardDestination['status']): 'normal' | 'attention' | 'error' | 'loading' =>
+  status === 'invalid' || status === 'wrong-ecosystem' ? 'error' : status === 'choose' || status === 'required' ? 'attention' : status === 'loading' ? 'loading' : 'normal';
 /**
  * Review round 2: with several wallets to choose from (`choose`) each one is a visible button that fills the field (the datalist stays as a
  * typing convenience). A destination drafted on its own (no amount draft, whose own form already says so) shows "Press Enter to apply" and
@@ -155,29 +167,36 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
   const { t: tr } = useLocale();
   const id = useId(), list = `${id}-wallets`, note = `${id}-note`, hint = `${id}-hint`;
   const field = useRef<HTMLInputElement>(null);
+  const ecosystem = destination.ecosystem ?? null, state = destinationFieldState(destination.status);
   const message = destination.status === 'invalid' ? tr('Enter a valid {0} address.', destination.network)
     : destination.status === 'wrong-ecosystem' ? tr('This is not a {0} address.', destination.network)
-    : destination.status === 'choose' ? tr('Choose one of your wallets or enter an address.')
-    : destination.status === 'required' ? tr('Enter the destination address on {0}.', destination.network) : null;
+    : destination.status === 'choose' ? ecosystem ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', destination.network, ecosystem)
+      : tr('Choose one of your wallets or enter an address.')
+    : destination.status === 'required' ? ecosystem ? tr('Required: the {1} wallet that receives on {0}. Connect one, choose one of your wallets, or enter its public address.', destination.network, ecosystem)
+      : tr('Enter the destination address on {0}.', destination.network)
+    : destination.status === 'loading' ? tr('Checking your wallets for {0}…', destination.network) : null;
   const automatic = !message && !destination.value && destination.auto ? destination.auto : null;
   const applying = pending && Boolean(onCommit);
   const describedBy = [message || automatic ? note : null, applying ? hint : null].filter(Boolean).join(' ') || undefined;
   // Enter applies only from the field itself: on a wallet button or on Cancel it keeps that button's own action. A chosen wallet fills the field
   // and returns focus to it (focus stays on the card, so leaving does not apply it before the owner presses Enter or leaves the card).
-  return <div className="composer-recipient composer-destination nodrag nopan" onClick={event => event.stopPropagation()} onBlur={onLeave}
+  return <div className="composer-recipient composer-destination nodrag nopan" data-destination-state={state} onClick={event => event.stopPropagation()} onBlur={onLeave}
     onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && onCommit && event.target === field.current) { event.preventDefault(); onCommit(); } }}>
     <label htmlFor={id}>{tr('Destination wallet')}</label>
     <input ref={field} id={id} className="composer-recipient-input numeric" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
       value={destination.value} placeholder={destination.auto ?? tr(destination.placeholder)} list={destination.candidates.length ? list : undefined}
       title={destination.value || destination.autoAddress || tr('Paste or type the destination wallet address')}
-      aria-invalid={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' || undefined} aria-describedby={describedBy}
+      aria-invalid={state === 'error' || undefined} aria-required={state === 'attention' || undefined} aria-busy={state === 'loading' || undefined} aria-describedby={describedBy}
       onChange={event => destination.onChange(event.target.value)}/>
     {destination.candidates.length > 0 && <datalist id={list}>{destination.candidates.map(candidate => <option key={candidate.address} value={candidate.address} label={candidate.label}/>)}</datalist>}
-    {message ? <span id={note} className={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' ? 'composer-recipient-error' : 'composer-destination-note'} role="status">{message}</span>
+    {message ? <span id={note} className={state === 'error' ? 'composer-recipient-error' : state === 'attention' ? 'composer-destination-note composer-destination-warning' : 'composer-destination-note'} role="status">
+      {state === 'attention' || state === 'error' ? <span className="composer-destination-icon" aria-hidden="true">!</span> : null}{message}</span>
       : automatic ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', automatic)}</span> : null}
     {destination.status === 'choose' && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
       {destination.candidates.map(candidate => <button key={candidate.address} type="button" className="composer-destination-choice" title={candidate.address}
         onClick={() => { destination.onChange(candidate.address); field.current?.focus(); }}>{candidate.label}</button>)}</div>}
+    {destination.status === 'required' && destination.onConnect && <button type="button" className="composer-destination-choice composer-destination-connect"
+      onClick={destination.onConnect}>{ecosystem === 'Solana' ? tr('Connect a Solana wallet') : tr('Connect an EVM wallet')}</button>}
     {applying && <div className="composer-amount-actions composer-amount-direct">
       <span id={hint} className="composer-amount-hint">{tr('Press Enter to apply')}</span>
       {onCancel && <button type="button" className="composer-amount-cancel" onClick={onCancel}>{tr('Cancel')}</button>}

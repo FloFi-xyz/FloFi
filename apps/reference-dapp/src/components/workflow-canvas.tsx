@@ -9,6 +9,7 @@ import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-e
 import {isLendingComposition, UNIVERSAL_NETWORKS} from '@defi-workflow-engine/workflow-contracts';
 import {lendingDetails,lendingCanvasEdges} from '../domain/lending-authoring';
 import {useBuild009Wallet} from '../state/build009-wallet-store';
+import { useOptionalJupiter } from '../state/jupiter-store';
 import { transferCardLabel, transferDetails } from '../domain/robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from '../domain/recipient-address';
 import { lendingAmountLabel, lendingNodeAsset, lendingReservesFor } from '../domain/supply-authoring';
@@ -415,6 +416,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const wallet=useBuild009Wallet();
   // BUILD-FLOFI-MAINNET-EXEC-002: the owner's wallets a bridge can deliver to (session, account, Credentials), for each card's destination wallet.
   const destinations = useDestinationWallets(wallet);
+  const solanaWallets = useOptionalJupiter();
   // BUILD-RH-002: catalog-network assets resolve from the official catalog; load it whenever the Canvas shows an action on that network
   // (BUILD-BASE-001: Robinhood Chain and Base). The hook re-renders the Canvas when any catalog registers.
   const catalog = useNetworkCatalog();
@@ -755,10 +757,17 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       const auto = cross ? resolution.kind === 'RESOLVED' ? resolution.wallet : null : session;
       const typed = recipientInputs[id], value = typed ?? canonical;
       const check = value.trim() ? checkDestinationAddress(destinationKey, value) : null;
+      // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the same states the shared gate blocks Simulate on (`destinationRequirement`): EVM → EVM
+      // keeps the signing wallet (no warning); across ecosystems a wallet still being read is `loading`, never "missing".
       const status: CardDestination['status'] = check ? check.ok ? 'valid' : check.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'wrong-ecosystem' : 'invalid'
-        : !cross || resolution.kind === 'RESOLVED' ? 'valid' : resolution.kind === 'CHOOSE' ? 'choose' : 'required';
+        : !cross || resolution.kind === 'RESOLVED' ? 'valid' : resolution.kind === 'CHOOSE' ? 'choose' : resolution.kind === 'LOADING' ? 'loading' : 'required';
       return { network, value, auto: auto ? destinationLabel(destinationKey, localizedProvider(auto, tr)) : null, autoAddress: auto?.address ?? null, candidates, status,
-        placeholder: ecosystem === 'solana' ? 'Solana address' : 'Address (0x…)', changed: typed !== undefined, onChange: (next: string) => editCanvasRecipient?.(id, next) };
+        placeholder: ecosystem === 'solana' ? 'Solana address' : 'Address (0x…)', changed: typed !== undefined, onChange: (next: string) => editCanvasRecipient?.(id, next),
+        ecosystem: ecosystem === 'solana' ? 'Solana' : 'EVM',
+        // Connecting a receiving wallet only reads its public address (the source wallet still signs); Solana through the page's Solana wallet
+        // connection, EVM through the EVM one.
+        onConnect: ecosystem === 'solana' ? solanaWallets ? () => { void solanaWallets.connect('solana:mainnet').catch(() => undefined); } : undefined
+          : () => { void wallet.connect().catch(() => undefined); } };
     };
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.
     const recipientField = (id: string, network: string | undefined, canonical: string | null): CardRecipient | undefined => {
@@ -893,7 +902,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
             : actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid ? null : 'Choose a network available for the connected wallet.' } } : {}),
       } });
     return projected;
-  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
+  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, wallet.connect, solanaWallets, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
   // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution state joins each card's data (no position, size or content change). A card whose
   // step has started executing keeps the estimate it shows and asks for no new one (`useLiveQuote` frozen); a waiting step keeps its live estimate.
