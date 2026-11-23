@@ -59,6 +59,7 @@ Nothing else changes:
 
 **Safeguards:**
 
+- `search_path` limited to `pg_catalog, pg_temp`, and every object schema-qualified, so nothing planted in `public` can stand in for a check;
 - the migration runner's advisory lock (`7340032001`);
 - `lock_timeout 5s`, which also covers the advisory lock;
 - `statement_timeout 60s`.
@@ -69,6 +70,8 @@ Nothing else changes:
 - `RUNTIME_ROLE_NOT_FOUND`.
 - `RUNTIME_ROLE_IS_SUPERUSER`.
 - `RUNTIME_ROLE_IS_OWNER`: the role is the owner or a member of it, so no REVOKE could bind it.
+- `RUNTIME_ROLE_OWNS_SCHEMA`: the role owns schema `public` (on PostgreSQL 15+, by owning the database), so it could drop and recreate the
+  private tables.
 - `MIGRATION_ROLE_REQUIRED`: the connection cannot change the owner's grants.
 
 **Effective-privilege check before COMMIT.** It refuses with `OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: <what>` and rolls the REVOKEs back

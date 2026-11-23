@@ -85,7 +85,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
   // Workflow review: also next to an expired Review whose "Simulate again" is what the destination blocks (its reason is then shown under it).
   // MCP review: only where Simulate is the action (no Review, or one that expired), never beside a Review that can still be authorized.
   const destinationShown = !props.gated && !live && !props.walletIssue && Boolean(props.destinationIssue)
-    && (!authorization.key || review.status === 'expired' || review.status === 'invalidated');
+    && (!authorization.key || review.status === 'expired' || review.status === 'invalidated' || review.simulationBlocked);
   // Frontend-UX review: Connect and Try again replace themselves (the reason changes), so focus moves to the status that says what happened.
   const statusRef = useRef<HTMLDivElement>(null);
   return <main id="workspace" className="main signing-surface" tabIndex={-1} aria-label={tr('Authorize with your wallet')}>

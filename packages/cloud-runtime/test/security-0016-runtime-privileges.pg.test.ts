@@ -331,6 +331,14 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
     expect(refusal(await remediate(m, { role: m.owner }))).toBe('RUNTIME_ROLE_IS_OWNER');
     expect(refusal(await remediate(m, { as: m.runtime }))).toBe('MIGRATION_ROLE_REQUIRED');
     expect(await acls(m.asOwner)).toEqual(unchanged);
+    // Security review: a runtime role that owns schema public could drop and recreate the private tables whatever their grants say.
+    const owners = createDatabase({ connectionString: m.url(m.owner).replace(`${m.owner}:`, `${new URL(testDatabaseUrl().toString()).username}:`).replace(/:[0-9a-f]{32}@/, '@'), maxConnections: 1 });
+    try {
+      await owners.query(`ALTER SCHEMA public OWNER TO ${m.runtime}`);
+      expect(refusal(await remediate(m))).toBe('RUNTIME_ROLE_OWNS_SCHEMA');
+      await owners.query(`ALTER SCHEMA public OWNER TO pg_database_owner`);
+    } finally { await owners.close(); }
+    expect(await acls(m.asOwner)).toEqual(unchanged);
 
     // A failure AFTER the REVOKEs ran: the runtime role inherits INSERT on the permit table through another role, so the post-check refuses and
     // the whole transaction (the REVOKEs included) rolls back; the direct grants are still exactly as before.
@@ -339,9 +347,15 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
     const admin = createDatabase({ connectionString: testDatabaseUrl().toString(), maxConnections: 1 });
     try { await admin.query(`CREATE ROLE ${writer} NOLOGIN`); await admin.query(`GRANT ${writer} TO ${m.runtime}`); } finally { await admin.close(); }
     await m.asOwner.query(`GRANT INSERT ON execution_purge_permits TO ${writer}`);
+    // Security review: functions planted in `public` that would answer every check "false" cannot fool it (search_path is pg_catalog only).
+    await m.asOwner.query(`CREATE FUNCTION public.has_table_privilege(text, text, text) RETURNS boolean LANGUAGE sql AS 'SELECT false'`);
+    await m.asOwner.query(`CREATE FUNCTION public.pg_has_role(text, oid, text) RETURNS boolean LANGUAGE sql AS 'SELECT false'`);
     const withWriter = await acls(m.asOwner);
     expect(refusal(await remediate(m))).toBe(`OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: execution_purge_permits:INSERT, execution_purge_permits:COLUMN, MEMBER:${writer}:execution_purge_permits`);
     expect(await acls(m.asOwner)).toEqual(withWriter);
+    expect((await verification(m)).summary).toMatchObject({ runtime_touches_permits: true, runtime_member_writes: true });
+    await m.asOwner.query(`DROP FUNCTION public.has_table_privilege(text, text, text)`);
+    await m.asOwner.query(`DROP FUNCTION public.pg_has_role(text, oid, text)`);
     await m.asOwner.query(`REVOKE ALL ON execution_purge_permits FROM ${writer}`);
     const admin2 = createDatabase({ connectionString: testDatabaseUrl().toString(), maxConnections: 1 });
     try { await admin2.query(`REVOKE ${writer} FROM ${m.runtime}`); } finally { await admin2.close(); }

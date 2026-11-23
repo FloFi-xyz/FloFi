@@ -741,9 +741,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       spends: continuationSimulation && continuationSimulation.input !== '—' ? continuationSimulation.input : continuationStep.funding?.bound ?? continuationStep.amount,
       receives: continuationSimulation?.result ?? null,
       previous: previousStep ? { number: previousStep.number, delivered: previousStep.delivered } : null,
-      status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction || destinationBlocked ? 'BLOCKED'
+      // Workflow review: the destination blocks only a new simulation; a Review that can still be authorized is READY, not "blocked".
+      status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction
+        || destinationBlocked && canvasAction.kind === 'simulate' ? 'BLOCKED'
         : (canvasAction.kind === 'approve' || canvasAction.kind === 'execute') && !canvasAction.disabled ? 'READY' : 'SIMULATE',
-      reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null) ?? destinationBlocked
+      reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null)
+        ?? (canvasAction.kind === 'simulate' ? destinationBlocked : null)
         ?? (simulationSource.state.error ? simulationError(simulationSource.state.error, simulationSource.kind) : null) } : null;
   // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security and wallet-execution reviews): a universal bridge whose receiving wallet was missing
   // here is not prepared by itself once it resolves (a connected wallet, Try again, a recovered read): its simulation may ask the source wallet

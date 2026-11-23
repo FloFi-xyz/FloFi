@@ -15,12 +15,14 @@
 -- permit that names an existing tombstone, and a forged tombstone written together with a forged History event whose run and journal were
 -- then deleted completely. Only the database's own history (point-in-time restore, logs) can rule those out.
 BEGIN TRANSACTION READ ONLY;
+-- Only pg_catalog resolves an unqualified name (no object in `public` can stand in for a check); every table is schema-qualified.
+SET LOCAL search_path = pg_catalog, pg_temp;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '120s';
 -- 1. Identity: 0016 exactly as certified, and the ledger head.
 SELECT version, name, sha256, sha256 = 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' AS certified,
-  (SELECT max(version) FROM schema_migrations) AS ledger_head
-FROM schema_migrations WHERE version = 16;
+  (SELECT max(version) FROM public.schema_migrations) AS ledger_head
+FROM public.schema_migrations WHERE version = 16;
 -- 2. The runtime role, its attributes and every role it belongs to (an inherited role's grants count as its own).
 SELECT r.rolname, r.rolsuper, r.rolinherit, r.rolbypassrls, r.rolcanlogin,
   coalesce((SELECT string_agg(g.rolname, ', ' ORDER BY g.rolname) FROM pg_roles g WHERE g.oid <> r.oid AND pg_has_role(r.oid, g.oid, 'MEMBER')), '') AS member_of
@@ -61,16 +63,16 @@ SELECT pg_get_userbyid(d.defaclrole) AS grantor, CASE WHEN d.defaclnamespace = 0
 FROM pg_default_acl d ORDER BY 1, 2, 3;
 -- 7. Integrity at rest (counts only). Every column but `tombstones` is 0 where only the checked procedure ever deleted execution history (see
 --    the header for the two forgeries no count can see).
-SELECT (SELECT count(*) FROM execution_purge_permits) AS open_permits,
-  (SELECT count(*) FROM execution_purge_audit) AS tombstones,
-  (SELECT count(*) FROM execution_purge_audit a WHERE NOT EXISTS (SELECT 1 FROM owner_history_events e WHERE e.tenant_id = a.tenant_id
+SELECT (SELECT count(*) FROM public.execution_purge_permits) AS open_permits,
+  (SELECT count(*) FROM public.execution_purge_audit) AS tombstones,
+  (SELECT count(*) FROM public.execution_purge_audit a WHERE NOT EXISTS (SELECT 1 FROM public.owner_history_events e WHERE e.tenant_id = a.tenant_id
     AND e.owner_account = a.owner_account AND e.kind = 'EXECUTION_RUN' AND e.record_id = a.run_id AND e.action = 'DELETED')) AS tombstones_without_history_event,
-  (SELECT count(*) FROM execution_purge_audit a WHERE EXISTS (SELECT 1 FROM execution_runs r WHERE r.tenant_id = a.tenant_id AND r.run_id = a.run_id)
-    OR EXISTS (SELECT 1 FROM journal_entries j WHERE j.tenant_id = a.tenant_id AND j.run_id = a.run_id)
-    OR EXISTS (SELECT 1 FROM execution_logs l WHERE l.tenant_id = a.tenant_id AND l.namespace = a.namespace AND l.name = a.log_name)) AS tombstones_with_live_records,
-  (SELECT count(*) FROM execution_logs l WHERE (SELECT count(*) FROM execution_log_segments s WHERE s.tenant_id = l.tenant_id AND s.namespace = l.namespace
+  (SELECT count(*) FROM public.execution_purge_audit a WHERE EXISTS (SELECT 1 FROM public.execution_runs r WHERE r.tenant_id = a.tenant_id AND r.run_id = a.run_id)
+    OR EXISTS (SELECT 1 FROM public.journal_entries j WHERE j.tenant_id = a.tenant_id AND j.run_id = a.run_id)
+    OR EXISTS (SELECT 1 FROM public.execution_logs l WHERE l.tenant_id = a.tenant_id AND l.namespace = a.namespace AND l.name = a.log_name)) AS tombstones_with_live_records,
+  (SELECT count(*) FROM public.execution_logs l WHERE (SELECT count(*) FROM public.execution_log_segments s WHERE s.tenant_id = l.tenant_id AND s.namespace = l.namespace
     AND s.name = l.name) <> l.segment_count) AS logs_missing_segments,
-  (SELECT count(*) FROM execution_runs r WHERE NOT EXISTS (SELECT 1 FROM execution_logs l WHERE l.tenant_id = r.tenant_id AND l.namespace = r.namespace
+  (SELECT count(*) FROM public.execution_runs r WHERE NOT EXISTS (SELECT 1 FROM public.execution_logs l WHERE l.tenant_id = r.tenant_id AND l.namespace = r.namespace
     AND l.name = r.log_name)) AS runs_without_log,
-  (SELECT count(*) FROM (SELECT 1 FROM journal_entries GROUP BY tenant_id, run_id HAVING count(*) <> max(sequence) + 1 OR min(sequence) <> 0) j) AS journals_with_gaps;
+  (SELECT count(*) FROM (SELECT 1 FROM public.journal_entries GROUP BY tenant_id, run_id HAVING count(*) <> max(sequence) + 1 OR min(sequence) <> 0) j) AS journals_with_gaps;
 COMMIT;

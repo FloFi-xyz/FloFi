@@ -35,6 +35,8 @@
 -- docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.md. Proven on disposable PostgreSQL by
 -- packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts, which runs this exact file.
 BEGIN;
+-- Security review: only pg_catalog resolves an unqualified name here, so no object planted in `public` can stand in for a check below.
+SET LOCAL search_path = pg_catalog, pg_temp;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
 SELECT pg_advisory_xact_lock(7340032001);
@@ -63,6 +65,9 @@ BEGIN
       RAISE EXCEPTION 'MIGRATION_ROLE_REQUIRED';
     END IF;
   END LOOP;
+  -- Security review: the owner of schema public (on PostgreSQL 15+ the database owner, through pg_database_owner) could drop and recreate
+  -- the private tables whatever their grants say.
+  IF pg_has_role(v_runtime, (SELECT nspowner FROM pg_namespace WHERE nspname = 'public'), 'MEMBER') THEN RAISE EXCEPTION 'RUNTIME_ROLE_OWNS_SCHEMA'; END IF;
 END $guard$;
 REVOKE ALL ON TABLE public.execution_purge_permits FROM PUBLIC;
 REVOKE ALL ON TABLE public.execution_purge_audit FROM PUBLIC;
