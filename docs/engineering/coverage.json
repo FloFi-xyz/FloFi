@@ -1310,6 +1310,10 @@
       "path": "scripts/test_ci_optimization.py",
       "stage": "governance"
     },
+    "scripts.test_ci_public_connectivity": {
+      "path": "scripts/test_ci_public_connectivity.py",
+      "stage": "governance"
+    },
     "scripts.test_ci_skill_registry": {
       "path": "scripts/test_ci_skill_registry.py",
       "stage": "governance"
@@ -5952,6 +5956,24 @@
       "gaps": [
         "Static/config contracts do not deploy or prove hosted Vercel/Railway/Cloud Build operations; CI branch protection remains owner-managed.",
         "Codex and Claude specialist delegation is model-driven: hooks record and bound what actually runs but cannot force an invocation; the Codex/Claude harness probes need local CLIs and are not CI stages."
+      ]
+    },
+    {
+      "id": "public-connectivity--infrastructure-ci",
+      "primary": "flofi-infrastructure-ci",
+      "dependencies": [
+        "flofi-frontend-ux"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "scripts/check-public-entry.mjs",
+        "scripts/check_public_connectivity.py"
+      ],
+      "suites": [
+        "scripts.test_ci_public_connectivity"
+      ],
+      "gaps": [
+        "Governance verifies probe classification and recurrence handling offline. Globalping and Playwright public entry checks are opt-in and depend on the measured network or browser runner. They do not certify nationwide availability or complete sign-up."
       ]
     },
     {
