@@ -14,7 +14,7 @@ import type { DestinationResolution } from '../domain/destination-wallet';
 
 const fixture = vi.hoisted(() => ({ workflow: { nodes: [] as unknown[], revision: 1 }, evm: { kind: 'NONE' } as DestinationResolution, solana: { kind: 'NONE' } as DestinationResolution,
   calls: [] as string[] }));
-const record = (name: string) => (..._args: unknown[]) => { fixture.calls.push(name); return Promise.resolve({ ok: false, code: 'NOT_EXPECTED' }); };
+const record = (name: string) => () => { fixture.calls.push(name); return Promise.resolve({ ok: false, code: 'NOT_EXPECTED' }); };
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ runtimeWorkflow: fixture.workflow }) }));
 vi.mock('./build009-wallet-store', () => ({ injected: () => null, useBuild009Wallet: () => ({ account: '0x90f5aa2a1b2c3d4e5f60718293a4b5c6d7e8d303', chainId: '0xa4b1',
   session: () => { fixture.calls.push('wallet.session'); return Promise.resolve({ account: '0x90f5aa2a1b2c3d4e5f60718293a4b5c6d7e8d303', chainId: '0xa4b1' }); },
