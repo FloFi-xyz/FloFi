@@ -5610,7 +5610,8 @@
         "apps/reference-dapp/src/mcp/pix-approval-status.ts",
         "apps/reference-dapp/src/mcp/runtime.ts",
         "apps/reference-dapp/src/mcp/simulation.ts",
-        "apps/reference-dapp/src/mcp/tools.ts"
+        "apps/reference-dapp/src/mcp/tools.ts",
+        "apps/reference-dapp/src/platform/output-guard.ts"
       ],
       "suites": [
         "app.mcp.automation-status",

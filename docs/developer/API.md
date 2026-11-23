@@ -85,6 +85,14 @@ Optional filters `network` (a public network ID such as `base`, or `base-sepolia
 `{available: false, reason: "OWNER_WALLET_IN_FLOFI_ONLY"}`, `availability {supportedByCode, enabledByDeployment, enabledByPolicy,
 demonstratedEvidence, mockedHarness}` and `exampleStrategy`. Internal flow names, adapters and editor commands are never exposed.
 
+Without filters, the list may also carry `publishedIntegrations`: Studio packages that an independent FloFi operator certified on a
+mainnet and published PUBLIC, or PRIVATE to this key's project. Each entry has `projectId` (the publisher's project), `slug`,
+`version`, `revision`, `manifestSha256`, `name`, `kind`, `architecture`, `chainRef` (CAIP-2), an optional `deploymentRef`,
+`capabilities` (`network.read` or `vault.read`) and `visibility`. The field is omitted when it would be empty, when a filter is set,
+or when the deployment has no certification records. Entries are read-only metadata: they add no action, network or operation to the
+rows above and carry no execution authority, for sandbox and production keys alike. RPC URLs, sources, evidence and audiences are
+never returned. The list holds at most 250 entries.
+
 ### `POST /strategies`
 
 Body: `{ "strategy": <StrategySpec> }` — a version 1 strategy or `{ "version": 2, "steps": [ … ] }` (1–8 steps). This is the same

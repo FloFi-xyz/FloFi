@@ -185,7 +185,48 @@ describe('Studio metadata certification and publication', () => {
       WHERE tenant_id=$1 AND project_id=$2 AND version=$3`, [tenant, projectId, newTarget.version]);
     expect(certified.rows).toEqual([expect.objectContaining({ capabilities: ['network.read'], adapter_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       evidence_sha256: expect.stringMatching(/^[a-f0-9]{64}$/), evidence: expect.objectContaining({ corroboration: expect.objectContaining({ reference }) }) })]);
+    // Retained evidence keeps endpoint origins and digests only: a provider key in an RPC path never outlives the owner's account.
+    const retained = JSON.stringify(certified.rows[0]?.evidence);
+    expect(retained).not.toContain('"rpcUrl"');
+    expect(retained).toContain('"rpcOrigin":"https://proposal-rpc.example.net"');
+    expect(retained).toContain('"rpcOrigin":"https://separate-rpc.example.org"');
+    expect(retained).toMatch(/"rpcUrlSha256":"[a-f0-9]{64}"/);
     await expect(t.db.query('UPDATE studio_certifications SET reason=$1 WHERE project_id=$2', ['Attempted change', projectId])).rejects.toThrow();
+  });
+
+  it('keeps a certified version when an owner probe that started before submission reports a contradiction afterwards', async () => {
+    const projectId = await projectFor().create('Late contradiction', '', now);
+    const audience = await projectFor(guest).create('Late contradiction audience', '', now);
+    const manifest = defineNetwork('late-contradiction', { chainRef: 'eip155:923701', name: 'Late Network' });
+    const store = studio();
+    const latest = async () => (await store.list(projectId)).find(item => item.slug === manifest.slug)!;
+    await store.create(projectId, manifest, now);
+    await store.probe(projectId, await latest(), 'verify', clock, async () => evidence(manifest, 'verify'));
+    await store.probe(projectId, await latest(), 'test', clock, async () => evidence(manifest, 'test'));
+    let fail: (cause: Error) => void = () => undefined;
+    const slow = store.probe(projectId, await latest(), 'test', clock, () => new Promise((_, reject) => { fail = reject; }));
+    await store.submit(projectId, await latest(), now);
+    const { slug, version, generation } = await latest();
+    const target = { projectId, slug, version, generation };
+    await change(actionBody(target, 'approve', { reference, rpcUrl }));
+    await change(actionBody(target, 'publish', { visibility: 'PRIVATE', audience: [`project:${audience}`] }));
+    fail(new Error('STUDIO_CHAIN_MISMATCH'));
+    await expect(slow).rejects.toThrow('STUDIO_CHAIN_MISMATCH');
+    expect(await latest()).toMatchObject({ status: 'CERTIFICATION_PENDING', generation });
+    expect((await catalog(tenant, { projectId: audience })).map(entry => entry.slug)).toEqual([slug]);
+  });
+
+  it('drops only a published entry whose publisher-chosen text a surface output guard would refuse', async () => {
+    const projectId = await projectFor().create('Guarded names', '', now);
+    const audience = await projectFor(guest).create('Guarded audience', '', now);
+    const safe = await pending(projectId, defineNetwork('guard-safe', { chainRef: 'eip155:923601', name: 'Guarded Network' }));
+    const unsafe = await pending(projectId, defineNetwork('guard-unsafe', { chainRef: 'eip155:923602', name: 'flofi_sk_probe' }));
+    for (const target of [safe, unsafe]) {
+      await change(actionBody(target, 'approve', { reference, rpcUrl }));
+      await change(actionBody(target, 'publish', { visibility: 'PRIVATE', audience: [`project:${audience}`] }));
+    }
+    expect((await catalog(tenant, { projectId: audience })).map(entry => entry.slug)).toEqual(['guard-safe']);
+    expect(await catalog()).toEqual([]);
   });
 
   it('scopes private publication, rolls back only certified immutable versions, and immediately revokes access', async () => {

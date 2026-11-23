@@ -12,6 +12,7 @@ import { CERTIFIED_FORWARD_MIGRATIONS, type Queryable } from '@defi-workflow-eng
 import { defineIntegrationPackage, type IntegrationPackage } from '@defi-workflow-engine/developer-sdk';
 import { isTestNetwork } from '../domain/network-scope.ts';
 import { studioManifestDigest } from '../studio/integration-manifest.ts';
+import { assertSafeOutput } from './output-guard.ts';
 
 const migration = CERTIFIED_FORWARD_MIGRATIONS.flatMap(entry => entry.migrations).find(entry => entry.name === 'studio_certification');
 export const STUDIO_ACCOUNT_ID = /^acct_[a-f0-9]{32}$/;
@@ -91,10 +92,13 @@ export async function listPublishedStudioIntegrations(db: Queryable, tenantId: s
       const manifest = defineIntegrationPackage(row.manifest);
       if (studioManifestDigest(manifest) !== row.manifest_sha256 || studioDigest(manifest.adapter) !== row.adapter_sha256
         || studioEvidenceDigest(row.evidence) !== row.evidence_sha256 || row.capabilities[0] !== studioMetadataCapability(manifest)) return [];
-      return [{ projectId: row.project_id, slug: row.slug, version: row.version, revision: row.revision,
+      const entry: PublishedStudioIntegration = { projectId: row.project_id, slug: row.slug, version: row.version, revision: row.revision,
         manifestSha256: row.manifest_sha256, name: manifest.name, kind: manifest.kind, architecture: manifest.architecture,
         chainRef: manifest.chainRef!, ...(manifest.deploymentRef ? { deploymentRef: manifest.deploymentRef } : {}),
-        capabilities: row.capabilities, visibility: row.visibility }];
+        capabilities: row.capabilities, visibility: row.visibility };
+      // Publisher-chosen text that a surface's output guard would refuse drops only this entry, never the caller's whole discovery response.
+      assertSafeOutput(entry);
+      return [entry];
     } catch { return []; }
   });
 }

@@ -4389,6 +4389,7 @@
             "type": "array",
             "items": {
               "additionalProperties": false,
+              "description": "Certified mainnet metadata. It adds no operation and carries no execution authority.",
               "type": "object",
               "required": [
                 "projectId",
@@ -4405,18 +4406,26 @@
               ],
               "properties": {
                 "projectId": {
+                  "pattern": "^prj_[a-z2-7]{26}$",
+                  "description": "The publishing developer project.",
                   "type": "string"
                 },
                 "slug": {
+                  "pattern": "^[a-z][a-z0-9-]{1,49}$",
                   "type": "string"
                 },
                 "version": {
+                  "minimum": 1,
                   "type": "integer"
                 },
                 "revision": {
+                  "pattern": "^(0|[1-9][0-9]{0,18})$",
+                  "description": "The publication revision.",
                   "type": "string"
                 },
                 "manifestSha256": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "SHA-256 of the certified, normalized package.",
                   "type": "string"
                 },
                 "name": {
@@ -4429,6 +4438,7 @@
                   "type": "string"
                 },
                 "chainRef": {
+                  "description": "CAIP-2 chain identifier.",
                   "type": "string"
                 },
                 "deploymentRef": {

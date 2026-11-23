@@ -191,7 +191,9 @@ export function createStudioStore(db: Database, tenantId: string, accountId: str
             // Submit advances the generation once while preserving the same evidence. Successful probes replace evidence.
             const sameEvidence = row?.status === 'VERIFIED' && row.generation === ref.generation
               || row?.status === 'CERTIFICATION_PENDING' && row.generation === ref.generation + 1;
-            if (row?.version === ref.version && sameEvidence) {
+            // A version an operator certified meanwhile keeps its reviewed state: only the admin lifecycle may suspend or revoke it.
+            if (row?.version === ref.version && sameEvidence
+              && !await studioCertificationOwnsVersion(tx, tenantId, projectId, row.slug, row.version)) {
               await advance(tx, projectId, row, 'DRAFT', 'INVALIDATED', now(), null, null, { code: cause.message });
             }
           });

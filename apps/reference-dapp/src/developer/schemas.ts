@@ -73,11 +73,13 @@ export const CapabilityView = Type.Object({ object: Type.Literal('capability'), 
     mockedHarness: Type.Boolean() }, strict),
   exampleStrategy: Type.Record(Type.String(), Type.Unknown(), { description: 'A valid version 1 strategy for this row.' }) }, strict);
 const PublishedIntegration = Type.Object({
-  projectId: Type.String(), slug: Type.String(), version: Type.Integer(), revision: Type.String(), manifestSha256: Type.String(),
-  name: Type.String(), kind: Type.String(), architecture: Type.String(), chainRef: Type.String(),
+  projectId: id('prj', 'The publishing developer project.'), slug: Type.String({ pattern: '^[a-z][a-z0-9-]{1,49}$' }),
+  version: Type.Integer({ minimum: 1 }), revision: Type.String({ pattern: '^(0|[1-9][0-9]{0,18})$', description: 'The publication revision.' }),
+  manifestSha256: Type.String({ pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the certified, normalized package.' }),
+  name: Type.String(), kind: Type.String(), architecture: Type.String(), chainRef: Type.String({ description: 'CAIP-2 chain identifier.' }),
   deploymentRef: Type.Optional(Type.String()), capabilities: Type.Array(literals(['network.read', 'vault.read'] as const)),
   visibility: literals(['PUBLIC', 'PRIVATE'] as const),
-}, strict);
+}, { ...strict, description: 'Certified mainnet metadata. It adds no operation and carries no execution authority.' });
 export const CapabilityList = Type.Object({ object: Type.Literal('list'), environment: Environment, data: Type.Array(CapabilityView),
   publishedIntegrations: Type.Optional(Type.Array(PublishedIntegration, {
     description: 'Certified Studio metadata visible to this project. These entries carry no financial execution authority.',

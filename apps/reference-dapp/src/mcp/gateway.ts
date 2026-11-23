@@ -229,7 +229,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   const scope = networkScope({ ...process.env, ...env });
   const automations = options.automations ?? deploymentAutomationReader(env, budget);
   const publicStudioIntegrations = async () => {
-    if (active.kind !== 'mcp-credential' || !env.DATABASE_URL) return [];
+    if (!env.DATABASE_URL) return [];
     const host = await mcpStateHost(env).catch(() => null);
     if (!host || host.tenantId !== active.tenantId) return [];
     const { listPublishedStudioIntegrations } = await import('../platform/studio-catalog.ts');

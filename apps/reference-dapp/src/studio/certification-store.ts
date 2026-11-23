@@ -85,6 +85,17 @@ export function parseStudioDecision(body: Record<string, unknown>): StudioDecisi
   }
 }
 
+/**
+ * Retained certification evidence is append-only and outlives the owner's account, so it keeps an RPC endpoint's origin and a digest of
+ * the full URL, never a path that may embed a provider key. The proposal's own copy (schema 0035) is deleted with the owner's account.
+ */
+function retainedEvidence(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(retainedEvidence);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).flatMap(([key, item]): [string, unknown][] => key === 'rpcUrl' && typeof item === 'string'
+    ? [['rpcOrigin', new URL(item).origin], ['rpcUrlSha256', digest(item)]] : [[key, retainedEvidence(item)]]));
+}
+
 const scope = (tenantId: string, target: Target) => [tenantId, target.projectId, target.slug, target.version] as const;
 const sameHost = (a: string, b: string) => new URL(a).hostname === new URL(b).hostname;
 
@@ -229,10 +240,11 @@ export async function decideStudioCertification(db: Database, tenantId: string, 
         evidence.corroboration = { evidence: corroboration, reference: decision.reference };
       }
       result = decision.action === 'approve' ? 'CERTIFIED' : 'REJECTED';
+      const retained = retainedEvidence(evidence);
       await tx.query(`INSERT INTO studio_certifications
         (tenant_id,project_id,slug,version,source_generation,decision,manifest_sha256,adapter_sha256,evidence_sha256,evidence,
          capabilities,actor,reason,decided_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      [...target, row.generation, result, row.manifest_sha256, digest(manifest.adapter), evidenceDigest(evidence), evidence,
+      [...target, row.generation, result, row.manifest_sha256, digest(manifest.adapter), evidenceDigest(retained), retained,
         capabilities, actor.principal.principalId, decision.reason, now]);
     } else {
       if (!existing || existing.decision !== 'CERTIFIED' || existing.manifest_sha256 !== row.manifest_sha256

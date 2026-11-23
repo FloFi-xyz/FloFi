@@ -1227,3 +1227,30 @@ before the owner uses `studio-certification-migrate`. This command requires
 schema 35 and applies only 0036. Verify read and insert grants, including use of
 the publication sequence, in a disposable database before applying it to any
 shared database. A binary that recognizes only 0035 refuses schema 36.
+
+**Objects and locks.** 0036 creates two tables, their append-only triggers and
+one partial unique index. It changes no existing object. Its foreign keys add
+internal referential-integrity triggers on `developer_projects` and
+`admin_principals` and take a SHARE ROW EXCLUSIVE lock on both while the
+migration runs. Project creation, edits, disabling and the detach on account
+deletion wait for it, bounded by the 5 s lock timeout. If the timeout is hit,
+the transaction rolls back and the database stays at 35.
+
+**Rollback.** A 0035-only binary refuses schema 36. Roll back to a build that
+carries this certificate. Before 0036 runs, the new build serves schema 35 with
+certification unavailable (HTTP 503 `STUDIO_CERTIFICATION_NOT_INSTALLED`, empty
+catalog).
+
+**Retention.** Certification rows and publication events are append-only and
+outlive the owner's account, which only detaches the project. They never hold
+an RPC URL: retained evidence keeps each endpoint's origin and a SHA-256 of
+the full URL, so a provider key embedded in a path is not retained. The proposal
+itself and its full evidence (schema 0035) are still deleted with the owner's
+account. Three items are retained deliberately and need an owner retention
+decision before production use:
+- the operator's decision reasons (at most 500 characters, as in the Admin
+  settings history);
+- the operator's official reference URL;
+- opaque `account:` and `project:` audience identifiers.
+
+None of them is returned by the public catalog.

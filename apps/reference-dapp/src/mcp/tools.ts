@@ -55,6 +55,7 @@ import type { McpState } from './oauth/state.ts';
 import { observeRuntime, type McpRuntime } from './runtime.ts';
 import { isPixApproval, pixApprovalProgress } from './pix-approval-status.ts';
 import { assertSafeOutput, strategyFlow } from './simulation.ts';
+import type { PublishedStudioIntegration } from '../platform/studio-catalog.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../platform/workflow-visual.ts';
 import { workflowVisualLayout, workflowVisualText } from '../platform/workflow-visual-layout.ts';
 import { workflowVisualPngOrNull } from '../server/workflow-visual-image.ts';
@@ -223,7 +224,8 @@ export type ToolEvent = { readonly tool: string; readonly outcome: string; reado
 export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: McpRuntime; readonly onTool?: (event: ToolEvent) => void; readonly now?: () => number;
   /** BUILD-MCP-002: present for OAuth deployments. */
   readonly oauth?: OAuthConfig; readonly state?: McpState;
-  readonly publicStudioIntegrations?: NonNullable<McpState['publishedIntegrations']>;
+  /** BUILD-FLOFI-STUDIO-UNIVERSAL-002: PUBLIC Studio metadata only. MCP account ids are not FloFi accounts, so PRIVATE audiences never apply. */
+  readonly publicStudioIntegrations?: () => Promise<readonly PublishedStudioIntegration[]>;
   /** BUILD-MCP-002: the MCP handoff policy (default: test funds only, every mainnet off). */
   readonly policy?: HandoffPolicy;
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
@@ -382,10 +384,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   };
 
   register('get_supported_networks', 'Supported networks', 'Networks FloFi can author strategies for, with CAIP-2 ids, network class and the actions available. ' +
-    'Also lists Studio metadata visible to the requester. Published metadata confers no financial execution capability.', Schemas.none, pure, async () => {
-    const publishedIntegrations = await (ctx.principal.kind === 'mcp-oauth'
-      ? ctx.state?.publishedIntegrations?.(ctx.principal.accountId)
-      : ctx.publicStudioIntegrations?.());
+    'Also lists PUBLIC Studio metadata an independent FloFi operator certified. It confers no financial execution capability.', Schemas.none, pure, async () => {
+    const publishedIntegrations = await ctx.publicStudioIntegrations?.();
     return { ok: true, networks: supportedNetworks(scope), ...(publishedIntegrations?.length ? { publishedIntegrations } : {}) };
   });
 
