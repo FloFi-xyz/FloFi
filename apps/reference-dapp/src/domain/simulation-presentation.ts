@@ -264,6 +264,9 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   if (/WALLET_UNAUTHORIZED/i.test(error)) return 'Your wallet did not authorize FloFi for this account. Reconnect the wallet, then try again.';
   if (/WALLET_METHOD_UNSUPPORTED/i.test(error)) return 'This wallet cannot send this kind of request. Use another wallet, then try again.';
   // A chain head that lagged or reorganised is the network's answer, not an expired result.
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a wallet sign-in session that ended (before the broad "expired" rule below, which would call it
+  // an expired result). Anchored: an account or Privy session is not a wallet sign-in.
+  if (/^(?:WALLET_SESSION_(?:REQUIRED|EXPIRED|INVALID)|SIWE_SESSION_EXPIRED)$/.test(error)) return 'Your wallet sign-in expired. Simulate again and sign the sign-in message; it moves no funds and authorizes no transaction. Nothing was signed or sent.';
   if (/STALE_CHAIN_HEAD|QUOTE_BLOCK_REORG/i.test(error)) return 'The network did not answer FloFi\'s reads, so nothing was simulated or sent. This is not a liquidity problem; try again shortly.';
   if (/EXPIRED|STALE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
   // Issue #149 (quoter): a read the network never answered is not a missing pool, and a missing pool is not an outage.
@@ -276,7 +279,6 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   // rule below (which read "Connect the wallet that will sign", a request the owner whose source wallet was connected could never satisfy).
   const destination = destinationWalletMessage(error);
   if (destination) return destination;
-  if (/WALLET_SESSION_(?:REQUIRED|EXPIRED|INVALID)|SIWE_SESSION_EXPIRED|SESSION_EXPIRED/i.test(error)) return 'Your wallet sign-in expired. Simulate again and sign the sign-in message; it moves no funds and authorizes no transaction. Nothing was signed or sent.';
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
   if (/RECIPIENT_(?:REQUIRED|INVALID|NOT_EOA|NOT_WALLET|IS_TOKEN_ACCOUNT|IS_PROGRAM|OFF_CURVE|IS_SENDER|UNSUPPORTED)/i.test(error)) return 'Check the destination address. It must be a valid wallet address on this network, not a token or program account.';
   if (/EXTENSION/i.test(error)) return 'This token uses a token feature FloFi cannot verify safely. Nothing was simulated or sent.';
@@ -297,13 +299,15 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   if (/OWNER_NOT_EOA/i.test(error)) return 'This address is a smart contract wallet (for example a Safe), so it cannot sign this transaction itself. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.';
   if (/EXECUTION_NOT_ENABLED|NETWORK_UNAVAILABLE|NETWORK_UNSUPPORTED|PROFILE_UNSUPPORTED|_NOT_ENABLED$/i.test(error)) return 'This action is not available on this FloFi server right now. Nothing was simulated or sent.';
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a provider FloFi can quote but not execute is a route limitation, never a wallet problem.
-  if (/^(?:LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED|MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED|ACROSS_EXECUTES_ON_CERTIFIED_ROUTER(?:_PAIRS_ONLY)?)$/.test(error))
+  if (/^ACROSS_EXECUTES_ON_CERTIFIED_ROUTER(?:_PAIRS_ONLY)?$/.test(error))
+    return 'Across runs through FloFi\'s certified Router bridge for its own supported pairs, not through this bridge. Choose Best routing, then simulate again. Nothing was signed or sent.';
+  if (/^(?:LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED|MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED)$/.test(error))
     return 'The selected bridge provider is shown for comparison only: FloFi cannot verify and execute its route yet. Choose Best routing, then simulate again. Nothing was signed or sent.';
   if (/NO_ROUTE|ROUTE_UNAVAILABLE|ROUTE_REFUSED|UNSUPPORTED/i.test(error)) return 'A route is not available for this workflow. Check its tokens and networks on the Canvas.';
   if (/APPROVAL|ALLOWANCE/i.test(error)) return 'The required token approval could not be verified. Simulate again before continuing.';
   if (/CAPACITY_EXCEEDED|INSUFFICIENT_COLLATERAL|NO_COLLATERAL|BORROW_CAPACITY|COLLATERAL_REQUIRED|RESERVE_(PAUSED|INACTIVE|FROZEN|UNAVAILABLE)|LIQUIDITY_(UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_LIQUIDITY/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a wallet on another network is asked to switch networks, not to reconnect.
-  if (/WRONG_CHAIN|WRONG_CLUSTER/i.test(error)) return 'Your wallet is on another network than this step\'s source network. Switch your wallet to the source network, then simulate again. Nothing was signed or sent.';
+  if (/WRONG_CHAIN|WRONG_CLUSTER/i.test(error)) return 'Your wallet is on another network than this step\'s source network. Switch your wallet to the source network, then try again. Nothing was signed or sent.';
   if (/WRONG_WALLET|WRONG_OWNER|WALLET_MISMATCH/i.test(error)) return 'Reconnect the wallet used for this workflow and simulate again.';
   if (/REJECTED|CANCELLED|USER_REFUSAL/i.test(error)) return 'The wallet request was cancelled. Try again when ready.';
   if (/SIMULATION_FAILED|SIMULATION_UNEXPECTED|SIMULATED_[A-Z_]*MISMATCH|SIMULATED_[A-Z_]*BELOW|SIMULATION_INVALID/i.test(error)) return 'The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.';

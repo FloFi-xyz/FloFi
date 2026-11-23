@@ -101,8 +101,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem
     ? resolvedAddress(destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana) : null;
   const implicitDestination = details?.fields.recipient === 'CONNECTED_DESTINATION_WALLET' ? destinationWallet : null;
-  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (incident: an EVM → Solana bridge with MetaMask connected and no Solana wallet known): a bridge
-  // whose destination wallet is not resolved is refused HERE, before any sign-in signature, with what is actually missing — the receiving
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (incident: an EVM → Solana bridge with MetaMask connected and no Solana wallet known): a NEW
+  // simulation of a bridge whose destination wallet is not resolved is refused HERE, before any sign-in signature, with what is actually missing — the receiving
   // wallet, never the signing one. Within one ecosystem the recipient is the signing wallet itself (`OWNER`) and nothing more is asked.
   const destination = details ? destinationRequirement(details.fields.recipient, destinationEcosystem && destinationEcosystem !== ecosystem
     ? destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana : { kind: 'NONE' }) : null;
@@ -240,8 +240,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }); }
   async function refresh() { await operation(async () => {
     if (!record) throw new Error('UNIVERSAL_RUN_MISSING');
+    // Not gated on the destination (wallet-execution review): a refresh of an existing run keeps its reviewed recipient on the server when no
+    // destination wallet is resolved now (`refresh` in server/universal-router/service.ts), exactly as the automatic re-quote at Execute does.
     const snapshot = latest.current, wallets = latestSimulationWallets.current;
-    if (latestDestinationBlock.current) throw new Error(latestDestinationBlock.current);
     if (!universalSimulationWalletsCurrent(wallets, wallets, record.owner)) return;
     const result = await bounded(universalRefresh(ecosystemOfRecord(record), record.id, wallets.destination ?? undefined), SIMULATION_TIMEOUT_MS, 'UNIVERSAL_SIMULATION_TIMEOUT');
     if (latest.current !== snapshot || !universalSimulationWalletsCurrent(wallets, latestSimulationWallets.current, record.owner)) return;

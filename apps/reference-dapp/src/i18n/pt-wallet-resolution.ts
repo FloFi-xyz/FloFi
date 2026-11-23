@@ -15,8 +15,8 @@ export const portugueseWalletResolution: Readonly<Record<string, string>> = {
     'A carteira de destino não é um endereço válido na rede de destino. Confira no card de Bridge e simule de novo. Nada foi assinado ou enviado.',
   'Your wallet sign-in expired. Simulate again and sign the sign-in message; it moves no funds and authorizes no transaction. Nothing was signed or sent.':
     'O acesso com a sua carteira expirou. Simule de novo e assine a mensagem de acesso; ela não move fundos nem autoriza transações. Nada foi assinado ou enviado.',
-  'Your wallet is on another network than this step\'s source network. Switch your wallet to the source network, then simulate again. Nothing was signed or sent.':
-    'A sua carteira está em outra rede que não a rede de origem desta etapa. Troque a carteira para a rede de origem e simule de novo. Nada foi assinado ou enviado.',
+  'Your wallet is on another network than this step\'s source network. Switch your wallet to the source network, then try again. Nothing was signed or sent.':
+    'A sua carteira está em outra rede que não a rede de origem desta etapa. Troque a carteira para a rede de origem e tente de novo. Nada foi assinado ou enviado.',
   'The selected bridge provider is shown for comparison only: FloFi cannot verify and execute its route yet. Choose Best routing, then simulate again. Nothing was signed or sent.':
     'O provedor de bridge selecionado aparece apenas para comparação: a FloFi ainda não consegue verificar e executar a rota dele. Escolha o melhor roteamento e simule de novo. Nada foi assinado ou enviado.',
   // Shared gate (Simulate, Canvas and chat), with the destination network.
@@ -24,8 +24,10 @@ export const portugueseWalletResolution: Readonly<Record<string, string>> = {
     'Escolha uma carteira de destino em {0} ou informe o endereço público dela. Nada foi assinado ou enviado.',
   'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.':
     'Você tem mais de uma carteira em {0}. Escolha a que recebe os fundos, ou informe o endereço público dela. Nada foi assinado ou enviado.',
-  'FloFi is still reading your wallets for {0}. Try again in a moment. Nothing was signed or sent.':
-    'A FloFi ainda está lendo as suas carteiras para {0}. Tente de novo em instantes. Nada foi assinado ou enviado.',
+  'FloFi is still reading your wallets for {0}. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.':
+    'A FloFi ainda está lendo as suas carteiras para {0}. Tente de novo em instantes, ou informe o endereço público de destino. Nada foi assinado ou enviado.',
+  'Across runs through FloFi\'s certified Router bridge for its own supported pairs, not through this bridge. Choose Best routing, then simulate again. Nothing was signed or sent.':
+    'A Across é executada pela bridge certificada do Router da FloFi nos pares que ela atende, não por esta bridge. Escolha o melhor roteamento e simule de novo. Nada foi assinado ou enviado.',
   // Destination wallet field.
   'Required: the {1} wallet that receives on {0}. Connect one, choose one of your wallets, or enter its public address.':
     'Obrigatório: a carteira {1} que recebe em {0}. Conecte uma, escolha uma das suas carteiras ou informe o endereço público dela.',

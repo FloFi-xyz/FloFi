@@ -30,6 +30,11 @@ export type DestinationInventory = {
    * destination that the session cannot fill is unknown (`LOADING`), never "missing" and never filled from a lower tier ahead of them.
    */
   readonly loading?: boolean;
+  /**
+   * The account's wallets could not be read (a failed request, not "none"). The device's saved addresses are then offered to choose from, never
+   * filled automatically ahead of wallets the account may hold (security review).
+   */
+  readonly accountUnavailable?: boolean;
 };
 export type DestinationResolution =
   | { readonly kind: 'RESOLVED'; readonly wallet: DestinationCandidate; readonly alternatives: readonly DestinationCandidate[] }
@@ -53,6 +58,7 @@ export function resolveDestinationWallet(ecosystem: DestinationEcosystem, invent
   for (const [index, tier] of [of(inventory.session), of(inventory.account), of(inventory.saved)].entries()) {
     // The session tier answers at once; the account tier (and the saved one below it) waits for the account's wallets to be read.
     if (index === 1 && inventory.loading) return { kind: 'LOADING' };
+    if (index === 2 && inventory.accountUnavailable && tier.length) return { kind: 'CHOOSE', candidates: all };
     if (tier.length === 1) return { kind: 'RESOLVED', wallet: tier[0]!, alternatives: all.filter(wallet => wallet !== tier[0]) };
     if (tier.length > 1) return { kind: 'CHOOSE', candidates: all };
   }
@@ -101,7 +107,7 @@ export function destinationIssue(requirement: DestinationRequirement): Destinati
  */
 export function destinationIssueMessage(issue: DestinationIssue): string {
   if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.';
-  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Try again in a moment. Nothing was signed or sent.';
+  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.';
   return 'Choose a destination wallet on {0} or enter its public address. Nothing was signed or sent.';
 }
 

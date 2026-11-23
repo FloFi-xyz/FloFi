@@ -50,6 +50,7 @@ const REASONS: Readonly<Record<string, string>> = {
   LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED: 'FloFi cannot yet verify this bridge\'s transactions independently, so it is shown for comparison only.',
   MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED: 'Mayan transactions are built by its SDK; FloFi has no verified builder yet, so this quote is for comparison only.',
   ACROSS_EXECUTES_ON_CERTIFIED_ROUTER_PAIRS_ONLY: 'Across executes through the certified Router for its USDC/USDG pairs only.',
+  ACROSS_EXECUTES_ON_CERTIFIED_ROUTER: 'Across executes through the certified Router for its USDC/USDG pairs only.',
   ACROSS_NETWORK_UNSUPPORTED: 'Across has no route for this network.', MAYAN_NETWORK_UNSUPPORTED: 'Mayan does not serve this network.',
   RELAY_NO_ROUTE: 'The provider has no route or liquidity for this pair right now.', RELAY_AMOUNT_TOO_LOW: 'The amount is below the provider minimum.',
   RELAY_AMOUNT_TOO_HIGH: 'The amount is above the provider maximum.', UNIVERSAL_PROVIDER_UNAVAILABLE: 'The provider could not be reached. Try again shortly.',

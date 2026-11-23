@@ -523,7 +523,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a bridge whose receiving wallet is not resolved (none known, several to choose from, or the
   // account's wallets still loading) is not simulated; the Canvas, the Simulate stage and the chat all say which wallet is missing and on which
   // network. The store refuses the same before any sign-in, and the server keeps its own refusal: this gate only adds, it relaxes nothing.
-  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && universal.destinationIssue && universal.details
+  // A refresh of an existing run (after its approval) keeps the reviewed recipient on the server, so only a NEW simulation waits for it.
+  const universalRefreshes = simulationSource.kind === 'universal' && refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired)
+    && (universal.record?.attempts.length ?? 0) < 16;
+  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && !universalRefreshes && universal.destinationIssue && universal.details
     ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel) : null;
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
   const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||

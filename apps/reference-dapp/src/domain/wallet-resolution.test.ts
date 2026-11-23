@@ -16,6 +16,7 @@ import { destinationWalletMessage, simulationError } from './simulation-presenta
 import { simulationUnavailableReason } from './simulation-unavailable';
 import { translate } from '../i18n/locale';
 import { UNIVERSAL_NOT_EXECUTABLE } from '../server/universal-router/service';
+import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
 
 const EVM_A = '0x90f5aa2a1b2c3d4e5f60718293a4b5c6d7e8d303', EVM_B = '0x1111111111111111111111111111111111111111';
 const SOL_A = '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2', SOL_B = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
@@ -25,14 +26,17 @@ const empty: DestinationInventory = { session: [], account: [], saved: [] };
 const ecosystemOf = (key: UniversalNetworkKey) => UNIVERSAL_NETWORKS[key].ecosystem;
 
 /**
- * The route classes the runtime itself declares (no live quote): Relay is the universal router's one executable provider on every directed pair;
- * LI.FI and Mayan are discovered and compared only (Mayan has no Robinhood Chain); Across serves EVM only and executes through the certified
- * Router (its universal quotes are comparison only). A pair is EXECUTABLE when one of its providers is; a live quote may still find no liquidity.
+ * The route classes the runtime itself declares (no live quote): Relay is executable where the universal router pins its Relay deployment (the
+ * EVM depository per chain, the Solana program) on both sides; LI.FI and Mayan are discovered and compared only (Mayan has no Robinhood Chain);
+ * Across serves EVM only and, in the universal router, is comparison only (it executes through the certified Router bridge for that bridge's
+ * own pairs). A pair is EXECUTABLE when one of its providers is; a live quote may still find no liquidity for it.
  */
+const relayPinned = (key: UniversalNetworkKey) => key === 'solana' ? Boolean(UNIVERSAL_ROUTER_DEPLOYMENT.solana.relayProgram)
+  : Boolean(UNIVERSAL_ROUTER_DEPLOYMENT.evm[UNIVERSAL_NETWORKS[key].chain]?.relayDepository);
 type RouteClass = 'EXECUTABLE' | 'QUOTE_ONLY' | 'UNSUPPORTED';
 function providerClass(provider: 'relay' | 'lifi' | 'mayan' | 'across', source: UniversalNetworkKey, destination: UniversalNetworkKey): RouteClass {
   const s = UNIVERSAL_NETWORKS[source].providers, d = UNIVERSAL_NETWORKS[destination].providers;
-  if (provider === 'relay') return 'EXECUTABLE';
+  if (provider === 'relay') return relayPinned(source) && relayPinned(destination) ? 'EXECUTABLE' : 'UNSUPPORTED';
   if (provider === 'mayan') return s.mayan && d.mayan ? 'QUOTE_ONLY' : 'UNSUPPORTED';
   if (provider === 'across') return s.across !== null && d.across !== null ? 'QUOTE_ONLY' : 'UNSUPPORTED';
   return 'QUOTE_ONLY';
@@ -87,6 +91,10 @@ const SCENARIOS: readonly { readonly name: string; readonly inventory: (eco: Des
     inventory: eco => ({ ...empty, session: [candidate(eco, eco === 'evm' ? EVM_A : SOL_A, 'Phantom', 'SESSION')], loading: true }) },
   { name: 'several account wallets (Privy embedded + linked): the owner chooses, never a silent pick', expected: 'CHOOSE',
     inventory: eco => ({ ...empty, account: [candidate(eco, eco === 'evm' ? EVM_A : SOL_A, 'FloFi Wallet', 'ACCOUNT'), candidate(eco, eco === 'evm' ? EVM_B : SOL_B, 'Linked', 'ACCOUNT')] }) },
+  { name: 'the account read failed: a saved address is offered to choose, never filled ahead of the account (security review)', expected: 'CHOOSE',
+    inventory: eco => ({ ...empty, saved: [candidate(eco, eco === 'evm' ? EVM_A : SOL_A, 'Saved', 'SAVED')], accountUnavailable: true }) },
+  { name: 'the account read failed but a wallet is connected: the session wallet still answers', expected: 'RESOLVED', source: 'SESSION',
+    inventory: eco => ({ ...empty, session: [candidate(eco, eco === 'evm' ? EVM_A : SOL_A, 'Phantom', 'SESSION')], accountUnavailable: true }) },
   { name: 'no wallet of that ecosystem anywhere', expected: 'NONE', inventory: () => empty },
   { name: 'only wallets of the OTHER ecosystem (an EVM address never fills a Solana destination, nor the reverse)', expected: 'NONE',
     inventory: eco => ({ session: [candidate(eco === 'evm' ? 'solana' : 'evm', eco === 'evm' ? SOL_A : EVM_A, 'Other', 'SESSION')], account: [], saved: [] }) },
@@ -152,6 +160,15 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 refusal wording (incident
     expect(simulationError('UNIVERSAL_WRONG_CHAIN')).toMatch(/Switch your wallet to the source network/);
     expect(simulationError('UNIVERSAL_WRONG_OWNER')).toBe('Reconnect the wallet used for this workflow and simulate again.');
     expect(simulationError('WALLET_SESSION_REQUIRED')).toMatch(/sign-in expired/);
+    // Wallet-execution review: an expired wallet session is not "this result has expired"; an account session is not a wallet sign-in.
+    expect(simulationError('WALLET_SESSION_EXPIRED')).toMatch(/sign-in expired/);
+    expect(simulationError('SIWE_SESSION_EXPIRED')).toMatch(/sign-in expired/);
+    expect(simulationError('ACCOUNT_SESSION_EXPIRED')).not.toMatch(/wallet sign-in/);
+    expect(simulationError('UNIVERSAL_WRONG_CHAIN')).toMatch(/then try again/);
+  });
+  it('Across in the universal router names the certified Router bridge instead of "not yet executable"', () => {
+    expect(simulationError('ACROSS_EXECUTES_ON_CERTIFIED_ROUTER')).toMatch(/certified Router bridge/);
+    expect(simulationError('LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED')).toMatch(/comparison only/);
   });
   it('names the destination network and is translated (EN/PT) for every blocking state', () => {
     for (const issue of Object.values(DESTINATION_ISSUE)) {
