@@ -26,6 +26,8 @@ import { FloFi, verifyWebhook, type WebhookEvent } from '../../../packages/devel
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { runAdminCommand } from '../src/admin/cli-commands';
+import type { StudioEvidence } from '../src/studio/integration-probe';
+import { createStudioStore } from '../src/studio/integration-store';
 import { E2E_APP_ORIGIN as APP_ORIGIN, chooseLanguage } from './app-origin';
 import { signedIn } from './batch-wallet-fixtures';
 import { AUTHORIZE_IN_WALLET, openProposalSimulationDetails, proveConnectedEvmWallet, signingSurface } from './fixtures';
@@ -159,7 +161,8 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
   });
 });
 
-test('a FloFi account creates an isolated project and rotates a server credential', async ({ browser }) => {
+test('a FloFi account manages its Studio packages and rotates an isolated project credential', async ({ browser }, testInfo) => {
+  test.setTimeout(90_000);
   assertMcpHarness();
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
   try {
@@ -187,32 +190,154 @@ test('a FloFi account creates an isolated project and rotates a server credentia
     await expect(page.getByRole('heading', { name: 'Portfolio integration' })).toBeVisible();
 
     const studio = page.getByRole('region', { name: 'FloFi Studio' });
-    await expect(studio.getByRole('heading', { name: 'My integrations' })).toBeVisible();
-    await studio.getByRole('textbox', { name: 'Integration name' }).fill('HyperEVM');
-    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('hyperevm');
+    const studioNavigation = studio.getByRole('navigation', { name: 'FloFi Studio' });
+    const navigateStudio = (name: string) => studioNavigation.getByRole('button', { name, exact: true }).click();
+    const integration = (name: string) => studio.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) });
+    const next = () => studio.getByRole('button', { name: 'Continue' }).click();
+    const checkpointHash = '0x' + 'a'.repeat(64);
+    const openCreate = async (category: string, architecture: string) => {
+      await navigateStudio('Create Integration');
+      await studio.getByRole('radio', { name: category }).check();
+      await next();
+      await studio.getByRole('radio', { name: architecture, exact: true }).check();
+      await next();
+    };
+    const fillEvmConfig = async (name: string, slug: string, chain: string, rpc: string) => {
+      await studio.getByRole('textbox', { name: 'Integration name' }).fill(name);
+      await studio.getByRole('textbox', { name: 'Integration slug' }).fill(slug);
+      await studio.getByRole('textbox', { name: 'CAIP-2 network ID' }).fill(chain);
+      await studio.getByRole('textbox', { name: 'Public HTTPS endpoint' }).fill(rpc);
+      await studio.getByRole('textbox', { name: 'Checkpoint height (hex)' }).fill('0x0');
+      await studio.getByRole('textbox', { name: 'Checkpoint hash' }).fill(checkpointHash);
+    };
+    const declare = async (name: string) => {
+      await next();
+      await studio.getByRole('checkbox', { name }).check();
+      await next();
+      await expect(studio.getByRole('heading', { name: 'Review your draft' })).toBeVisible();
+    };
+    const capture = (name: string) => studio.screenshot({ path: testInfo.outputPath(name), animations: 'disabled' });
+    await page.setViewportSize({ width: 1440, height: 1050 });
+    await expect(studio.getByRole('heading', { name: 'Overview' })).toBeVisible();
+    await capture('studio-overview-en-desktop.png');
+
+    await openCreate('Blockchain', 'EVM');
+    await fillEvmConfig('Example EVM', 'example-evm', 'eip155:42424242', 'https://rpc.example.org');
+    await capture('studio-configuration-en-desktop.png');
+    await declare('Read network identity');
+    await expect(studio).toContainText('evm-rpc@1');
+    await capture('studio-summary-en-desktop.png');
     await studio.getByRole('button', { name: 'Save draft' }).click();
-    const network = studio.getByRole('article').filter({ has: page.getByRole('heading', { name: 'HyperEVM', exact: true }) });
-    await expect(network).toContainText('Version 1 · Certification status Draft');
+    const network = integration('Example EVM');
+    await expect(network).toContainText('Version 1');
+    await expect(network).toContainText('Draft');
     await expect(network.getByRole('button', { name: 'Verify' })).toBeVisible();
     await expect(network.getByRole('button', { name: 'Submit for certification' })).toHaveCount(0);
-    await studio.getByText('New integration', { exact: true }).click();
-    await studio.getByRole('textbox', { name: 'Integration name' }).fill('Duplicate HyperEVM');
-    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('hyperevm');
+
+    await openCreate('Blockchain', 'EVM');
+    await fillEvmConfig('Duplicate example', 'example-evm', 'eip155:42424242', 'https://rpc.example.org');
+    await declare('Read network identity');
     await studio.getByRole('button', { name: 'Save draft' }).click();
     await expect(studio.getByRole('alert')).toHaveText('This slug is already used in the project.');
-    await expect(studio.getByRole('textbox', { name: 'Integration name' })).toHaveValue('Duplicate HyperEVM');
-    await expect(studio.getByRole('textbox', { name: 'Integration slug' })).toHaveValue('hyperevm');
-    await studio.getByLabel('Integration category').selectOption('vault');
-    await studio.getByRole('button', { name: 'Use Savings Dai configuration' }).click();
-    await studio.getByRole('textbox', { name: 'Integration name' }).fill('Savings Dai');
-    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('savings-dai');
+    for (let index = 0; index < 2; index++) await studio.getByRole('button', { name: 'Back' }).click();
+    await expect(studio.getByRole('textbox', { name: 'Integration name' })).toHaveValue('Duplicate example');
+    await expect(studio.getByRole('textbox', { name: 'Integration slug' })).toHaveValue('example-evm');
+    await navigateStudio('Overview');
+
+    await openCreate('Vault', 'EVM');
+    await fillEvmConfig('Example vault', 'example-vault', 'eip155:42424242', 'https://rpc.example.org');
+    await studio.getByRole('textbox', { name: 'Vault contract address' }).fill('0x' + 'a'.repeat(40));
+    await studio.getByRole('textbox', { name: 'Underlying token contract' }).fill('0x' + 'b'.repeat(40));
+    await declare('Read vault positions and previews');
     await studio.getByRole('button', { name: 'Save draft' }).click();
-    await expect(studio.getByRole('heading', { name: 'Savings Dai' })).toBeVisible();
-    await chooseLanguage(context, 'PT');
+    const vault = integration('Example vault');
+    await expect(vault.getByRole('button', { name: 'Verify' })).toBeVisible();
+    await vault.locator('summary').filter({ hasText: /^Revoke version$/ }).click();
+    const revoke = vault.locator('form').getByRole('button', { name: 'Revoke version' });
+    await revoke.click();
+    await expect(vault).toContainText('Draft');
+    await vault.getByRole('checkbox', { name: 'Permanently revoke this version.' }).check();
+    await revoke.click();
+    await expect(vault).toContainText('Revoked');
+    await expect(vault.getByRole('button', { name: 'Verify' })).toHaveCount(0);
+
+    await openCreate('Blockchain', 'Move');
+    await studio.getByRole('textbox', { name: 'Integration name' }).fill('Example Move');
+    await studio.getByRole('textbox', { name: 'Integration slug' }).fill('example-move');
+    await studio.getByRole('textbox', { name: 'CAIP-2 network ID' }).fill('sui:studio-fixture');
+    await studio.getByRole('textbox', { name: 'GitHub repository' }).fill('https://github.com/example/studio-adapter');
+    await studio.getByRole('textbox', { name: 'Commit SHA' }).fill('b'.repeat(40));
+    await studio.getByRole('textbox', { name: 'Source SHA-256' }).fill('c'.repeat(64));
+    await declare('Read network identity');
+    await studio.getByRole('button', { name: 'Save draft' }).click();
+    const move = integration('Example Move');
+    await expect(move.getByRole('button', { name: 'Verify' })).toHaveCount(0);
+    await move.getByRole('button', { name: 'Submit adapter for review' }).click();
+    await expect(move).toContainText('Adapter review pending');
+    await expect(move.getByRole('button', { name: 'Test' })).toHaveCount(0);
+
+    // Seed both read observations through the real store with fixture data. This profile never calls a public RPC.
+    const fixturesDb = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
+    try {
+      const projectId = new URL(projectUrl).searchParams.get('project')!;
+      const { rows: [owner] } = await fixturesDb.query<{ account_id: string }>(
+        'SELECT account_id FROM developer_project_owners WHERE tenant_id=$1 AND project_id=$2', ['default', projectId],
+      );
+      const store = createStudioStore(fixturesDb, 'default', owner!.account_id);
+      const version = async () => (await store.list(projectId)).find(row => row.slug === 'example-evm')!;
+      const now = new Date();
+      const verify: StudioEvidence = {
+        schemaVersion: 2, mode: 'verify', source: 'PROPOSAL_RPC', chainRef: 'eip155:42424242',
+        adapterId: 'evm-rpc', adapterVersion: 1, rpcUrl: 'https://rpc.example.org/', observedAt: now.toISOString(),
+        checkpointHash, block: { height: '0x100', hash: '0x' + 'b'.repeat(64), timestamp: '0x1', baseFeePerGas: '0x1' },
+        facts: { canonicalNativeTransferProfile: false, browserFixture: true },
+      };
+      await store.probe(projectId, await version(), 'verify', () => now, async () => verify);
+      await page.reload();
+      await navigateStudio('My Integrations');
+      await expect(network.getByRole('button', { name: 'Test' })).toBeVisible();
+      await store.probe(projectId, await version(), 'test', () => now, async () => ({ ...verify, mode: 'test' }));
+    } finally {
+      await fixturesDb.close();
+    }
     await page.reload();
+    await navigateStudio('My Integrations');
+    await network.getByRole('button', { name: 'Submit for certification' }).click();
+    await expect(network).toContainText('Certification pending');
+    await navigateStudio('Certification');
+    await network.getByText('Verification evidence', { exact: true }).click();
+    await expect(network).toContainText('Proposed RPC');
+    await expect(network).toContainText('The canonical transfer adapter has no approved profile for this network.');
+    await capture('studio-certification-en-desktop.png');
+
+    await navigateStudio('Versions & Activity');
+    await expect(studio).toContainText('Compatibility tested');
+    await expect(studio).toContainText('Adapter submitted');
+    await navigateStudio('Documentation / SDK');
+    await expect(studio.getByRole('link', { name: 'TypeScript SDK guide' })).toHaveAttribute('href', '/docs/typescript-sdk#studio-integration-packages');
+
+    await chooseLanguage(context, 'PT');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await navigateStudio('Minhas integrações');
     await expect(studio.getByRole('heading', { name: 'Minhas integrações' })).toBeVisible();
-    await expect(network).toContainText('Versão 1 · Status da certificação Rascunho');
+    await expect(network).toContainText('Certificação pendente');
+    expect(await studio.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await capture('studio-integrations-pt-mobile.png');
+    await navigateStudio('Criar integração');
+    const continueInPortuguese = studio.getByRole('button', { name: 'Continuar' });
+    await continueInPortuguese.focus();
+    await page.keyboard.press('Enter');
+    const mobileStep = studio.getByRole('heading', { name: 'Escolha a família tecnológica' });
+    await expect(mobileStep).toBeFocused();
+    await expect(mobileStep).toBeInViewport();
+    await page.setViewportSize({ width: 820, height: 1024 });
+    await navigateStudio('Certificação');
+    await expect(studio.getByRole('heading', { name: 'Certificação' })).toBeVisible();
+    expect(await studio.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await capture('studio-certification-pt-tablet.png');
     await chooseLanguage(context, 'EN');
+    await page.setViewportSize({ width: 1440, height: 1050 });
     await page.reload();
 
     await page.getByText('Generate key (sandbox)', { exact: true }).click();

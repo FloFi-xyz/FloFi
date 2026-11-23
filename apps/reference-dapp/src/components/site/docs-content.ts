@@ -1344,6 +1344,27 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
       ]
      },
      {
+      "id": "studio-integration-packages",
+      "title": "Pacotes de integração do FloFi Studio",
+      "blocks": [
+       {
+        "kind": "p",
+        "text": [
+         "Valide a proposta com defineIntegrationPackage e crie uma versão no Developer Console. Informe a identidade CAIP-2 e a arquitetura. Para adaptadores externos, envie o repositório, o commit completo e o SHA-256 do arquivo de fonte desse commit. A publicação e a autorização financeira exigem revisão separada."
+        ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         {
+          "link": "Contrato e exemplo no repositório",
+          "href": "https://github.com/FloFi-xyz/FloFi/tree/main/packages/developer-sdk#studio-integration-packages"
+         }
+        ]
+       }
+      ]
+     },
+     {
       "id": "webhooks",
       "title": "Verifique notificações assinadas",
       "blocks": [
@@ -3339,6 +3360,27 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
           "href": "/docs/developer-api#strategy-to-handoff"
          },
          ". FloFi makes capability decisions; the SDK contains no alternate workflow engine."
+        ]
+       }
+      ]
+     },
+     {
+      "id": "studio-integration-packages",
+      "title": "FloFi Studio integration packages",
+      "blocks": [
+       {
+        "kind": "p",
+        "text": [
+         "Validate your proposal with defineIntegrationPackage and create a version in Developer Console. Provide its CAIP-2 identity and architecture. For external adapters, submit the repository, full commit and SHA-256 of that commit archive. Publication and financial authorization require separate review."
+        ]
+       },
+       {
+        "kind": "p",
+        "text": [
+         {
+          "link": "Contract and repository example",
+          "href": "https://github.com/FloFi-xyz/FloFi/tree/main/packages/developer-sdk#studio-integration-packages"
+         }
         ]
        }
       ]
