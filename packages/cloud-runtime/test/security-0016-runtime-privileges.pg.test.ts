@@ -52,10 +52,11 @@ type Model = { readonly owner: string; readonly runtime: string; readonly asOwne
 const models: Model[] = [];
 const extraRoles: string[] = [];
 afterEach(async () => {
-  for (const model of models.splice(0)) await model.drop();
+  // Infrastructure review: every model and role is dropped even when one drop fails (each is independent).
+  await Promise.allSettled(models.splice(0).map(model => model.drop()));
   if (!extraRoles.length) return;
   const admin = createDatabase({ connectionString: testDatabaseUrl().toString(), maxConnections: 1 });
-  try { for (const role of extraRoles.splice(0)) await admin.query(`DROP ROLE IF EXISTS ${role}`); } finally { await admin.close(); }
+  try { for (const role of extraRoles.splice(0)) await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined); } finally { await admin.close(); }
 });
 
 /** The certified chain FloFi production runs (shipped 0001–0028, then 0029–0036 from their SHA-256-pinned files), or the first `upTo` of it. */
@@ -73,17 +74,33 @@ async function chain(upTo?: number): Promise<Migration[]> {
 /** A database whose objects belong to a non-superuser migration role, with a runtime role provisioned exactly as in production. */
 async function productionModel(options: { upTo?: number } = {}): Promise<Model> {
   const suffix = randomBytes(5).toString('hex'), owner = `flofi_t_owner_${suffix}`, runtime = `flofi_t_runtime_${suffix}`, name = `flofi_test_${suffix}`;
+  // Infrastructure review: a password of its own, so the suite also runs on a loopback server that authenticates (SCRAM), not only under trust.
+  const password = randomBytes(16).toString('hex');
   const base = testDatabaseUrl();
+  const pools: Database[] = [];
+  const drop = async () => {
+    await Promise.allSettled(pools.map(pool => pool.close()));
+    const cleanup = createDatabase({ connectionString: base.toString(), maxConnections: 1 });
+    try {
+      for (const statement of [`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`, `DROP ROLE IF EXISTS ${runtime}`, `DROP ROLE IF EXISTS ${owner}`])
+        await cleanup.query(statement).catch(() => undefined);
+    } finally { await cleanup.close(); }
+  };
+  // Registered before anything is created, so a setup that fails part-way leaves no role, database or pool behind.
+  const pending: Model = { owner, runtime, asOwner: null as unknown as Database, asRuntime: null as unknown as Database, url: () => '', drop };
+  models.push(pending);
   const admin = createDatabase({ connectionString: base.toString(), maxConnections: 1 });
   try {
-    await admin.query(`CREATE ROLE ${owner} LOGIN NOSUPERUSER CREATEROLE`);
-    await admin.query(`CREATE ROLE ${runtime} LOGIN NOSUPERUSER INHERIT`);
+    await admin.query(`CREATE ROLE ${owner} LOGIN NOSUPERUSER CREATEROLE PASSWORD '${password}'`);
+    await admin.query(`CREATE ROLE ${runtime} LOGIN NOSUPERUSER INHERIT PASSWORD '${password}'`);
     // Production: the migration role administers the runtime role (Neon's CREATEROLE grant) without inheriting it.
     await admin.query(`GRANT ${runtime} TO ${owner} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
     await admin.query(`CREATE DATABASE ${name} OWNER ${owner}`);
   } finally { await admin.close(); }
-  const url = (role: string) => { const u = new URL(base.toString()); u.username = role; u.password = ''; u.pathname = '/' + name; return u.toString(); };
+  const url = (role: string) => { const u = new URL(base.toString()); u.username = role; u.password = role === owner || role === runtime ? password : ''; u.pathname = '/' + name;
+    return u.toString(); };
   const asOwner = createDatabase({ connectionString: url(owner), maxConnections: 4, applicationName: 'flofi-test-migration' });
+  pools.push(asOwner);
   await asOwner.query(`GRANT USAGE ON SCHEMA public TO ${runtime}`);
   await asOwner.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${runtime}`);
   await asOwner.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${runtime}`);
@@ -95,16 +112,9 @@ async function productionModel(options: { upTo?: number } = {}): Promise<Model> 
     await asOwner.query(provisioning.replaceAll(':"runtime_role"', `"${runtime}"`));
   }
   const asRuntime = createDatabase({ connectionString: url(runtime), maxConnections: 4, applicationName: 'flofi-test-runtime' });
-  const model: Model = { owner, runtime, asOwner, asRuntime, url, async drop() {
-    await Promise.allSettled([asOwner.close(), asRuntime.close()]);
-    const cleanup = createDatabase({ connectionString: base.toString(), maxConnections: 1 });
-    try {
-      await cleanup.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-      await cleanup.query(`DROP ROLE IF EXISTS ${runtime}`);
-      await cleanup.query(`DROP ROLE IF EXISTS ${owner}`);
-    } finally { await cleanup.close(); }
-  } };
-  models.push(model);
+  pools.push(asRuntime);
+  const model: Model = { owner, runtime, asOwner, asRuntime, url, drop };
+  models[models.indexOf(pending)] = model;
   return model;
 }
 
@@ -162,7 +172,7 @@ async function rows(db: Database) {
     migrations: await q('SELECT version, name, sha256 FROM schema_migrations ORDER BY version'),
   };
 }
-/** Every ACL, default ACL and membership in the database: what a privilege change can touch. */
+/** Every ACL, default ACL and membership in the database, and this model's roles' memberships: what a privilege change can touch. */
 async function acls(db: Database) {
   const q = async (sql: string) => (await db.query<{ item: string }>(sql)).rows.map(r => r.item).sort();
   return {
@@ -172,7 +182,10 @@ async function acls(db: Database) {
     functions: await q(`SELECT p.oid::regprocedure::text || ':' || coalesce(p.proacl::text, '-') || ':' || md5(pg_get_functiondef(p.oid)) AS item FROM pg_proc p
       WHERE p.pronamespace = 'public'::regnamespace`),
     defaults: await q(`SELECT pg_get_userbyid(defaclrole) || ':' || defaclobjtype::text || ':' || defaclacl::text AS item FROM pg_default_acl`),
-    memberships: await q(`SELECT roleid::regrole::text || '>' || member::regrole::text AS item FROM pg_auth_members WHERE member::regrole::text LIKE 'flofi_t_%'`),
+    // Infrastructure review: only this database's model roles (the shared catalog also holds other suites' roles).
+    // `acls` always runs as the model's owner, whose runtime role carries the same suffix.
+    memberships: await q(`SELECT roleid::regrole::text || '>' || member::regrole::text AS item FROM pg_auth_members
+      WHERE member::regrole::text IN (current_user, replace(current_user, 'flofi_t_owner_', 'flofi_t_runtime_'))`),
     triggers: await q(`SELECT tgrelid::regclass::text || ':' || tgname || ':' || tgenabled::text AS item FROM pg_trigger WHERE NOT tgisinternal`),
   };
 }

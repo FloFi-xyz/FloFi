@@ -52,7 +52,7 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve destination me
       expect(html).not.toContain(`title="${escaped(shown)}"`);
       expect(shown).toContain('Solana');
       expect(html).not.toMatch(/Bridge card|card de Bridge/);
-      expect(shown).toMatch(language === 'PT' ? /Nada foi assinado nem enviado\.$/ : /Nothing was signed or sent\.$/);
+      expect(shown).toMatch(language === 'PT' ? /Nada foi assinado ou enviado\.$/ : /Nothing was signed or sent\.$/);
     }
   });
   it('says what is missing and the next action: Connect here, Try again after a failed read, the Canvas for a choice or a typed address', () => {
@@ -69,11 +69,21 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve destination me
     expect(loading.shown).toMatch(/continues by itself/);
     const pt = render(DESTINATION_ISSUE.UNAVAILABLE, 'PT', actions(true));
     expect(pt.html).toContain('>Tentar novamente</button>'); expect(pt.html).toContain('>Conectar uma carteira Solana</button>');
-    expect(pt.shown).toBe('A FloFi não conseguiu ler quais carteiras Solana a sua conta tem para Solana. Tente novamente, conecte uma carteira Solana aqui ou abra o Canvas para escolher uma ou informar o endereço público dela. Nada foi assinado nem enviado.');
+    expect(pt.shown).toBe('A FloFi não conseguiu ler quais carteiras Solana a sua conta tem para Solana. Tente novamente, conecte uma carteira Solana aqui ou abra o Canvas para escolher uma ou informar o endereço público dela. Nada foi assinado ou enviado.');
   });
   it('bridge review: an EVM destination reads "an EVM wallet" (PT "uma carteira EVM")', () => {
     expect(message(DESTINATION_ISSUE.REQUIRED, 'EN', 'approve', 'EVM')).toBe('To receive the tokens on Base, connect an EVM wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.');
-    expect(message(DESTINATION_ISSUE.REQUIRED, 'PT', 'approve', 'EVM')).toBe('Para receber os tokens em Base, conecte uma carteira EVM aqui ou abra o Canvas para informar o endereço público dela. Nada foi assinado nem enviado.');
+    expect(message(DESTINATION_ISSUE.REQUIRED, 'PT', 'approve', 'EVM')).toBe('Para receber os tokens em Base, conecte uma carteira EVM aqui ou abra o Canvas para informar o endereço público dela. Nada foi assinado ou enviado.');
+  });
+  it('frontend-UX and MCP reviews: once the page holds its preparation, a new read says to choose Simulate (it does not continue by itself)', () => {
+    for (const surface of ['approve', 'approve-embedded'] as const) {
+      expect(translate('EN', destinationIssueMessage(DESTINATION_ISSUE.LOADING, surface, true), 'Solana'))
+        .toBe('FloFi is reading your wallets for Solana again. When they are read, choose Simulate. Nothing was signed or sent.');
+      expect(translate('PT', destinationIssueMessage(DESTINATION_ISSUE.LOADING, surface, true), 'Solana'))
+        .toBe('A FloFi está lendo as suas carteiras para Solana novamente. Quando elas forem lidas, escolha Simular. Nada foi assinado ou enviado.');
+      expect(destinationIssueMessage(DESTINATION_ISSUE.LOADING, surface, false)).toMatch(/continues by itself/);
+      expect(destinationIssueMessage(DESTINATION_ISSUE.REQUIRED, surface, true)).toBe(destinationIssueMessage(DESTINATION_ISSUE.REQUIRED, surface));
+    }
   });
   it('workflow review: the embedded MCP approval (no Canvas) never points at the Canvas; its Connect failure note does not either', () => {
     for (const issue of Object.values(DESTINATION_ISSUE)) for (const language of ['EN', 'PT'] as const) {

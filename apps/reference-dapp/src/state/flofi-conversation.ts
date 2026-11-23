@@ -475,7 +475,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
    * `auto`: FloFi continues this review by itself (a resume after a network switch, an edit, a runtime's answer or the destination's wallets
    * being read; `network` for the last). Such a review never starts a simulation that may ask the wallet to sign in: it is offered instead.
    */
-  function startReview(scope: number, language: ConversationLanguage, fresh = false, announced = false, auto: { readonly network?: string } | null = null) {
+  function startReview(scope: number, language: ConversationLanguage, fresh = false, announced = false,
+    auto: { readonly network?: string; readonly switched?: string } | null = null) {
     const view = latest.current.bridge;
     setQuestion(null); resume.current = null;
     if (!actionable(view.workflow)) { say(scope, language, (_, c) => c.emptyWorkflow); return; }
@@ -549,8 +550,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // destination's wallets are read, a network switch, an applied edit or a runtime's answer, also between the steps of a step-by-step workflow —
     // never starts a simulation that may ask the wallet to sign in (FIX-07): it offers the Review, which the owner starts.
     if (auto && view.manualSimulation) {
-      const network = auto.network;
-      say(scope, language, (_, c) => [network !== undefined ? c.walletsReadyReview(network) : c.resumeReadyReview, { options: [c.review] }]);
+      const network = auto.network, switched = auto.switched;
+      say(scope, language, (_, c) => [network !== undefined ? c.walletsReadyReview(network) : switched !== undefined ? c.switchedReview(switched) : c.resumeReadyReview,
+        { options: [c.review] }]);
       return;
     }
     const next = { scope, key: view.authorization.key, sawBusy: false, settled: false, language, continuation };
@@ -964,6 +966,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       resume.current = null;
       if (!bridge.wallet.account) return;
       const network = bridge.walletNetwork ?? '';
+      // Frontend-UX review: a review that will be offered (not started) is never announced as "continuing".
+      if (bridge.manualSimulation) { startReview(waiting.scope, waiting.language, false, false, { switched: network }); return; }
       say(waiting.scope, waiting.language, (_, c) => c.switched(network));
       startReview(waiting.scope, waiting.language, false, false, {});
       return;

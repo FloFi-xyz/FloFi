@@ -534,11 +534,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: worded for the surface that shows it (the Editor has the Bridge card; /approve does not).
   // The embedded MCP approval (no "Open Canvas") never points at a Canvas it does not have.
   const destinationSurface: DestinationSurface = surface !== 'signing' ? 'editor' : onViewInFloFi ? 'approve' : 'approve-embedded';
+  // The proposal whose automatic preparation /approve holds (see `destinationHoldsPreparation` below): its new reads do not continue by themselves.
+  const destinationHeld = useRef<string | null>(null);
   const destinationIssueIn = (shown: 'EN' | 'PT', on: DestinationSurface = destinationSurface): string | null => {
     if (!(simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown && universal.destinationIssue && universal.details
       && !universalRefreshes())) return null;
     const ecosystem = UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const;
-    return translate(shown, destinationIssueMessage(universal.destinationIssue, on), universal.details.destinationLabel, ecosystem,
+    return translate(shown, destinationIssueMessage(universal.destinationIssue, on, destinationHeld.current === state.workflow.workflowId), universal.details.destinationLabel, ecosystem,
       translate(shown, destinationWalletPhrase(ecosystem)));
   };
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
@@ -743,9 +745,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security and wallet-execution reviews): a universal bridge whose receiving wallet was missing
   // here is not prepared by itself once it resolves (a connected wallet, Try again, a recovered read): its simulation may ask the source wallet
   // to sign in, so the owner chooses Simulate. A proposal that arrived with its destination already resolved is prepared as before.
-  const destinationHeld = useRef<string | null>(null);
   const destinationHold = destinationHoldsPreparation({ kind: simulationSource.kind, held: destinationHeld.current, key: state.workflow.workflowId,
-    blocked: Boolean(destinationBlocked) && Boolean(approvalWallet) && !approvalGate && universal.destinationIssue !== DESTINATION_ISSUE.LOADING });
+    // MCP review: a session wallet still restoring silently (it will resolve the destination by itself) never holds the preparation either.
+    blocked: Boolean(destinationBlocked) && Boolean(approvalWallet) && !approvalGate && universal.destinationIssue !== DESTINATION_ISSUE.LOADING
+      && !connectedWallet.restoring && !jupiter.restoring });
   destinationHeld.current = destinationHold.held;
   const preparedAfterDestination = destinationHold.holds;
   const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)

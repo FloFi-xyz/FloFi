@@ -41,7 +41,7 @@ export type ConversationCopy = {
    */
   readonly identifyingWallets: (network: string) => string; readonly walletsReadyReview: (network: string) => string;
   /** A review FloFi continues by itself whose simulation may ask the wallet to sign in (offered, never started), and a resume dropped by a change. */
-  readonly resumeReadyReview: string; readonly walletsResumeDropped: string;
+  readonly resumeReadyReview: string; readonly walletsResumeDropped: string; readonly switchedReview: (network: string) => string;
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: honest start wording, provider-side settlement, start refusals and quote-change recovery.
   readonly approvalIfNeeded: string; readonly providerSettles: (steps: string) => string; readonly executionNotStarted: (reason: string) => string;
   /** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the chat has no Authorize control, so its not-ready wallet message points to Review workflow. */
@@ -163,6 +163,7 @@ const en: ConversationCopy = {
   identifyingWallets: network => `I’m still reading your wallets that can receive on ${network}. I’ll let you know as soon as they’re read. Nothing was signed or sent.`,
   walletsReadyReview: network => `Your wallets have been read, and the wallet that receives on ${network} is set. The review may ask your wallet to sign in to FloFi (no funds move), so it starts when you choose Review workflow.`,
   resumeReadyReview: 'Ready to continue. The review may ask your wallet to sign in to FloFi (no funds move), so it starts when you choose Review workflow.',
+  switchedReview: network => `Your wallet is now on ${network}. The review may ask your wallet to sign in to FloFi (no funds move), so it starts when you choose Review workflow.`,
   walletsResumeDropped: 'Your workflow, wallet or network changed while I was reading your wallets, so I did not continue. Choose Review workflow when you are ready.',
   approvalIfNeeded: 'A token approval is requested only if your current allowance is still too low when you execute.',
   providerSettles: steps => `Then the provider completes ${steps} on its own: FloFi observes and reconciles it, and your wallet signs nothing for it.`,
@@ -290,6 +291,7 @@ const pt: ConversationCopy = {
   checkingProviders: 'Verificando quais provedores atendem este fluxo nesta implantação. Continuo a revisão assim que responderem.',
   identifyingWallets: network => `Ainda estou lendo suas carteiras que podem receber em ${network}. Aviso você assim que terminar. Nada foi assinado nem enviado.`,
   walletsReadyReview: network => `Já li suas carteiras, e a carteira que recebe em ${network} está definida. A revisão pode pedir um sign-in da sua carteira na FloFi (nenhum fundo se move), então ela só começa quando você escolher Revisar fluxo.`,
+  switchedReview: network => `A sua carteira agora está em ${network}. A revisão pode pedir um sign-in da sua carteira na FloFi (nenhum fundo se move), então ela só começa quando você escolher Revisar fluxo.`,
   resumeReadyReview: 'Tudo pronto para continuar. A revisão pode pedir um sign-in da sua carteira na FloFi (nenhum fundo se move), então ela só começa quando você escolher Revisar fluxo.',
   walletsResumeDropped: 'Seu fluxo, sua carteira ou sua rede mudou enquanto eu lia suas carteiras, então não continuei. Escolha Revisar fluxo quando estiver pronto.',
   approvalIfNeeded: 'Uma aprovação de token só é pedida se a sua permissão atual ainda for insuficiente no momento da execução.',

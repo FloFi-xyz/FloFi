@@ -96,7 +96,8 @@ INSERT/UPDATE/DELETE. So:
 
 Preparation:
 
-- Use a reviewed checkout of `main` that contains this build.
+- Use a reviewed checkout of `main` that contains this build, and run every command from the repository root.
+- Run from a single-user operator host: the connection URL appears in psql's process arguments (or use a `PGPASSFILE` / service file).
 - Set the direct (unpooled) production `DATABASE_MIGRATION_URL` in the operator shell only. Never commit it, paste it into chat or write it to
   logs.
 - Set `RUNTIME_ROLE` to the role the API, worker and web tier connect as. Confirm it from each consumer's `DATABASE_URL` user name, without
@@ -107,8 +108,10 @@ Preparation:
 ### 1. Pre-check (read-only)
 
 ```sh
-psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql > "$HOME/0016-before.txt"
+psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql > "$HOME/0016-before.txt"; echo "exit $?"
 ```
+
+A non-zero exit (psql answers 3 when a statement fails) means the output file is incomplete: stop.
 
 Expected:
 
@@ -137,8 +140,10 @@ Only the database's own history (point-in-time restore, logs) can rule those out
 ### 2. Apply
 
 ```sh
-psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql
+psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -L "$HOME/0016-apply.log" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql; echo "exit $?"
 ```
+
+`-L` keeps the statements and their results as the apply evidence. Exit 0 with `COMMIT` is the only success.
 
 Expected output, in order:
 
@@ -179,7 +184,7 @@ Run the same command as step 1, writing `"$HOME/0016-after.txt"`. Expected:
 Keep these with the approval reference:
 
 - both verification outputs (role names, ACLs and counts only);
-- the apply output;
+- the apply output and `0016-apply.log`;
 - the time and the operator.
 
 Never keep the connection URL.
@@ -210,8 +215,8 @@ If an unexpected `permission denied for table execution_purge_*` appears in a le
 
 ## Evidence
 
-**`packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts`.** It runs on disposable loopback PostgreSQL: CI runs PostgreSQL
-18.6, and development also ran it on 16.15.
+**`packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts`.** It runs on disposable loopback PostgreSQL 16.15 in development
+and on PostgreSQL 18.6 in CI (CircleCI's result for this build is the 18 evidence).
 
 Production model it reproduces:
 

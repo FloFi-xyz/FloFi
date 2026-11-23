@@ -131,7 +131,10 @@ export type DestinationSurface = 'editor' | 'approve' | 'approve-embedded';
  * Never "connect the wallet that will sign": the source wallet is not what is missing. One message per reason and surface
  * (BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: never a component the surface does not have).
  */
-export function destinationIssueMessage(issue: DestinationIssue, surface: DestinationSurface = 'editor'): string {
+export function destinationIssueMessage(issue: DestinationIssue, surface: DestinationSurface = 'editor', held = false): string {
+  // Frontend-UX review: once /approve holds its automatic preparation (the destination was missing), a new read does not continue by itself.
+  if (surface !== 'editor' && held && issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING')
+    return 'FloFi is reading your wallets for {0} again. When they are read, choose Simulate. Nothing was signed or sent.';
   if (surface === 'approve') {
     if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one {1} wallet that can receive on {0}. Connect the one that receives the tokens here, or open the Canvas to choose it or to enter its public address. Nothing was signed or sent.';
     if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is reading your wallets for {0}. This page continues by itself when they are read. Nothing was signed or sent.';
@@ -145,8 +148,8 @@ export function destinationIssueMessage(issue: DestinationIssue, surface: Destin
     return 'To receive the tokens on {0}, connect {2} here. Nothing was signed or sent.';
   }
   if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.';
-  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.';
-  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read which {1} wallets your account has for {0}. Choose one of your wallets or Try again on the Bridge card, or enter the destination’s public address. Nothing was signed or sent.';
+  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Wait a moment, or enter the destination\'s public address. Nothing was signed or sent.';
+  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read which {1} wallets your account has for {0}. Use Try again or connect a wallet on the Bridge card, or enter the destination’s public address. Nothing was signed or sent.';
   return 'No {1} wallet can receive on {0} yet. Connect one on the Bridge card or enter its public address. Nothing was signed or sent.';
 }
 /** `{2}` of the /approve messages: the wallet to connect, with its article (a catalog key; PT "uma carteira Solana"). */

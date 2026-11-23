@@ -185,7 +185,8 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
       : tr('Enter the destination address on {0}.', destination.network)
     : destination.status === 'unavailable' ? destination.candidates.length
       ? tr('FloFi could not read which {1} wallets your account has for {0}. Choose one of your wallets, try again, or enter its public address.', destination.network, ecosystem ?? '')
-      : tr('FloFi could not read which {1} wallets your account has for {0}. Try again, connect one, or enter its public address.', destination.network, ecosystem ?? '')
+      : destination.onConnect ? tr('FloFi could not read which {1} wallets your account has for {0}. Try again, connect one, or enter its public address.', destination.network, ecosystem ?? '')
+      : tr('FloFi could not read which {1} wallets your account has for {0}. Try again, or enter its public address.', destination.network, ecosystem ?? '')
     : destination.status === 'loading' ? tr('Checking your wallets for {0}…', destination.network) : null;
   const automatic = !message && !destination.value && destination.auto ? destination.auto : null;
   const applying = pending && Boolean(onCommit);
@@ -211,10 +212,10 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
     {(destination.status === 'choose' || destination.status === 'unavailable') && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
       {destination.candidates.map(candidate => <button key={candidate.address} type="button" className="composer-destination-choice" title={candidate.address}
         onClick={() => { destination.onChange(candidate.address); field.current?.focus(); }}>{candidate.label}</button>)}</div>}
+    {destination.onRetry && <button type="button" className="composer-destination-choice composer-destination-connect"
+      onClick={() => { setConnectFailed(false); destination.onRetry?.(); field.current?.focus(); }}>{tr('Try again')}</button>}
     {(destination.status === 'required' || destination.status === 'unavailable') && destination.onConnect && <button type="button" className="composer-destination-choice composer-destination-connect"
       onClick={connect}>{ecosystem === 'Solana' ? tr('Connect a Solana wallet') : tr('Connect an EVM wallet')}</button>}
-    {destination.onRetry && <button type="button" className="composer-destination-choice composer-destination-connect"
-      onClick={() => { destination.onRetry?.(); field.current?.focus(); }}>{tr('Try again')}</button>}
     {applying && <div className="composer-amount-actions composer-amount-direct">
       <span id={hint} className="composer-amount-hint">{tr('Press Enter to apply')}</span>
       {onCancel && <button type="button" className="composer-amount-cancel" onClick={onCancel}>{tr('Cancel')}</button>}

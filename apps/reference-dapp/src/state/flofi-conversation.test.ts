@@ -1199,7 +1199,9 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 chat resumes after the d
     expect(last(render()).options).toEqual(['Switch to Base Sepolia']);
     reviewedPatch = { manualSimulation: true, networkAction: undefined, walletNetwork: 'Base Sepolia' }; lifecycle(reviewedPatch);
     render(); await flush();
-    expect(last(render()).text).toBe('Ready to continue. The review may ask your wallet to sign in to FloFi (no funds move), so it starts when you choose Review workflow.');
+    // One message (never "Continuing the review" followed by an offer): where the wallet is now, and that the owner starts the review.
+    expect(last(render()).text).toBe('Your wallet is now on Base Sepolia. The review may ask your wallet to sign in to FloFi (no funds move), so it starts when you choose Review workflow.');
+    expect(texts(render()).some(text => /Continuing the review/.test(text))).toBe(false);
     expect(last(render()).options).toEqual(['Review workflow']);
     expect(simulate).not.toHaveBeenCalled();
   });

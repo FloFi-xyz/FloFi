@@ -7,7 +7,7 @@
  * one "Authorize in wallet" action, then the live status and the receipt. It never builds, signs or sends a transaction itself; the wallet's
  * confirmation stays mandatory and the existing runtimes keep every gate. "Open Canvas" explicitly shows the same proposal on the optional Canvas.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
 import { projectReview } from '../domain/review-presentation';
 import { projectSimulation, simulationStatusPresentation } from '../domain/simulation-presentation';
@@ -83,7 +83,11 @@ export function SigningSurface(props: SigningSurfaceProps) {
     ? 'Check the details, then authorize. Your wallet shows the exact transaction for your confirmation.' : c.view.message, tone: c.view.canExecute || review.canApprove ? 'ready' : 'blocked' };
   const final = isFinalExecutionResult(live);
   // Workflow review: also next to an expired Review whose "Simulate again" is what the destination blocks (its reason is then shown under it).
-  const destinationShown = !props.gated && !live && !props.walletIssue && Boolean(props.destinationIssue);
+  // MCP review: only where Simulate is the action (no Review, or one that expired), never beside a Review that can still be authorized.
+  const destinationShown = !props.gated && !live && !props.walletIssue && Boolean(props.destinationIssue)
+    && (!authorization.key || review.status === 'expired' || review.status === 'invalidated');
+  // Frontend-UX review: Connect and Try again replace themselves (the reason changes), so focus moves to the status that says what happened.
+  const statusRef = useRef<HTMLDivElement>(null);
   return <main id="workspace" className="main signing-surface" tabIndex={-1} aria-label={tr('Authorize with your wallet')}>
     <div className="signing-column">
       {props.approvalSlot && <div className="signing-proposal" ref={props.approvalSlot}/>}
@@ -115,8 +119,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
         </dl>
         {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
         <ReviewTokenPermissions review={review}/>
-        <div className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
-        {destinationShown && props.destinationActions && <DestinationActions actions={props.destinationActions}/>}
+        <div ref={statusRef} tabIndex={-1} className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
+        {destinationShown && props.destinationActions && <DestinationActions actions={props.destinationActions} focusStatus={() => statusRef.current?.focus()}/>}
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
         {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
           {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
@@ -148,16 +152,17 @@ export function SigningSurface(props: SigningSurfaceProps) {
  * wallets once more. Neither starts a simulation, and the page does not prepare one by itself once the destination resolves (app-shell
  * `preparedAfterDestination`): the owner chooses Simulate, whose source sign-in is then the owner's own request.
  */
-function DestinationActions({ actions }: { actions: NonNullable<SigningSurfaceProps['destinationActions']> }) {
+function DestinationActions({ actions, focusStatus }: { actions: NonNullable<SigningSurfaceProps['destinationActions']>; focusStatus: () => void }) {
   const { t: tr } = useLocale();
   const [failed, setFailed] = useState(false), [busy, setBusy] = useState(false);
-  const connect = actions.connect;
+  const connect = actions.connect, retry = actions.retry;
   return <div className="signing-destination-actions">
+    {retry && <button type="button" className="secondary" onClick={() => { setFailed(false); retry(); focusStatus(); }}>{tr('Try again')}</button>}
     {connect && <button type="button" className="secondary" disabled={busy} onClick={() => {
       setFailed(false); setBusy(true);
-      void connect.run().then(ok => setFailed(!ok), () => setFailed(true)).finally(() => setBusy(false));
+      void connect.run().then(ok => setFailed(!ok), () => setFailed(true)).finally(() => { setBusy(false); focusStatus(); });
     }}>{tr(connect.label)}</button>}
-    {actions.retry && <button type="button" className="secondary" onClick={actions.retry}>{tr('Try again')}</button>}
-    {failed && <p className="muted" role="status">{tr(actions.canvas === false ? 'No wallet was connected.' : 'No wallet was connected. You can still open the Canvas to enter its public address.')}</p>}
+    {/* One persistent live region, so a failed connection is announced when it appears. */}
+    <p className="muted" role="status">{failed ? tr(actions.canvas === false ? 'No wallet was connected.' : 'No wallet was connected. You can still open the Canvas to enter its public address.') : null}</p>
   </div>;
 }
