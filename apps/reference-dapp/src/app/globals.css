@@ -2113,4 +2113,5 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .signing-destination-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
 .signing-destination-actions button{min-height:32px}
 .signing-destination-actions p{flex-basis:100%;margin:0}
-.signing-destination-actions p:empty{display:none}
+/* The live region stays in the accessibility tree while empty (so a failed connection is announced), only visually collapsed. */
+.signing-destination-actions p:empty{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}

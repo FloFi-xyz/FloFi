@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (P0): READ-ONLY verification of 0016's runtime-role privileges, before and after
--- docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql. Every statement is a SELECT inside a READ ONLY transaction: it changes nothing, writes no row,
+-- docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql. Only SELECTs and SET LOCALs inside a READ ONLY transaction: it changes nothing, writes no row,
 -- takes no lock beyond ordinary reads and prints no secret (role names, ACLs and counts only; no run, owner, address or byte).
 --   psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role=<runtime role> -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql
 -- Expected after the remediation: `runtime_reads_tombstones = t`, `runtime_writes_tombstones = f`, `runtime_touches_permits = f`,
@@ -9,11 +9,14 @@
 -- on PostgreSQL 16, which has no such privilege). Before it, where the runtime role holds the owner's default table privileges,
 -- `runtime_writes_tombstones` and `runtime_touches_permits` are `t` (the exposure).
 -- The integrity section reads 0 in every column except `tombstones` (legitimate owner deletions) on a database where only the checked procedure
--- ever deleted execution history: a permit that outlived its transaction, a tombstone without the owner's History event, a tombstone whose run,
--- log or journal still exists, or an execution log / journal with a missing row is not produced by the procedure and is investigated first.
--- These are heuristics, not proof. Two forgeries leave none of these traces: deleting a whole log no run references (an INTENT log) under a
--- permit that names an existing tombstone, and a forged tombstone written together with a forged History event whose run and journal were
--- then deleted completely. Only the database's own history (point-in-time restore, logs) can rule those out.
+-- ever deleted execution history: a permit that outlived its transaction, a tombstone without the owner's History event, a tombstone whose run
+-- or log still exists, an execution log with a missing segment, log bytes that no longer match their recorded digests or length, or a journal
+-- with a missing entry is not produced by the procedure and is investigated first.
+-- These are heuristics, not proof, and the list of what they cannot see is not exhaustive: any forgery that also restores every invariant
+-- counted here is invisible. Examples: deleting a whole log no run references (an INTENT log) under a permit that names an existing tombstone;
+-- rewriting a log's bytes and updating its recorded length and digest; a forged tombstone written with a forged History event, for a run that
+-- was then deleted completely or for an identity that never existed. Only the database's own history (point-in-time restore, logs) can rule
+-- those out.
 BEGIN TRANSACTION READ ONLY;
 -- Only pg_catalog resolves an unqualified name (no object in `public` can stand in for a check); every table is schema-qualified.
 SET LOCAL search_path = pg_catalog, pg_temp;
@@ -50,7 +53,8 @@ SELECT has_table_privilege(:'runtime_role', 'public.execution_purge_audit', 'SEL
     OR has_any_column_privilege(:'runtime_role', 'public.execution_purge_audit', 'INSERT,UPDATE,REFERENCES') AS runtime_column_writes,
   EXISTS (SELECT 1 FROM pg_roles r, (VALUES ('public.execution_purge_permits'), ('public.execution_purge_audit')) t(object)
     WHERE r.rolname <> :'runtime_role' AND pg_has_role(:'runtime_role', r.oid, 'MEMBER')
-      AND has_table_privilege(r.oid, t.object, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')) AS runtime_member_writes,
+      AND (has_table_privilege(r.oid, t.object, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR has_any_column_privilege(r.oid, t.object, 'INSERT,UPDATE,REFERENCES')
+        OR has_schema_privilege(r.oid, 'public', 'CREATE'))) AS runtime_member_writes,
   has_schema_privilege(:'runtime_role', 'public', 'CREATE') AS runtime_creates_in_public,
   has_function_privilege(:'runtime_role', 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') AS runtime_execute,
   has_function_privilege('public', 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') AS public_execute,
@@ -72,7 +76,11 @@ SELECT (SELECT count(*) FROM public.execution_purge_permits) AS open_permits,
     OR EXISTS (SELECT 1 FROM public.execution_logs l WHERE l.tenant_id = a.tenant_id AND l.namespace = a.namespace AND l.name = a.log_name)) AS tombstones_with_live_records,
   (SELECT count(*) FROM public.execution_logs l WHERE (SELECT count(*) FROM public.execution_log_segments s WHERE s.tenant_id = l.tenant_id AND s.namespace = l.namespace
     AND s.name = l.name) <> l.segment_count) AS logs_missing_segments,
-  (SELECT count(*) FROM public.execution_runs r WHERE NOT EXISTS (SELECT 1 FROM public.execution_logs l WHERE l.tenant_id = r.tenant_id AND l.namespace = r.namespace
-    AND l.name = r.log_name)) AS runs_without_log,
+  -- Data-privacy review: log bytes rewritten without updating their recorded digest or length (a run's log is its financial evidence).
+  (SELECT count(*) FROM public.execution_logs l WHERE encode(sha256(coalesce((SELECT string_agg(s.bytes, ''::bytea ORDER BY s.seq) FROM public.execution_log_segments s
+    WHERE s.tenant_id = l.tenant_id AND s.namespace = l.namespace AND s.name = l.name), ''::bytea)), 'hex') <> l.content_sha256
+    OR (SELECT coalesce(sum(octet_length(s.bytes)), 0) FROM public.execution_log_segments s WHERE s.tenant_id = l.tenant_id AND s.namespace = l.namespace
+      AND s.name = l.name) <> l.byte_length) AS logs_with_digest_mismatch,
+  (SELECT count(*) FROM public.execution_log_segments s WHERE encode(sha256(s.bytes), 'hex') <> s.segment_sha256) AS segments_with_digest_mismatch,
   (SELECT count(*) FROM (SELECT 1 FROM public.journal_entries GROUP BY tenant_id, run_id HAVING count(*) <> max(sequence) + 1 OR min(sequence) <> 0) j) AS journals_with_gaps;
 COMMIT;

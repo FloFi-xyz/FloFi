@@ -101,11 +101,16 @@ BEGIN
   -- lets it write after SET ROLE: every role it is a member of, predefined ones included, must hold no write on either table.
   FOR v_member IN SELECT r.oid, r.rolname FROM pg_roles r WHERE r.rolname <> v_role AND pg_has_role(v_role, r.oid, 'MEMBER') LOOP
     FOREACH v_table IN ARRAY ARRAY['execution_purge_permits', 'execution_purge_audit'] LOOP
-      IF has_table_privilege(v_member.oid, 'public.' || v_table, v_writes) THEN v_open := v_open || ('MEMBER:' || v_member.rolname || ':' || v_table); END IF;
+      -- Data-privacy review: column-level writes count too (a permit can be forged from column grants alone).
+      IF has_table_privilege(v_member.oid, 'public.' || v_table, v_writes)
+        OR has_any_column_privilege(v_member.oid, 'public.' || v_table, 'INSERT, UPDATE, REFERENCES') THEN
+        v_open := v_open || ('MEMBER:' || v_member.rolname || ':' || v_table);
+      END IF;
     END LOOP;
+    IF has_schema_privilege(v_member.oid, 'public', 'CREATE') THEN v_open := v_open || ('MEMBER:' || v_member.rolname || ':SCHEMA_PUBLIC:CREATE'); END IF;
   END LOOP;
   -- An object the runtime role could create in `public` could shadow a pg_catalog function the SECURITY DEFINER procedure calls
-  -- (`SET search_path = pg_catalog,public,pg_temp` resolves an exact-signature public function first).
+  -- (an overload in public that matches a call's argument types more closely than pg_catalog's wins, whatever the search_path order).
   IF has_schema_privilege(v_role, 'public', 'CREATE') THEN v_open := v_open || 'SCHEMA_PUBLIC:CREATE'::text; END IF;
   IF NOT has_table_privilege(v_role, 'public.execution_purge_audit', 'SELECT') THEN v_open := v_open || 'execution_purge_audit:SELECT_MISSING'::text; END IF;
   IF NOT has_function_privilege(v_role, 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') THEN

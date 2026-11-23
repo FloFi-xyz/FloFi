@@ -970,7 +970,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (!bridge.wallet.account) return;
       const network = bridge.walletNetwork ?? '';
       // Frontend-UX review: a review that will be offered (not started) is never announced as "continuing".
-      if (bridge.manualSimulation) { startReview(waiting.scope, waiting.language, false, false, { switched: network }); return; }
+      if (bridge.manualSimulation) { startReview(waiting.scope, waiting.language, false, false, network ? { switched: network } : {}); return; }
       say(waiting.scope, waiting.language, (_, c) => c.switched(network));
       startReview(waiting.scope, waiting.language, false, false, {});
       return;

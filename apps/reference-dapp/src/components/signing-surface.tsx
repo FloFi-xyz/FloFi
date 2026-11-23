@@ -120,7 +120,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
         {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
         <ReviewTokenPermissions review={review}/>
         <div ref={statusRef} tabIndex={-1} className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
-        {destinationShown && props.destinationActions && <DestinationActions actions={props.destinationActions} focusStatus={() => statusRef.current?.focus()}/>}
+        {destinationShown && props.destinationActions && <DestinationActions actions={props.destinationActions}
+          focusStatus={() => requestAnimationFrame(() => statusRef.current?.focus())}/>}
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
         {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
           {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>

@@ -34,9 +34,9 @@ History and privacy reports READ the tombstone. All three shapes are reproduced,
 `packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts`. That test runs on a disposable PostgreSQL that reproduces the
 production model.
 
-**Production state.** The owner's production database was inspected read-only on 2026-11-23: catalog and count queries only, nothing changed.
-The exposure is active there. The integrity counts below showed no trace of a forgery. That is not proof: see the blind spots under
-step 1. The exact facts (roles, ACLs, counts) belong in the owner's approval record, not in this repository.
+**Production state.** The owner's production database was inspected read-only on 2026-11-23 (catalog and count queries only, nothing
+changed). Its result (roles, ACLs, counts) belongs in the owner's approval record, not in this repository. The integrity counts are
+heuristics: see the blind spots under step 1.
 
 ## What the remediation changes
 
@@ -82,8 +82,9 @@ if any of these can still write either table:
 - any role the runtime role belongs to, whether inherited or reachable only by `SET ROLE`, including predefined roles such as
   `pg_write_all_data`.
 
-It also refuses (`SCHEMA_PUBLIC:CREATE`) if the runtime role can CREATE in schema `public`. An exact-signature function there would take
-precedence over a `pg_catalog` function that the SECURITY DEFINER procedure calls. PostgreSQL 15+ denies it by default.
+It also refuses (`SCHEMA_PUBLIC:CREATE`) if the runtime role, or any role it belongs to, can CREATE in schema `public`. A function there whose
+argument types match a call more closely would take precedence over the `pg_catalog` function that the SECURITY DEFINER procedure calls.
+PostgreSQL 15+ denies it by default. Column-level writes reached through any membership count as writes.
 
 Any error, timeout or lost connection rolls everything back. A rerun changes nothing.
 
@@ -93,6 +94,7 @@ INSERT/UPDATE/DELETE. So:
 - run this file again on any new environment with a separate runtime role once it is at schema 16 or above (a new project, a rebuild, a
   preview with its own role);
 - run it again after any `GRANT … ON ALL TABLES IN SCHEMA public TO <runtime role>`;
+- run it again on any Neon branch or restore taken from before the remediation: it carries the previous ACLs;
 - a future private table must revoke the runtime role in its own provisioning step, as 0033's did.
 
 ## Procedure (owner-approved intervention only)
@@ -150,7 +152,7 @@ psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_R
 
 Expected output, in order:
 
-- `BEGIN`, `SET`, `SET`;
+- `BEGIN`, `SET`, `SET`, `SET` (search path, lock timeout, statement timeout);
 - one `pg_advisory_xact_lock` row;
 - one `runtime_role_named` row (`t`);
 - `DO`;
@@ -207,8 +209,9 @@ Never keep the connection URL.
 If an unexpected `permission denied for table execution_purge_*` appears in a legitimate path:
 
 1. Set `FLOFI_OWNER_HISTORY=read-only`, the existing switch, so no deletion runs.
-2. Only if the owner then decides to restore the exact previous ACL, knowingly reopening the exposure, run:
-   `GRANT SELECT, INSERT, UPDATE, DELETE ON execution_purge_permits, execution_purge_audit TO <runtime role>;`
+2. Only if the owner then decides to restore the previous ACL, knowingly reopening the exposure, run on the migration connection the grants
+   that section 3 of `0016-before.txt` shows for the runtime role. With FloFi's default privileges that is
+   `GRANT SELECT, INSERT, UPDATE, DELETE ON public.execution_purge_permits, public.execution_purge_audit TO <runtime role>;`
 3. Record that decision, and re-run step 3 to show the reopened state.
 
 **After a 0033 reversal or re-application:** nothing changes here.
@@ -240,16 +243,17 @@ It proves:
   - History's legitimate Delete still deletes only an eligible run, and still refuses completed and submitting runs and another owner;
 - each refusal changes nothing:
   - 0016 absent;
-  - an unknown or owning role;
+  - an unknown or owning role, and a role that owns schema `public`;
   - a runtime-role connection;
   - an inherited write after the REVOKEs;
-  - a membership reachable only by `SET ROLE`, and `pg_write_all_data`;
-  - CREATE in `public`;
+  - a table- or column-level write, or CREATE, reachable only by `SET ROLE`, and `pg_write_all_data`;
+  - CREATE in `public`, and functions planted in `public` to fake the checks;
   - a 5 s lock timeout;
-- the integrity section detects three forgery shapes once committed.
+- the integrity section detects four forgery shapes once committed (a whole run, a log's bytes deleted, a forged tombstone over a live run,
+  a log's bytes rewritten without updating its digest).
 
-**Real `psql -v runtime_role=…` run.** The two files were also run with real psql on a production-model database: pre-check, apply, rerun,
-post-check. The test itself substitutes psql's quoting textually.
+**Real `psql -v runtime_role=…` run.** During development the two files were also run with real psql on a local production-model database
+(pre-check, apply, rerun, post-check); that run is not recorded as an artifact. The test itself substitutes psql's quoting textually.
 
 **Not proven here:**
 

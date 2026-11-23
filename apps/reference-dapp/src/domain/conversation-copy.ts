@@ -293,7 +293,7 @@ const pt: ConversationCopy = {
   walletsReadyReview: network => `Já li suas carteiras, e a carteira que recebe em ${network} está definida. A revisão pode pedir um sign-in da sua carteira na FloFi (nenhum fundo se move), então ela só começa quando você escolher Revisar fluxo.`,
   switchedReview: network => `A sua carteira agora está em ${network}. A revisão pode pedir um sign-in da sua carteira na FloFi (nenhum fundo se move), então ela só começa quando você escolher Revisar fluxo.`,
   resumeReadyReview: 'Tudo pronto para continuar. A revisão pode pedir um sign-in da sua carteira na FloFi (nenhum fundo se move), então ela só começa quando você escolher Revisar fluxo.',
-  walletsResumeDropped: 'Seu fluxo, sua carteira ou sua rede mudou enquanto eu lia suas carteiras, então não continuei. Escolha Revisar fluxo quando estiver pronto.',
+  walletsResumeDropped: 'Seu fluxo, sua carteira ou a rede da sua carteira mudou enquanto eu lia suas carteiras, então não continuei. Escolha Revisar fluxo quando quiser.',
   approvalIfNeeded: 'Uma aprovação de token só é pedida se a sua permissão atual ainda for insuficiente no momento da execução.',
   providerSettles: steps => `Depois, o provedor conclui ${steps} por conta própria: a FloFi observa e reconcilia, e a sua carteira não assina nada para isso.`,
   executionNotStarted: reason => `Nada foi enviado e nenhum pedido foi aberto na carteira. ${reason}`,
