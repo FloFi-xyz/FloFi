@@ -7,7 +7,8 @@
 -- `runtime_column_writes = f`, `runtime_member_writes = f`, `runtime_creates_in_public = f`, `runtime_execute = t`, `public_execute = f`,
 -- `public_touches_tables = f`, and every row of the effective-privilege table false except execution_purge_audit/SELECT (MAINTAIN rows are empty
 -- on PostgreSQL 16, which has no such privilege). Before it, where the runtime role holds the owner's default table privileges,
--- `runtime_writes_tombstones` and `runtime_touches_permits` are `t` (the exposure).
+-- `runtime_writes_tombstones`, `runtime_touches_permits` and `runtime_column_writes` are `t` (the exposure). On PostgreSQL 17+ MAINTAIN counts as
+-- a write in this summary exactly as in the remediation's own check.
 -- The integrity section reads 0 in every column except `tombstones` (legitimate owner deletions) on a database where only the checked procedure
 -- ever deleted execution history: a permit that outlived its transaction, a tombstone without the owner's History event, a tombstone whose run
 -- or log still exists, an execution log with a missing segment, log bytes that no longer match their recorded digests or length, or a journal
@@ -47,13 +48,17 @@ CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
 ORDER BY 1, 2;
 -- 5. Summary (the same columns the remediation prints before COMMIT, plus PUBLIC on the tables).
 SELECT has_table_privilege(:'runtime_role', 'public.execution_purge_audit', 'SELECT') AS runtime_reads_tombstones,
-  has_table_privilege(:'runtime_role', 'public.execution_purge_audit', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS runtime_writes_tombstones,
-  has_table_privilege(:'runtime_role', 'public.execution_purge_permits', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS runtime_touches_permits,
+  has_table_privilege(:'runtime_role', 'public.execution_purge_audit', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ',MAINTAIN' ELSE '' END) AS runtime_writes_tombstones,
+  has_table_privilege(:'runtime_role', 'public.execution_purge_permits', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ',MAINTAIN' ELSE '' END) AS runtime_touches_permits,
   has_any_column_privilege(:'runtime_role', 'public.execution_purge_permits', 'SELECT,INSERT,UPDATE,REFERENCES')
     OR has_any_column_privilege(:'runtime_role', 'public.execution_purge_audit', 'INSERT,UPDATE,REFERENCES') AS runtime_column_writes,
   EXISTS (SELECT 1 FROM pg_roles r, (VALUES ('public.execution_purge_permits'), ('public.execution_purge_audit')) t(object)
     WHERE r.rolname <> :'runtime_role' AND pg_has_role(:'runtime_role', r.oid, 'MEMBER')
-      AND (has_table_privilege(r.oid, t.object, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR has_any_column_privilege(r.oid, t.object, 'INSERT,UPDATE,REFERENCES')
+      AND (has_table_privilege(r.oid, t.object, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+          || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ',MAINTAIN' ELSE '' END)
+        OR has_any_column_privilege(r.oid, t.object, 'INSERT,UPDATE,REFERENCES')
         OR has_schema_privilege(r.oid, 'public', 'CREATE'))) AS runtime_member_writes,
   has_schema_privilege(:'runtime_role', 'public', 'CREATE') AS runtime_creates_in_public,
   has_function_privilege(:'runtime_role', 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') AS runtime_execute,
@@ -66,7 +71,7 @@ SELECT pg_get_userbyid(d.defaclrole) AS grantor, CASE WHEN d.defaclnamespace = 0
   d.defaclacl::text AS acl
 FROM pg_default_acl d ORDER BY 1, 2, 3;
 -- 7. Integrity at rest (counts only). Every column but `tombstones` is 0 where only the checked procedure ever deleted execution history (see
---    the header for the two forgeries no count can see).
+--    the header for what no count can see; that list is not exhaustive).
 SELECT (SELECT count(*) FROM public.execution_purge_permits) AS open_permits,
   (SELECT count(*) FROM public.execution_purge_audit) AS tombstones,
   (SELECT count(*) FROM public.execution_purge_audit a WHERE NOT EXISTS (SELECT 1 FROM public.owner_history_events e WHERE e.tenant_id = a.tenant_id

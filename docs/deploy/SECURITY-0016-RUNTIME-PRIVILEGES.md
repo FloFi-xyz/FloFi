@@ -122,7 +122,8 @@ Expected:
 
 - Section 1: certified `t`.
 - Section 5:
-  - `runtime_writes_tombstones t` and `runtime_touches_permits t` (the exposure);
+  - `runtime_writes_tombstones t`, `runtime_touches_permits t` and `runtime_column_writes t` (the exposure; a table-level write is also a
+    column-level one);
   - `runtime_member_writes f`;
   - `runtime_creates_in_public f`;
   - `runtime_execute t`;
@@ -135,10 +136,13 @@ Expected:
 - `runtime_member_writes` or `runtime_creates_in_public` is `t`: the file would refuse, and the cause needs its own decision;
 - section 7 shows anything but legitimate tombstones.
 
-Two forgeries leave no count behind, as the verification header explains:
+The counts cannot see every forgery, and this list is not exhaustive (see the verification header): any forgery that also restores every
+invariant counted is invisible. Among them:
 
 - deleting a whole log that no run references, under a permit naming an existing tombstone;
-- a forged tombstone written together with a forged History event, whose run, log and journal were then deleted completely.
+- rewriting a log's bytes and updating its recorded length and digest;
+- a forged tombstone written together with a forged History event, for a run whose run, log and journal were then deleted completely, or
+  for an identity that never existed.
 
 Only the database's own history (point-in-time restore, logs) can rule those out.
 
