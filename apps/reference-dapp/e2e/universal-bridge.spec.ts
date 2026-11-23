@@ -225,6 +225,25 @@ test('a new Canvas Bridge card on mainnet offers Solana and applies a universal 
 test('chat authors Base → Solana receiving SOL through Relay; the Review needs the Solana destination wallet', async ({ page }) => {
   await installEvmWallet(page, wallets.evm);
   await authorByChat(page, 'bridge 10 USDC from Base to Solana receive SOL via relay');
+  // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (incident regression): the EVM source wallet is connected and no Solana wallet is known. The card's
+  // Destination wallet is amber and says which wallet is missing; Simulate is blocked before any sign-in; the chat names the receiving wallet,
+  // never "Connect the wallet that will sign".
+  const destination = page.locator('.build-flow-surface .composer-card .composer-destination');
+  await expect(destination).toHaveAttribute('data-destination-state', 'attention');
+  await expect(destination).toContainText('Required: a wallet that can receive on Solana (Solana address). Connect one or enter its public address.');
+  await expect(destination.getByRole('button', { name: 'Connect a Solana wallet' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeDisabled();
+  await page.getByLabel('Describe your flow').fill('Review workflow');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message:not(.you):not(.conversation-execution-message)').last();
+  await expect(answer).toContainText('I can’t start the review yet: No Solana wallet can receive on Solana yet. Connect one on the Bridge card or enter its public address.');
+  await expect(answer).not.toContainText('will sign');
+  expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
+  // A typed public address resolves it at once: the warning clears and Simulate opens (the recipient is the address as written).
+  await destination.getByRole('textbox', { name: 'Destination wallet' }).fill(wallets.solana.owner);
+  await destination.getByRole('textbox', { name: 'Destination wallet' }).press('Enter');
+  await expect(destination).toHaveAttribute('data-destination-state', 'normal');
+  await expect(destination).not.toContainText('Required');
   await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
   await expect(panel(page)).toContainText('Bridge 10 USDC from Base to Solana, receiving SOL.');
   await panel(page).getByRole('button', { name: 'Find routes' }).click();

@@ -65,13 +65,16 @@ export async function loginUrl(): Promise<string> {
  * What the product pages may know: availability, the signed-in account (public data) and Privy's public app settings. Never a token or
  * secret.
  */
-export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null; readonly privy: PrivyBrowserConfig | null };
+export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null; readonly privy: PrivyBrowserConfig | null;
+  /** BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a signed-in session whose account could not be read (not "no account"). */
+  readonly accountUnavailable?: true };
 export async function accountState(): Promise<AccountState> {
   let h: AccountHost | null;
   try { h = await accountHost(); } catch { h = null; }
   const availability = accountAvailability(process.env, h), session = await currentAccountSession(h);
   if (!h || !session) return { availability, account: null, privy: h?.privy ?? null };
-  return { availability, account: await h.service.view(session).catch(() => null), privy: h.privy };
+  const account = await h.service.view(session).catch(() => undefined);
+  return { availability, account: account ?? null, privy: h.privy, ...account === undefined ? { accountUnavailable: true as const } : {} };
 }
 
 /**

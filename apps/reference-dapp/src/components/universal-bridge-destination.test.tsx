@@ -26,7 +26,7 @@ const wallet = (address: string, providerName: string): DestinationCandidate => 
 // The form's default pair is Solana → Base: a cross-ecosystem bridge whose destination is an EVM wallet.
 const render = (language: Language = 'EN') => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language,
   children: createElement(UniversalBridgeForm, { nodeId: 'bridge', options: true }) }));
-const input = (html: string) => /<label>(?:Destination wallet|Carteira de destino)<input[^>]*\/><\/label>/.exec(html)?.[0] ?? '';
+const input = (html: string) => /<label[^>]*>(?:Destination wallet|Carteira de destino)<input[^>]*\/><\/label>/.exec(html)?.[0] ?? '';
 
 describe('BUILD-FLOFI-MAINNET-EXEC-002 universal bridge destination field', () => {
   it('several wallets (CHOOSE): named by its visible label, described by the message, and an address placeholder', () => {
@@ -38,13 +38,16 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 universal bridge destination field', () =
     expect(field).toContain('placeholder="Address (0x…)"');
     expect(field).not.toMatch(/placeholder="[^"]*connected/i);
     const described = /aria-describedby="([^"]+)"/.exec(field)?.[1];
-    expect(html).toContain(`<small id="${described}" role="status">Choose one of your wallets or enter an address.</small>`);
+    // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the choice names the network and the kind of wallet, in the amber (attention) state.
+    expect(html).toContain(`<small id="${described}" role="status" class="composer-destination-warning">Choose which of your EVM wallets receives on Base, or enter its public address.</small>`);
+    expect(html).toContain('data-destination-state="attention"');
   });
   it('no wallet (NONE): an address placeholder and the message as its description, in Portuguese too', () => {
     fixture.wallets = []; fixture.evm = { kind: 'NONE' };
     const html = render(), field = input(html), described = /aria-describedby="([^"]+)"/.exec(field)?.[1];
     expect(field).toContain('placeholder="Address (0x…)"');
-    expect(html).toContain(`<small id="${described}" role="status">Enter the destination address on Base.</small>`);
+    expect(html).toContain(`<small id="${described}" role="status" class="composer-destination-warning">Required: a wallet that can receive on Base (EVM address). Connect one or enter its public address.</small>`);
+    expect(html).toContain('data-destination-state="attention"');
     const pt = input(render('PT'));
     expect(pt).toContain('placeholder="Endereço (0x…)"');
   });

@@ -204,3 +204,18 @@
 .composer-destination .composer-destination-choice:hover{border-color:var(--accent-line);background:var(--blue-soft)}
 .composer-destination .composer-destination-choice:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 @media(pointer:coarse){.composer-destination .composer-destination-choice{min-height:44px}}
+/* BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the destination wallet's states. Amber: required wallet missing or a choice pending; red: an
+   invalid address; loading: wallets still being read. The text and the icon say the same (colour is never the only signal). */
+.composer-destination[data-destination-state="attention"] .composer-recipient-input{border-color:var(--warning-text);box-shadow:0 0 0 1px var(--warning-text)}
+.composer-destination[data-destination-state="error"] .composer-recipient-input{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
+.composer-destination[data-destination-state="loading"] .composer-recipient-input{border-style:dashed}
+.composer-destination .composer-destination-warning{display:flex;align-items:flex-start;gap:5px;padding:4px 6px;border-radius:6px;background:var(--warning-surface);color:var(--warning-text)}
+.composer-destination .composer-recipient-error{display:flex;align-items:flex-start;gap:5px}
+.composer-destination .composer-destination-icon{flex:none;display:inline-grid;place-items:center;width:13px;height:13px;border-radius:50%;background:var(--warning-text);color:var(--surface);font-size:9px;font-weight:700;line-height:1}
+.composer-destination .composer-recipient-error .composer-destination-icon{background:var(--red)}
+.composer-destination .composer-destination-connect{border-color:var(--warning-text);min-height:24px}
+.composer-destination .composer-destination-live{display:flex;flex-direction:column;gap:3px;min-width:0}
+.universal-destination[data-destination-state="attention"] input{border-color:var(--warning-text);box-shadow:0 0 0 1px var(--warning-text)}
+.universal-destination[data-destination-state="error"] input{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
+.universal-destination[data-destination-state="loading"] input{border-style:dashed}
+.universal-bridge-form .composer-destination-warning{display:block;padding:4px 6px;border-radius:6px;background:var(--warning-surface);color:var(--warning-text)}

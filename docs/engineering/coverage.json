@@ -5442,6 +5442,7 @@
         "apps/reference-dapp/src/i18n/pt-universal-bridge.ts",
         "apps/reference-dapp/src/i18n/pt-user-funded.ts",
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
+        "apps/reference-dapp/src/i18n/pt-wallet-resolution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
