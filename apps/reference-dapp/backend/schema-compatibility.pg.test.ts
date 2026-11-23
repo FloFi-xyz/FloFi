@@ -245,7 +245,7 @@ describe.runIf(CERTIFICATE)(`BUILD-DB-COMPAT-001 this build across its certified
     expect(await ledger(uncertified.db)).toEqual(before);
 
     // The Developer operator CLI on the newer schema.
-    const cli = await node('developer-admin.ts', ['create-project', '--tenant', 'default', '--name', 'Compatibility'], { DATABASE_URL: ahead.url, FLOFI_DEVELOPER_SECRET: SECRET });
+    const cli = await node('developer-admin.ts', ['create-project', '--tenant', 'default', '--name', 'Compatibility'], { DATABASE_ADMIN_OPERATIONS_URL: ahead.url, FLOFI_DEVELOPER_SECRET: SECRET });
     expect(cli.code).toBe(0);
     expect(JSON.parse(cli.stdout)).toMatchObject({ tenantId: 'default', projectId: expect.stringMatching(/^prj_/) });
     // The next build (its migrations shipped) starts only once they are applied.

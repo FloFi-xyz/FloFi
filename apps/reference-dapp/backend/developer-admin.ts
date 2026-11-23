@@ -13,7 +13,7 @@
  *   disable-project --project <prj_…>                  every key stops working; open approvals are revoked
  *   deliveries      --project <prj_…> [--limit 50]     read-only webhook delivery state
  *
- * Environment: DATABASE_URL (the deployment's database) and FLOFI_DEVELOPER_SECRET (the deployment's developer secret: a key only
+ * Environment: DATABASE_ADMIN_OPERATIONS_URL and FLOFI_DEVELOPER_SECRET (the deployment's developer secret: a key only
  * authenticates where the digest key matches). The tenant is explicit: production/local `--tenant default`, a Vercel Preview
  * `--preview-branch <git branch>`. Production (live) keys cannot be issued in this build. Like `main.ts`, it runs on plain Node: every
  * module it reaches imports with explicit extensions (`backend/developer-admin.test.ts`).
@@ -41,8 +41,8 @@ async function main(): Promise<void> {
   if (!command || !(COMMANDS as readonly string[]).includes(command)) throw new Error(`COMMAND_INVALID: one of ${COMMANDS.join(', ')}`);
   const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { tenant: { type: 'string' }, 'preview-branch': { type: 'string' },
     name: { type: 'string' }, project: { type: 'string' }, key: { type: 'string' }, scopes: { type: 'string' }, 'key-file': { type: 'string' }, limit: { type: 'string' } } });
-  const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '', secret = process.env.FLOFI_DEVELOPER_SECRET ?? '';
-  if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
+  const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_ADMIN_OPERATIONS_URL ?? '', secret = process.env.FLOFI_DEVELOPER_SECRET ?? '';
+  if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_ADMIN_OPERATIONS_URL_REQUIRED');
   if (secret.length < 32 || secret.length > 512) throw new Error('FLOFI_DEVELOPER_SECRET_INVALID');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-developer-admin' });
   try {

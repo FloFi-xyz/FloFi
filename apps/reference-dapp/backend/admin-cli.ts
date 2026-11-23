@@ -34,7 +34,7 @@
  *   privacy-access     --request <dsr_…> [--wallet-stdin] [--include-text]      privacy-erase --request <dsr_…> [--wallet-stdin]
  *   privacy-complete   --request <dsr_…> --code <CODE>                          (correction, objection, restriction)
  *
- * Environment: DATABASE_URL (the deployment's database). The tenant is explicit: production/local `--tenant default`, a Vercel Preview
+ * Environment: DATABASE_ADMIN_OPERATIONS_URL, or DATABASE_MIGRATION_URL for migration commands. The tenant is explicit: production/local `--tenant default`, a Vercel Preview
  * `--preview-branch <git branch>`. No secret is printed; only the privacy commands that need the admin key read FLOFI_ADMIN_SESSION_SECRET. Like `main.ts`, it runs on plain Node: every module it reaches imports
  * with explicit extensions (`backend/admin-cli.test.ts`).
  */
@@ -76,8 +76,9 @@ async function main(): Promise<void> {
   const migration = command === 'finops-migrate' || command === 'finops-sync-migrate' || command === 'position-purge-migrate'
     || command === 'single-step-runs-migrate' || command === 'workflow-run-purge-migrate' || command === 'developer-projects-migrate'
     || command === 'studio-migrate' || command === 'studio-certification-migrate';
-  const tenantId = tenantOf(values), databaseUrl = (migration ? process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL : process.env.DATABASE_URL) ?? '';
-  if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
+  const connection = migration ? 'DATABASE_MIGRATION_URL' : 'DATABASE_ADMIN_OPERATIONS_URL';
+  const tenantId = tenantOf(values), databaseUrl = process.env[connection] ?? '';
+  if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error(`${connection}_REQUIRED`);
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });
   try {
     if (migration && (values['preview-branch'] || deploymentEnvironment(process.env) === 'preview')) {

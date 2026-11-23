@@ -23,7 +23,7 @@ const SECRET = 's'.repeat(40);
 const cwd = fileURLToPath(new URL('..', import.meta.url));
 async function cli(args: string[]) {
   const result = await promisify(execFile)(process.execPath, ['backend/developer-admin.ts', ...args], { cwd, timeout: 60_000,
-    env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', DATABASE_URL: t.url, FLOFI_DEVELOPER_SECRET: SECRET } })
+    env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', DATABASE_ADMIN_OPERATIONS_URL: t.url, FLOFI_DEVELOPER_SECRET: SECRET } })
     .then(r => ({ code: 0, stdout: r.stdout, stderr: r.stderr }), (e: { code: number; stdout: string; stderr: string }) => ({ code: e.code, stdout: e.stdout, stderr: e.stderr }));
   return { ...result, json: result.code === 0 ? JSON.parse(result.stdout) as Record<string, unknown> : null };
 }

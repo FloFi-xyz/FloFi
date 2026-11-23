@@ -3,7 +3,7 @@
   "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile" },
   "deploy": {
     "startCommand": "node apps/reference-dapp/backend/main.ts api",
-    "preDeployCommand": ["node apps/reference-dapp/backend/main.ts migrate"],
+    "preDeployCommand": ["node apps/reference-dapp/backend/main.ts check-schema"],
     "healthcheckPath": "/readyz",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",

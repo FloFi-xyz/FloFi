@@ -66,7 +66,7 @@ describe('FinOps ledger authorization and rollout on disposable PostgreSQL', () 
     expect(await (await write(invoice)).json()).toMatchObject({ code: 'FINOPS_LEDGER_NOT_CONFIGURED' });
     const command = promisify(execFile);
     await expect(command(process.execPath, ['backend/admin-cli.ts', 'finops-migrate', '--preview-branch', 'finops-review'], {
-      cwd: new URL('../../../', import.meta.url), env: { PATH: process.env.PATH ?? '', DATABASE_URL: database.url, NODE_ENV: 'test' },
+      cwd: new URL('../../../', import.meta.url), env: { PATH: process.env.PATH ?? '', DATABASE_MIGRATION_URL: database.url, NODE_ENV: 'test' },
     })).rejects.toMatchObject({ code: 1, stderr: 'PREVIEW_DATABASE_NOT_DEDICATED\n' });
     expect(await assertSchemaCompatible(database.db)).toMatchObject({ version: 28 });
   });

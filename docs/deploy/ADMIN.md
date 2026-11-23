@@ -24,17 +24,17 @@ strict output schema, grounding and every later Simulate/Review/signature step a
 | --- | --- |
 | `FLOFI_ADMIN` | `enabled` (anything else: `/admin` answers 404) |
 | `FLOFI_ADMIN_SESSION_SECRET` | `openssl rand -hex 32`, **dedicated**: 32–512 characters, refused if equal to any other secret FloFi reads (`FLOFI_SESSION_SECRET`, `API_AUTH_TOKEN`, channel, automation, developer, MCP, webhook, provider, object-store or cron secrets, `OPENAI_API_KEY`) |
-| `DATABASE_URL` | already required for platform state (pooled Neon URL); without it the console reports `ADMIN_STORE_NOT_CONFIGURED` |
+| `DATABASE_ADMIN_URL` | Dedicated pooled login on the same Neon database as platform state. Hosted admin reports `ADMIN_STORE_NOT_CONFIGURED` when missing. |
 | `FLOFI_COPILOT_RUNTIME_CONFIG` | optional break-glass: `disabled` ignores stored Copilot settings and uses `OPENAI_COPILOT_*` only |
 
 Never `NEXT_PUBLIC_*`. Rotating `FLOFI_ADMIN_SESSION_SECRET` signs every administrator out (sessions are also server-side rows).
 
 ## 3. Grant, revoke, audit (operator CLI)
 
-Run from a trusted shell with the deployment's database URL (the CLI prints ids and codes only, never a secret):
+Run from a trusted shell with the deployment's operations login. Migration subcommands use the owner's direct `DATABASE_MIGRATION_URL`. See [the database privilege rollout](DATABASE-LEAST-PRIVILEGE.md).
 
 ```sh
-export DATABASE_URL=…   # read with `read -rs`, never pasted into a chat or committed
+export DATABASE_ADMIN_OPERATIONS_URL=…   # read with `read -rs`, never pasted into a chat or committed
 node apps/reference-dapp/backend/admin-cli.ts grant --tenant default --wallet 0x… --role OPERATOR --label "Owner"
 node apps/reference-dapp/backend/admin-cli.ts list --tenant default
 node apps/reference-dapp/backend/admin-cli.ts revoke --tenant default --principal adm_…     # ends that administrator's sessions at once
@@ -353,7 +353,7 @@ never rolled back by a runner: from the commit of 0012 on, only Release A and la
 With `FLOFI_MIGRATE_ON_BUILD=preview` on the Preview environment, every Preview build runs `main.ts migrate` on its Preview `DATABASE_URL`
 (`deploy/vercel/build.sh`), so this PR's own Preview build applies 0012 as soon as it builds. Production is protected twice:
 
-* `build.sh` migrates only when `VERCEL_ENV=preview` (a Production build never migrates; Production migrates only in the Railway pre-deploy);
+* `build.sh` migrates only when `VERCEL_ENV=preview` (a Production build never migrates; the production owner runs migrations separately);
 * in a Preview, `main.ts migrate` first refuses — changing nothing, failing the Preview build with `backend.failed stage=preview_database
   error_code=PREVIEW_DATABASE_NOT_DEDICATED` — a database that a non-Preview deployment writes to: any tenant-scoped row outside the
   Preview `pv-…` tenants, or a tenant other than the seeded `default` outside them (`backend/preview-migration.ts`). A Preview whose
