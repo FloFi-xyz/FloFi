@@ -148,8 +148,8 @@ export type CardDestination = { network: string; value: string; auto: string | n
   status: 'valid' | 'loading' | 'choose' | 'required' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void;
   /** The kind of wallet the destination needs ('Solana' or 'EVM'), named in the warning so the owner knows which wallet to bring. */
   ecosystem?: 'Solana' | 'EVM';
-  /** Connect a wallet of the destination ecosystem in this page (the existing wallet connection; it signs nothing). */
-  onConnect?: (() => void) | undefined };
+  /** Connect a wallet of the destination ecosystem in this page (the existing wallet connection; it signs nothing). Rejects when none connected. */
+  onConnect?: (() => Promise<void>) | undefined };
 /**
  * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the field's visual state. `attention` (amber): a required wallet is missing or a choice is
  * pending; `error` (red): the typed address is invalid or of the wrong network; `loading`: wallets are still being read; otherwise normal.
@@ -168,11 +168,14 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
   const id = useId(), list = `${id}-wallets`, note = `${id}-note`, hint = `${id}-hint`;
   const field = useRef<HTMLInputElement>(null);
   const ecosystem = destination.ecosystem ?? null, state = destinationFieldState(destination.status);
+  // Frontend-UX review: a connection that did not happen says so (the owner can still type the address), and focus returns to the field.
+  const [connectFailed, setConnectFailed] = useState(false);
+  const connect = () => { setConnectFailed(false); void destination.onConnect?.().catch(() => setConnectFailed(true)).finally(() => field.current?.focus()); };
   const message = destination.status === 'invalid' ? tr('Enter a valid {0} address.', destination.network)
     : destination.status === 'wrong-ecosystem' ? tr('This is not a {0} address.', destination.network)
     : destination.status === 'choose' ? ecosystem ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', destination.network, ecosystem)
       : tr('Choose one of your wallets or enter an address.')
-    : destination.status === 'required' ? ecosystem ? tr('Required: the {1} wallet that receives on {0}. Connect one, choose one of your wallets, or enter its public address.', destination.network, ecosystem)
+    : destination.status === 'required' ? ecosystem ? tr('Required: a wallet that can receive on {0} ({1} address). Connect one or enter its public address.', destination.network, ecosystem)
       : tr('Enter the destination address on {0}.', destination.network)
     : destination.status === 'loading' ? tr('Checking your wallets for {0}…', destination.network) : null;
   const automatic = !message && !destination.value && destination.auto ? destination.auto : null;
@@ -186,17 +189,21 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
     <input ref={field} id={id} className="composer-recipient-input numeric" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
       value={destination.value} placeholder={destination.auto ?? tr(destination.placeholder)} list={destination.candidates.length ? list : undefined}
       title={destination.value || destination.autoAddress || tr('Paste or type the destination wallet address')}
-      aria-invalid={state === 'error' || undefined} aria-required={state === 'attention' || undefined} aria-busy={state === 'loading' || undefined} aria-describedby={describedBy}
+      aria-invalid={state === 'error' || undefined} aria-required={state === 'attention' || undefined} aria-describedby={describedBy}
       onChange={event => destination.onChange(event.target.value)}/>
     {destination.candidates.length > 0 && <datalist id={list}>{destination.candidates.map(candidate => <option key={candidate.address} value={candidate.address} label={candidate.label}/>)}</datalist>}
-    {message ? <span id={note} className={state === 'error' ? 'composer-recipient-error' : state === 'attention' ? 'composer-destination-note composer-destination-warning' : 'composer-destination-note'} role="status">
-      {state === 'attention' || state === 'error' ? <span className="composer-destination-icon" aria-hidden="true">!</span> : null}{message}</span>
-      : automatic ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', automatic)}</span> : null}
+    {/* Frontend-UX review: one persistent polite live region, so a warning that appears or clears (a wallet resolved) is announced. */}
+    <span className="composer-destination-live" role="status">
+      {message ? <span id={note} className={state === 'error' ? 'composer-recipient-error' : state === 'attention' ? 'composer-destination-note composer-destination-warning' : 'composer-destination-note'}>
+        {state === 'attention' || state === 'error' ? <span className="composer-destination-icon" aria-hidden="true">!</span> : null}{message}</span>
+        : automatic ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', automatic)}</span> : null}
+      {connectFailed && destination.status === 'required' && <span className="composer-destination-note">{tr('No wallet was connected. You can enter its public address instead.')}</span>}
+    </span>
     {destination.status === 'choose' && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
       {destination.candidates.map(candidate => <button key={candidate.address} type="button" className="composer-destination-choice" title={candidate.address}
         onClick={() => { destination.onChange(candidate.address); field.current?.focus(); }}>{candidate.label}</button>)}</div>}
     {destination.status === 'required' && destination.onConnect && <button type="button" className="composer-destination-choice composer-destination-connect"
-      onClick={destination.onConnect}>{ecosystem === 'Solana' ? tr('Connect a Solana wallet') : tr('Connect an EVM wallet')}</button>}
+      onClick={connect}>{ecosystem === 'Solana' ? tr('Connect a Solana wallet') : tr('Connect an EVM wallet')}</button>}
     {applying && <div className="composer-amount-actions composer-amount-direct">
       <span id={hint} className="composer-amount-hint">{tr('Press Enter to apply')}</span>
       {onCancel && <button type="button" className="composer-amount-cancel" onClick={onCancel}>{tr('Cancel')}</button>}

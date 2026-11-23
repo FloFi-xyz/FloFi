@@ -172,8 +172,9 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 refusal wording (incident
   });
   it('names the destination network and is translated (EN/PT) for every blocking state', () => {
     for (const issue of Object.values(DESTINATION_ISSUE)) {
-      const en = translate('EN', destinationIssueMessage(issue), 'Solana'), pt = translate('PT', destinationIssueMessage(issue), 'Solana');
+      const en = translate('EN', destinationIssueMessage(issue), 'Solana', 'Solana'), pt = translate('PT', destinationIssueMessage(issue), 'Solana', 'Solana');
       expect(en).toContain('Solana');
+      expect(en).not.toMatch(/\{\d\}/);
       expect(pt).toContain('Solana');
       expect(pt).not.toBe(en);
       expect(en).not.toMatch(/will sign/);
@@ -183,7 +184,8 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 refusal wording (incident
       const message = simulationError(code);
       expect(translate('PT', message)).not.toBe(message);
     }
-    for (const field of ['Required: the {1} wallet that receives on {0}. Connect one, choose one of your wallets, or enter its public address.',
+    expect(translate('EN', destinationIssueMessage(DESTINATION_ISSUE.REQUIRED), 'Base', 'EVM')).toBe('No EVM wallet can receive on Base yet. Connect one on the Bridge card or enter its public address. Nothing was signed or sent.');
+    for (const field of ['Required: a wallet that can receive on {0} ({1} address). Connect one or enter its public address.', 'No wallet was connected. You can enter its public address instead.',
       'Choose which of your {1} wallets receives on {0}, or enter its public address.', 'Checking your wallets for {0}…', 'Connect a Solana wallet', 'Connect an EVM wallet']) {
       expect(translate('PT', field)).not.toBe(field);
     }

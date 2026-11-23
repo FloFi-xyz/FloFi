@@ -27,6 +27,13 @@ const SIGNING_LIMITS = ['Max spend', 'Max per action', 'Max total spend', 'Max s
 export type SigningSurfaceProps = ExecutionControlsState & {
   controls: ExecutionControls; workflowName: string;
   simulate: () => void | Promise<void>; simulationDisabled: boolean;
+  /** Why Simulate is disabled (shown under the action), as on the Canvas. */
+  simulationReason?: string | null;
+  /**
+   * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 (workflow review): a bridge handed off here (chat, MCP, a channel) whose receiving wallet is not
+   * resolved says so, in the status, instead of a disabled Simulate with no reason; the owner fixes it on the Bridge card ("Open in FloFi").
+   */
+  destinationIssue?: string | null;
   /** The proposal is not loaded for the proven wallet yet: no simulation or authorization is offered. */
   gated: boolean;
   /** Why authorization cannot proceed with the connected wallet (e.g. it is not the wallet that loaded the proposal). */
@@ -63,6 +70,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
   if (props.gated) status = { label: 'Connect your wallet', message: 'Connect the wallet that will sign. Nothing is authorized until you confirm in your wallet.', tone: 'neutral' };
   else if (live) status = { label: result?.label ?? live.label, message: result?.message ?? live.message, tone: result?.tone ?? (live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : 'attention') };
   else if (props.walletIssue) status = { label: 'Wallet changed', message: props.walletIssue, tone: 'blocked' };
+  else if (!authorization.key && props.destinationIssue) status = { label: 'Destination wallet needed', message: props.destinationIssue, tone: 'attention' };
   else if (!authorization.key) { const s = simulationStatusPresentation(simulation, Boolean(props.invalidWorkflow), source.state.busy); status = { label: s.label, message: s.message, tone: s.tone }; }
   else status = { label: c.view.canExecute || review.canApprove ? 'Ready to authorize' : c.view.label, message: c.view.canExecute || review.canApprove
     ? 'Check the details, then authorize. Your wallet shows the exact transaction for your confirmation.' : c.view.message, tone: c.view.canExecute || review.canApprove ? 'ready' : 'blocked' };

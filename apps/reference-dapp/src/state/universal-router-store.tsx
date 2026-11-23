@@ -108,6 +108,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     ? destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana : { kind: 'NONE' }) : null;
   const destinationBlock = destination ? destinationIssue(destination) : null;
   const latestDestinationBlock = useRef(destinationBlock); latestDestinationBlock.current = destinationBlock;
+  // Workflow review: once the destination resolves, an earlier destination refusal is no longer the bridge's state.
+  useEffect(() => { if (!destinationBlock) setError(current => current && /^UNIVERSAL_DESTINATION_WALLETS?_/.test(current) ? null : current); }, [destinationBlock]);
   const latestSimulationWallets = useRef<SimulationWallets>({ owner, destination: implicitDestination });
   latestSimulationWallets.current = { owner, destination: implicitDestination };
   // Review round 3: only these may be called "your wallet" in the chat Review; a saved Credentials address is the device's, not proof of control.

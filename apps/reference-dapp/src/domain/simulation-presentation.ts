@@ -300,9 +300,9 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   if (/EXECUTION_NOT_ENABLED|NETWORK_UNAVAILABLE|NETWORK_UNSUPPORTED|PROFILE_UNSUPPORTED|_NOT_ENABLED$/i.test(error)) return 'This action is not available on this FloFi server right now. Nothing was simulated or sent.';
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a provider FloFi can quote but not execute is a route limitation, never a wallet problem.
   if (/^ACROSS_EXECUTES_ON_CERTIFIED_ROUTER(?:_PAIRS_ONLY)?$/.test(error))
-    return 'Across runs through FloFi\'s certified Router bridge for its own supported pairs, not through this bridge. Choose Best routing, then simulate again. Nothing was signed or sent.';
+    return 'Across runs through FloFi\'s certified Router bridge for its own supported pairs, not through this bridge. Choose Automatic routing, then simulate again. Nothing was signed or sent.';
   if (/^(?:LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED|MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED)$/.test(error))
-    return 'The selected bridge provider is shown for comparison only: FloFi cannot verify and execute its route yet. Choose Best routing, then simulate again. Nothing was signed or sent.';
+    return 'The selected bridge provider is shown for comparison only: FloFi cannot verify and execute its route yet. Choose Automatic routing, then simulate again. Nothing was signed or sent.';
   if (/NO_ROUTE|ROUTE_UNAVAILABLE|ROUTE_REFUSED|UNSUPPORTED/i.test(error)) return 'A route is not available for this workflow. Check its tokens and networks on the Canvas.';
   if (/APPROVAL|ALLOWANCE/i.test(error)) return 'The required token approval could not be verified. Simulate again before continuing.';
   if (/CAPACITY_EXCEEDED|INSUFFICIENT_COLLATERAL|NO_COLLATERAL|BORROW_CAPACITY|COLLATERAL_REQUIRED|RESERVE_(PAUSED|INACTIVE|FROZEN|UNAVAILABLE)|LIQUIDITY_(UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_LIQUIDITY/i.test(error)) return 'The available collateral or liquidity cannot support this action.';

@@ -526,8 +526,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // A refresh of an existing run (after its approval) keeps the reviewed recipient on the server, so only a NEW simulation waits for it.
   const universalRefreshes = simulationSource.kind === 'universal' && refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired)
     && (universal.record?.attempts.length ?? 0) < 16;
-  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && !universalRefreshes && universal.destinationIssue && universal.details
-    ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel) : null;
+  // Workflow review: an unavailable (or not yet answered) universal router is said first; the destination is asked only where it can be used.
+  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown
+    && !universalRefreshes && universal.destinationIssue && universal.details
+    ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel,
+      UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM') : null;
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
   const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
@@ -712,9 +715,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       spends: continuationSimulation && continuationSimulation.input !== '—' ? continuationSimulation.input : continuationStep.funding?.bound ?? continuationStep.amount,
       receives: continuationSimulation?.result ?? null,
       previous: previousStep ? { number: previousStep.number, delivered: previousStep.delivered } : null,
-      status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction ? 'BLOCKED'
+      status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction || destinationBlocked ? 'BLOCKED'
         : (canvasAction.kind === 'approve' || canvasAction.kind === 'execute') && !canvasAction.disabled ? 'READY' : 'SIMULATE',
-      reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null)
+      reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null) ?? destinationBlocked
         ?? (simulationSource.state.error ? simulationError(simulationSource.state.error, simulationSource.kind) : null) } : null;
   const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)
     ? `${state.workflow.workflowId}:${state.workflow.revision}:${restorationEpoch}:${signer}:${reviewBinding.wallet.chain}:${connectedWallet.revision}:${jupiter.revision}` : null;
@@ -967,6 +970,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>
     {flightNoticeView}
     <SigningSurface {...lifecycleState} controls={lifecycleControls} workflowName={workflowName} simulate={simulateAgain} simulationDisabled={simulationDisabled || !actionable}
+      simulationReason={simulationReason} destinationIssue={destinationBlocked}
       gated={approvalGate} walletIssue={walletIssue} networkAction={networkAction} walletRequestError={walletConnection.notice ? tr(...walletConnection.notice) : null} connectWallet={() => void walletConnection.connect()} approvalSlot={approvalSlot} onViewInFloFi={onViewInFloFi}
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;

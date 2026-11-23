@@ -39,7 +39,11 @@ function readAccountWallets(key: string, now = Date.now()): Promise<AccountRead>
   if (accountRead?.key === key && now - accountRead.at < ACCOUNT_WALLETS_FRESH_MS) return accountRead.promise;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('ACCOUNT_WALLETS_READ_TIMEOUT')), ACCOUNT_WALLETS_READ_TIMEOUT_MS); });
-  const promise: Promise<AccountRead> = Promise.race([accountState(), timeout]).finally(() => clearTimeout(timer)).then(state => ({ failed: false, wallets: state.account?.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address,
+  const promise: Promise<AccountRead> = Promise.race([accountState(), timeout]).finally(() => clearTimeout(timer)).then(state => {
+    // Workflow review: the server could not read a signed-in account: that is a failed read too, never "no wallets".
+    if (state.accountUnavailable) throw new Error('ACCOUNT_VIEW_UNAVAILABLE');
+    return state;
+  }).then(state => ({ failed: false, wallets: state.account?.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address,
     providerName: wallet.provider === 'privy' || wallet.provider === 'turnkey' ? 'FloFi Wallet' : wallet.providerName })) ?? [] }), () => {
     // A failure is forgotten at once: the next reader asks again instead of reusing "no wallets" for a minute.
     if (accountRead?.promise === promise) accountRead = null;

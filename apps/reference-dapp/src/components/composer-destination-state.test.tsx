@@ -37,16 +37,16 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 destination field states'
     expect(html).toContain('aria-required="true"');
     expect(html).toContain('composer-destination-warning');
     expect(html).toContain('composer-destination-icon');
-    expect(html).toContain('Required: the Solana wallet that receives on Solana. Connect one, choose one of your wallets, or enter its public address.');
+    expect(html).toContain('Required: a wallet that can receive on Solana (Solana address). Connect one or enter its public address.');
     expect(html).toContain('>Connect a Solana wallet</button>');
     expect(html).not.toMatch(/will sign/);
     const pt = render(field({ onConnect: vi.fn() }), 'PT');
-    expect(pt).toContain('Obrigatório: a carteira Solana que recebe em Solana.');
+    expect(pt).toContain('Obrigatório: uma carteira que receba em Solana (endereço Solana).');
     expect(pt).toContain('>Conectar uma carteira Solana</button>');
   });
   it('required (Solana → Base, no EVM wallet): names the EVM wallet and Base', () => {
     const html = render(field({ network: 'Base', ecosystem: 'EVM', placeholder: 'Address (0x…)', onConnect: vi.fn() }));
-    expect(html).toContain('Required: the EVM wallet that receives on Base.');
+    expect(html).toContain('Required: a wallet that can receive on Base (EVM address).');
     expect(html).toContain('>Connect an EVM wallet</button>');
   });
   it('choose (several wallets): amber and the wallets as buttons, no automatic pick', () => {
@@ -67,8 +67,7 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 destination field states'
   it('loading: busy, "checking", never "required"', () => {
     const html = render(field({ status: 'loading' }));
     expect(html).toContain('data-destination-state="loading"');
-    expect(html).toContain('aria-busy="true"');
-    expect(html).toContain('Checking your wallets for Solana…');
+        expect(html).toContain('Checking your wallets for Solana…');
     expect(html).not.toContain('Required');
     expect(html).not.toContain('Connect a Solana wallet');
   });

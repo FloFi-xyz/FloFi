@@ -102,13 +102,13 @@ export function destinationIssue(requirement: DestinationRequirement): Destinati
   return requirement.kind === 'REQUIRED' || requirement.kind === 'CHOOSE' || requirement.kind === 'LOADING' ? DESTINATION_ISSUE[requirement.kind] : null;
 }
 /**
- * What the owner does about a blocking destination, naming the destination network (`{0}`). A catalog key: callers translate it with the
+ * What the owner does about a blocking destination, naming the destination network (`{0}`) and the kind of wallet it needs (`{1}`: Solana / EVM). A catalog key: callers translate it with the
  * network name. Never "connect the wallet that will sign": the source wallet is not what is missing.
  */
 export function destinationIssueMessage(issue: DestinationIssue): string {
   if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.';
   if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.';
-  return 'Choose a destination wallet on {0} or enter its public address. Nothing was signed or sent.';
+  return 'No {1} wallet can receive on {0} yet. Connect one on the Bridge card or enter its public address. Nothing was signed or sent.';
 }
 
 /**

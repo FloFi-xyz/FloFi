@@ -230,11 +230,11 @@ test('chat authors Base → Solana receiving SOL through Relay; the Review needs
   // never "Connect the wallet that will sign".
   const destination = page.locator('.build-flow-surface .composer-card .composer-destination');
   await expect(destination).toHaveAttribute('data-destination-state', 'attention');
-  await expect(destination).toContainText('Required: the Solana wallet that receives on Solana.');
+  await expect(destination).toContainText('Required: a wallet that can receive on Solana (Solana address). Connect one or enter its public address.');
   await expect(destination.getByRole('button', { name: 'Connect a Solana wallet' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeDisabled();
   await ask(page, 'Review workflow');
-  await expect(copilotSays(page)).toContainText('Choose a destination wallet on Solana or enter its public address.');
+  await expect(copilotSays(page)).toContainText('No Solana wallet can receive on Solana yet. Connect one on the Bridge card or enter its public address.');
   await expect(copilotSays(page)).not.toContainText('will sign');
   expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
   // A typed public address resolves it at once: the warning clears and Simulate opens (the recipient is the address as written).

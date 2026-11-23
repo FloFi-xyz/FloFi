@@ -46,7 +46,7 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 universal bridge destination field', () =
     fixture.wallets = []; fixture.evm = { kind: 'NONE' };
     const html = render(), field = input(html), described = /aria-describedby="([^"]+)"/.exec(field)?.[1];
     expect(field).toContain('placeholder="Address (0x…)"');
-    expect(html).toContain(`<small id="${described}" role="status" class="composer-destination-warning">Required: the EVM wallet that receives on Base. Connect one, choose one of your wallets, or enter its public address.</small>`);
+    expect(html).toContain(`<small id="${described}" role="status" class="composer-destination-warning">Required: a wallet that can receive on Base (EVM address). Connect one or enter its public address.</small>`);
     expect(html).toContain('data-destination-state="attention"');
     const pt = input(render('PT'));
     expect(pt).toContain('placeholder="Endereço (0x…)"');

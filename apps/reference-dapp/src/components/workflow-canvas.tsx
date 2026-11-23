@@ -766,8 +766,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         ecosystem: ecosystem === 'solana' ? 'Solana' : 'EVM',
         // Connecting a receiving wallet only reads its public address (the source wallet still signs); Solana through the page's Solana wallet
         // connection, EVM through the EVM one.
-        onConnect: ecosystem === 'solana' ? solanaWallets ? () => { void solanaWallets.connect('solana:mainnet').catch(() => undefined); } : undefined
-          : () => { void wallet.connect().catch(() => undefined); } };
+        onConnect: ecosystem === 'solana' ? solanaWallets ? () => solanaWallets.connect('solana:mainnet') : undefined
+          : async () => { if (!await wallet.connect()) throw new Error('EVM_WALLET_NOT_CONNECTED'); } };
     };
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.
     const recipientField = (id: string, network: string | undefined, canonical: string | null): CardRecipient | undefined => {
