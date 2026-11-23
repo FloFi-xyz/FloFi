@@ -11,7 +11,7 @@
  * There is no user-facing switch between the two. Nothing here grants authority: a mainnet network still needs a fresh simulation, the
  * owner's Review and the owner's wallet signature, and the deployment's own enablement still decides which mainnet actions run.
  */
-import { copilotNetworksMentioned, familyCounterpart, networkIdentity, networkOfCopilot, type NetworkIdentity } from './network-registry';
+import { copilotNetworksMentioned, familyCounterpart, networkIdentity, networkOfCopilot, type NetworkIdentity } from './network-registry.ts';
 
 export type NetworkScope = 'PUBLIC_MAINNET' | 'ENGINEERING';
 /** The refusal every surface reports for a test network in the public product. */

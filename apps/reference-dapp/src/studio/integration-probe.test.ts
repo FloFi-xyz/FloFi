@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { base58Encode, erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { executionCapabilityRegistry } from '@defi-workflow-engine/action-registry';
 import type { pinnedHttpsRequest } from '../platform/pinned-https.ts';
-import { HYPEREVM, SAVINGS_DAI, parseStudioIntegration } from './integration-manifest.ts';
-import { probeStudioIntegration, supportsStudioProbe } from './integration-probe.ts';
+import { HYPEREVM, SAVINGS_DAI, parseStudioIntegration, supportsStudioProbe } from './integration-manifest.ts';
+import { probeStudioIntegration } from './integration-probe.ts';
 
 const network = { schemaVersion: 1, slug: 'hyperevm', name: 'HyperEVM', kind: 'network', chainRef: HYPEREVM.chainRef } as const;
 const vault = { schemaVersion: 1, slug: 'savings-dai', name: 'Savings Dai', kind: 'vault', standard: 'ERC-4626', ...SAVINGS_DAI } as const;

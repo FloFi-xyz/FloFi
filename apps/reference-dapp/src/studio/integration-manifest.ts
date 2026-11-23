@@ -14,6 +14,13 @@ export type StakingIntegration = Base & { readonly kind: 'staking'; readonly pro
 export type CexIntegration = Base & { readonly kind: 'cex'; readonly provider: string;
   readonly access: 'user-scoped'; readonly withdrawals: false };
 export type StudioIntegration = NetworkIntegration | VaultIntegration | StakingIntegration | CexIntegration | IntegrationPackage;
+type ProbePackage = IntegrationPackage & { readonly chainRef: string; readonly rpcUrl: string;
+  readonly adapter: Extract<IntegrationPackage['adapter'], { kind: 'builtin' }> };
+
+export function supportsStudioProbe(manifest: StudioIntegration): manifest is NetworkIntegration | VaultIntegration | ProbePackage {
+  if (manifest.schemaVersion === 1) return manifest.kind === 'network' || manifest.kind === 'vault';
+  return manifest.adapter.kind === 'builtin' && manifest.chainRef !== undefined && manifest.rpcUrl !== undefined;
+}
 
 export function studioManifestDigest(manifest: StudioIntegration): string {
   return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');

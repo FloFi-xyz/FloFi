@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { CERTIFIED_FORWARD_MIGRATIONS, type Database, type Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { PROJECT_ID } from '../developer/admin.ts';
-import { parseStudioIntegration, studioManifestDigest, type StudioIntegration } from './integration-manifest.ts';
-import { supportsStudioProbe, type ProbeMode, type StudioEvidence } from './integration-probe.ts';
+import { parseStudioIntegration, studioManifestDigest, supportsStudioProbe, type StudioIntegration } from './integration-manifest.ts';
+import type { ProbeMode, StudioEvidence } from './integration-probe.ts';
 
 const migration = CERTIFIED_FORWARD_MIGRATIONS.flatMap(entry => entry.migrations).find(entry => entry.name === 'studio_integrations');
 const EVIDENCE_TTL = 24 * 60 * 60 * 1_000;

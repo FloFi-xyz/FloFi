@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto';
 import { NATIVE_TRANSFER_PROFILES } from '@defi-workflow-engine/action-registry';
-import type { BuiltinStudioAdapter, IntegrationPackage } from '@defi-workflow-engine/developer-sdk';
+import type { BuiltinStudioAdapter } from '@defi-workflow-engine/developer-sdk';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { isSolanaPublicKey, SOLANA_SYSTEM_PROGRAM } from '@defi-workflow-engine/workflow-contracts';
 import { isTestNetwork } from '../domain/network-scope.ts';
 import { pinnedHttpsRequest } from '../platform/pinned-https.ts';
-import { HYPEREVM, parseStudioIntegration, type NetworkIntegration, type StudioIntegration, type VaultIntegration } from './integration-manifest.ts';
+import { HYPEREVM, parseStudioIntegration, supportsStudioProbe, type StudioIntegration, type VaultIntegration } from './integration-manifest.ts';
 
 // Schema 0035 keeps its original reviewed endpoints, identity pins and evidence shape.
 const legacyNetworks = Object.freeze({
@@ -34,8 +34,6 @@ export type StudioEvidence = EvidenceFields & (
   | { readonly schemaVersion: 2; readonly source: 'PROPOSAL_RPC'; readonly checkpointHash: string | null;
       readonly block: Block & { readonly baseFeePerGas?: string }; readonly adapterId: BuiltinStudioAdapter; readonly adapterVersion: 1 }
 );
-type ProbePackage = IntegrationPackage & { readonly chainRef: string; readonly rpcUrl: string;
-  readonly adapter: Extract<IntegrationPackage['adapter'], { kind: 'builtin' }> };
 type EvmIdentity = { chainRef: string; checkpoint: string; checkpointHash: string };
 type VaultTarget = Pick<VaultIntegration, 'contractAddress' | 'underlyingAsset'>;
 
@@ -260,11 +258,6 @@ async function probeCosmos(chainRef: string, mode: ProbeMode, now: Date, rpc: Rp
   if (header.height !== height || commit.height !== height || parseHex(id.hash, COMET_HASH, badBlock) !== hash
     || cometTime(header.time).raw !== time.raw) throw new Error('STUDIO_BLOCK_CHANGED');
   return { checkpointHash: null, block: { height: hexQuantity(BigInt(height)), hash, timestamp: hexQuantity(time.seconds) }, facts };
-}
-
-export function supportsStudioProbe(manifest: StudioIntegration): manifest is NetworkIntegration | VaultIntegration | ProbePackage {
-  if (manifest.schemaVersion === 1) return manifest.kind === 'network' || manifest.kind === 'vault';
-  return manifest.adapter.kind === 'builtin' && manifest.chainRef !== undefined && manifest.rpcUrl !== undefined;
 }
 
 /** Performs bounded read-only checks. Proposal evidence reflects the specified endpoint, with independent identity and risk review still required. */

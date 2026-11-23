@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Compile and test an exact Studio adapter archive in separate Linux sandboxes."""
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -16,6 +17,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE_LIMIT = 4 * 1024 * 1024
+EXPANDED_LIMIT = 16 * 1024 * 1024
 INPUT_LIMIT = 128 * 1024
 HARNESS = """import { readFileSync } from 'node:fs';
 import { check } from '/artifact/adapter.mjs';
@@ -40,12 +42,22 @@ def sha(data):
 
 def adapter_source(archive):
     source = None
-    expanded = 0
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as tar:
+    # Bound decompression before tarfile parses any PAX metadata or member bodies.
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(archive)) as packed:
+            expanded = packed.read(EXPANDED_LIMIT + 1)
+    except (OSError, EOFError) as error:
+        raise ValueError("ARCHIVE_INVALID") from error
+    if len(expanded) > EXPANDED_LIMIT:
+        raise ValueError("ARCHIVE_LIMIT")
+    try:
+        tar = tarfile.open(fileobj=io.BytesIO(expanded), mode="r:")
+    except tarfile.TarError as error:
+        raise ValueError("ARCHIVE_INVALID") from error
+    with tar:
         for index, entry in enumerate(tar):
             parts = PurePosixPath(entry.name).parts
-            expanded += entry.size
-            if index >= 500 or expanded > 16 * 1024 * 1024:
+            if index >= 500:
                 raise ValueError("ARCHIVE_LIMIT")
             if len(parts) == 3 and parts[1:] == ("src", "adapter.mts"):
                 if source is not None or not entry.isfile() or not 0 < entry.size <= INPUT_LIMIT or parts[0] in ("/", ".."):
