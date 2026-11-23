@@ -23,7 +23,7 @@ import { persistCopilotInterpretation, persistCopilotTurn } from '../src/server/
 import { expect, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
 import { chooseLanguage } from './app-origin';
-import { navigationDrawer } from './build-entry-navigation';
+import { openEditorSection } from './build-entry-navigation';
 
 const BASE_SEPOLIA = 'eip155:84532', ARBITRUM_SEPOLIA = 'eip155:421614', SOLANA_DEVNET = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -639,26 +639,33 @@ test('Studio certification: an independent operator publishes, suspends and revo
     await decide(aurora, 'Publish', 'Published for every eligible FloFi user', 'Public');
     await expect(aurora).toContainText('Published');
     await expect(aurora).toContainText('v1 · Public');
-    // The product shows it in the Editor as reference information (never on the Chat landing).
-    const product = await page.context().newPage();
-    await product.goto('/app');
-    await expect(product.locator('.app-shell').first()).not.toHaveAttribute('inert', { timeout: 30_000 });
-    await expect(product.locator('details.studio-discovery')).toHaveCount(0);
-    await navigationDrawer(product).getByRole('link', { name: 'Editor', exact: true }).click();
-    const discovery = product.locator('details.studio-discovery');
+    // The product shows it in the Editor as reference information (never on the Chat landing). Same page: the guard allows no popups.
+    const openProduct = async () => {
+      await page.goto('/app');
+      await expect(page.locator('.app-shell').first()).not.toHaveAttribute('inert', { timeout: 30_000 });
+      await expect(page.locator('details.studio-discovery')).toHaveCount(0);
+      await openEditorSection(page, 'Build');
+    };
+    const backToQueue = async () => {
+      await page.goto('/admin/studio');
+      await expect(page.getByRole('heading', { name: 'Submitted integrations' })).toBeVisible();
+    };
+    await openProduct();
+    const discovery = page.locator('details.studio-discovery');
     await discovery.locator('summary').click();
     await expect(discovery).toContainText('Aurora Partner Network');
     await expect(discovery).toContainText(`eip155:${chainBase}`);
     await expect(discovery).toContainText('They cannot be used in actions yet.');
     await expect(discovery).not.toContainText('Boreal Partner Network');
     await expect(discovery).not.toContainText('rpc.example.org');
-    await product.screenshot({ path: info.outputPath('studio-published-metadata-product.png') });
+    await page.screenshot({ path: info.outputPath('studio-published-metadata-product.png') });
+    await backToQueue();
 
     await decide(aurora, 'Suspend', 'Provider incident under investigation');
     await expect(aurora).toContainText('Suspended');
-    await product.reload();
-    await expect(product.locator('.app-shell').first()).not.toHaveAttribute('inert', { timeout: 30_000 });
-    await expect(product.locator('details.studio-discovery')).toHaveCount(0);
+    await openProduct();
+    await expect(page.locator('details.studio-discovery')).toHaveCount(0);
+    await backToQueue();
 
     await decide(aurora, 'Revoke', 'Certification withdrawn');
     await expect(aurora).toContainText('Revoked');
