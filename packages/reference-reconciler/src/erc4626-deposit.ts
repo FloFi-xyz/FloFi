@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { assertErc4626DepositBinding, fromHex, rpcHash, rpcRecord, rpcUint, supplyCall, supplyHex, supplyTopic, supplyWord, toHex,
+import { assertErc4626DepositBinding, ERC4626_PROXY_SLOTS, fromHex, rpcHash, rpcRecord, rpcUint, supplyCall, supplyHex, supplyTopic, supplyWord, toHex,
   type Erc4626DepositProfile, type Erc4626DepositReview, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashSupplyValue } from '@defi-workflow-engine/workflow-contracts';
 import { keccak_256 } from '@noble/hashes/sha3.js';
@@ -36,13 +36,16 @@ export async function reconcileErc4626Deposit(review: Erc4626DepositReview, prof
     if (txValue === null || receiptValue === null) return inconclusive('VAULT_TRANSACTION_PENDING');
     const tx = rpcRecord(txValue), receipt = rpcRecord(receiptValue);
     const block = rpcUint(receipt.blockNumber), blockHash = rpcHash(receipt.blockHash), index = rpcUint(receipt.transactionIndex);
+    const type = rpcUint(tx.type);
     if (block <= BigInt(review.block) || rpcHash(tx.hash) !== transactionHash || rpcHash(receipt.transactionHash) !== transactionHash ||
       rpcHash(tx.blockHash) !== blockHash || rpcUint(tx.blockNumber) !== block || rpcUint(tx.transactionIndex) !== index ||
       lower(tx.from) !== expected.from || lower(tx.to) !== expected.to || lower(receipt.from) !== expected.from || lower(receipt.to) !== expected.to ||
       lower(tx.input) !== expected.data || rpcUint(tx.value) !== 0n || rpcUint(tx.nonce) !== BigInt(expected.nonce) ||
-      rpcUint(tx.chainId) !== BigInt(expected.chainId) || rpcUint(tx.type) !== 2n || !Array.isArray(tx.accessList) || tx.accessList.length > 0 ||
-      rpcUint(tx.gas) !== BigInt(expected.gas) || rpcUint(tx.maxFeePerGas) !== BigInt(expected.maxFeePerGas) ||
-      rpcUint(tx.maxPriorityFeePerGas) !== BigInt(expected.maxPriorityFeePerGas)) return divergent('VAULT_TRANSACTION_MISMATCH');
+      rpcUint(tx.chainId) !== BigInt(expected.chainId) || (type !== 0n && type !== 2n)) return divergent('VAULT_TRANSACTION_MISMATCH');
+    // The reviewed fee bounds, as on the engine's other EVM paths: the wallet may lower gas and fees but never raise them.
+    const gasLimit = rpcUint(tx.gas), offeredPrice = type === 2n ? rpcUint(tx.maxFeePerGas) : rpcUint(tx.gasPrice);
+    if (gasLimit > BigInt(expected.gas) || offeredPrice > BigInt(expected.maxFeePerGas) ||
+      (type === 2n && rpcUint(tx.maxPriorityFeePerGas) > offeredPrice)) return divergent('VAULT_FEE_BOUND_MISMATCH');
     const tag = supplyHex(block), parentTag = supplyHex(block - 1n);
     const [head, included, parent] = await Promise.all([
       rpc('eth_blockNumber', []).then(rpcUint), rpc('eth_getBlockByNumber', [tag, false]).then(rpcRecord),
@@ -51,16 +54,17 @@ export async function reconcileErc4626Deposit(review: Erc4626DepositReview, prof
     if (rpcHash(included.hash) !== blockHash || rpcHash(included.parentHash) !== rpcHash(parent.hash) ||
       !Array.isArray(included.transactions) || index >= BigInt(included.transactions.length) ||
       lower(included.transactions[Number(index)]) !== transactionHash) return inconclusive('VAULT_REORG');
-    if (head < block + BigInt(profile.minimumConfirmations - 1)) return inconclusive('VAULT_CONFIRMATIONS_PENDING');
+    if (head < block + BigInt(profile.minimumConfirmations)) return inconclusive('VAULT_CONFIRMATIONS_PENDING');
     if (rpcUint(receipt.status) !== 1n) return divergent('VAULT_TRANSACTION_REVERTED');
     const fee = rpcUint(receipt.gasUsed) * rpcUint(receipt.effectiveGasPrice);
-    if (fee <= 0n || fee > BigInt(review.feeBudget) || rpcUint(receipt.gasUsed) > BigInt(expected.gas) ||
-      rpcUint(receipt.effectiveGasPrice) > BigInt(expected.maxFeePerGas) || (receipt.l1Fee != null && rpcUint(receipt.l1Fee) !== 0n)) {
+    if (fee <= 0n || fee > BigInt(review.feeBudget) || rpcUint(receipt.gasUsed) > gasLimit ||
+      rpcUint(receipt.effectiveGasPrice) > offeredPrice || (receipt.l1Fee != null && rpcUint(receipt.l1Fee) !== 0n)) {
       return divergent('VAULT_FEE_MISMATCH');
     }
     if (!Array.isArray(receipt.logs)) return divergent('VAULT_LOGS_INVALID');
     const ownerTopic = addressTopic(review.owner), vaultTopic = addressTopic(fields.vault);
-    const deposits = receipt.logs.map(rpcRecord).filter(log => lower(log.address) === fields.vault && Array.isArray(log.topics) && log.topics[0] === depositTopic);
+    const deposits = receipt.logs.map(rpcRecord).filter(log => log.removed !== true && lower(log.address) === fields.vault && Array.isArray(log.topics)
+      && log.topics[0] === depositTopic);
     const [deposit] = deposits, amount = BigInt(fields.amount), logged = deposit?.data;
     if (deposits.length !== 1 || typeof logged !== 'string' || !/^0x[0-9a-f]{128}$/.test(logged) ||
       !Array.isArray(deposit?.topics) || deposit.topics.length !== 3 || deposit.topics[1] !== ownerTopic ||
@@ -74,13 +78,16 @@ export async function reconcileErc4626Deposit(review: Erc4626DepositReview, prof
     const read = (to: string, data: string, blockTag: string) => rpc('eth_call', [{ to, data }, blockTag]).then(rpcUint);
     const balance = (to: string, blockTag: string) => read(to, supplyCall('balanceOf(address)', review.owner), blockTag);
     const allowance = (blockTag: string) => read(fields.underlying, supplyCall('allowance(address,address)', review.owner, fields.vault), blockTag);
-    const [assetBefore, assetAfter, sharesBefore, sharesAfter, allowanceBefore, allowanceAfter, vaultCode, tokenCode, ownerCode] = await Promise.all([
-      balance(fields.underlying, parentTag), balance(fields.underlying, tag), balance(fields.vault, parentTag), balance(fields.vault, tag),
-      allowance(parentTag), allowance(tag), rpc('eth_getCode', [fields.vault, tag]), rpc('eth_getCode', [fields.underlying, tag]),
-      rpc('eth_getCode', [review.owner, tag]),
-    ]);
-    if (codeDigest(vaultCode) !== profile.vaultCodeHash || codeDigest(tokenCode) !== profile.underlyingCodeHash || ownerCode !== '0x')
-      return divergent('VAULT_DEPLOYMENT_MISMATCH');
+    const proxySlots = (target: string) => Promise.all(ERC4626_PROXY_SLOTS.map(slot => rpc('eth_getStorageAt', [target, slot, tag]).then(rpcUint)));
+    const [assetBefore, assetAfter, sharesBefore, sharesAfter, allowanceBefore, allowanceAfter, vaultCode, tokenCode, ownerCode, vaultSlots, tokenSlots] =
+      await Promise.all([
+        balance(fields.underlying, parentTag), balance(fields.underlying, tag), balance(fields.vault, parentTag), balance(fields.vault, tag),
+        allowance(parentTag), allowance(tag), rpc('eth_getCode', [fields.vault, tag]), rpc('eth_getCode', [fields.underlying, tag]),
+        rpc('eth_getCode', [review.owner, tag]), proxySlots(fields.vault), proxySlots(fields.underlying),
+      ]);
+    if (codeDigest(vaultCode) !== profile.vaultCodeHash || codeDigest(tokenCode) !== profile.underlyingCodeHash ||
+      [...vaultSlots, ...tokenSlots].some(value => value !== 0n)) return divergent('VAULT_DEPLOYMENT_MISMATCH');
+    if (ownerCode !== '0x') return divergent('VAULT_OWNER_NOT_EOA');
     if (assetBefore - assetAfter !== amount || sharesAfter - sharesBefore !== shares || allowanceBefore !== amount || allowanceAfter !== 0n)
       return divergent('VAULT_BALANCE_MISMATCH');
     const consistent = rpcRecord(await rpc('eth_getBlockByNumber', [tag, false]));

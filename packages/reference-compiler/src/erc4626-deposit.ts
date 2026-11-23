@@ -29,6 +29,15 @@ export const ERC4626_BOUNDED_DEPOSIT = 'deposit(uint256,address,uint256)';
 export const ERC4626_DEPOSIT_STEP = 'erc4626-deposit';
 export const ERC4626_DEPOSIT_SEGMENT = 'erc4626-deposit-segment';
 const TTL_SECONDS = 120;
+/** OP Stack GasPriceOracle predeploy: its presence means an L1 data fee this execution-only gas model cannot bound. */
+const OP_STACK_GAS_PRICE_ORACLE = '0x420000000000000000000000000000000000000f';
+/** ERC-1967 implementation, beacon and admin slots, and the legacy OpenZeppelin implementation slot (e.g. FiatTokenProxy). */
+export const ERC4626_PROXY_SLOTS = Object.freeze([
+  '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc',
+  '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50',
+  '0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103',
+  '0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3',
+]);
 const MAX_UINT = (1n << 256n) - 1n;
 const oneWord = /^0x[0-9a-fA-F]{64}$/;
 const hash = /^0x[0-9a-f]{64}$/;
@@ -80,10 +89,14 @@ async function observeDeposit(workflow: SemanticWorkflow, profile: Erc4626Deposi
   const block = blockHeight(latest.number), blockHash = rpcHash(latest.hash), tag = supplyHex(block);
   const amount = BigInt(fields.amount), minimum = BigInt(fields.minimumShares);
   const read = async (to: string, data: string) => rpcWord(await rpc('eth_call', [{ from: owner, to, data }, tag]));
+  // The profile pins code hashes, which a proxy keeps while its implementation changes: standard proxy slots must be empty.
+  const upgradeable = async (target: string) => (await Promise.all(ERC4626_PROXY_SLOTS.map(slot =>
+    rpc('eth_getStorageAt', [target, slot, tag]).then(rpcWord)))).some(value => value !== 0n);
   const address = (to: string, selector: string) => read(to, supplyCall(selector));
-  const [vaultCode, tokenCode, ownerCode, underlying, assetDecimals, shareDecimals, allowance, balance, shareBalance,
+  const [vaultCode, tokenCode, ownerCode, oracleCode, vaultProxy, tokenProxy, underlying, assetDecimals, shareDecimals, allowance, balance, shareBalance,
     maxDeposit, preview, nativeBalance, nonce, pendingNonce, gasPrice, priority] = await Promise.all([
     rpc('eth_getCode', [fields.vault, tag]), rpc('eth_getCode', [fields.underlying, tag]), rpc('eth_getCode', [owner, tag]),
+    rpc('eth_getCode', [OP_STACK_GAS_PRICE_ORACLE, tag]), upgradeable(fields.vault), upgradeable(fields.underlying),
     address(fields.vault, 'asset()'), address(fields.underlying, 'decimals()'), address(fields.vault, 'decimals()'),
     read(fields.underlying, supplyCall('allowance(address,address)', owner, fields.vault)),
     read(fields.underlying, supplyCall('balanceOf(address)', owner)), read(fields.vault, supplyCall('balanceOf(address)', owner)),
@@ -92,10 +105,14 @@ async function observeDeposit(workflow: SemanticWorkflow, profile: Erc4626Deposi
     rpc('eth_getTransactionCount', [owner, 'pending']).then(rpcUint), rpc('eth_gasPrice', []).then(rpcUint),
     rpc('eth_maxPriorityFeePerGas', []).then(rpcUint),
   ]);
-  if (codeHash(vaultCode) !== profile.vaultCodeHash || codeHash(tokenCode) !== profile.underlyingCodeHash || ownerCode !== '0x' ||
+  if (oracleCode !== '0x') throw new Error('VAULT_GAS_MODEL_UNSUPPORTED');
+  // An EIP-7702 delegated or contract owner is refused by name, before any Review (this adapter binds an externally owned account).
+  if (ownerCode !== '0x') throw new Error('VAULT_OWNER_NOT_EOA');
+  if (codeHash(vaultCode) !== profile.vaultCodeHash || codeHash(tokenCode) !== profile.underlyingCodeHash ||
     underlying !== BigInt(fields.underlying) || assetDecimals !== BigInt(fields.assetDecimals) || shareDecimals !== BigInt(fields.shareDecimals)) {
     throw new Error('VAULT_DEPLOYMENT_MISMATCH');
   }
+  if (vaultProxy || tokenProxy) throw new Error('VAULT_UPGRADEABLE_UNSUPPORTED');
   if (allowance !== amount) throw new Error('VAULT_EXACT_ALLOWANCE_REQUIRED');
   if (balance < amount || maxDeposit < amount) throw new Error('VAULT_DEPOSIT_LIMIT');
   if (nonce !== pendingNonce) throw new Error('VAULT_PENDING_NONCE');
@@ -211,11 +228,15 @@ export function assertErc4626DepositBinding(review: Erc4626DepositReview, profil
   return fields;
 }
 
-/** Revalidates an authoritative stored Review immediately before the owner wallet request. */
-export async function assertFreshErc4626Deposit(review: Erc4626DepositReview, profile: Erc4626DepositProfile, expectedCommitment: string,
-  owner: string, rpc: SupplyRpc, now = Date.now()): Promise<void> {
+/**
+ * Revalidates an authoritative stored Review immediately before the owner wallet request, against the workflow as currently authored:
+ * any semantic edit since the Review requires a new one.
+ */
+export async function assertFreshErc4626Deposit(review: Erc4626DepositReview, workflow: SemanticWorkflow, profile: Erc4626DepositProfile,
+  expectedCommitment: string, owner: string, rpc: SupplyRpc, now = Date.now()): Promise<void> {
   assertErc4626DepositBinding(review, profile);
   if (expectedCommitment !== review.commitment || review.owner !== supplyAddress(owner) ||
+    supplyArtifactHash('semantic-workflow', workflow) !== review.manifest.semanticWorkflowHash ||
     !Number.isFinite(now) || now >= Date.parse(review.expiresAt) || now < Date.parse(review.simulation.freshness.observedAt)) {
     throw new Error('VAULT_REVIEW_REQUIRED');
   }

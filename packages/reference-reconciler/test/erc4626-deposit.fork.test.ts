@@ -97,16 +97,28 @@ describe('ERC-4626 bounded deposit on disposable Anvil', () => {
         .rejects.toThrow('VAULT_DEPLOYMENT_MISMATCH');
       await expect(simulateErc4626Deposit(workflow, profile, owner, (method, args) => method === 'eth_chainId' ? Promise.resolve('0x1') : rpc(method, args)))
         .rejects.toThrow('VAULT_WRONG_CHAIN');
+      // Refused before any Review: an OP Stack L1 data fee, a delegated or contract owner, and an upgradeable vault or token.
+      const withCode = (target: string): SupplyRpc => (method, args) =>
+        method === 'eth_getCode' && String((args as unknown[])[0]).toLowerCase() === target ? Promise.resolve('0x6001') : rpc(method, args);
+      await expect(simulateErc4626Deposit(workflow, profile, owner, withCode('0x420000000000000000000000000000000000000f'))).rejects.toThrow('VAULT_GAS_MODEL_UNSUPPORTED');
+      await expect(simulateErc4626Deposit(workflow, profile, owner, withCode(owner))).rejects.toThrow('VAULT_OWNER_NOT_EOA');
+      await expect(simulateErc4626Deposit(workflow, profile, owner, (method, args) => method === 'eth_getStorageAt' &&
+        String((args as unknown[])[0]).toLowerCase() === profile.underlying ? Promise.resolve('0x' + '0'.repeat(24) + '1'.repeat(40)) : rpc(method, args)))
+        .rejects.toThrow('VAULT_UPGRADEABLE_UNSUPPORTED');
 
       const beforeSlippage = await simulate();
-      await expect(assertFreshErc4626Deposit(beforeSlippage, profile, beforeSlippage.commitment, other, rpc)).rejects.toThrow('VAULT_REVIEW_REQUIRED');
+      await expect(assertFreshErc4626Deposit(beforeSlippage, workflow, profile, beforeSlippage.commitment, other, rpc)).rejects.toThrow('VAULT_REVIEW_REQUIRED');
+      // A semantic edit after the Review (here a new revision) requires a new Review.
+      await expect(assertFreshErc4626Deposit(beforeSlippage, { ...workflow, revision: 2 }, profile, beforeSlippage.commitment, owner, rpc))
+        .rejects.toThrow('VAULT_REVIEW_REQUIRED');
       await setOffer(1n);
-      await expect(assertFreshErc4626Deposit(beforeSlippage, profile, beforeSlippage.commitment, owner, rpc))
+      await expect(assertFreshErc4626Deposit(beforeSlippage, workflow, profile, beforeSlippage.commitment, owner, rpc))
         .rejects.toThrow('VAULT_MINIMUM_SHARES_UNAVAILABLE');
       // A stale call submitted on this closed chain still reverts on the vault itself.
       const reverted = await localWallet(beforeSlippage.transaction);
       expect(reverted.receipt.status).toBe('0x0');
       await setOffer(2n);
+      await rpc('anvil_mine', [1]);
       await expect(reconcileErc4626Deposit(beforeSlippage, profile, reverted.hash, rpc))
         .resolves.toMatchObject({ verdict: 'DIVERGENT', reason: 'VAULT_TRANSACTION_REVERTED' });
 
@@ -116,7 +128,7 @@ describe('ERC-4626 bounded deposit on disposable Anvil', () => {
       const step = review.plan.segments[0]!.steps[0]!;
       if (step.executionKind !== 'DIRECT_TRANSACTION') throw new Error('VAULT_PLAN_INVALID');
       expect(step.payloadHash).toBe(hashSupplyValue(review.transaction, 'payload'));
-      await expect(assertFreshErc4626Deposit(review, profile, review.commitment, owner, rpc)).resolves.toBeUndefined();
+      await expect(assertFreshErc4626Deposit(review, workflow, profile, review.commitment, owner, rpc)).resolves.toBeUndefined();
 
       const directory = await mkdtemp(join(tmpdir(), 'flofi-vault-attempt-')), path = join(directory, 'attempts.json');
       try {
@@ -145,10 +157,14 @@ describe('ERC-4626 bounded deposit on disposable Anvil', () => {
           payloadHash: step.payloadHash, preparedAtBlock: review.block, priorStepConfirmed: true });
         const { transactionHash } = await coordinator.request(attempt.executionAttemptId, async () => {
           expect((await read()).journal.entries.at(-1)?.toState).toBe('SUBMITTING');
-          return (await localWallet(review.transaction)).hash;
+          // The wallet may lower the reviewed gas and fees (never raise them): a lowered gas limit still reconciles.
+          return (await localWallet({ ...review.transaction, gas: '0x' + (BigInt(review.transaction.gas) - 1_000n).toString(16) })).hash;
         });
         expect(transactionHash).toBeTruthy();
         await expect(coordinator.request(attempt.executionAttemptId, () => Promise.reject(new Error('DUPLICATE_SEND')))).rejects.toThrow('ATTEMPT_NOT_PREPARED');
+        await expect(reconcileErc4626Deposit(review, profile, transactionHash!, rpc))
+          .resolves.toMatchObject({ verdict: 'INCONCLUSIVE', reason: 'VAULT_CONFIRMATIONS_PENDING' });
+        await rpc('anvil_mine', [1]);
         await expect(reconcileErc4626Deposit(review, profile, transactionHash!, rpc))
           .resolves.toMatchObject({ verdict: 'INCONCLUSIVE', reason: 'VAULT_CONFIRMATIONS_PENDING' });
         await rpc('anvil_mine', [1]);
@@ -166,6 +182,10 @@ describe('ERC-4626 bounded deposit on disposable Anvil', () => {
         await expect(reconcileErc4626Deposit(review, profile, transactionHash!, async (method, params) => method === 'eth_getTransactionReceipt'
           ? { ...rpcRecord(await rpc(method, params)), logs: [] } : rpc(method, params)))
           .resolves.toMatchObject({ verdict: 'DIVERGENT', reason: 'VAULT_DEPOSIT_LOG_MISMATCH' });
+        // A fee above the reviewed bound is never accepted, even for a settled deposit.
+        await expect(reconcileErc4626Deposit(review, profile, transactionHash!, async (method, params) => method === 'eth_getTransactionByHash'
+          ? { ...rpcRecord(await rpc(method, params)), maxFeePerGas: '0x' + (BigInt(review.transaction.maxFeePerGas) + 1n).toString(16) } : rpc(method, params)))
+          .resolves.toMatchObject({ verdict: 'DIVERGENT', reason: 'VAULT_FEE_BOUND_MISMATCH' });
       } finally { await rm(directory, { recursive: true, force: true }); }
     });
   }, 15_000);

@@ -46,5 +46,15 @@ Certified metadata grants no financial authority. The following items remain ope
 - **Financial capability certification.** Migration 0036 allows only `network.read` and `vault.read`. Certifying an executable capability, such as `vault.deposit`, needs a further additive migration that binds the reviewed runtime profile (code hashes, limits, confirmations). It needs owner rollout.
 - **Engine dispatch.** No backend flow, Chat or Canvas action, MCP tool or wallet handoff dispatches the ERC-4626 adapter yet. The compiler expects its profile from a trusted host. Resolving it from a Studio publication at preparation and at wallet handoff is not implemented.
 - **Vault compatibility.** A plain ERC-4626 `deposit(uint256,address)` cannot enforce a minimum share output atomically. Execution therefore requires a vault exposing the bounded `deposit(uint256,address,uint256)`, or a separately reviewed router. The adapter also requires an exact pre-existing allowance and never generates an approval.
+- **Wallet flow requirements for the vault adapter.** The workflow and wallet-execution specialist reviews named these. The adapter's simulation already refuses OP Stack chains (unbounded L1 data fee), non-EOA owners, and upgradeable vaults or tokens (standard proxy slots set). Its reconciler accepts fees and gas that the wallet lowered, never raised. Still open:
+  - a nonce decision (wallet-assigned or explicit) with run-level nonce reservation;
+  - observation keyed by owner and reviewed nonce, for dropped or replaced hashes;
+  - publication and revocation state as inputs at preparation and handoff;
+  - the stored profile snapshot, and attempt-bound reconciliation;
+  - a transaction-scoped fallback for blocks the owner shares with other transactions;
+  - a reviewed approval step for the exact allowance;
+  - EIP-7702 owners;
+  - composition beyond a single node;
+  - an evidence-bundle builder.
 - **External adapters.** Trusted certification of submitted adapter code needs an isolated build worker and a signed attestation that binds the source, dependencies, toolchain, artifact and test suite. Neither exists yet.
 - **Production.** Applying 0035 or 0036 to any shared database, and any mainnet transaction, remain owner actions.
