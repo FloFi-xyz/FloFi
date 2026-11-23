@@ -90,7 +90,7 @@ export async function AdminShell({ active, context, title, description, actions,
 }
 
 const UNAVAILABLE: Record<string, string> = {
-  ADMIN_STORE_NOT_CONFIGURED: 'This deployment has no PostgreSQL platform state (DATABASE_URL), so the console cannot authenticate anyone.',
+  ADMIN_STORE_NOT_CONFIGURED: 'This deployment has no PostgreSQL admin connection (DATABASE_ADMIN_URL), so the console cannot authenticate anyone.',
   ADMIN_SCHEMA_NOT_CURRENT: 'The database schema does not match this build. Check the deployment’s supported migration history.',
   ADMIN_STORE_UNAVAILABLE: 'The admin store is unreachable right now.',
 };

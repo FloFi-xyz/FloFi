@@ -94,7 +94,7 @@ The worker logs `flight.email.worker_enabled` when it starts, or `flight.email.w
 
 ## 7. First real send (owner; only after §2–§6 and the release of 0024)
 
-1. `node apps/reference-dapp/backend/flight-admin.ts email-status --tenant default` (production `DATABASE_URL`, `--tenant default`): limits,
+1. `node apps/reference-dapp/backend/flight-admin.ts email-status --tenant default` (operator `DATABASE_ADMIN_OPERATIONS_URL`, `--tenant default`): limits,
    today's reservations, nothing held.
 2. Join the list at `https://flofi.xyz/board` with a team Gmail address and a team Outlook address. Within about 15 seconds Email 1 arrives.
    Check in each: it is not in Spam; *Show original* says `SPF: PASS`, `DKIM: PASS` (`d=flofi.xyz`), `DMARC: PASS`; Reply goes to

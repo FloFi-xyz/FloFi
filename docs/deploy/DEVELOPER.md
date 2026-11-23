@@ -42,7 +42,7 @@ The operator manages legacy projects and sandbox keys with a CLI that runs on pl
 For account-owned projects, see [Account-owned Developer Console](#account-owned-developer-console).
 
 ```bash
-export DATABASE_URL='postgres://…'            # the deployment's database
+export DATABASE_ADMIN_OPERATIONS_URL='postgres://…' # dedicated operator login
 export FLOFI_DEVELOPER_SECRET='…'             # the deployment's developer secret (a key only authenticates where it matches)
 CLI='node apps/reference-dapp/backend/developer-admin.ts'
 

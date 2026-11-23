@@ -1,6 +1,6 @@
 # Schema compatibility during rolling deployments (BUILD-DB-COMPAT-001)
 
-FloFi's services deploy independently — the Railway API (whose pre-deploy step migrates), the Railway worker, and Vercel (embedded
+FloFi's services deploy independently — the Railway API (whose pre-deploy checks schema compatibility), the Railway worker, and Vercel (embedded
 flows, MCP, Developer API, Channels, approvals, Admin) — so for a while the database and a serving build disagree. Until this build,
 every process accepted only the **exact** migration set its build ships: once a migration committed, every cold start of the previous
 build (a restart, a scale-out, every new serverless instance) refused the database with `MIGRATION_HISTORY_MISMATCH`, however harmless
@@ -28,8 +28,9 @@ identity — in a reviewed **forward-compatibility certificate** that the build 
 * **Error codes are unchanged** (`SCHEMA_NOT_MIGRATED`, `MIGRATION_HISTORY_MISMATCH`), so readiness, the web's classified errors and
   every client keep their existing behavior. `MIGRATION_CERTIFICATE_INVALID` only appears for a malformed manifest, which the unit
   suite rejects before a build exists.
-* **Migration entry points.** Applications read the ledger on user requests. Railway pre-deploy and the opt-in Vercel Preview step
-  run `main.ts migrate`. Optional migrations have explicit operator commands.
+* **Migration entry points.** Applications read the ledger on user requests. Railway pre-deploy runs `main.ts check-schema`. The owner runs
+  `main.ts migrate` in a separate operator environment. Dedicated Vercel Preview databases retain the opt-in build bootstrap.
+  Optional migrations have explicit operator commands. See [database privilege rollout](DATABASE-LEAST-PRIVILEGE.md).
 * `assertSchemaCurrent` (strict, exact) is unchanged and still exported; no production path uses it any more.
 
 Where the check runs:
@@ -37,7 +38,8 @@ Where the check runs:
 | Path | Services |
 | --- | --- |
 | `backend/main.ts` `api`, `worker`, `import-journal` | Railway API, Railway worker, operator import |
-| `backend/main.ts migrate` | Railway API pre-deploy; Vercel Preview `FLOFI_MIGRATE_ON_BUILD=preview` |
+| `backend/main.ts check-schema` | Railway API pre-deploy with `DATABASE_URL` |
+| `backend/main.ts migrate` | Operator with direct `DATABASE_MIGRATION_URL`; Vercel Preview `FLOFI_MIGRATE_ON_BUILD=preview` |
 | `src/server/flow-runtime.ts` (embedded runtime) | Vercel embedded flows, MCP tools, `/api/readiness` |
 | `src/server/platform-state-host.ts` | MCP OAuth, Developer API, Channels, approvals, Admin (BUILD-ADMIN-001) |
 | `backend/developer-admin.ts`, `backend/admin-cli.ts` | Developer and Admin operator CLIs |

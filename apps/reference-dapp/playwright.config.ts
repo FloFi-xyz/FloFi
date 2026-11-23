@@ -366,7 +366,7 @@ export default defineConfig({
       ...(cardHarness ? { GRYLOO_CARD_HARNESS: 'MOCKED_LOOPBACK_ONLY', WOOVI_APP_ID: SERVER_ONLY_WOOVI_APP_ID, WOOVI_ENVIRONMENT: 'sandbox',
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, FLOFI_CARD_ORIGIN: E2E_CARD_ORIGIN } : {}),
       ...(cloudRuntime ? { FLOFI_RUNTIME: 'embedded', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, GRYLOO_ROBINHOOD_HARNESS: 'MOCKED_LOOPBACK_ONLY' } : {}),
-      ...(adminHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') } : {}),
+      ...(adminHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, DATABASE_ADMIN_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') } : {}),
       // BUILD-CHAT-LEARNING-002: persistent automatic learning under the consent basis (the spec opts in through Privacy & memory).
       ...(learningHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_LEARNING: 'enabled', FLOFI_LEARNING_SECRET: randomBytes(32).toString('hex'),
         FLOFI_LEARNING_AUTOMATIC: 'consent' } : {}),

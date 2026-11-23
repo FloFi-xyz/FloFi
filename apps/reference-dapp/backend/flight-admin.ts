@@ -56,7 +56,7 @@
  *   remove-card    --card <id | flp_…>             take a public card page down (the person's request or moderation)
  *   revoke-access  --email <address>               void every unused access link and code of an address
  *
- * Environment: DATABASE_URL (the deployment's database). Holding the database credentials is the authorization, as for the other
+ * Environment: DATABASE_ADMIN_OPERATIONS_URL. Holding the database credentials is the authorization, as for the other
  * operator CLIs. The tenant is explicit (production/local `--tenant default`, a Vercel Preview `--preview-branch <git branch>`) and must
  * already exist: a mistyped tenant is refused, never created. An exported file holds addresses and possibly invite codes: deliver only through the team’s secure channel; never attach it to a public artifact or commit.
  */
@@ -292,8 +292,8 @@ async function main(): Promise<void> {
     template: { type: 'string' }, 'provider-id': { type: 'string' }, language: { type: 'string' }, 'send-at': { type: 'string' }, file: { type: 'string' },
     card: { type: 'string' }, apply: { type: 'boolean', default: false }, 'confirm-worker-deployed': { type: 'boolean', default: false },
     'include-released': { type: 'boolean', default: false }, keep: { type: 'string' }, 'include-operator-cancelled': { type: 'boolean', default: false } } });
-  const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
-  if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
+  const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_ADMIN_OPERATIONS_URL ?? '';
+  if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_ADMIN_OPERATIONS_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-flight-admin' });
   try {
     await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);

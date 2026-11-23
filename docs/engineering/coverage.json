@@ -1902,6 +1902,10 @@
       "path": "packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts",
       "stage": "postgres"
     },
+    "app.backend.database-privileges.pg": {
+      "path": "apps/reference-dapp/backend/database-privileges.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.backend.workflow-run-purge-migrate.pg": {
       "path": "apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts",
       "stage": "postgres"
@@ -3702,7 +3706,10 @@
         "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.reversal.sql",
         "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql",
         "docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql",
-        "docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql"
+        "docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql",
+        "docs/deploy/database-privileges/policy.sql",
+        "docs/deploy/database-privileges/apply.sql",
+        "docs/deploy/database-privileges/verify.sql"
       ],
       "suites": [
         "app.learning.automatic",
@@ -3727,7 +3734,8 @@
         "cloud-runtime.certificate-0033.pg",
         "app.backend.workflow-run-purge-migrate.pg",
         "app.backend.owner-history.pg",
-        "cloud-runtime.security-0016-runtime-privileges.pg"
+        "cloud-runtime.security-0016-runtime-privileges.pg",
+        "app.backend.database-privileges.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -9213,6 +9221,7 @@
     "app.backend.owner-history.pg",
     "app.studio.integration-store.pg",
     "app.studio.certification-store.pg",
-    "cloud-runtime.security-0016-runtime-privileges.pg"
+    "cloud-runtime.security-0016-runtime-privileges.pg",
+    "app.backend.database-privileges.pg"
   ]
 }

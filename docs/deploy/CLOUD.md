@@ -7,7 +7,10 @@ Flofi runs as a modular monolith in three process types built from this reposito
 | Frontend + BFF (Next.js) | Vercel build of `apps/reference-dapp` | N (serverless) | Vercel |
 | API | `node apps/reference-dapp/backend/main.ts api` | N replicas | Railway service `flofi-api` |
 | Worker | `node apps/reference-dapp/backend/main.ts worker` | N replicas | Railway service `flofi-worker` |
-| Migrations | `node apps/reference-dapp/backend/main.ts migrate` | one-shot | Railway pre-deploy of `flofi-api` |
+| Migrations | `node apps/reference-dapp/backend/main.ts migrate` | one-shot | Owner operator environment |
+
+Railway API pre-deploy runs `check-schema` with its runtime login. The owner runs migration commands separately.
+See [the database privilege rollout](DATABASE-LEAST-PRIVILEGE.md).
 
 PostgreSQL (initially Neon) is the only source of truth for execution state. Evidence exports go to an
 S3-compatible bucket. No component holds a key, signs, or submits transactions: the owner's browser wallet
@@ -23,7 +26,7 @@ All values are secrets or configuration supplied by the hosting platform. Never 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | PostgreSQL URL used at runtime. Neon: the **pooled** connection string with `sslmode=require`. |
-| `DATABASE_MIGRATION_URL` | recommended | Direct (unpooled) URL used only by `migrate`. Defaults to `DATABASE_URL`. |
+| `DATABASE_FINOPS_WORKER_URL` | when FinOps is enabled | Dedicated PostgreSQL login for the optional billing loop. |
 | `DATABASE_POOL_MAX` | no | Connections per process (default 10). Budget for deploy overlaps: `(2 × API replicas + 2 × worker replicas) × pool + 1 (migrate) + Vercel instances × their pool` under the pooler (or direct) limit at the minimum compute size ([BUILD-INFRA-API-FAILOVER-CERT-001](../builds/BUILD-INFRA-API-FAILOVER-CERT-001-REPORT.md)). |
 | `API_AUTH_TOKEN` | API, yes in production | Bearer token the BFF presents. ≥32 characters (`openssl rand -hex 32`). The API refuses to start in production without it. |
 | `NODE_ENV` | yes | `production` (set by the Docker image). |
@@ -46,7 +49,7 @@ All values are secrets or configuration supplied by the hosting platform. Never 
 | `GRYLOO_UNISWAP_LIQUIDITY_TESTNET=live` | to enable | Base Sepolia read-only RPC (`eth_simulateV1`, receipts, nonce discovery) for the Uniswap v3 USDC/WETH concentrated-liquidity flow (`uniswap-liquidity`; test tokens, owner wallet signs each approval and the mint). `GRYLOO_BASE_SEPOLIA_RPC_URL` optionally names an HTTPS Base Sepolia RPC that supports `eth_simulateV1`; `GRYLOO_UNISWAP_LIQUIDITY_EXECUTION=DISABLED` keeps it Simulate/Review-only. No new service, database migration or secret. |
 | `GRYLOO_ROUTER=live` | to enable | Cross-chain Router (`crosschain-router`, BUILD-ROUTER-001): Base mainnet → Arbitrum One USDC through LI.FI or direct Across, **quotes, simulation and Review only**. Read-only Base/Arbitrum RPC (`eth_simulateV1`, `eth_getLogs`, receipts) and server-side LI.FI/Across quote and status reads. The public Base RPC rate-limits `eth_call` bursts (HTTP 429), so set `GRYLOO_BASE_RPC_URL` (and optionally `GRYLOO_ARBITRUM_RPC_URL`) to keyed HTTPS endpoints that support `eth_simulateV1`. `ACROSS_API_KEY`, `ACROSS_INTEGRATOR_ID` (`0x` + 4 hex) and `LIFI_API_KEY` are optional secrets. Real-funds execution additionally requires the owner's explicit `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` on both API and worker; never set it for a demo. No new service, database migration or required secret. |
 | `FLOFI_AUTOMATIONS=enabled` | API and worker, to enable | BUILD-AUTOMATION-001 FloFi Automations on this topology: the **API** serves the workspace (`POST /v1/automations/:method`, owner in `x-flofi-workflow-owner`) and automation approval links (`POST /v1/approvals/:method`) — needs `FLOFI_AUTOMATION_SECRET`, `FLOFI_PUBLIC_ORIGIN` (the Vercel origin) and the price variables; the **worker** evaluates them (its 60 s sweep is the scheduler: no cron) — needs `FLOFI_PUBLIC_ORIGIN` and the price variables, never the secret. Proposals for owners only; nothing signs or submits. Unset: both are unchanged. See [AUTOMATIONS.md](AUTOMATIONS.md) and [ENVIRONMENT.md §5f](ENVIRONMENT.md). |
-| `GRYLOO_ROUTER_TESTNET=live` | to enable | BUILD-JOURNEY-001 permissionless journey: the same Cross-chain Router on public testnets (`crosschain-router-testnet`), Base Sepolia → Arbitrum Sepolia **test USDC**, quotes, simulation, Review and owner-wallet execution for **any** signed-in wallet (no allowlist, no operator step). Public read-only RPCs by default (`https://sepolia.base.org`, `https://sepolia-rollup.arbitrum.io/rpc`); `GRYLOO_BASE_SEPOLIA_RPC_URL` / `GRYLOO_ARBITRUM_SEPOLIA_RPC_URL` optionally name keyed HTTPS endpoints (the Base Sepolia one must support `eth_simulateV1`). LI.FI and the Across **testnet** API are queried server-side; `LIFI_API_KEY` is optional. `GRYLOO_ROUTER_TESTNET_EXECUTION=DISABLED` keeps it Simulate/Review-only. Set it on **both** API and worker. Migration `0004` (an index) runs in the normal pre-deploy `migrate`. No new service or required secret. |
+| `GRYLOO_ROUTER_TESTNET=live` | to enable | BUILD-JOURNEY-001 permissionless journey: the same Cross-chain Router on public testnets (`crosschain-router-testnet`), Base Sepolia → Arbitrum Sepolia **test USDC**, quotes, simulation, Review and owner-wallet execution for **any** signed-in wallet (no allowlist, no operator step). Public read-only RPCs by default (`https://sepolia.base.org`, `https://sepolia-rollup.arbitrum.io/rpc`); `GRYLOO_BASE_SEPOLIA_RPC_URL` / `GRYLOO_ARBITRUM_SEPOLIA_RPC_URL` optionally name keyed HTTPS endpoints (the Base Sepolia one must support `eth_simulateV1`). LI.FI and the Across **testnet** API are queried server-side; `LIFI_API_KEY` is optional. `GRYLOO_ROUTER_TESTNET_EXECUTION=DISABLED` keeps it Simulate/Review-only. Set it on **both** API and worker. Migration `0004` (an index) is part of the shipped schema. No new service or required secret. |
 
 A flow without its enablement variable answers `*_PUBLIC_TESTNET_NOT_ENABLED`. The `*_HARNESS=MOCKED_LOOPBACK_ONLY`
 variables exist only for tests and must never be set in a deployment.
@@ -196,7 +199,7 @@ These steps need the owner's accounts. The repository already contains everythin
    key limited to that bucket.
 3. **Railway** — create a project from the GitHub repository and branch to deploy:
    * service `flofi-api`: Settings → Config-as-code path `deploy/railway/api.railway.json`; variables from the
-     table above; Networking → generate a public domain. The pre-deploy command runs migrations.
+     table above; Networking → generate a public domain. Run owner migrations before deploying a build that requires them. The pre-deploy checks compatibility.
    * service `flofi-worker`: config path `deploy/railway/worker.railway.json`; same database and object-store
      variables; no public domain.
 4. **Vercel** — import the repository; Root Directory `apps/reference-dapp` (the `vercel.json` there installs the
@@ -218,7 +221,7 @@ These steps need the owner's accounts. The repository already contains everythin
    perform this step.
 
 8. **Permissionless testnet journey (BUILD-JOURNEY-001)** — deploy this revision to `flofi-api` and `flofi-worker` with
-   `GRYLOO_ROUTER_TESTNET=live` on both (migration `0004` applies in pre-deploy), keep `API_BASE_URL`/`API_AUTH_TOKEN` on Vercel,
+   `GRYLOO_ROUTER_TESTNET=live` on both (requires shipped migration `0004`), keep `API_BASE_URL`/`API_AUTH_TOKEN` on Vercel,
    and make the frontend URL public (step 6). Verify without a wallet: the Build stage shows "Permissionless testnet journey";
    `curl -H "authorization: Bearer <token>" https://<api>/v1/runs?flow=crosschain-router-testnet` → `{"ok":true,...}`.
    Acceptance is performed by an **external user** with their own wallet (never an agent, never a team key): Base Sepolia ETH

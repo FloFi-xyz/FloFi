@@ -60,10 +60,10 @@ async function query<T>(sql: string, values: unknown[] = []): Promise<T[]> {
 }
 const events = async (event: string, detail = '') => Number((await query<{ n: string }>(
   'SELECT coalesce(sum(events), 0) AS n FROM flight_daily_events WHERE event = $1 AND detail = $2', [event, detail]))[0]!.n);
-/** The operator CLI, as the team runs it (DATABASE_URL is the authorization). */
+/** The operator CLI, using the operator connection. */
 async function operator(...args: string[]): Promise<Record<string, unknown>> {
   const { stdout } = await promisify(execFile)(process.execPath, ['backend/flight-admin.ts', ...args, '--tenant', 'default'],
-    { cwd: APP_DIR, timeout: 60_000, env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL! } });
+    { cwd: APP_DIR, timeout: 60_000, env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', DATABASE_ADMIN_OPERATIONS_URL: process.env.FLOFI_E2E_DATABASE_URL! } });
   return JSON.parse(stdout) as Record<string, unknown>;
 }
 async function at(context: BrowserContext, clock: number) {

@@ -3,6 +3,7 @@
  * Flofi backend entry point (BUILD-CLOUD-001), run directly by Node 24's TypeScript support:
  *
  *   node apps/reference-dapp/backend/main.ts migrate          apply pending schema migrations (deploy step)
+ *   node apps/reference-dapp/backend/main.ts check-schema     check compatibility using the service credential
  *   node apps/reference-dapp/backend/main.ts api              stateless HTTP API (N replicas)
  *   node apps/reference-dapp/backend/main.ts worker           reconciliation/evidence worker (N replicas)
  *   node apps/reference-dapp/backend/main.ts import-journal <flow> <absolute journal dir> <run id>
@@ -19,7 +20,7 @@ import { assertSchemaCompatible, createDatabase, createHttpServer, createLogger,
   readEvidenceStore, readRuntimeConfig, sweep, type SchemaCompatibility, type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createFileLogStore, utf8 } from '@defi-workflow-engine/reference-executor';
 import { createRobinhoodTransferService } from '../src/server/robinhood-transfer-service.ts';
-import { deploymentEnvironment } from '../src/server/deployment.ts';
+import { deploymentEnvironment, isHostedDeployment } from '../src/server/deployment.ts';
 import { createSupplyService } from '../src/server/supply-service.ts';
 import { validatePublicRunLog } from '../src/server/public-testnet-service.ts';
 import type { WorkflowRunWorkerParts } from '../src/workflow-runs/worker.ts';
@@ -42,16 +43,22 @@ const loadFailed = (code: string) => (error: unknown): Disabled => ({ disabled: 
 const disabledFields = (parts: Disabled) => ({ error_code: parts.disabled, reason: parts.reason ?? undefined, ...parts.failure });
 
 async function main(): Promise<void> {
-  if (command === 'migrate') {
+  if (command === 'migrate' || command === 'check-schema') {
     stage = 'config';
-    const config = readRuntimeConfig(process.env, 'migrate');
-    stage = 'migrate';
-    const db = createDatabase({ connectionString: config.migrationDatabaseUrl, maxConnections: 1, applicationName: 'flofi-migrate' });
+    const applying = command === 'migrate';
+    const environment = deploymentEnvironment(process.env);
+    if (applying && isHostedDeployment(process.env) && environment !== 'preview' && !process.env.DATABASE_MIGRATION_URL) {
+      throw new Error('DATABASE_MIGRATION_URL_REQUIRED');
+    }
+    const config = readRuntimeConfig(process.env, applying ? 'migrate' : 'worker');
+    stage = applying ? 'migrate' : 'schema';
+    const db = createDatabase({ connectionString: config.databaseUrl, maxConnections: 1, applicationName: applying ? 'flofi-migrate' : 'flofi-schema-check' });
     try {
       // BUILD-ADMIN-001: a Vercel Preview build never migrates a database that a non-Preview deployment (Production) writes to.
-      if (deploymentEnvironment(process.env) === 'preview') { stage = 'preview_database'; await assertDedicatedPreviewDatabase(db); stage = 'migrate'; }
+      if (applying && environment === 'preview') { stage = 'preview_database'; await assertDedicatedPreviewDatabase(db); stage = 'migrate'; }
       // A database ahead of this build is never changed: certified, nothing is applied and the check below reports it; otherwise both fail closed.
-      logger.info('migrate.applied', { versions: (await migrate(db)).join(',') || 'none', ...schemaFields(await assertSchemaCompatible(db)) });
+      const versions = applying ? await migrate(db) : [];
+      logger.info(applying ? 'migrate.applied' : 'schema.compatible', { versions: versions.join(',') || 'none', ...schemaFields(await assertSchemaCompatible(db)) });
     } finally { await db.close(); }
     return;
   }
@@ -228,7 +235,9 @@ async function main(): Promise<void> {
     void import('./finops-worker.ts')
       .then(async ({ loadFinancialSync }) => {
         if (workerStopRequested) return;
-        const loop = await loadFinancialSync(process.env, { databaseUrl: config.databaseUrl, tenantId: config.tenantId, logger });
+        const databaseUrl = process.env.DATABASE_FINOPS_WORKER_URL || (isHostedDeployment(process.env) ? '' : config.databaseUrl);
+        if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_FINOPS_WORKER_URL_REQUIRED');
+        const loop = await loadFinancialSync(process.env, { databaseUrl, tenantId: config.tenantId, logger });
         if (loop && workerStopRequested) await loop.stop();
         else financialSync = loop;
       })

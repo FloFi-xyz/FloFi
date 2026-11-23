@@ -44,7 +44,7 @@ async function operatorKey(): Promise<{ key: string; cleanup: () => Promise<void
   const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), 'flofi-developer-e2e-')), keyFile = join(dir, 'key');
   const cwd = fileURLToPath(new URL('..', import.meta.url));
   const cli = (args: string[]) => promisify(execFile)(process.execPath, ['backend/developer-admin.ts', ...args, '--tenant', 'default'], { cwd, timeout: 60_000,
-    env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_DEVELOPER_SECRET: process.env.FLOFI_E2E_DEVELOPER_SECRET! } });
+    env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', DATABASE_ADMIN_OPERATIONS_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_DEVELOPER_SECRET: process.env.FLOFI_E2E_DEVELOPER_SECRET! } });
   const project = JSON.parse((await cli(['create-project', '--name', 'Acme Wallet'])).stdout) as { projectId: string };
   await cli(['create-key', '--project', project.projectId, '--key-file', keyFile]);
   return { key: (await readFile(keyFile, 'utf8')).trim(), cleanup: () => rm(dir, { recursive: true, force: true }) };

@@ -11,9 +11,9 @@ import { serverlessPostgresConfig } from './postgres-config.ts';
 type Env = Readonly<Record<string, string | undefined>>;
 export type PlatformStateHost = { readonly db: Database; readonly tenantId: string };
 
-async function openHost(config: ReturnType<typeof serverlessPostgresConfig>): Promise<PlatformStateHost> {
+async function openHost(config: ReturnType<typeof serverlessPostgresConfig>, applicationName: string): Promise<PlatformStateHost> {
   const runtime = await import('@defi-workflow-engine/cloud-runtime');
-  const db = runtime.createDatabase({ connectionString: config.databaseUrl, maxConnections: config.maxConnections, applicationName: 'flofi-platform-state' });
+  const db = runtime.createDatabase({ connectionString: config.databaseUrl, maxConnections: config.maxConnections, applicationName });
   try {
     // Bundled functions check shipped identities without reading migration files or applying migrations; a newer schema is served
     // only under this build's forward-compatibility certificate (BUILD-DB-COMPAT-001).
@@ -30,12 +30,17 @@ export async function platformStateHost(env: Env = process.env): Promise<Platfor
     const runtime = await embeddedRuntime(env);
     return { db: runtime.db, tenantId: runtime.tenantId };
   }
+  return postgresPlatformStateHost(env, 'flofi-platform-state');
+}
+
+/** Dedicated server pools can use the same schema and tenant checks without sharing the embedded runtime's credentials. */
+export async function postgresPlatformStateHost(env: Env, applicationName: string): Promise<PlatformStateHost> {
   const config = serverlessPostgresConfig(env);
   const holder = globalThis as unknown as Record<symbol, Map<string, Promise<PlatformStateHost>> | undefined>;
-  const hosts = holder[HOSTS] ??= new Map(), key = JSON.stringify([config.databaseUrl, config.tenantId, config.maxConnections]);
+  const hosts = holder[HOSTS] ??= new Map(), key = JSON.stringify([applicationName, config.databaseUrl, config.tenantId, config.maxConnections]);
   let host = hosts.get(key);
   if (!host) {
-    host = openHost(config).catch(error => { hosts.delete(key); throw error; });
+    host = openHost(config, applicationName).catch(error => { hosts.delete(key); throw error; });
     hosts.set(key, host);
   }
   return host;

@@ -20,8 +20,8 @@ describe('BUILD-DEVELOPER-001 developer operator CLI', () => {
     expect(await cli(['create-key', '--tenant', 'default', '--preview-branch', 'b'])).toMatchObject({ code: 1, stderr: expect.stringMatching(/^TENANT_REQUIRED: /) });
     expect(await cli(['create-key', '--tenant', 'Bad Tenant'])).toMatchObject({ code: 1, stderr: 'TENANT_ID_INVALID\n' });
     expect(await cli(['create-key', '--tenant', 'default', '--environment', 'production'])).toMatchObject({ code: 1, stderr: 'ARGUMENTS_INVALID\n' });
-    expect(await cli(['list-keys', '--tenant', 'default', '--project', 'prj_x'])).toMatchObject({ code: 1, stderr: 'DATABASE_URL_REQUIRED\n' });
-    expect(await cli(['list-keys', '--tenant', 'default', '--project', 'prj_x'], { DATABASE_URL: 'postgres://127.0.0.1:1/none', FLOFI_DEVELOPER_SECRET: 'short' }))
+    expect(await cli(['list-keys', '--tenant', 'default', '--project', 'prj_x'])).toMatchObject({ code: 1, stderr: 'DATABASE_ADMIN_OPERATIONS_URL_REQUIRED\n' });
+    expect(await cli(['list-keys', '--tenant', 'default', '--project', 'prj_x'], { DATABASE_ADMIN_OPERATIONS_URL: 'postgres://127.0.0.1:1/none', FLOFI_DEVELOPER_SECRET: 'short' }))
       .toMatchObject({ code: 1, stderr: 'FLOFI_DEVELOPER_SECRET_INVALID\n' });
   });
 });
