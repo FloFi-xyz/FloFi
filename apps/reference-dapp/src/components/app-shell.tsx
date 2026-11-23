@@ -100,7 +100,7 @@ import { activeNetworkScope, workflowAllowed } from '../domain/network-scope';
 import { usePublicTestnet } from '../state/public-testnet-store';
 import { PublicTestnetPanel } from './public-testnet-panel';
 
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from '../state/lending-store';
 import {LendingPanel} from './lending-panel';
 import { useSupply } from '../state/supply-store';
