@@ -30,6 +30,7 @@ export type DeveloperContext = {
   readonly config: DeveloperConfig; readonly tenantId: string; readonly principal: DeveloperPrincipal; readonly scope: ProjectScope;
   readonly store: DeveloperStore; readonly handoffs: HandoffStore; readonly runtime: EngineRuntime; readonly limits: PlanLimits; readonly allow: WindowLimit;
   readonly now: Date; readonly write?: DeveloperWrite; readonly workflowRuns?: ApprovalRunReader; readonly signal?: AbortSignal;
+  readonly publishedIntegrations?: () => Promise<NonNullable<CapabilityListBody['publishedIntegrations']>>;
 };
 /** The principal's credential environment determines eligible networks and funds. */
 const policyOf = (ctx: DeveloperContext): HandoffPolicy => ctx.scope.environment === 'sandbox' ? SANDBOX_POLICY : MAINNET_POLICY;
@@ -49,9 +50,13 @@ const MAX_STRATEGY_BYTES = 16_000;
 
 export async function listCapabilities(ctx: DeveloperContext, query: { network?: string; action?: string }): Promise<CapabilityListBody> {
   const live = ctx.scope.environment === 'production';
-  const facts = await capabilityFacts(ctx.runtime, policyOf(ctx), query as Parameters<typeof capabilityFacts>[2],
-    live ? 'PUBLIC_MAINNET' : undefined, { singleStepRun: live });
+  const [facts, publishedIntegrations] = await Promise.all([
+    capabilityFacts(ctx.runtime, policyOf(ctx), query as Parameters<typeof capabilityFacts>[2],
+      live ? 'PUBLIC_MAINNET' : undefined, { singleStepRun: live }),
+    !query.network && !query.action ? ctx.publishedIntegrations?.() : undefined,
+  ]);
   return { object: 'list', environment: ctx.scope.environment, data: facts.map(f => capabilityView(f, ctx.scope.environment)),
+    ...(publishedIntegrations?.length ? { publishedIntegrations } : {}),
     ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY' };
 }
 

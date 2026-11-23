@@ -9,6 +9,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import type { CopilotMode } from '../domain/copilot-mode';
 import type { WalletHintEcosystem } from '../wallet/wallet-hint';
 import type { PrivacyNoticeChoice } from '../domain/privacy-notice';
+import type { PublishedStudioIntegration } from '../platform/studio-catalog';
 
 export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosystem[]; readonly copilotMode: CopilotMode | null;
   /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: this browser's answer to the Privacy & Memory notice, as the server read it (absent: unknown, not shown). */
@@ -25,7 +26,9 @@ export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosyst
    * same server-verified session read (`currentAccountBootstrap`); null or absent: not known, read by the Settings menu itself. Presentation
    * only — it opens no page and authorizes nothing (every account page and action verifies the session again).
    */
-  readonly accountPresence?: { readonly accounts: boolean; readonly signedIn: boolean } | null | undefined };
+  readonly accountPresence?: { readonly accounts: boolean; readonly signedIn: boolean } | null | undefined;
+  readonly publishedIntegrations?: readonly PublishedStudioIntegration[] | undefined;
+};
 const NONE: ProductBootstrap = Object.freeze({ walletHint: Object.freeze([]), copilotMode: null });
 const Context = createContext<ProductBootstrap>(NONE);
 export function ProductBootstrapProvider({ value, children }: { value: ProductBootstrap; children: ReactNode }) {

@@ -53,7 +53,7 @@ describe('developer console ownership', () => {
   it('uses an explicitly certified additive migration and the operator step is repeatable', async () => {
     expect(await developerOwnershipInstalled(t.db)).toBe(true);
     expect(await runAdminCommand('developer-projects-migrate', {}, t.db, tenant)).toEqual({ applied: [] });
-    expect(await assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS)).toMatchObject({ version: process.env.FLOFI_TEST_CERTIFIED_AHEAD === '1' ? 35 : 34, application: 28 });
+    expect(await assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS)).toMatchObject({ version: process.env.FLOFI_TEST_CERTIFIED_AHEAD === '1' ? 36 : 34, application: 28 });
     await expect(assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS, oldCertificate)).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
   });
 

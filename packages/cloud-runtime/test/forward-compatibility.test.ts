@@ -136,12 +136,13 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
       // provably never reached a chain (certificate-0033.pg.test.ts).
       { version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' },
       { version: 34, name: 'developer_project_ownership', sha256: '7c698ed7779703abdd6110b39802aa0dad50c74798d6b1eb11a5e35bb4ea1485' },
-      { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' }]);
+      { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' },
+      { version: 36, name: 'studio_certification', sha256: '47d9ab5d5c1736cdfcd2b1110433e5caba9055ec2e90dfd313b7ed1a4e429aa3' }]);
   });
   it('classifies each FinOps-era certificate prefix and keeps the legacy refusal messages', async () => {
     const shipped = SHIPPED_MIGRATIONS.slice(0, 28);
     const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
-    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32, 33, 34, 35]);
+    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32, 33, 34, 35, 36]);
     expect(schemaCompatibilityState(shipped, shipped)).toBe('exact');
     for (const [index, migration] of certificate.migrations.entries()) {
       const ahead = [...shipped, ...certificate.migrations.slice(0, index + 1)];
@@ -152,7 +153,7 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
     const last = ahead.at(-1)!;
     const cases = [
       { ledger: shipped.slice(0, -1), state: 'behind', message: 'SCHEMA_NOT_MIGRATED' },
-      { ledger: [...ahead, { version: 36, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [...ahead, { version: 37, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...ahead.slice(0, -1), edit(last, { sha256: 'a'.repeat(64) })], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [edit(shipped[0]!, { name: 'edited' }), ...ahead.slice(1)], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...shipped, last], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },

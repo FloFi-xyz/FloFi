@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001: the chat's account scope comes only from the server-verified account session. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ session: null as { accountId: string } | null, host: {} as object | null, fail: false }));
+const h = vi.hoisted(() => ({ session: null as { accountId: string } | null, host: {} as object | null, fail: false, catalog: [] as { accountId?: string }[] }));
 vi.mock('../accounts/account-host.ts', () => ({ accountHost: async () => { if (h.fail) throw new Error('db down'); return h.host; },
   currentAccountSession: async (host: object | null) => host ? h.session : null }));
-vi.mock('./platform-state-host.ts', () => ({ platformStateHost: async () => ({ tenantId: 'default' }) }));
+vi.mock('./platform-state-host.ts', () => ({ platformStateHost: async () => ({ tenantId: 'default', db: {} }) }));
+vi.mock('../platform/studio-catalog.ts', () => ({ listPublishedStudioIntegrations: async (_db: unknown, tenantId: string, requester: { accountId?: string }) => {
+  h.catalog.push(requester); return [{ slug: 'public-network', tenantId, ...requester }];
+} }));
 import { conversationScopeKey, conversationScopeOf, currentAccountBootstrap, currentConversationScope } from './conversation-scope';
 const env = { DATABASE_URL: 'postgres://127.0.0.1/fixture', FLOFI_SESSION_SECRET: 's'.repeat(40) };
-beforeEach(() => { h.session = null; h.host = {}; h.fail = false; });
+beforeEach(() => { h.session = null; h.host = {}; h.fail = false; h.catalog = []; });
 
 describe('conversation scope of this request', () => {
   it('is the tenant and verified account digest, and null without an account session, accounts or database', async () => {
@@ -31,5 +34,17 @@ describe('conversation scope of this request', () => {
     // A chat-scope key that cannot be derived keeps the chat in memory only, without hiding the verified session.
     expect(await currentAccountBootstrap({ ...env, FLOFI_SESSION_SECRET: 'short' })).toEqual({ conversationScope: null, accountPresence: { accounts: true, signedIn: true } });
     h.fail = true; expect(await currentAccountBootstrap(env)).toEqual({ conversationScope: null, accountPresence: null });
+  });
+  it('BUILD-FLOFI-STUDIO-UNIVERSAL-002: lists PUBLIC Studio metadata without accounts and scopes PRIVATE entries to the verified session only', async () => {
+    expect(await currentAccountBootstrap(env)).not.toHaveProperty('publishedIntegrations');
+    expect(h.catalog).toEqual([]);
+    h.host = null;
+    expect((await currentAccountBootstrap(env, true)).publishedIntegrations).toEqual([{ slug: 'public-network', tenantId: 'default' }]);
+    h.host = {};
+    expect((await currentAccountBootstrap(env, true)).publishedIntegrations).toEqual([{ slug: 'public-network', tenantId: 'default' }]);
+    h.session = { accountId: 'acct_0123456789abcdef0123456789abcdef' };
+    expect(await currentAccountBootstrap(env, true)).toMatchObject({ accountPresence: { accounts: true, signedIn: true },
+      publishedIntegrations: [{ slug: 'public-network', accountId: 'acct_0123456789abcdef0123456789abcdef' }] });
+    expect(h.catalog).toEqual([{}, {}, { accountId: 'acct_0123456789abcdef0123456789abcdef' }]);
   });
 });

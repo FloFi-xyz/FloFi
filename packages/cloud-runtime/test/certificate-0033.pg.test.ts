@@ -155,8 +155,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: certificate for 0033 wor
   it('certifies the exact fixture bytes after 0029–0032 for the v28 build; 0015/0016/0023 stay immutable and the migration stays a fixture', async () => {
     expect(CERTIFICATE.base).toEqual(V28[27]);
     expect(CERTIFICATE.migrations.map(m => [m.version, m.name])).toEqual([[29, 'finops_ledger'], [30, 'finops_sync'], [31, 'position_history_purge'],
-      [32, 'single_step_runs'], [33, 'workflow_run_purge'], [34, 'developer_project_ownership'], [35, 'studio_integrations']]);
-    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#27-certificate-0035_studio_integrations');
+      [32, 'single_step_runs'], [33, 'workflow_run_purge'], [34, 'developer_project_ownership'], [35, 'studio_integrations'], [36, 'studio_certification']]);
+    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#28-certificate-0036_studio_certification');
     const m33 = await fixture(33);
     expect(m33.sha256).toBe(SHA_0033);
     expect(SHIPPED_MIGRATIONS.some(m => m.version === 33 || m.name === 'workflow_run_purge')).toBe(false);

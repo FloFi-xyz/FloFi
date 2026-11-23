@@ -74,6 +74,12 @@ metadata before entering it in Developer Console → FloFi Studio. Every new
 version is immutable once saved. CAIP-2 identifies on-chain deployments. Select
 the architecture that defines how their network identity can be checked.
 
+Once an independent FloFi operator certifies and publishes a package, it appears
+in `capabilities.list()` under `publishedIntegrations` (only when no filter is
+set). A PUBLIC package is visible to every project; a PRIVATE one only to its
+audience. These entries are metadata (`network.read` or `vault.read`) and grant
+no execution capability.
+
 ```ts
 import { defineIntegrationPackage } from '@defi-workflow-engine/developer-sdk';
 

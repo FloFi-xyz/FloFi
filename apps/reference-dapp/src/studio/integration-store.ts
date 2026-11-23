@@ -3,6 +3,7 @@ import { CERTIFIED_FORWARD_MIGRATIONS, type Database, type Queryable } from '@de
 import { PROJECT_ID } from '../developer/admin.ts';
 import { parseStudioIntegration, studioManifestDigest, supportsStudioProbe, type StudioIntegration } from './integration-manifest.ts';
 import type { ProbeMode, StudioEvidence } from './integration-probe.ts';
+import { studioCertificationOwnsVersion } from './certification-store.ts';
 
 const migration = CERTIFIED_FORWARD_MIGRATIONS.flatMap(entry => entry.migrations).find(entry => entry.name === 'studio_integrations');
 const EVIDENCE_TTL = 24 * 60 * 60 * 1_000;
@@ -190,7 +191,9 @@ export function createStudioStore(db: Database, tenantId: string, accountId: str
             // Submit advances the generation once while preserving the same evidence. Successful probes replace evidence.
             const sameEvidence = row?.status === 'VERIFIED' && row.generation === ref.generation
               || row?.status === 'CERTIFICATION_PENDING' && row.generation === ref.generation + 1;
-            if (row?.version === ref.version && sameEvidence) {
+            // A version an operator certified meanwhile keeps its reviewed state: only the admin lifecycle may suspend or revoke it.
+            if (row?.version === ref.version && sameEvidence
+              && !await studioCertificationOwnsVersion(tx, tenantId, projectId, row.slug, row.version)) {
               await advance(tx, projectId, row, 'DRAFT', 'INVALIDATED', now(), null, null, { code: cause.message });
             }
           });
@@ -226,7 +229,8 @@ export function createStudioStore(db: Database, tenantId: string, accountId: str
         await lockProject(tx, projectId);
         const row = await current(tx, projectId, ref);
         if (row.status === 'REVOKED' || row.status === status || row.status === 'CERTIFIED' || row.status === 'PUBLISHED'
-          || (status === 'SUSPENDED' && row.status === 'DRAFT')) {
+          || (status === 'SUSPENDED' && row.status === 'DRAFT')
+          || await studioCertificationOwnsVersion(tx, tenantId, projectId, row.slug, row.version)) {
           throw new Error('STUDIO_TRANSITION_FORBIDDEN');
         }
         await advance(tx, projectId, row, status, status, now, null, null);

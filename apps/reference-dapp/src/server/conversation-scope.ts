@@ -8,6 +8,7 @@
  */
 import { createHmac, hkdfSync } from 'node:crypto';
 import { walletSessionKey } from './wallet-session.ts';
+import type { PublishedStudioIntegration } from '../platform/studio-catalog.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** The digest key: derived from the same deployment secret as the account session cookie, for this purpose only. */
@@ -25,18 +26,25 @@ export async function currentConversationScope(env: Env = process.env): Promise<
  * with the page's first HTML instead of after a request queued behind the page's Server Actions. `accountPresence` null: not known (a failed
  * read), and the menu reads it itself as before; never assumed signed in. No account data leaves the server.
  */
-export async function currentAccountBootstrap(env: Env = process.env): Promise<{ readonly conversationScope: string | null;
-  readonly accountPresence: { readonly accounts: boolean; readonly signedIn: boolean } | null }> {
+export async function currentAccountBootstrap(env: Env = process.env, includeStudio = false): Promise<{ readonly conversationScope: string | null;
+  readonly accountPresence: { readonly accounts: boolean; readonly signedIn: boolean } | null;
+  readonly publishedIntegrations?: readonly PublishedStudioIntegration[] }> {
   try {
     if (!env.DATABASE_URL) return { conversationScope: null, accountPresence: { accounts: false, signedIn: false } };
     const [{ accountHost, currentAccountSession }, { platformStateHost }] = await Promise.all([import('../accounts/account-host.ts'), import('./platform-state-host.ts')]);
     const host = await accountHost(env);
-    if (!host) return { conversationScope: null, accountPresence: { accounts: false, signedIn: false } };
-    const session = await currentAccountSession(host, env);
-    if (!session) return { conversationScope: null, accountPresence: { accounts: true, signedIn: false } };
+    const session = host ? await currentAccountSession(host, env) : null;
+    const state = session || includeStudio ? await platformStateHost(env).catch(() => null) : null;
+    // BUILD-FLOFI-STUDIO-UNIVERSAL-002: PUBLIC Studio metadata does not depend on accounts; PRIVATE entries need the verified account session.
+    const publishedIntegrations = includeStudio && state ? await import('../platform/studio-catalog.ts')
+      .then(({ listPublishedStudioIntegrations }) => listPublishedStudioIntegrations(state.db, state.tenantId, session ? { accountId: session.accountId } : {}))
+      .catch(() => []) : undefined;
+    const studio = publishedIntegrations?.length ? { publishedIntegrations } : {};
+    if (!host) return { conversationScope: null, accountPresence: { accounts: false, signedIn: false }, ...studio };
+    if (!session) return { conversationScope: null, accountPresence: { accounts: true, signedIn: false }, ...studio };
     // The chat scope needs the deployment's key; a key that cannot be derived keeps the chat in memory only, without hiding the verified session.
     let conversationScope: string | null = null;
-    try { conversationScope = conversationScopeOf(conversationScopeKey(env), (await platformStateHost(env)).tenantId, session.accountId); } catch { conversationScope = null; }
-    return { conversationScope, accountPresence: { accounts: true, signedIn: true } };
+    try { if (state) conversationScope = conversationScopeOf(conversationScopeKey(env), state.tenantId, session.accountId); } catch { conversationScope = null; }
+    return { conversationScope, accountPresence: { accounts: true, signedIn: true }, ...studio };
   } catch { return { conversationScope: null, accountPresence: null }; }
 }

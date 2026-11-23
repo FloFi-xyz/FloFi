@@ -206,24 +206,6 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
   }
 }
 
-/** Keys that only executable material, secrets or wallet internals use. */
-const FORBIDDEN_KEY = /^(data|calldata|tx|txs|transaction|transactions|unsignedtransaction|signedtransaction|rawtransaction|serializedtransaction|signature|signatures|privatekey|secret|mnemonic|seed|seedphrase|commitment|apikey|accesstoken|bearer)$/i;
-/**
- * Fails closed when an MCP result contains anything executable or secret: forbidden keys, hex payloads longer than a hash
- * (66 chars), or long base64 blobs (serialized transactions). Hashes, addresses, selectors and mints pass.
- */
-export function assertSafeOutput(value: unknown, depth = 0): void {
-  if (depth > 32) throw new Error('MCP_OUTPUT_GUARD');
-  if (typeof value === 'string') {
-    if (/0x[0-9a-fA-F]{67,}/.test(value) || /^[A-Za-z0-9+/]{200,}={0,2}$/.test(value)) throw new Error('MCP_OUTPUT_GUARD');
-    // BUILD-MCP-002: OAuth access/refresh tokens, codes and consent tokens never appear in a tool result.
-    // BUILD-DEVELOPER-001: nor a Developer API key or a webhook signing secret (the one response that issues a secret checks it apart).
-    if (/flofi_(at|rt|code|csrf|sk)_[A-Za-z0-9_-]/.test(value) || /whsec_[A-Za-z0-9+/]/.test(value)) throw new Error('MCP_OUTPUT_GUARD');
-    return;
-  }
-  if (Array.isArray(value)) { for (const item of value) assertSafeOutput(item, depth + 1); return; }
-  if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) {
-    if (FORBIDDEN_KEY.test(key)) throw new Error('MCP_OUTPUT_GUARD');
-    assertSafeOutput(item, depth + 1);
-  }
-}
+// BUILD-FLOFI-STUDIO-UNIVERSAL-002: the guard is dependency-free in src/platform/output-guard.ts so the Studio catalog (loaded by plain-Node
+// tooling) can apply it per entry; every importer of this module keeps the same function.
+export { assertSafeOutput } from '../platform/output-guard.ts';

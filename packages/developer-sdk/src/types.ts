@@ -38,7 +38,13 @@ export type Capability = { object: 'capability'; action: string; network: string
     approve: { available: boolean; reason: string | null }; execute: { available: false; reason: 'OWNER_WALLET_IN_FLOFI_ONLY' } };
   availability: { supportedByCode: boolean; enabledByDeployment: boolean; enabledByPolicy: boolean; demonstratedEvidence: string; mockedHarness: boolean };
   exampleStrategy: Record<string, unknown> };
-export type CapabilityList = { object: 'list'; environment: Environment; data: Capability[]; ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY' };
+export type PublishedIntegration = {
+  projectId: string; slug: string; version: number; revision: string; manifestSha256: string;
+  name: string; kind: string; architecture: string; chainRef: string; deploymentRef?: string;
+  capabilities: ('network.read' | 'vault.read')[]; visibility: 'PUBLIC' | 'PRIVATE';
+};
+export type CapabilityList = { object: 'list'; environment: Environment; data: Capability[]; publishedIntegrations?: PublishedIntegration[];
+  ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY' };
 
 export type Strategy = { id: string; object: 'strategy'; environment: Environment; strategy: Record<string, unknown>; workflowHash: string; engineVersion: string;
   fundsClass: FundsClass; networkEnvironment: string; executionPlan: ExecutionPlan; validation: Validation; availability: Availability; summary: string;

@@ -31,6 +31,8 @@ const portuguese: Readonly<Record<string, string>> = {
   "AI Learning": "Aprendizagem da IA",
   "System Health": "Saúde do sistema",
   "Access & audit": "Acesso e auditoria",
+  "Studio certification": "Certificação do Studio",
+  "Review integration evidence and publications": "Revise evidências e publicações das integrações",
   "Support & Recovery": "Suporte e recuperação",
   "Skip to content": "Ir para o conteúdo",
   "FloFi Admin home": "Página inicial do Admin FloFi",

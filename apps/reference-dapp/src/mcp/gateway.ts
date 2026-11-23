@@ -228,7 +228,15 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the route passes `process.env`; a hosted deployment is always Mainnet-only).
   const scope = networkScope({ ...process.env, ...env });
   const automations = options.automations ?? deploymentAutomationReader(env, budget);
-  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, ...state ? { state } : {}, ...oauth ? { oauth } : {},
+  const publicStudioIntegrations = async () => {
+    if (!env.DATABASE_URL) return [];
+    const host = await mcpStateHost(env).catch(() => null);
+    if (!host || host.tenantId !== active.tenantId) return [];
+    const { listPublishedStudioIntegrations } = await import('../platform/studio-catalog.ts');
+    return listPublishedStudioIntegrations(host.db, host.tenantId);
+  };
+  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, publicStudioIntegrations,
+    ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;
       logger?.info('mcp.tool', { request_id: budget.requestId, principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }); } }),
   // `auto` answers with one JSON body: no tool emits a notification before its result.
