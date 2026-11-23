@@ -523,12 +523,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a bridge whose receiving wallet is not resolved (none known, several to choose from, or the
   // account's wallets still loading) is not simulated; the Canvas, the Simulate stage and the chat all say which wallet is missing and on which
   // network. The store refuses the same before any sign-in, and the server keeps its own refusal: this gate only adds, it relaxes nothing.
-  // A refresh of an existing run (after its approval) keeps the reviewed recipient on the server, so only a NEW simulation waits for it.
-  const universalRefreshes = simulationSource.kind === 'universal' && refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired)
-    && (universal.record?.attempts.length ?? 0) < 16;
+  // A refresh of an existing run (after its approval) keeps the reviewed recipient on the server, so only a NEW simulation waits for it. Read only
+  // when a destination issue exists (so the workflow holds its bridge): the check hashes the workflow, which an empty one (a reload) cannot be.
+  const universalRefreshes = () => {
+    try { return refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired) && (universal.record?.attempts.length ?? 0) < 16; }
+    catch { return false; }
+  };
   // Workflow review: an unavailable (or not yet answered) universal router is said first; the destination is asked only where it can be used.
   const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown
-    && !universalRefreshes && universal.destinationIssue && universal.details
+    && universal.destinationIssue && universal.details && !universalRefreshes()
     ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel,
       UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM') : null;
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
