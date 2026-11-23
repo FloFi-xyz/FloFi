@@ -21,7 +21,8 @@ import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { translate, useLocale } from '../i18n/locale';
-import { destinationIssueMessage } from '../domain/destination-wallet';
+import { destinationIssueMessage, DESTINATION_ISSUE, type DestinationSurface } from '../domain/destination-wallet';
+import { retryAccountWallets } from '../state/destination-wallets';
 
 import { WithdrawPanel } from './withdraw-panel';
 import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
@@ -530,11 +531,24 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     catch { return false; }
   };
   // Workflow review: an unavailable (or not yet answered) universal router is said first; the destination is asked only where it can be used.
-  const destinationIssueIn = (shown: 'EN' | 'PT'): string | null => simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown
+  // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: worded for the surface that shows it (the Editor has the Bridge card; /approve does not).
+  const destinationIssueIn = (shown: 'EN' | 'PT', on: DestinationSurface = surface === 'signing' ? 'approve' : 'editor'): string | null =>
+    simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown
     && universal.destinationIssue && universal.details && !universalRefreshes()
-    ? translate(shown, destinationIssueMessage(universal.destinationIssue), universal.details.destinationLabel,
+    ? translate(shown, destinationIssueMessage(universal.destinationIssue, on), universal.details.destinationLabel,
       UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM') : null;
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
+  // The account's wallets are still being read for this bridge's destination: the chat says so once and continues by itself when they are.
+  const destinationLoading = destinationBlocked && universal.destinationIssue === DESTINATION_ISSUE.LOADING && universal.details
+    ? { network: universal.details.destinationLabel, reason: destinationBlocked } : null;
+  // What the owner can do about it where no Bridge card is shown (/approve): connect a wallet of the destination ecosystem (it only reads its
+  // public address; nothing is signed) and, after a failed account read, read it again. Choosing or typing an address happens on the Canvas.
+  const destinationEcosystemLabel = universal.details ? UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const : null;
+  const destinationActions = destinationBlocked && destinationEcosystemLabel && (universal.destinationIssue === DESTINATION_ISSUE.REQUIRED
+    || universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE) ? {
+      connect: { label: destinationEcosystemLabel === 'Solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet',
+        run: async () => destinationEcosystemLabel === 'Solana' ? Boolean(await jupiter.connect('solana:mainnet')) : Boolean(await connectedWallet.connect()) },
+      retry: universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE ? retryAccountWallets : null } : null;
   const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);
@@ -904,6 +918,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
+      // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the destination's wallets are still being read (the chat waits and resumes by itself).
+      destinationLoading,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
       simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.'
@@ -973,7 +989,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>
     {flightNoticeView}
     <SigningSurface {...lifecycleState} controls={lifecycleControls} workflowName={workflowName} simulate={simulateAgain} simulationDisabled={simulationDisabled || !actionable}
-      simulationReason={simulationReason} destinationIssue={destinationBlocked}
+      simulationReason={simulationReason} destinationIssue={destinationBlocked} destinationLoading={Boolean(destinationLoading)} destinationActions={destinationActions}
       gated={approvalGate} walletIssue={walletIssue} networkAction={networkAction} walletRequestError={walletConnection.notice ? tr(...walletConnection.notice) : null} connectWallet={() => void walletConnection.connect()} approvalSlot={approvalSlot} onViewInFloFi={onViewInFloFi}
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;

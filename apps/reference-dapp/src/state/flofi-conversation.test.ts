@@ -1098,3 +1098,87 @@ describe('HOTFIX-P1 conversation identity and recovery', () => {
     expect(texts(chat).length).toBeGreaterThanOrEqual(shown);
   });
 });
+
+/**
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (P2): a bridge asked for in the chat while the account's wallets for its destination are still
+ * being read (Privy after a reload, a slow or retried account read). The chat says so ONCE, keeps no other question open, and continues by itself
+ * when the read settles — for the same workflow revision, wallet and network only. Its simulation may ask the wallet to sign in, so FloFi offers
+ * the Review instead of starting it; nothing is signed, approved or sent by the resume. MOCKED bridge and runtime.
+ */
+describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 chat resumes after the destination wallets are read', () => {
+  const LOADING = 'FloFi is still reading your wallets for Solana. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.';
+  const loading = { network: 'Solana', reason: LOADING };
+  /** The universal bridge as the shell describes it: its simulation may ask for a sign-in, and while the read runs Simulate waits for it. */
+  const waiting = () => { reviewedPatch = { manualSimulation: true, destinationLoading: loading }; lifecycle(reviewedPatch); bridge = { ...bridge, simulationBlocked: LOADING }; };
+  const settled = (blocked: string | null = null) => { reviewedPatch = { manualSimulation: true, destinationLoading: null }; lifecycle(reviewedPatch); bridge = { ...bridge, simulationBlocked: blocked }; };
+  const texts = (chat: FlofiConversation) => chat.messages.map(message => message.text);
+  async function asked() {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    waiting();
+    render().send('Review workflow'); await flush();
+    return render();
+  }
+  it('says it is identifying the wallets once, then offers the Review when they are read (no sign-in, no simulation, no repeat)', async () => {
+    let chat = await asked();
+    expect(last(chat).text).toBe('I’m identifying your wallets that can receive on Solana. I’ll continue as soon as they are read. Nothing was signed or sent.');
+    expect(texts(chat).filter(text => /can’t start the review/.test(text))).toEqual([]);
+    const before = chat.messages.length;
+    for (let i = 0; i < 3; i++) { waiting(); render(); await flush(); }
+    expect(render().messages).toHaveLength(before);
+    settled(); render(); await flush(); chat = render();
+    expect(last(chat).text).toBe('Your wallets are read and the receiving wallet on Solana is set. The review may ask your wallet to sign in to FloFi (no funds move), so it starts when you choose Review.');
+    expect(last(chat).options).toEqual(['Review workflow']);
+    expect(chat.messages).toHaveLength(before + 1);
+    for (let i = 0; i < 3; i++) { settled(); render(); await flush(); }
+    expect(render().messages).toHaveLength(before + 1);
+    expect(simulate).not.toHaveBeenCalled(); expect(controls.authorize).not.toHaveBeenCalled(); expect(controls.request).not.toHaveBeenCalled();
+    // The owner's own answer starts the review (its sign-in is then the owner's request).
+    render().send('Review workflow'); await flush();
+    expect(simulate).toHaveBeenCalledTimes(1);
+  });
+  it('a read that ends without a usable wallet says why once (no wait, no loop)', async () => {
+    await asked();
+    const missing = 'FloFi could not read your account’s wallets for Solana. Choose Try again on the Bridge card, or enter the destination’s public address. Nothing was signed or sent.';
+    settled(missing); render(); await flush();
+    const chat = render();
+    expect(last(chat).text).toBe(`I can’t start the review yet: ${missing}`);
+    expect(texts(chat).filter(text => text.startsWith('I can’t start the review yet')).length).toBe(1);
+    for (let i = 0; i < 3; i++) { render(); await flush(); }
+    expect(render().messages).toHaveLength(chat.messages.length);
+    expect(simulate).not.toHaveBeenCalled();
+  });
+  it('a resume never continues for another revision or wallet, nor after the owner said something else', async () => {
+    let chat = await asked();
+    const count = chat.messages.length;
+    // The workflow's revision changed while the wallets were read (an edit on the Canvas, no chat message): the old request does not resume.
+    editor = { ...editor, workflow: { ...editor.workflow, revision: editor.workflow.revision + 1 } }; store();
+    settled(); render(); await flush();
+    expect(render().messages).toHaveLength(count);
+    // A message from the owner replaces the waiting request too.
+    waiting(); render().send('Review workflow'); await flush();
+    await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    chat = render(); const afterEdit = chat.messages.length;
+    settled(); render(); await flush();
+    expect(render().messages).toHaveLength(afterEdit);
+    expect(texts(render()).some(text => /Your wallets are read/.test(text))).toBe(false);
+    // Another wallet: the resume of the first is dropped too.
+    waiting(); render().send('Review workflow'); await flush();
+    const asked2 = render().messages.length;
+    bridge = { ...bridge, wallet: { ...bridge.wallet, account: '0x2222222222222222222222222222222222222222' } };
+    settled(); bridge = { ...bridge, wallet: { ...bridge.wallet, account: '0x2222222222222222222222222222222222222222' } }; render(); await flush();
+    expect(texts(render()).slice(asked2).some(text => /Your wallets are read/.test(text))).toBe(false);
+    expect(simulate).not.toHaveBeenCalled();
+  });
+  it('in Portuguese, with the same single message and resume', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    waiting();
+    harness.unmount(); harness.slots = [];
+    const portuguese = () => harness.render(() => useFlofiConversation({ owner: { namespace: 'eip155', address: reviewOwner }, epoch: 0, bridge, direct, interfaceLanguage: 'PT' }));
+    portuguese().send('Revisar fluxo'); await flush();
+    expect(last(portuguese()).text).toBe('Estou identificando suas carteiras que podem receber em Solana. Continuo assim que forem lidas. Nada foi assinado ou enviado.');
+    settled(); portuguese(); await flush();
+    expect(last(portuguese()).text).toMatch(/^Suas carteiras foram lidas e a carteira que recebe em Solana está definida\./);
+    expect(last(portuguese()).options).toEqual(['Revisar fluxo']);
+    expect(simulate).not.toHaveBeenCalled();
+  });
+});

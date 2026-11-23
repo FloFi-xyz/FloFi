@@ -33,6 +33,10 @@ export type DestinationInventory = {
   /**
    * The account's wallets could not be read (a failed request, not "none"). The device's saved addresses are then offered to choose from, never
    * filled automatically ahead of wallets the account may hold (security review).
+   *
+   * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the same holds for the account tier itself (Privy's embedded wallets, which this browser lists
+   * without the server): one of them is offered to CHOOSE, never filled silently, because the account may hold another wallet of that ecosystem
+   * the failed read did not return. With no wallet known at all the answer is `UNAVAILABLE` ("could not check"), never `NONE` ("you have none").
    */
   readonly accountUnavailable?: boolean;
 };
@@ -40,6 +44,8 @@ export type DestinationResolution =
   | { readonly kind: 'RESOLVED'; readonly wallet: DestinationCandidate; readonly alternatives: readonly DestinationCandidate[] }
   | { readonly kind: 'CHOOSE'; readonly candidates: readonly DestinationCandidate[] }
   | { readonly kind: 'LOADING' }
+  /** The account's wallets could not be read and no other wallet of the ecosystem is known: unknown, not "none" (the owner may retry). */
+  | { readonly kind: 'UNAVAILABLE' }
   | { readonly kind: 'NONE' };
 
 const canonical = (ecosystem: DestinationEcosystem, address: string) => ecosystem === 'evm' ? address.toLowerCase() : address;
@@ -58,11 +64,11 @@ export function resolveDestinationWallet(ecosystem: DestinationEcosystem, invent
   for (const [index, tier] of [of(inventory.session), of(inventory.account), of(inventory.saved)].entries()) {
     // The session tier answers at once; the account tier (and the saved one below it) waits for the account's wallets to be read.
     if (index === 1 && inventory.loading) return { kind: 'LOADING' };
-    if (index === 2 && inventory.accountUnavailable && tier.length) return { kind: 'CHOOSE', candidates: all };
+    if (index >= 1 && inventory.accountUnavailable && tier.length) return { kind: 'CHOOSE', candidates: all };
     if (tier.length === 1) return { kind: 'RESOLVED', wallet: tier[0]!, alternatives: all.filter(wallet => wallet !== tier[0]) };
     if (tier.length > 1) return { kind: 'CHOOSE', candidates: all };
   }
-  return { kind: 'NONE' };
+  return inventory.accountUnavailable ? { kind: 'UNAVAILABLE' } : { kind: 'NONE' };
 }
 
 /**
@@ -76,8 +82,11 @@ export function resolveDestinationWallet(ecosystem: DestinationEcosystem, invent
  * - `RESOLVED`: across ecosystems, the owner's one wallet of the destination ecosystem at the first tier that has one (session, account, saved).
  * - `LOADING`: the account's wallets have not answered yet: unknown, never "missing".
  * - `CHOOSE`: several wallets at that tier: the owner chooses (never a silent pick).
+ * - `UNAVAILABLE`: the account's wallets could not be read (after FloFi's own retry) and no other wallet is known: the owner retries, connects
+ *   one or enters a public address — never told they have no wallet.
  * - `REQUIRED`: no wallet of the destination ecosystem is known: the owner connects one, chooses one or enters a public address.
- * Only `REQUIRED`, `CHOOSE` and `LOADING` block Simulate; the server keeps its own `UNIVERSAL_DESTINATION_WALLET_REQUIRED` refusal regardless.
+ * Only `REQUIRED`, `CHOOSE`, `UNAVAILABLE` and `LOADING` block Simulate; the server keeps its own `UNIVERSAL_DESTINATION_WALLET_REQUIRED` refusal
+ * regardless.
  */
 export type DestinationRequirement =
   | { readonly kind: 'OWNER' }
@@ -85,6 +94,7 @@ export type DestinationRequirement =
   | { readonly kind: 'RESOLVED'; readonly wallet: DestinationCandidate }
   | { readonly kind: 'LOADING' }
   | { readonly kind: 'CHOOSE'; readonly candidates: readonly DestinationCandidate[] }
+  | { readonly kind: 'UNAVAILABLE' }
   | { readonly kind: 'REQUIRED' };
 export function destinationRequirement(recipient: string, resolution: DestinationResolution): DestinationRequirement {
   if (recipient === 'CONNECTED_OWNER') return { kind: 'OWNER' };
@@ -92,22 +102,38 @@ export function destinationRequirement(recipient: string, resolution: Destinatio
   if (resolution.kind === 'RESOLVED') return { kind: 'RESOLVED', wallet: resolution.wallet };
   if (resolution.kind === 'CHOOSE') return { kind: 'CHOOSE', candidates: resolution.candidates };
   if (resolution.kind === 'LOADING') return { kind: 'LOADING' };
+  if (resolution.kind === 'UNAVAILABLE') return { kind: 'UNAVAILABLE' };
   return { kind: 'REQUIRED' };
 }
 /** The refusal a blocking requirement stands for (the server's own code for a missing wallet; two client-only codes for the other states). */
 export const DESTINATION_ISSUE = Object.freeze({ REQUIRED: 'UNIVERSAL_DESTINATION_WALLET_REQUIRED', CHOOSE: 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED',
-  LOADING: 'UNIVERSAL_DESTINATION_WALLETS_LOADING' } as const);
+  LOADING: 'UNIVERSAL_DESTINATION_WALLETS_LOADING', UNAVAILABLE: 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE' } as const);
 export type DestinationIssue = typeof DESTINATION_ISSUE[keyof typeof DESTINATION_ISSUE];
 export function destinationIssue(requirement: DestinationRequirement): DestinationIssue | null {
-  return requirement.kind === 'REQUIRED' || requirement.kind === 'CHOOSE' || requirement.kind === 'LOADING' ? DESTINATION_ISSUE[requirement.kind] : null;
+  return requirement.kind === 'REQUIRED' || requirement.kind === 'CHOOSE' || requirement.kind === 'LOADING' || requirement.kind === 'UNAVAILABLE'
+    ? DESTINATION_ISSUE[requirement.kind] : null;
 }
 /**
- * What the owner does about a blocking destination, naming the destination network (`{0}`) and the kind of wallet it needs (`{1}`: Solana / EVM). A catalog key: callers translate it with the
- * network name. Never "connect the wallet that will sign": the source wallet is not what is missing.
+ * Where a blocking destination is explained. `editor`: the Canvas and its chat, where the Bridge card (its Destination wallet field, Connect,
+ * Try again and the owner's wallets) is at hand. `approve`: the signing surface of a handed-off proposal (chat, MCP, Telegram), which has no
+ * Bridge card: it offers Connect and Try again itself, and sends a choice or a typed address to the Canvas.
  */
-export function destinationIssueMessage(issue: DestinationIssue): string {
+export type DestinationSurface = 'editor' | 'approve';
+/**
+ * What the owner does about a blocking destination, naming the destination network (`{0}`) and the kind of wallet it needs (`{1}`: Solana / EVM). A catalog key: callers translate it with the
+ * network name. Never "connect the wallet that will sign": the source wallet is not what is missing. One message per reason and surface
+ * (BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: never a component the surface does not have).
+ */
+export function destinationIssueMessage(issue: DestinationIssue, surface: DestinationSurface = 'editor'): string {
+  if (surface === 'approve') {
+    if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one {1} wallet that can receive on {0}. Open the Canvas to choose the one that receives the tokens, or to enter its public address. Nothing was signed or sent.';
+    if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is reading your wallets for {0}. This page continues by itself when they are read. Nothing was signed or sent.';
+    if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read your account’s wallets for {0}. Try again, connect a {1} wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.';
+    return 'To receive the tokens on {0}, connect a {1} wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.';
+  }
   if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.';
   if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.';
+  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read your account’s wallets for {0}. Choose Try again on the Bridge card, or enter the destination’s public address. Nothing was signed or sent.';
   return 'No {1} wallet can receive on {0} yet. Connect one on the Bridge card or enter its public address. Nothing was signed or sent.';
 }
 
