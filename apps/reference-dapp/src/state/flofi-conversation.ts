@@ -227,8 +227,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: `WALLETS` waits for the destination's wallets to be read, for exactly the workflow revision,
   // wallet and network it was asked about (`context`); any change, a new message or another conversation drops it.
   const resume = useRef<{ scope: number; language: ConversationLanguage; until: 'NETWORK' | 'EDIT' | 'READY' | 'WALLETS'; error: string | null;
-    context?: { readonly workflowId: string; readonly revision: number; readonly account: string | null; readonly chain: string | null; readonly network: string;
-      readonly waits: number } } | null>(null);
+    context?: { readonly workflowId: string; readonly revision: number; readonly account: string | null; readonly chain: string | null; readonly network: string } } | null>(null);
   const handover = useRef<{ scope: number; language: ConversationLanguage; from: number; waiting: boolean } | null>(null);
   /**
    * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the last Review the chat presented (to name what a fresh quote changed) and an open re-quote — after the
@@ -472,7 +471,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       return [c.inProgress(where || translate(language, 'Execution in progress'), next), canCheck ? { options: [c.checkStatus] } : {}];
     });
   }
-  function startReview(scope: number, language: ConversationLanguage, fresh = false, announced = false, resumed = 0, resumedFor = '') {
+  /**
+   * `auto`: FloFi continues this review by itself (a resume after a network switch, an edit, a runtime's answer or the destination's wallets
+   * being read; `network` for the last). Such a review never starts a simulation that may ask the wallet to sign in: it is offered instead.
+   */
+  function startReview(scope: number, language: ConversationLanguage, fresh = false, announced = false, auto: { readonly network?: string } | null = null) {
     const view = latest.current.bridge;
     setQuestion(null); resume.current = null;
     if (!actionable(view.workflow)) { say(scope, language, (_, c) => c.emptyWorkflow); return; }
@@ -528,13 +531,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // (a run, or a step-by-step workflow between its steps) is described with its status and next action, never refused as a Review.
       if (workflowExecuting(view)) { reportProgress(scope, language, action); return; }
       // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: only the destination's wallets are missing because they are still being read: said once,
-      // and the review continues by itself when they are (a second wait after a resume is silent and bounded).
+      // and the review continues by itself when they are (never armed again from that same resume).
       const loading = view.destinationLoading;
-      // After three waits the owner is told why (the blocked reason below), never left without an answer.
-      if (loading && view.simulationBlocked === loading.reason && resumed < 3) {
+      if (loading && view.simulationBlocked === loading.reason && auto?.network === undefined) {
         resume.current = { scope, language, until: 'WALLETS', error: null, context: { workflowId: view.workflow.workflowId, revision: view.workflow.revision,
-          account: view.wallet.account ?? null, chain: view.wallet.chain ?? null, network: loading.network, waits: resumed + 1 } };
-        if (!resumed) say(scope, language, (_, c) => c.identifyingWallets(loading.network));
+          account: view.wallet.account ?? null, chain: view.wallet.chain ?? null, network: loading.network } };
+        say(scope, language, (_, c) => c.identifyingWallets(loading.network));
         return;
       }
       // Each piece in the message's own language: the blocked reason is a catalog key, never an English sentence inside Portuguese copy.
@@ -543,10 +545,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       say(scope, language, (language, c) => [c.reviewBlocked(reason(language)), connect ? { options: [translate(language, 'Connect wallet')] } : {}]);
       return;
     }
-    // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (wallet-execution review): a review FloFi resumes by itself never starts a simulation that may
-    // ask the wallet to sign in (also between the steps of a step-by-step workflow): it offers the Review, which the owner starts.
-    if (resumed > 0 && view.manualSimulation) {
-      say(scope, language, (_, c) => [c.walletsReadyReview(resumedFor), { options: [c.review] }]);
+    // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (wallet-execution, chat and workflow reviews): a review FloFi continues by itself — after the
+    // destination's wallets are read, a network switch, an applied edit or a runtime's answer, also between the steps of a step-by-step workflow —
+    // never starts a simulation that may ask the wallet to sign in (FIX-07): it offers the Review, which the owner starts.
+    if (auto && view.manualSimulation) {
+      const network = auto.network;
+      say(scope, language, (_, c) => [network !== undefined ? c.walletsReadyReview(network) : c.resumeReadyReview, { options: [c.review] }]);
       return;
     }
     const next = { scope, key: view.authorization.key, sawBusy: false, settled: false, language, continuation };
@@ -961,29 +965,27 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (!bridge.wallet.account) return;
       const network = bridge.walletNetwork ?? '';
       say(waiting.scope, waiting.language, (_, c) => c.switched(network));
-      startReview(waiting.scope, waiting.language);
+      startReview(waiting.scope, waiting.language, false, false, {});
       return;
     }
     if (waiting.until === 'WALLETS') {
       if (bridge.destinationLoading) return;
       resume.current = null;
       const context = waiting.context!, view = latest.current.bridge;
-      // A resume is for what was asked: another workflow revision, wallet or network (or nothing to review any more) drops it silently.
-      if (view.workflow.workflowId !== context.workflowId || view.workflow.revision !== context.revision || (view.wallet.account ?? null) !== context.account
-        || (view.wallet.chain ?? null) !== context.chain) return;
-      const action = projectCanvasAction(view.controls.current, view.controls);
-      // Never a wallet request by itself: a simulation that may ask the wallet to sign in is offered, and starts on the owner's Review — also
-      // between the steps of a step-by-step workflow (wallet-execution review). `startReview` refuses to simulate for a resume too.
-      if (view.manualSimulation && !view.simulationBlocked && action.kind === 'simulate' && !action.disabled && !view.source.state.busy) {
-        say(waiting.scope, waiting.language, (_, c) => [c.walletsReadyReview(context.network), { options: [c.review] }]);
+      // A resume is for what was asked: another workflow revision, another wallet or another network drops it, and says so once (the chat promised
+      // to continue). A wallet or network that only became known meanwhile (restored after a reload) is the same request.
+      const changed = (was: string | null, now: string | null | undefined) => was !== null && (now ?? null) !== was;
+      if (view.workflow.workflowId !== context.workflowId || view.workflow.revision !== context.revision || changed(context.account, view.wallet.account)
+        || changed(context.chain, view.wallet.chain)) {
+        say(waiting.scope, waiting.language, (_, c) => [c.walletsResumeDropped, { options: [c.review] }]);
         return;
       }
-      startReview(waiting.scope, waiting.language, false, false, context.waits, context.network);
+      startReview(waiting.scope, waiting.language, false, false, { network: context.network });
       return;
     }
     if (waiting.until === 'READY' ? bridge.runtimeChecking : bridge.pendingEdits?.length) return;
     resume.current = null;
-    startReview(waiting.scope, waiting.language);
+    startReview(waiting.scope, waiting.language, false, false, {});
   });
 
   // ── Messages ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

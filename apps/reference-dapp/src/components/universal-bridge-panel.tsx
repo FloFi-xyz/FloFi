@@ -173,12 +173,13 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
       (entry.ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index);
   const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null, destinationMessageId = useId();
   const destinationMessage = destinationCheck && !destinationCheck.ok ? tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)
-    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
+    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' && !destinationResolution.unconfirmed ? tr('Choose which of your {1} wallets receives on {0}, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
     : !input.recipient && cross && destinationResolution.kind === 'NONE' ? tr('Required: a wallet that can receive on {0} ({1} address). Connect one or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
-    : !input.recipient && cross && destinationResolution.kind === 'UNAVAILABLE' ? tr('FloFi could not read your account’s wallets for {0}. Try again, connect one, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name)
+    : !input.recipient && cross && (destinationResolution.kind === 'UNAVAILABLE' || destinationResolution.kind === 'CHOOSE' && destinationResolution.unconfirmed)
+      ? tr('FloFi could not read which {1} wallets your account has for {0}. Try again, connect one, or enter its public address.', UNIVERSAL_NETWORKS[input.destination].name, destinationEcosystem === 'solana' ? 'Solana' : 'EVM')
     : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? tr('Checking your wallets for {0}…', UNIVERSAL_NETWORKS[input.destination].name) : null;
   // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: after FloFi's own retry failed, the owner may read the account's wallets again (or type the address).
-  const destinationRetry = !input.recipient && cross && destinations.inventory.accountUnavailable;
+  const destinationRetry = !input.recipient && cross && destinations.inventory.accountUnavailable && destinationResolution.kind !== 'RESOLVED';
   // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the same field states as the Canvas card (amber: missing or a choice; red: invalid; loading).
   const destinationState = destinationCheck && !destinationCheck.ok ? 'error' : !input.recipient && cross && (destinationResolution.kind === 'CHOOSE' || destinationResolution.kind === 'NONE'
     || destinationResolution.kind === 'UNAVAILABLE') ? 'attention'

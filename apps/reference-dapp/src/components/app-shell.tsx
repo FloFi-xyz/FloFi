@@ -21,7 +21,7 @@ import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { translate, useLocale } from '../i18n/locale';
-import { destinationHoldsPreparation, destinationIssueMessage, DESTINATION_ISSUE, type DestinationSurface } from '../domain/destination-wallet';
+import { destinationHoldsPreparation, destinationIssueMessage, DESTINATION_ISSUE, destinationWalletPhrase, type DestinationSurface } from '../domain/destination-wallet';
 import { retryAccountWallets } from '../state/destination-wallets';
 
 import { WithdrawPanel } from './withdraw-panel';
@@ -532,11 +532,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   };
   // Workflow review: an unavailable (or not yet answered) universal router is said first; the destination is asked only where it can be used.
   // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: worded for the surface that shows it (the Editor has the Bridge card; /approve does not).
-  const destinationIssueIn = (shown: 'EN' | 'PT', on: DestinationSurface = surface === 'signing' ? 'approve' : 'editor'): string | null =>
-    simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown
-    && universal.destinationIssue && universal.details && !universalRefreshes()
-    ? translate(shown, destinationIssueMessage(universal.destinationIssue, on), universal.details.destinationLabel,
-      UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM') : null;
+  // The embedded MCP approval (no "Open Canvas") never points at a Canvas it does not have.
+  const destinationSurface: DestinationSurface = surface !== 'signing' ? 'editor' : onViewInFloFi ? 'approve' : 'approve-embedded';
+  const destinationIssueIn = (shown: 'EN' | 'PT', on: DestinationSurface = destinationSurface): string | null => {
+    if (!(simulationSource.kind === 'universal' && universal.available && universal.availabilityKnown && universal.destinationIssue && universal.details
+      && !universalRefreshes())) return null;
+    const ecosystem = UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const;
+    return translate(shown, destinationIssueMessage(universal.destinationIssue, on), universal.details.destinationLabel, ecosystem,
+      translate(shown, destinationWalletPhrase(ecosystem)));
+  };
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
   // The account's wallets are still being read for this bridge's destination: the chat says so once and continues by itself when they are.
   const destinationLoading = destinationBlocked && universal.destinationIssue === DESTINATION_ISSUE.LOADING && universal.details
@@ -544,11 +548,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // What the owner can do about it where no Bridge card is shown (/approve): connect a wallet of the destination ecosystem (it only reads its
   // public address; nothing is signed) and, after a failed account read, read it again. Choosing or typing an address happens on the Canvas.
   const destinationEcosystemLabel = universal.details ? UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const : null;
-  const destinationActions = destinationBlocked && destinationEcosystemLabel && (universal.destinationIssue === DESTINATION_ISSUE.REQUIRED
-    || universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE) ? {
+  // A wallet connected here is the first one FloFi uses (session tier), so Connect also settles a choice between several wallets.
+  const destinationActions = destinationBlocked && destinationEcosystemLabel && universal.destinationIssue !== DESTINATION_ISSUE.LOADING ? {
       connect: { label: destinationEcosystemLabel === 'Solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet',
         run: async () => destinationEcosystemLabel === 'Solana' ? Boolean(await jupiter.connect('solana:mainnet')) : Boolean(await connectedWallet.connect()) },
-      retry: universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE ? retryAccountWallets : null } : null;
+      retry: universal.destinationIssue === DESTINATION_ISSUE.UNAVAILABLE ? retryAccountWallets : null, canvas: destinationSurface === 'approve' } : null;
   const simulationDisabled = Boolean(destinationBlocked) || authoringIncomplete || approvalGate || testNetworkWorkflow || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);
@@ -740,8 +744,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // here is not prepared by itself once it resolves (a connected wallet, Try again, a recovered read): its simulation may ask the source wallet
   // to sign in, so the owner chooses Simulate. A proposal that arrived with its destination already resolved is prepared as before.
   const destinationHeld = useRef<string | null>(null);
-  const destinationHold = destinationHoldsPreparation({ kind: simulationSource.kind, blocked: Boolean(destinationBlocked), held: destinationHeld.current,
-    key: `${state.workflow.workflowId}:${state.workflow.revision}` });
+  const destinationHold = destinationHoldsPreparation({ kind: simulationSource.kind, held: destinationHeld.current, key: state.workflow.workflowId,
+    blocked: Boolean(destinationBlocked) && Boolean(approvalWallet) && !approvalGate && universal.destinationIssue !== DESTINATION_ISSUE.LOADING });
   destinationHeld.current = destinationHold.held;
   const preparedAfterDestination = destinationHold.holds;
   const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)

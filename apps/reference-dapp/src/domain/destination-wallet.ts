@@ -42,7 +42,11 @@ export type DestinationInventory = {
 };
 export type DestinationResolution =
   | { readonly kind: 'RESOLVED'; readonly wallet: DestinationCandidate; readonly alternatives: readonly DestinationCandidate[] }
-  | { readonly kind: 'CHOOSE'; readonly candidates: readonly DestinationCandidate[] }
+  /**
+   * `unconfirmed`: offered only because the account's wallets could not be read (it may be one wallet): FloFi asks the owner to choose or retry,
+   * and says it could not read the account — never "you have more than one wallet".
+   */
+  | { readonly kind: 'CHOOSE'; readonly candidates: readonly DestinationCandidate[]; readonly unconfirmed?: true }
   | { readonly kind: 'LOADING' }
   /** The account's wallets could not be read and no other wallet of the ecosystem is known: unknown, not "none" (the owner may retry). */
   | { readonly kind: 'UNAVAILABLE' }
@@ -64,7 +68,7 @@ export function resolveDestinationWallet(ecosystem: DestinationEcosystem, invent
   for (const [index, tier] of [of(inventory.session), of(inventory.account), of(inventory.saved)].entries()) {
     // The session tier answers at once; the account tier (and the saved one below it) waits for the account's wallets to be read.
     if (index === 1 && inventory.loading) return { kind: 'LOADING' };
-    if (index >= 1 && inventory.accountUnavailable && tier.length) return { kind: 'CHOOSE', candidates: all };
+    if (index >= 1 && inventory.accountUnavailable && tier.length) return { kind: 'CHOOSE', candidates: all, unconfirmed: true };
     if (tier.length === 1) return { kind: 'RESOLVED', wallet: tier[0]!, alternatives: all.filter(wallet => wallet !== tier[0]) };
     if (tier.length > 1) return { kind: 'CHOOSE', candidates: all };
   }
@@ -100,7 +104,8 @@ export function destinationRequirement(recipient: string, resolution: Destinatio
   if (recipient === 'CONNECTED_OWNER') return { kind: 'OWNER' };
   if (recipient !== 'CONNECTED_DESTINATION_WALLET') return { kind: 'EXPLICIT', address: recipient };
   if (resolution.kind === 'RESOLVED') return { kind: 'RESOLVED', wallet: resolution.wallet };
-  if (resolution.kind === 'CHOOSE') return { kind: 'CHOOSE', candidates: resolution.candidates };
+  // A choice offered only because the account could not be read is that failure (with the owner's known wallets to choose from).
+  if (resolution.kind === 'CHOOSE') return resolution.unconfirmed ? { kind: 'UNAVAILABLE' } : { kind: 'CHOOSE', candidates: resolution.candidates };
   if (resolution.kind === 'LOADING') return { kind: 'LOADING' };
   if (resolution.kind === 'UNAVAILABLE') return { kind: 'UNAVAILABLE' };
   return { kind: 'REQUIRED' };
@@ -116,32 +121,44 @@ export function destinationIssue(requirement: DestinationRequirement): Destinati
 /**
  * Where a blocking destination is explained. `editor`: the Canvas and its chat, where the Bridge card (its Destination wallet field, Connect,
  * Try again and the owner's wallets) is at hand. `approve`: the signing surface of a handed-off proposal (chat, MCP, Telegram), which has no
- * Bridge card: it offers Connect and Try again itself, and sends a choice or a typed address to the Canvas.
+ * Bridge card: it offers Connect and Try again itself (a wallet connected here is the first one FloFi uses), and sends a choice or a typed
+ * address to the Canvas. `approve-embedded`: the same surface embedded for an MCP client, which has no Canvas to open either.
  */
-export type DestinationSurface = 'editor' | 'approve';
+export type DestinationSurface = 'editor' | 'approve' | 'approve-embedded';
 /**
- * What the owner does about a blocking destination, naming the destination network (`{0}`) and the kind of wallet it needs (`{1}`: Solana / EVM). A catalog key: callers translate it with the
- * network name. Never "connect the wallet that will sign": the source wallet is not what is missing. One message per reason and surface
+ * What the owner does about a blocking destination, naming the destination network (`{0}`), the kind of wallet it needs (`{1}`: Solana / EVM)
+ * and, on /approve, the wallet to connect with its article (`{2}`: `destinationWalletPhrase`, translated). A catalog key: callers translate it.
+ * Never "connect the wallet that will sign": the source wallet is not what is missing. One message per reason and surface
  * (BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: never a component the surface does not have).
  */
 export function destinationIssueMessage(issue: DestinationIssue, surface: DestinationSurface = 'editor'): string {
   if (surface === 'approve') {
-    if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one {1} wallet that can receive on {0}. Open the Canvas to choose the one that receives the tokens, or to enter its public address. Nothing was signed or sent.';
+    if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one {1} wallet that can receive on {0}. Connect the one that receives the tokens here, or open the Canvas to choose it or to enter its public address. Nothing was signed or sent.';
     if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is reading your wallets for {0}. This page continues by itself when they are read. Nothing was signed or sent.';
-    if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read your account’s wallets for {0}. Try again, connect a {1} wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.';
-    return 'To receive the tokens on {0}, connect a {1} wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.';
+    if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read which {1} wallets your account has for {0}. Try again, connect {2} here, or open the Canvas to choose one or to enter its public address. Nothing was signed or sent.';
+    return 'To receive the tokens on {0}, connect {2} here, or open the Canvas to enter its public address. Nothing was signed or sent.';
+  }
+  if (surface === 'approve-embedded') {
+    if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one {1} wallet that can receive on {0}. Connect the one that receives the tokens here. Nothing was signed or sent.';
+    if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is reading your wallets for {0}. This page continues by itself when they are read. Nothing was signed or sent.';
+    if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read which {1} wallets your account has for {0}. Try again, or connect the one that receives the tokens here. Nothing was signed or sent.';
+    return 'To receive the tokens on {0}, connect {2} here. Nothing was signed or sent.';
   }
   if (issue === 'UNIVERSAL_DESTINATION_WALLET_CHOICE_REQUIRED') return 'You have more than one wallet on {0}. Choose the one that receives the funds, or enter its public address. Nothing was signed or sent.';
   if (issue === 'UNIVERSAL_DESTINATION_WALLETS_LOADING') return 'FloFi is still reading your wallets for {0}. Try again in a moment, or enter the destination\'s public address. Nothing was signed or sent.';
-  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read your account’s wallets for {0}. Choose Try again on the Bridge card, or enter the destination’s public address. Nothing was signed or sent.';
+  if (issue === 'UNIVERSAL_DESTINATION_WALLETS_UNAVAILABLE') return 'FloFi could not read which {1} wallets your account has for {0}. Choose one of your wallets or Try again on the Bridge card, or enter the destination’s public address. Nothing was signed or sent.';
   return 'No {1} wallet can receive on {0} yet. Connect one on the Bridge card or enter its public address. Nothing was signed or sent.';
 }
+/** `{2}` of the /approve messages: the wallet to connect, with its article (a catalog key; PT "uma carteira Solana"). */
+export const destinationWalletPhrase = (ecosystem: 'Solana' | 'EVM'): string => ecosystem === 'Solana' ? 'a Solana wallet' : 'an EVM wallet';
 
 /**
- * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security and wallet-execution reviews): /approve prepares a handed-off proposal's simulation by
- * itself — except a universal bridge whose receiving wallet was missing for this workflow revision (`held`, the revision key it was missing
- * for). Once that wallet resolves (a connected wallet, Try again, a recovered read) its simulation may ask the source wallet to sign in, so the
- * owner chooses Simulate. Returns the revision key to remember and whether automatic preparation is held.
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security, wallet-execution, workflow and bridge reviews): /approve prepares a handed-off
+ * proposal's simulation by itself — except a universal bridge whose receiving wallet was missing for this proposal (`held`, the workflow it was
+ * missing for: a choice or typed address on the Canvas is a new revision of the same proposal). Once that wallet resolves (a connected wallet,
+ * Try again, a recovered read, a choice) its simulation may ask the source wallet to sign in, so the owner chooses Simulate. `blocked` is set by
+ * the caller only for a proposal loaded for its proven wallet and a destination that is actually missing (not one still being read: that one
+ * resolves by itself, as on arrival). Returns the key to remember and whether automatic preparation is held.
  */
 export function destinationHoldsPreparation(input: { readonly kind: string; readonly blocked: boolean; readonly held: string | null; readonly key: string }):
   { readonly held: string | null; readonly holds: boolean } {

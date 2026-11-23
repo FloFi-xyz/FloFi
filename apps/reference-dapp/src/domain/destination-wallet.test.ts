@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { readUniversalBridgeNode } from '@defi-workflow-engine/workflow-contracts';
 import { actionReviewValue, canvasAmountCommand, canvasAmountMessage, keptBridgeRecipient } from './canvas-action-setup';
+import { destinationWalletMessage } from './simulation-presentation';
+import { translate } from '../i18n/translate';
 import { boundRecipientOwned, checkDestinationAddress, DESTINATION_ISSUE, destinationHoldsPreparation, destinationIssue, destinationIssueMessage, destinationLabel, destinationRequirement, resolveDestinationWallet,
   type DestinationCandidate } from './destination-wallet';
 import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
@@ -183,8 +185,21 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve does not prepa
     const missing = destinationHoldsPreparation({ kind: 'universal', blocked: true, held: null, key: 'wf:3' });
     expect(missing).toEqual({ held: 'wf:3', holds: true });
     expect(destinationHoldsPreparation({ kind: 'universal', blocked: false, held: missing.held, key: 'wf:3' })).toEqual({ held: 'wf:3', holds: true });
-    // Another revision or proposal starts afresh; other runtimes are never held.
+    // The key is the proposal (workflow id): a choice or typed address on the Canvas (a new revision) stays held; another proposal starts afresh;
+    // other runtimes are never held. The caller never passes `blocked` for a destination still being read (it resolves by itself, as on arrival).
     expect(destinationHoldsPreparation({ kind: 'universal', blocked: false, held: 'wf:3', key: 'wf:4' })).toMatchObject({ holds: false });
     expect(destinationHoldsPreparation({ kind: 'public', blocked: true, held: null, key: 'wf:3' })).toEqual({ held: null, holds: false });
+  });
+});
+
+describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (bridge review): every destination message has its Portuguese', () => {
+  it('each issue on each surface, each destination refusal code, and the wallet phrases', () => {
+    for (const issue of Object.values(DESTINATION_ISSUE)) for (const surface of ['editor', 'approve', 'approve-embedded'] as const)
+      expect(translate('PT', destinationIssueMessage(issue, surface)), `${issue}/${surface}`).not.toBe(destinationIssueMessage(issue, surface));
+    for (const code of [...Object.values(DESTINATION_ISSUE), 'UNIVERSAL_DESTINATION_WALLET_INVALID']) {
+      const english = destinationWalletMessage(code)!;
+      expect(english, code).toBeTruthy(); expect(translate('PT', english), code).not.toBe(english);
+    }
+    expect(translate('PT', 'a Solana wallet')).toBe('uma carteira Solana'); expect(translate('PT', 'an EVM wallet')).toBe('uma carteira EVM');
   });
 });

@@ -38,7 +38,8 @@ export type SigningSurfaceProps = ExecutionControlsState & {
    */
   destinationIssue?: string | null;
   destinationLoading?: boolean;
-  destinationActions?: { readonly connect: { readonly label: string; run(): Promise<boolean> } | null; readonly retry: (() => void) | null } | null;
+  destinationActions?: { readonly connect: { readonly label: string; run(): Promise<boolean> } | null; readonly retry: (() => void) | null;
+    /** Whether this page offers "Open Canvas" (the embedded MCP approval does not). */ readonly canvas?: boolean } | null;
   /** The proposal is not loaded for the proven wallet yet: no simulation or authorization is offered. */
   gated: boolean;
   /** Why authorization cannot proceed with the connected wallet (e.g. it is not the wallet that loaded the proposal). */
@@ -81,7 +82,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
   else status = { label: c.view.canExecute || review.canApprove ? 'Ready to authorize' : c.view.label, message: c.view.canExecute || review.canApprove
     ? 'Check the details, then authorize. Your wallet shows the exact transaction for your confirmation.' : c.view.message, tone: c.view.canExecute || review.canApprove ? 'ready' : 'blocked' };
   const final = isFinalExecutionResult(live);
-  const destinationShown = !props.gated && !live && !props.walletIssue && !authorization.key && Boolean(props.destinationIssue);
+  // Workflow review: also next to an expired Review whose "Simulate again" is what the destination blocks (its reason is then shown under it).
+  const destinationShown = !props.gated && !live && !props.walletIssue && Boolean(props.destinationIssue);
   return <main id="workspace" className="main signing-surface" tabIndex={-1} aria-label={tr('Authorize with your wallet')}>
     <div className="signing-column">
       {props.approvalSlot && <div className="signing-proposal" ref={props.approvalSlot}/>}
@@ -156,6 +158,6 @@ function DestinationActions({ actions }: { actions: NonNullable<SigningSurfacePr
       void connect.run().then(ok => setFailed(!ok), () => setFailed(true)).finally(() => setBusy(false));
     }}>{tr(connect.label)}</button>}
     {actions.retry && <button type="button" className="secondary" onClick={actions.retry}>{tr('Try again')}</button>}
-    {failed && <p className="muted" role="status">{tr('No wallet was connected. You can still open the Canvas to enter its public address.')}</p>}
+    {failed && <p className="muted" role="status">{tr(actions.canvas === false ? 'No wallet was connected.' : 'No wallet was connected. You can still open the Canvas to enter its public address.')}</p>}
   </div>;
 }

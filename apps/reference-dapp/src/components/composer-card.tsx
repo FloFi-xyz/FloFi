@@ -183,7 +183,9 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
       : tr('Choose one of your wallets or enter an address.')
     : destination.status === 'required' ? ecosystem ? tr('Required: a wallet that can receive on {0} ({1} address). Connect one or enter its public address.', destination.network, ecosystem)
       : tr('Enter the destination address on {0}.', destination.network)
-    : destination.status === 'unavailable' ? tr('FloFi could not read your account’s wallets for {0}. Try again, connect one, or enter its public address.', destination.network)
+    : destination.status === 'unavailable' ? destination.candidates.length
+      ? tr('FloFi could not read which {1} wallets your account has for {0}. Choose one of your wallets, try again, or enter its public address.', destination.network, ecosystem ?? '')
+      : tr('FloFi could not read which {1} wallets your account has for {0}. Try again, connect one, or enter its public address.', destination.network, ecosystem ?? '')
     : destination.status === 'loading' ? tr('Checking your wallets for {0}…', destination.network) : null;
   const automatic = !message && !destination.value && destination.auto ? destination.auto : null;
   const applying = pending && Boolean(onCommit);
@@ -206,7 +208,7 @@ export function DestinationField({ destination, onCommit, onLeave, onCancel, pen
         : automatic ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', automatic)}</span> : null}
       {connectFailed && (destination.status === 'required' || destination.status === 'unavailable') && <span className="composer-destination-note">{tr('No wallet was connected. You can enter its public address instead.')}</span>}
     </span>
-    {destination.status === 'choose' && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
+    {(destination.status === 'choose' || destination.status === 'unavailable') && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
       {destination.candidates.map(candidate => <button key={candidate.address} type="button" className="composer-destination-choice" title={candidate.address}
         onClick={() => { destination.onChange(candidate.address); field.current?.focus(); }}>{candidate.label}</button>)}</div>}
     {(destination.status === 'required' || destination.status === 'unavailable') && destination.onConnect && <button type="button" className="composer-destination-choice composer-destination-connect"

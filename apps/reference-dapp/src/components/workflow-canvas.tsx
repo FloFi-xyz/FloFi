@@ -760,8 +760,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       // BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: the same states the shared gate blocks Simulate on (`destinationRequirement`): EVM → EVM
       // keeps the signing wallet (no warning); across ecosystems a wallet still being read is `loading`, never "missing".
       const status: CardDestination['status'] = check ? check.ok ? 'valid' : check.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'wrong-ecosystem' : 'invalid'
-        : !cross || resolution.kind === 'RESOLVED' ? 'valid' : resolution.kind === 'CHOOSE' ? 'choose' : resolution.kind === 'LOADING' ? 'loading'
-        : resolution.kind === 'UNAVAILABLE' ? 'unavailable' : 'required';
+        : !cross || resolution.kind === 'RESOLVED' ? 'valid' : resolution.kind === 'CHOOSE' ? resolution.unconfirmed ? 'unavailable' : 'choose'
+        : resolution.kind === 'LOADING' ? 'loading' : resolution.kind === 'UNAVAILABLE' ? 'unavailable' : 'required';
       return { network, value, auto: auto ? destinationLabel(destinationKey, localizedProvider(auto, tr)) : null, autoAddress: auto?.address ?? null, candidates, status,
         placeholder: ecosystem === 'solana' ? 'Solana address' : 'Address (0x…)', changed: typed !== undefined, onChange: (next: string) => editCanvasRecipient?.(id, next),
         ecosystem: ecosystem === 'solana' ? 'Solana' : 'EVM',
@@ -771,7 +771,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onConnect: ecosystem === 'solana' ? solanaWallets ? async () => { if (!await solanaWallets.connect('solana:mainnet')) throw new Error('SOLANA_WALLET_NOT_CONNECTED'); } : undefined
           : async () => { if (!await wallet.connect()) throw new Error('EVM_WALLET_NOT_CONNECTED'); },
         // The account's wallets could not be read (after FloFi's own retry): the owner may ask again, and may still type the address.
-        ...destinations.inventory.accountUnavailable && cross && !check ? { onRetry: retryAccountWallets } : {} };
+        ...status === 'unavailable' ? { onRetry: retryAccountWallets } : {} };
     };
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.
     const recipientField = (id: string, network: string | undefined, canonical: string | null): CardRecipient | undefined => {

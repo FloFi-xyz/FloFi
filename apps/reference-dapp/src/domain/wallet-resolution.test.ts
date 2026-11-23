@@ -117,7 +117,9 @@ describe('BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001 wallet matrix × every di
         expect(destinationIssue(requirement)).toBeNull();
         continue;
       }
-      const expectedIssue = { RESOLVED: null, CHOOSE: DESTINATION_ISSUE.CHOOSE, LOADING: DESTINATION_ISSUE.LOADING, NONE: DESTINATION_ISSUE.REQUIRED }[scenario.expected];
+      // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: a choice offered only because the account read failed is that failure (UNAVAILABLE).
+      const expectedIssue = resolution.kind === 'CHOOSE' && resolution.unconfirmed ? DESTINATION_ISSUE.UNAVAILABLE
+        : { RESOLVED: null, CHOOSE: DESTINATION_ISSUE.CHOOSE, LOADING: DESTINATION_ISSUE.LOADING, NONE: DESTINATION_ISSUE.REQUIRED }[scenario.expected];
       expect(destinationIssue(requirement)).toBe(expectedIssue);
       // An explicit recipient is the owner's own choice: it is never replaced by a resolved wallet, and never blocked here (the server checks it).
       const explicit = destinationRequirement(eco === 'evm' ? EVM_B : SOL_B, resolution);

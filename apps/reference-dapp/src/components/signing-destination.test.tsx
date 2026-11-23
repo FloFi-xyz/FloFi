@@ -14,7 +14,7 @@ import { useExecutionControls, type ExecutionControlsState } from '../state/exec
 import { reviewFixture, reviewNow } from '../test-utils/review-fixture';
 import { LocaleProvider, type Language } from '../i18n/locale';
 import { translate } from '../i18n/translate';
-import { DESTINATION_ISSUE, destinationIssueMessage, type DestinationIssue } from '../domain/destination-wallet';
+import { DESTINATION_ISSUE, destinationIssueMessage, destinationWalletPhrase, type DestinationIssue, type DestinationSurface } from '../domain/destination-wallet';
 
 type Destination = Pick<SigningSurfaceProps, 'destinationIssue' | 'destinationLoading' | 'destinationActions' | 'simulationReason'>;
 function View({ data, destination }: { data: ExecutionControlsState; destination: Destination }) {
@@ -27,7 +27,8 @@ const unsimulated = (): ExecutionControlsState => {
   return { ...fixture, authorization: { ...fixture.authorization, key: null, manifest: null, policy: null },
     execution: { ready: false, started: false, start: null, prompt: null, expiresAt: null } };
 };
-const message = (issue: DestinationIssue, language: Language) => translate(language, destinationIssueMessage(issue, 'approve'), 'Solana', 'Solana');
+const message = (issue: DestinationIssue, language: Language, surface: DestinationSurface = 'approve', ecosystem: 'Solana' | 'EVM' = 'Solana') =>
+  translate(language, destinationIssueMessage(issue, surface), ecosystem === 'Solana' ? 'Solana' : 'Base', ecosystem, translate(language, destinationWalletPhrase(ecosystem)));
 const escaped = (text: string) => renderToStaticMarkup(<>{text}</>);
 /** Where the text is SHOWN (a text node), as opposed to the disabled Simulate button's own description of why it is disabled. */
 const occurrences = (html: string, text: string) => html.split(`>${escaped(text)}<`).length - 1;
@@ -51,7 +52,7 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve destination me
       expect(html).not.toContain(`title="${escaped(shown)}"`);
       expect(shown).toContain('Solana');
       expect(html).not.toMatch(/Bridge card|card de Bridge/);
-      expect(shown).toMatch(language === 'PT' ? /Nada foi assinado ou enviado\.$/ : /Nothing was signed or sent\.$/);
+      expect(shown).toMatch(language === 'PT' ? /Nada foi assinado nem enviado\.$/ : /Nothing was signed or sent\.$/);
     }
   });
   it('says what is missing and the next action: Connect here, Try again after a failed read, the Canvas for a choice or a typed address', () => {
@@ -60,15 +61,27 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: /approve destination me
     expect(required.shown).toBe('To receive the tokens on Solana, connect a Solana wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.');
     expect(required.html).toContain('>Connect a Solana wallet</button>'); expect(required.html).not.toContain('>Try again</button>');
     const unavailable = render(DESTINATION_ISSUE.UNAVAILABLE, 'EN', actions(true));
-    expect(unavailable.shown).toMatch(/^FloFi could not read your account’s wallets for Solana\. Try again, connect a Solana wallet here/);
+    expect(unavailable.shown).toMatch(/^FloFi could not read which Solana wallets your account has for Solana\. Try again, connect a Solana wallet here/);
     expect(unavailable.html).toContain('>Try again</button>'); expect(unavailable.html).toContain('>Connect a Solana wallet</button>');
-    expect(render(DESTINATION_ISSUE.CHOOSE).shown).toMatch(/Open the Canvas to choose the one that receives the tokens/);
+    expect(render(DESTINATION_ISSUE.CHOOSE).shown).toMatch(/Connect the one that receives the tokens here, or open the Canvas to choose it/);
     const loading = render(DESTINATION_ISSUE.LOADING);
     expect(loading.html).toContain('Checking your wallets'); expect(loading.html).not.toContain('Destination wallet needed');
     expect(loading.shown).toMatch(/continues by itself/);
     const pt = render(DESTINATION_ISSUE.UNAVAILABLE, 'PT', actions(true));
     expect(pt.html).toContain('>Tentar novamente</button>'); expect(pt.html).toContain('>Conectar uma carteira Solana</button>');
-    expect(pt.shown).toBe('A FloFi não conseguiu ler as carteiras da sua conta para Solana. Tente novamente, conecte uma carteira Solana aqui ou abra o Canvas para informar o endereço público dela. Nada foi assinado ou enviado.');
+    expect(pt.shown).toBe('A FloFi não conseguiu ler quais carteiras Solana a sua conta tem para Solana. Tente novamente, conecte uma carteira Solana aqui ou abra o Canvas para escolher uma ou informar o endereço público dela. Nada foi assinado nem enviado.');
+  });
+  it('bridge review: an EVM destination reads "an EVM wallet" (PT "uma carteira EVM")', () => {
+    expect(message(DESTINATION_ISSUE.REQUIRED, 'EN', 'approve', 'EVM')).toBe('To receive the tokens on Base, connect an EVM wallet here, or open the Canvas to enter its public address. Nothing was signed or sent.');
+    expect(message(DESTINATION_ISSUE.REQUIRED, 'PT', 'approve', 'EVM')).toBe('Para receber os tokens em Base, conecte uma carteira EVM aqui ou abra o Canvas para informar o endereço público dela. Nada foi assinado nem enviado.');
+  });
+  it('workflow review: the embedded MCP approval (no Canvas) never points at the Canvas; its Connect failure note does not either', () => {
+    for (const issue of Object.values(DESTINATION_ISSUE)) for (const language of ['EN', 'PT'] as const) {
+      const shown = message(issue, language, 'approve-embedded');
+      expect(shown).not.toMatch(/Canvas|Bridge card|card de Bridge/);
+      expect(shown).toContain('Solana');
+    }
+    expect(message(DESTINATION_ISSUE.CHOOSE, 'EN', 'approve-embedded')).toMatch(/Connect the one that receives the tokens here\./);
   });
   it('a different reason under Simulate (not the status) is still shown: only the same message is not repeated', () => {
     const shown = message(DESTINATION_ISSUE.REQUIRED, 'EN'), other = 'Simulation is not available for this workflow.';
