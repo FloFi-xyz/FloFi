@@ -29,9 +29,12 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
     id ? host.store.activity(id, new Date()) : [],
   ]) : [[], null, []] as const;
   const studio = selected && host.status === 'signed-in'
-    ? await (async () => await studioInstalled(host.db)
-      ? createStudioStore(host.db, host.tenantId, host.session.accountId).list(selected.id)
-      : null)().catch(() => null)
+    ? await (async () => {
+      if (!await studioInstalled(host.db)) return null;
+      const store = createStudioStore(host.db, host.tenantId, host.session.accountId);
+      const [versions, events] = await Promise.all([store.list(selected.id), store.activity(selected.id)]);
+      return { versions, events };
+    })().catch(() => null)
     : null;
   const locale = language === 'PT' ? 'pt-BR' : 'en';
   return <SiteShell language={language} page="developers" skipTo="developer-console">
@@ -104,7 +107,9 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
               </li>)}</ul>
             </>}
           </details>
-          <DeveloperStudio language={language} projectId={selected.id} active={selected.status === 'ACTIVE'} versions={studio} now={new Date().toISOString()}/>
+          <DeveloperStudio language={language} projectId={selected.id} active={selected.status === 'ACTIVE'}
+            versions={studio?.versions ?? null} activity={studio?.events ?? []}
+            now={new Date().toISOString()}/>
           {selected.status === 'ACTIVE' && <DeveloperPlayground language={language} projectId={selected.id}/>}
         </section>}
       </>}
