@@ -21,7 +21,7 @@ import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { translate, useLocale } from '../i18n/locale';
-import { destinationIssueMessage, DESTINATION_ISSUE, type DestinationSurface } from '../domain/destination-wallet';
+import { destinationHoldsPreparation, destinationIssueMessage, DESTINATION_ISSUE, type DestinationSurface } from '../domain/destination-wallet';
 import { retryAccountWallets } from '../state/destination-wallets';
 
 import { WithdrawPanel } from './withdraw-panel';
@@ -736,7 +736,16 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         : (canvasAction.kind === 'approve' || canvasAction.kind === 'execute') && !canvasAction.disabled ? 'READY' : 'SIMULATE',
       reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null) ?? destinationBlocked
         ?? (simulationSource.state.error ? simulationError(simulationSource.state.error, simulationSource.kind) : null) } : null;
+  // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security and wallet-execution reviews): a universal bridge whose receiving wallet was missing
+  // here is not prepared by itself once it resolves (a connected wallet, Try again, a recovered read): its simulation may ask the source wallet
+  // to sign in, so the owner chooses Simulate. A proposal that arrived with its destination already resolved is prepared as before.
+  const destinationHeld = useRef<string | null>(null);
+  const destinationHold = destinationHoldsPreparation({ kind: simulationSource.kind, blocked: Boolean(destinationBlocked), held: destinationHeld.current,
+    key: `${state.workflow.workflowId}:${state.workflow.revision}` });
+  destinationHeld.current = destinationHold.held;
+  const preparedAfterDestination = destinationHold.holds;
   const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)
+    && !preparedAfterDestination
     ? `${state.workflow.workflowId}:${state.workflow.revision}:${restorationEpoch}:${signer}:${reviewBinding.wallet.chain}:${connectedWallet.revision}:${jupiter.revision}` : null;
   const preparedFor = useRef<string | null>(null);
   useEffect(() => {

@@ -20,15 +20,17 @@
 --   * PUBLIC holds nothing on either table (0016's own `REVOKE ALL ... FROM PUBLIC`, asserted again);
 --   * the runtime role keeps EXECUTE on `purge_unstarted_execution(text,text,text)` (granted again, idempotently: History's legitimate Delete),
 --     and PUBLIC still cannot execute it.
--- No row is read for a decision, inserted, updated or deleted; no other table, function, role, membership or default privilege changes; the 0033
--- objects (`workflow_run_purge_*`) are not touched.
+-- No row is inserted, updated or deleted (the only row read is 0016's own ledger entry); no other table, function, role, membership or default
+-- privilege changes; the 0033 objects (`workflow_run_purge_*`) are not touched.
 --
 -- Run it with the MIGRATION connection (the role that owns 0016's objects), naming the runtime role:
---   psql "$DATABASE_MIGRATION_URL" -v ON_ERROR_STOP=1 -v runtime_role=<runtime role> -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql
+--   psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role=<runtime role> -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql
 -- One transaction. It takes the migration runner's advisory lock, bounds every lock wait (5 s) and the whole statement time (60 s), refuses unless
 -- 0016 is applied with its exact certified identity (OWNER_HISTORY_PURGE_0016_NOT_CERTIFIED), refuses an unknown, superuser or owning runtime role
 -- and a connection that cannot change the owner's grants, and verifies the result before COMMIT
--- (OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN). Any refusal, error, lock timeout or lost connection rolls everything back: nothing changes.
+-- (OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN): no write left to the runtime role directly, through PUBLIC, through any role it belongs to
+-- (inherited OR only reachable by SET ROLE) or a predefined role, and no CREATE in schema public (where an object could shadow a pg_catalog
+-- function the SECURITY DEFINER procedure calls). Any refusal, error, lock timeout or lost connection rolls everything back: nothing changes.
 -- Idempotent: a rerun changes nothing. Read-only pre/post verification: docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql. Runbook:
 -- docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.md. Proven on disposable PostgreSQL by
 -- packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts, which runs this exact file.
@@ -43,7 +45,7 @@ DECLARE
   v_runtime oid;
   v_owner oid;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 16 AND name = 'owner_history_purge'
+  IF NOT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = 16 AND name = 'owner_history_purge'
       AND sha256 = 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f')
     OR to_regclass('public.execution_purge_permits') IS NULL OR to_regclass('public.execution_purge_audit') IS NULL
     OR to_regprocedure('public.purge_unstarted_execution(text,text,text)') IS NULL THEN
@@ -62,19 +64,22 @@ BEGIN
     END IF;
   END LOOP;
 END $guard$;
-REVOKE ALL ON TABLE execution_purge_permits FROM PUBLIC;
-REVOKE ALL ON TABLE execution_purge_audit FROM PUBLIC;
-REVOKE ALL ON TABLE execution_purge_permits FROM :"runtime_role";
-REVOKE ALL ON TABLE execution_purge_audit FROM :"runtime_role";
-GRANT SELECT ON TABLE execution_purge_audit TO :"runtime_role";
-GRANT EXECUTE ON FUNCTION purge_unstarted_execution(text, text, text) TO :"runtime_role";
+REVOKE ALL ON TABLE public.execution_purge_permits FROM PUBLIC;
+REVOKE ALL ON TABLE public.execution_purge_audit FROM PUBLIC;
+REVOKE ALL ON TABLE public.execution_purge_permits FROM :"runtime_role";
+REVOKE ALL ON TABLE public.execution_purge_audit FROM :"runtime_role";
+GRANT SELECT ON TABLE public.execution_purge_audit TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.purge_unstarted_execution(text, text, text) TO :"runtime_role";
 DO $verify$
 DECLARE
   v_role text := current_setting('flofi.runtime_role');
   v_privileges text[] := ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
     || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ARRAY['MAINTAIN'] ELSE ARRAY[]::text[] END;
+  v_writes text := 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+    || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ', MAINTAIN' ELSE '' END;
   v_table text;
   v_privilege text;
+  v_member record;
   v_open text[] := ARRAY[]::text[];
 BEGIN
   -- has_*_privilege counts direct grants, PUBLIC, inherited memberships and predefined roles such as pg_write_all_data.
@@ -87,6 +92,16 @@ BEGIN
     IF has_any_column_privilege(v_role, 'public.' || v_table, CASE WHEN v_table = 'execution_purge_audit' THEN 'INSERT, UPDATE, REFERENCES'
         ELSE 'SELECT, INSERT, UPDATE, REFERENCES' END) THEN v_open := v_open || (v_table || ':COLUMN'); END IF;
   END LOOP;
+  -- Security review: a role the runtime role belongs to without inheriting it (NOINHERIT, or a membership it can only SET ROLE to) still
+  -- lets it write after SET ROLE: every role it is a member of, predefined ones included, must hold no write on either table.
+  FOR v_member IN SELECT r.oid, r.rolname FROM pg_roles r WHERE r.rolname <> v_role AND pg_has_role(v_role, r.oid, 'MEMBER') LOOP
+    FOREACH v_table IN ARRAY ARRAY['execution_purge_permits', 'execution_purge_audit'] LOOP
+      IF has_table_privilege(v_member.oid, 'public.' || v_table, v_writes) THEN v_open := v_open || ('MEMBER:' || v_member.rolname || ':' || v_table); END IF;
+    END LOOP;
+  END LOOP;
+  -- An object the runtime role could create in `public` could shadow a pg_catalog function the SECURITY DEFINER procedure calls
+  -- (`SET search_path = pg_catalog,public,pg_temp` resolves an exact-signature public function first).
+  IF has_schema_privilege(v_role, 'public', 'CREATE') THEN v_open := v_open || 'SCHEMA_PUBLIC:CREATE'::text; END IF;
   IF NOT has_table_privilege(v_role, 'public.execution_purge_audit', 'SELECT') THEN v_open := v_open || 'execution_purge_audit:SELECT_MISSING'::text; END IF;
   IF NOT has_function_privilege(v_role, 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') THEN
     v_open := v_open || 'purge_unstarted_execution:EXECUTE_MISSING'::text;

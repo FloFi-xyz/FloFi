@@ -2,14 +2,20 @@
 -- BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (P0): READ-ONLY verification of 0016's runtime-role privileges, before and after
 -- docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql. Every statement is a SELECT inside a READ ONLY transaction: it changes nothing, writes no row,
 -- takes no lock beyond ordinary reads and prints no secret (role names, ACLs and counts only; no run, owner, address or byte).
---   psql "$DATABASE_MIGRATION_URL" -v ON_ERROR_STOP=1 -v runtime_role=<runtime role> -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql
+--   psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role=<runtime role> -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql
 -- Expected after the remediation: `runtime_reads_tombstones = t`, `runtime_writes_tombstones = f`, `runtime_touches_permits = f`,
--- `runtime_execute = t`, `public_execute = f`, `public_touches_tables = f`, and every row of the effective-privilege table false except
--- execution_purge_audit/SELECT. Before it, on FloFi production, `runtime_writes_tombstones` and `runtime_touches_permits` are `t` (the exposure).
--- The integrity section must read 0 in every column except `tombstones` (legitimate owner deletions): a permit that outlived its transaction, a
--- tombstone without the owner's History event, or an execution log / journal with a missing row is not produced by the checked procedure and is
--- investigated before anything else. These are heuristics, not proof: a careful forger could also have written the History event.
+-- `runtime_column_writes = f`, `runtime_member_writes = f`, `runtime_creates_in_public = f`, `runtime_execute = t`, `public_execute = f`,
+-- `public_touches_tables = f`, and every row of the effective-privilege table false except execution_purge_audit/SELECT (MAINTAIN rows are empty
+-- on PostgreSQL 16, which has no such privilege). Before it, where the runtime role holds the owner's default table privileges,
+-- `runtime_writes_tombstones` and `runtime_touches_permits` are `t` (the exposure).
+-- The integrity section reads 0 in every column except `tombstones` (legitimate owner deletions) on a database where only the checked procedure
+-- ever deleted execution history: a permit that outlived its transaction, a tombstone without the owner's History event, a tombstone whose run,
+-- log or journal still exists, or an execution log / journal with a missing row is not produced by the procedure and is investigated first.
+-- These are heuristics, not proof. Two forgeries leave none of these traces: deleting a whole log no run references (an INTENT log) under a
+-- permit that names an existing tombstone, and a forged tombstone written together with a forged History event whose run and journal were
+-- then deleted completely. Only the database's own history (point-in-time restore, logs) can rule those out.
 BEGIN TRANSACTION READ ONLY;
+SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '120s';
 -- 1. Identity: 0016 exactly as certified, and the ledger head.
 SELECT version, name, sha256, sha256 = 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' AS certified,
@@ -40,19 +46,28 @@ SELECT has_table_privilege(:'runtime_role', 'public.execution_purge_audit', 'SEL
   has_table_privilege(:'runtime_role', 'public.execution_purge_permits', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS runtime_touches_permits,
   has_any_column_privilege(:'runtime_role', 'public.execution_purge_permits', 'SELECT,INSERT,UPDATE,REFERENCES')
     OR has_any_column_privilege(:'runtime_role', 'public.execution_purge_audit', 'INSERT,UPDATE,REFERENCES') AS runtime_column_writes,
+  EXISTS (SELECT 1 FROM pg_roles r, (VALUES ('public.execution_purge_permits'), ('public.execution_purge_audit')) t(object)
+    WHERE r.rolname <> :'runtime_role' AND pg_has_role(:'runtime_role', r.oid, 'MEMBER')
+      AND has_table_privilege(r.oid, t.object, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')) AS runtime_member_writes,
+  has_schema_privilege(:'runtime_role', 'public', 'CREATE') AS runtime_creates_in_public,
   has_function_privilege(:'runtime_role', 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') AS runtime_execute,
   has_function_privilege('public', 'public.purge_unstarted_execution(text,text,text)', 'EXECUTE') AS public_execute,
   has_table_privilege('public', 'public.execution_purge_permits', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
     OR has_table_privilege('public', 'public.execution_purge_audit', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS public_touches_tables;
 -- 6. Default privileges (they are why tables created later reach the runtime role; this remediation does not change them).
-SELECT pg_get_userbyid(d.defaclrole) AS grantor, coalesce(d.defaclnamespace::regnamespace::text, '(all schemas)') AS schema, d.defaclobjtype::text AS type,
+SELECT pg_get_userbyid(d.defaclrole) AS grantor, CASE WHEN d.defaclnamespace = 0 THEN '(all schemas)' ELSE d.defaclnamespace::regnamespace::text END AS schema,
+  d.defaclobjtype::text AS type,
   d.defaclacl::text AS acl
 FROM pg_default_acl d ORDER BY 1, 2, 3;
--- 7. Integrity at rest (counts only). Every column but `tombstones` is 0 where only the checked procedure ever deleted execution history.
+-- 7. Integrity at rest (counts only). Every column but `tombstones` is 0 where only the checked procedure ever deleted execution history (see
+--    the header for the two forgeries no count can see).
 SELECT (SELECT count(*) FROM execution_purge_permits) AS open_permits,
   (SELECT count(*) FROM execution_purge_audit) AS tombstones,
   (SELECT count(*) FROM execution_purge_audit a WHERE NOT EXISTS (SELECT 1 FROM owner_history_events e WHERE e.tenant_id = a.tenant_id
     AND e.owner_account = a.owner_account AND e.kind = 'EXECUTION_RUN' AND e.record_id = a.run_id AND e.action = 'DELETED')) AS tombstones_without_history_event,
+  (SELECT count(*) FROM execution_purge_audit a WHERE EXISTS (SELECT 1 FROM execution_runs r WHERE r.tenant_id = a.tenant_id AND r.run_id = a.run_id)
+    OR EXISTS (SELECT 1 FROM journal_entries j WHERE j.tenant_id = a.tenant_id AND j.run_id = a.run_id)
+    OR EXISTS (SELECT 1 FROM execution_logs l WHERE l.tenant_id = a.tenant_id AND l.namespace = a.namespace AND l.name = a.log_name)) AS tombstones_with_live_records,
   (SELECT count(*) FROM execution_logs l WHERE (SELECT count(*) FROM execution_log_segments s WHERE s.tenant_id = l.tenant_id AND s.namespace = l.namespace
     AND s.name = l.name) <> l.segment_count) AS logs_missing_segments,
   (SELECT count(*) FROM execution_runs r WHERE NOT EXISTS (SELECT 1 FROM execution_logs l WHERE l.tenant_id = r.tenant_id AND l.namespace = r.namespace

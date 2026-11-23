@@ -143,7 +143,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
 /**
  * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: what /approve itself offers for a missing receiving wallet. Connect reads a wallet's public
  * address (the source wallet still signs; nothing is signed here); a connection that did not happen says so. Try again reads the account's
- * wallets once more. Neither starts a simulation: the owner still chooses Simulate.
+ * wallets once more. Neither starts a simulation, and the page does not prepare one by itself once the destination resolves (app-shell
+ * `preparedAfterDestination`): the owner chooses Simulate, whose source sign-in is then the owner's own request.
  */
 function DestinationActions({ actions }: { actions: NonNullable<SigningSurfaceProps['destinationActions']> }) {
   const { t: tr } = useLocale();

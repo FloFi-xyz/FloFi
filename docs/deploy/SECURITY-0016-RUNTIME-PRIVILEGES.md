@@ -1,150 +1,250 @@
 # FloFi: 0016 runtime-role privilege remediation (BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001, P0)
 
-Status: **prepared and certified in this build; NOT applied to production.** Applying it is a separate owner action that needs its own explicit
-approval (who, when, where), recorded with the evidence below. Merging or deploying this build changes no database privilege: Vercel and
-Railway deployments run no part of it.
+**Status: prepared and certified in this build. Not applied to production.**
+
+- Applying it is a separate owner action. It needs its own explicit approval (who, when, where), recorded with the evidence below.
+- Merging or deploying this build changes no database privilege: no Vercel or Railway deployment runs any part of it.
 
 ## The exposure
 
-Migration 0016 (`owner_history_purge`, SHA-256 `a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f`, immutable and unchanged) lets the
-owner delete, from History, an execution run that provably never reached execution, through the checked procedure
-`purge_unstarted_execution(text,text,text)` (SECURITY DEFINER). The procedure inserts an immutable tombstone (`execution_purge_audit`) and a
-transaction-scoped permit (`execution_purge_permits`); `protect_execution_history()` lets a DELETE of `journal_entries`, `execution_log_segments`,
-`execution_runs` or `execution_logs` through only while a permit of the same transaction names that run or log.
+Migration 0016 (`owner_history_purge`) lets the owner delete, from History, an execution run that provably never reached execution. Its
+SHA-256 is `a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f`, and the migration is immutable and unchanged.
 
-0016 names no role and revokes both tables from PUBLIC only. In FloFi production the objects belong to the migration role and the runtime role
-receives table rights through `ALTER DEFAULT PRIVILEGES ... GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES`, so the runtime role also holds INSERT,
-UPDATE and DELETE on both private tables. With them, the runtime role (any code or credential that connects as it) can, without the procedure:
+How the deletion works:
 
-- **forge a whole deletion**: insert a tombstone and a permit for any run, a completed one included, then delete its journal, log bytes, run and
-  log in the same transaction;
-- **delete another run's log bytes with no new tombstone**: insert a permit that names an existing legitimate tombstone but another run's log (the
-  trigger matches logs by namespace and name), then delete that log's segments;
-- **block an identity forever**: insert a tombstone for a run that does not exist yet (`EXECUTION_DELETED` on creation).
+- The owner's request goes through the checked procedure `purge_unstarted_execution(text,text,text)` (SECURITY DEFINER).
+- The procedure inserts an immutable tombstone (`execution_purge_audit`) and a transaction-scoped permit (`execution_purge_permits`).
+- `protect_execution_history()` lets a DELETE of `journal_entries`, `execution_log_segments`, `execution_runs` or `execution_logs` through only
+  while a permit of the same transaction names that run or log.
 
-The application never writes either table directly (only the procedure and the trigger function, both owned by the migration role, do).
-Owner History and privacy reports READ the tombstone. All three shapes are reproduced, and then refused, by
-`packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts` on a disposable PostgreSQL that reproduces production's model.
+0016 names no role and revokes both tables from PUBLIC only. Where the objects belong to a migration role and the services connect as a separate
+runtime role whose table rights come from `ALTER DEFAULT PRIVILEGES ... GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES`, that runtime role
+also holds INSERT, UPDATE and DELETE on both private tables. This is FloFi production's model; the 0033 release document records it.
 
-## Production state (read-only catalog inspection, 2026-11-23, Neon project `Flofi`, branch `production`, PostgreSQL 18.6)
+With those rights, the runtime role (any code or credential that connects as it) can do the following without the procedure:
 
-No privilege, row or setting was changed; only catalog and count queries ran, as the database owner.
+- **Forge a whole deletion.** Insert a tombstone and a permit for any run, a completed one included, then delete its journal, log bytes, run
+  and log in the same transaction.
+- **Delete another log's bytes with no new tombstone.** Insert a permit that names an existing legitimate tombstone but another log (the
+  trigger matches logs by namespace and name), then delete that log's segments, or the whole log.
+- **Block an identity forever.** Insert a tombstone for a run that does not exist yet, so its creation answers `EXECUTION_DELETED`.
 
-| Fact | Value |
-| --- | --- |
-| Ledger | head 36; version 16 = `owner_history_purge` with the certified SHA-256 |
-| Login roles | `flofi_owner` (owns every object, member of `neon_superuser`) and `flofi_runtime` (not superuser, `INHERIT`, member of no role) |
-| `execution_purge_permits` ACL | `flofi_owner=arwdDxtm`, **`flofi_runtime=arwd`** |
-| `execution_purge_audit` ACL | `flofi_owner=arwdDxtm`, **`flofi_runtime=arwd`** |
-| `purge_unstarted_execution` | owner `flofi_owner`, SECURITY DEFINER, EXECUTE `flofi_owner`, `flofi_runtime`; PUBLIC none |
-| Default privileges | `flofi_owner` in `public`: tables `flofi_runtime=arwd`, sequences `flofi_runtime=rwU` (plus Neon's own `cloud_admin` → `neon_superuser`) |
-| PUBLIC on the two tables | none |
-| 0033's `workflow_run_purge_*` | already closed (runtime: SELECT on the tombstone only, nothing on permits) |
-| Connections observed | `flofi_runtime` as `flofi-worker`; no consumer seen as `flofi_owner` (the one owner session was this inspection) |
-| Exposure | **active**: `runtime_writes_tombstones = t`, `runtime_touches_permits = t` |
-| Integrity at rest | `open_permits 0`, `tombstones 9`, `tombstones_without_history_event 0`, `logs_missing_segments 0`, `runs_without_log 0`, `journals_with_gaps 0` (167 runs, 283 logs, 207 journal entries) |
+The application never writes either table directly: only the procedure and the trigger function, both owned by the migration role, do. Owner
+History and privacy reports READ the tombstone. All three shapes are reproduced, and then refused, by
+`packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts`. That test runs on a disposable PostgreSQL that reproduces the
+production model.
 
-No sign of exploitation was found, which is not proof: a careful forger could also have written the History event. The API and the web tier
-were not connected at the instant of inspection. Production has exactly two login roles, and the 0033 activation records that the API, worker and
-web tier connect as the runtime role. Before applying, confirm the role in each consumer's `DATABASE_URL` without printing the URL (for example
-the user part only). A consumer connecting as `flofi_owner` would keep every right by ownership; no REVOKE can constrain the owner, and that
-would be a separate finding.
+**Production state.** The owner's production database was inspected read-only on 2026-11-23: catalog and count queries only, nothing changed.
+The exposure is active there. The integrity counts below showed no trace of a forgery. That is not proof: see the blind spots under
+step 1. The exact facts (roles, ACLs, counts) belong in the owner's approval record, not in this repository.
 
 ## What the remediation changes
 
-[SECURITY-0016-RUNTIME-PRIVILEGES.sql](./SECURITY-0016-RUNTIME-PRIVILEGES.sql), one transaction:
+[SECURITY-0016-RUNTIME-PRIVILEGES.sql](./SECURITY-0016-RUNTIME-PRIVILEGES.sql) runs as one transaction and makes these changes:
 
-- `REVOKE ALL ON execution_purge_permits FROM <runtime role>` (and from PUBLIC, as 0016 already declares);
-- `REVOKE ALL ON execution_purge_audit FROM <runtime role>` then `GRANT SELECT` back: INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and,
-  on PostgreSQL 17+, MAINTAIN are gone, column-level grants included; SELECT stays for History and privacy;
-- `GRANT EXECUTE ON FUNCTION purge_unstarted_execution(text,text,text) TO <runtime role>`: already held in production, granted again so the
-  legitimate Delete is guaranteed after the change.
+- `REVOKE ALL ON execution_purge_permits FROM <runtime role>`, and from PUBLIC, as 0016 already declares.
+- `REVOKE ALL ON execution_purge_audit FROM <runtime role>`, then `GRANT SELECT` back:
+  - removed: INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and, on PostgreSQL 17+, MAINTAIN;
+  - column-level grants are removed too;
+  - SELECT stays, for History and privacy.
+- `GRANT EXECUTE ON FUNCTION purge_unstarted_execution(text,text,text) TO <runtime role>`. Production already grants it; granting it again
+  guarantees the legitimate Delete after the change.
 
-Nothing else: no row, no other table, function, trigger, role, membership or default privilege; 0016's bytes and ledger row are untouched; 0033's
-objects are not named. Safeguards: the migration runner's advisory lock (`7340032001`), `lock_timeout 5s` (also for the advisory lock),
-`statement_timeout 60s`, and refusals before any change:
+Nothing else changes:
 
-- `OWNER_HISTORY_PURGE_0016_NOT_CERTIFIED`: 0016 is missing or not this exact identity;
-- `RUNTIME_ROLE_NOT_FOUND`;
-- `RUNTIME_ROLE_IS_SUPERUSER`;
-- `RUNTIME_ROLE_IS_OWNER`: the role is the owner or a member of it, so no REVOKE could bind it;
+- no row is inserted, updated or deleted; the only row read is 0016's ledger entry;
+- no other table, function, trigger, role, membership or default privilege changes;
+- 0016's bytes and ledger row are untouched;
+- 0033's objects are not named.
+
+**Safeguards:**
+
+- the migration runner's advisory lock (`7340032001`);
+- `lock_timeout 5s`, which also covers the advisory lock;
+- `statement_timeout 60s`.
+
+**Refusals before any change:**
+
+- `OWNER_HISTORY_PURGE_0016_NOT_CERTIFIED`: 0016 is missing or is not this exact identity.
+- `RUNTIME_ROLE_NOT_FOUND`.
+- `RUNTIME_ROLE_IS_SUPERUSER`.
+- `RUNTIME_ROLE_IS_OWNER`: the role is the owner or a member of it, so no REVOKE could bind it.
 - `MIGRATION_ROLE_REQUIRED`: the connection cannot change the owner's grants.
 
-Before COMMIT it checks the effective result: direct grants, PUBLIC, inherited memberships and predefined roles such as `pg_write_all_data`. On
-any residual privilege it refuses with `OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: <what>` and rolls the REVOKEs back. Any error, timeout or
-lost connection rolls everything back. A rerun changes nothing.
+**Effective-privilege check before COMMIT.** It refuses with `OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: <what>` and rolls the REVOKEs back
+if any of these can still write either table:
 
-Default privileges are deliberately unchanged: every table the migration role creates later still reaches the runtime role with `arwd`. A future
-private table must revoke the runtime role in its own provisioning step, as 0033's did and this file does for 0016.
+- direct grants;
+- PUBLIC;
+- any role the runtime role belongs to, whether inherited or reachable only by `SET ROLE`, including predefined roles such as
+  `pg_write_all_data`.
+
+It also refuses (`SCHEMA_PUBLIC:CREATE`) if the runtime role can CREATE in schema `public`. An exact-signature function there would take
+precedence over a `pg_catalog` function that the SECURITY DEFINER procedure calls. PostgreSQL 15+ denies it by default.
+
+Any error, timeout or lost connection rolls everything back. A rerun changes nothing.
+
+**Default privileges are deliberately unchanged.** Every table the migration role creates later still reaches the runtime role with
+INSERT/UPDATE/DELETE. So:
+
+- run this file again on any new environment with a separate runtime role once it is at schema 16 or above (a new project, a rebuild, a
+  preview with its own role);
+- run it again after any `GRANT … ON ALL TABLES IN SCHEMA public TO <runtime role>`;
+- a future private table must revoke the runtime role in its own provisioning step, as 0033's did.
 
 ## Procedure (owner-approved intervention only)
 
-From a reviewed checkout of `main` that contains this build, with the direct (unpooled) production `DATABASE_MIGRATION_URL` set in the operator
-shell only (never committed, pasted into chat, or written to logs), and `RUNTIME_ROLE=flofi_runtime` after confirming the consumers' role:
+Preparation:
 
-1. **Pre-check (read-only):**
+- Use a reviewed checkout of `main` that contains this build.
+- Set the direct (unpooled) production `DATABASE_MIGRATION_URL` in the operator shell only. Never commit it, paste it into chat or write it to
+  logs.
+- Set `RUNTIME_ROLE` to the role the API, worker and web tier connect as. Confirm it from each consumer's `DATABASE_URL` user name, without
+  printing the URL.
+- **Stop** if any consumer connects as the owner of the objects. No REVOKE can constrain the owner; that is a separate finding.
+- Keep the evidence files outside the checkout, for example under `$HOME`.
 
-   ```sh
-   psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql > 0016-before.txt
-   ```
+### 1. Pre-check (read-only)
 
-   Expected now: section 1 certified `t`; section 5 `runtime_writes_tombstones t`, `runtime_touches_permits t`, `runtime_execute t`,
-   `public_execute f`; section 7 as in the table above. **Stop** on any other identity, or if section 7 shows anything but legitimate tombstones,
-   and investigate first.
-2. **Apply:**
+```sh
+psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.verify.sql > "$HOME/0016-before.txt"
+```
 
-   ```sh
-   psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql
-   ```
+Expected:
 
-   Expected: `REVOKE ×4`, `GRANT ×2`, `DO`, one row `t | f | f | t | f`, `COMMIT`. On `canceling statement due to lock timeout` (a migration or
-   long transaction holds the lock) nothing changed: retry later. Any other refusal changed nothing; record it and stop.
-3. **Post-check (read-only):** the same command as step 1, writing `0016-after.txt`. Expected:
-   - section 5: `t | f | f | f | t | f | f`;
-   - section 4: every `runtime` value `f` except `execution_purge_audit / SELECT`, and every `public` value `f` (MAINTAIN is empty on PostgreSQL
-     16 and `f` on 18);
-   - section 3: `execution_purge_audit` shows `flofi_runtime=r/flofi_owner`, and `execution_purge_permits` no `flofi_runtime`;
-   - section 7 unchanged.
-4. **Functional check:** History lists runs and shows deleted ones as deleted. A Delete of an eligible simulated run answers `DELETED`, and one
-   of a submitted run answers `RUN_DELETE_REFUSED`; use the owner's own runs, and only if the owner wants one deleted. Over the following hour,
-   API, worker and Vercel logs show no `permission denied for table execution_purge_*`.
-5. **Evidence to keep with the approval reference:** both verification outputs (they hold role names, ACLs and counts only), the apply output,
-   time and operator. Never the connection URL.
+- Section 1: certified `t`.
+- Section 5:
+  - `runtime_writes_tombstones t` and `runtime_touches_permits t` (the exposure);
+  - `runtime_member_writes f`;
+  - `runtime_creates_in_public f`;
+  - `runtime_execute t`;
+  - `public_execute f`.
+- Section 7: every count 0 except `tombstones`.
+
+**Stop and investigate first** if any of these holds:
+
+- the identity is different;
+- `runtime_member_writes` or `runtime_creates_in_public` is `t`: the file would refuse, and the cause needs its own decision;
+- section 7 shows anything but legitimate tombstones.
+
+Two forgeries leave no count behind, as the verification header explains:
+
+- deleting a whole log that no run references, under a permit naming an existing tombstone;
+- a forged tombstone written together with a forged History event, whose run, log and journal were then deleted completely.
+
+Only the database's own history (point-in-time restore, logs) can rule those out.
+
+### 2. Apply
+
+```sh
+psql "$DATABASE_MIGRATION_URL" -X -v ON_ERROR_STOP=1 -v runtime_role="$RUNTIME_ROLE" -f docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql
+```
+
+Expected output, in order:
+
+- `BEGIN`, `SET`, `SET`;
+- one `pg_advisory_xact_lock` row;
+- one `runtime_role_named` row (`t`);
+- `DO`;
+- `REVOKE` ×4, `GRANT` ×2;
+- `DO`;
+- one row `t | f | f | t | f`;
+- `COMMIT`.
+
+On `canceling statement due to lock timeout`, a migration or a long transaction holds the lock. Nothing changed; retry later. Any other
+refusal also changed nothing: record it and stop.
+
+### 3. Post-check (read-only)
+
+Run the same command as step 1, writing `"$HOME/0016-after.txt"`. Expected:
+
+- Section 5: `t | f | f | f | f | f | t | f | f`.
+- Section 4:
+  - every `runtime` value is `f` except `execution_purge_audit / SELECT`;
+  - every `public` value is `f`;
+  - MAINTAIN rows are empty on PostgreSQL 16 and `f` on 17 and later.
+- Section 3: `execution_purge_audit` shows `<runtime role>=r/<owner>`, and `execution_purge_permits` does not mention the runtime role.
+- Section 7: unchanged.
+
+### 4. Functional check
+
+- History lists runs and shows deleted ones as deleted.
+- Only on the owner's own runs, and only if the owner wants one deleted:
+  - a Delete of an eligible simulated run answers `DELETED`;
+  - a Delete of a submitted run answers `RUN_DELETE_REFUSED`.
+- For the following hour, the API, worker and Vercel logs show no `permission denied for table execution_purge_*`.
+
+### 5. Evidence
+
+Keep these with the approval reference:
+
+- both verification outputs (role names, ACLs and counts only);
+- the apply output;
+- the time and the operator.
+
+Never keep the connection URL.
 
 ## Recovery
 
-- **During application:** nothing to do. The file is one transaction, and every refusal, timeout or disconnect leaves the database exactly as
-  before. No Neon restore point is needed or recommended: restoring one would also discard every financial write since it was taken.
-- **After application:** no legitimate code path is expected to break (proven: History's Delete, its tombstone read and privacy's reads work as
-  the runtime role). If an unexpected `permission denied for table execution_purge_*` appears in a legitimate path, first set
-  `FLOFI_OWNER_HISTORY=read-only` (the existing switch: no deletion runs). Only if the owner then decides to restore the exact previous ACL,
-  knowingly reopening the exposure:
-  `GRANT SELECT, INSERT, UPDATE, DELETE ON execution_purge_permits, execution_purge_audit TO flofi_runtime;`
-  Record that decision and re-run step 3 to show the reopened state.
-- **After a 0033 reversal or re-application:** nothing changes here. 0016's objects are never dropped or recreated, so this remediation stays in
-  force. 0033's own provisioning file remains required after every application of 0033.
+**During application:** nothing to do.
+
+- The file is one transaction; any refusal, timeout or disconnect leaves the database exactly as before.
+- No Neon restore point is needed or recommended. Restoring one would also discard every financial write made since it was taken.
+
+**After application:** no legitimate code path is expected to break.
+
+- The test exercises History's Delete and its tombstone read as the runtime role.
+- Privacy access and erasure read the same table with the same plain SELECT, which stays granted. They are not run in the test.
+
+If an unexpected `permission denied for table execution_purge_*` appears in a legitimate path:
+
+1. Set `FLOFI_OWNER_HISTORY=read-only`, the existing switch, so no deletion runs.
+2. Only if the owner then decides to restore the exact previous ACL, knowingly reopening the exposure, run:
+   `GRANT SELECT, INSERT, UPDATE, DELETE ON execution_purge_permits, execution_purge_audit TO <runtime role>;`
+3. Record that decision, and re-run step 3 to show the reopened state.
+
+**After a 0033 reversal or re-application:** nothing changes here.
+
+- 0016's objects are never dropped or recreated, so this remediation stays in force.
+- 0033's own provisioning file is still required after every application of 0033.
 
 ## Evidence
 
-- `packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts` (disposable loopback PostgreSQL; CI runs PostgreSQL 18.6, and
-  development also ran it on 16.15). The test reproduces production's role model:
-  - a non-superuser migration role owns the database and applies 0001–0036 itself;
-  - the runtime role has the owner's default privileges and the explicit EXECUTE;
-  - 0033's provisioning file is applied;
-  - the owner administers the runtime role without inheriting it.
+**`packages/cloud-runtime/test/security-0016-runtime-privileges.pg.test.ts`.** It runs on disposable loopback PostgreSQL: CI runs PostgreSQL
+18.6, and development also ran it on 16.15.
 
-  It proves:
-  - every exposure shape before the remediation;
-  - an exact ACL-only diff, with all rows identical;
-  - idempotency;
-  - 0033's documented verification unchanged;
-  - after the remediation, every forgery, tamper, truncate and permit read refused for the runtime role, while plain deletes keep 0016's
-    `APPEND_ONLY_VIOLATION`;
-  - History's legitimate Delete still deleting only an eligible run, still refusing completed and submitting runs, and still refusing another
-    owner;
-  - each refusal (0016 absent, unknown or owning role, runtime-role connection, inherited write after the REVOKEs, 5 s lock timeout) changing
-    nothing;
-  - the integrity section detecting both forgery shapes once committed.
-- The same two files were also run with the real `psql -v runtime_role=…` on a production-model database (pre-check, apply, rerun, post-check).
-- Not proven here: the application on Neon production (pending approval), and that no consumer connects as `flofi_owner` (confirm before
-  applying).
+Production model it reproduces:
+
+- a non-superuser migration role owns the database and applies 0001–0036 itself;
+- the runtime role has the owner's default privileges and the explicit EXECUTE;
+- 0033's provisioning file is applied;
+- the owner administers the runtime role without inheriting it.
+
+It proves:
+
+- every exposure shape before the remediation;
+- an exact ACL-only diff, with all rows identical;
+- idempotency;
+- 0033's documented verification unchanged;
+- as the runtime role after the remediation:
+  - every forgery, tamper, truncate and permit read is refused;
+  - plain deletes keep 0016's `APPEND_ONLY_VIOLATION`;
+  - History's legitimate Delete still deletes only an eligible run, and still refuses completed and submitting runs and another owner;
+- each refusal changes nothing:
+  - 0016 absent;
+  - an unknown or owning role;
+  - a runtime-role connection;
+  - an inherited write after the REVOKEs;
+  - a membership reachable only by `SET ROLE`, and `pg_write_all_data`;
+  - CREATE in `public`;
+  - a 5 s lock timeout;
+- the integrity section detects three forgery shapes once committed.
+
+**Real `psql -v runtime_role=…` run.** The two files were also run with real psql on a production-model database: pre-check, apply, rerun,
+post-check. The test itself substitutes psql's quoting textually.
+
+**Not proven here:**
+
+- the application on Neon production, which is pending the owner's approval;
+- that no consumer connects as the owner of the objects (confirm before applying);
+- privacy access and erasure run as the runtime role.

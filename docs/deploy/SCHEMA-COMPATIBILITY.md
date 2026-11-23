@@ -1124,6 +1124,9 @@ exactly such an attempt from History, decided by the database under the run's ro
   without EXECUTE on the procedure and WITH write access to the private permit table and the tombstone (a forged permit could delete any run's
   rows). `docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql` (operator step right after 0033; see its release document) revokes
   those writes, keeps SELECT on the tombstone and grants EXECUTE; the certificate test proves both the defect and the fix with such a role.
+  The same default privileges reach 0016's private `execution_purge_permits` and `execution_purge_audit`: their remediation is
+  `docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql` (BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001), needed once on every environment with a
+  separate runtime role at schema 16 or above, and again after any blanket grant of table rights to that role.
 - **One new function: `purge_unsubmitted_workflow_run(tenant, owner, id) RETURNS jsonb`**, `SECURITY DEFINER`, the same `search_path`, EXECUTE revoked
   from PUBLIC (the owner role only). It locks the run (as every run-store write), its steps and groups (as cancellation), the approval handoff, the
   run's `workflow-run.advance` work items, then the tenant's privacy lock (as legal-hold placement and erasure), and answers a closed result:

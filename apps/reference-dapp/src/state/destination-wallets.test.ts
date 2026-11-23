@@ -50,6 +50,8 @@ describe('accountWalletsFrom: the answer is checked before anything is mapped', 
       view([wallet('evm', EVM_A), { ...wallet('solana', SOL_A), address: 'not-base58-0OIl' }]), view(Array.from({ length: 65 }, () => wallet('evm', EVM_A)))];
     for (const value of malformed) expect(() => m.accountWalletsFrom(value), JSON.stringify(value)?.slice(0, 80)).toThrow('ACCOUNT_WALLETS_MALFORMED');
     expect(() => m.accountWalletsFrom({ availability: 'AVAILABLE', account: null, accountUnavailable: true })).toThrow('ACCOUNT_WALLETS_UNAVAILABLE');
+    // Reviews: signed in to Privy, but the server sees no FloFi session: the account's wallets are unknown, not "none".
+    expect(() => m.accountWalletsFrom({ availability: 'AVAILABLE', account: null }, true)).toThrow('ACCOUNT_WALLETS_UNAVAILABLE');
   });
 });
 
@@ -146,6 +148,30 @@ describe('useDestinationInventory: Privy and the account, across sessions', () =
     await flush(); inventory = render();
     expect(inventory).toMatchObject({ loading: false, accountUnavailable: false });
     expect(solana(inventory)).toMatchObject({ kind: 'RESOLVED', wallet: { address: SOL_A } });
+  });
+  it('a read recovered by another reader updates every reader (the store and the Bridge card never disagree until a reload)', async () => {
+    f.answers = [fail(), fail()];
+    render(); await flush(); await vi.advanceTimersByTimeAsync(m.ACCOUNT_WALLETS_RETRY_DELAY_MS); await flush();
+    expect(render().accountUnavailable).toBe(true);
+    // Another reader (the Canvas opening later) reads again and succeeds.
+    const canvas = new HookHarness();
+    f.answers = [answer(view([wallet('solana', SOL_A)]))];
+    const read = () => canvas.render(() => m.useDestinationInventory({ account: EVM_A, provider: { name: 'MetaMask' } }));
+    read(); await flush(); await flush();
+    expect(solana(read())).toMatchObject({ kind: 'RESOLVED', wallet: { address: SOL_A } });
+    // The first reader re-reads that fresh answer from the page's cache (no further server call) and resolves too.
+    render(); await flush(); await flush();
+    expect(render()).toMatchObject({ loading: false, accountUnavailable: false });
+    expect(solana(render())).toMatchObject({ kind: 'RESOLVED', wallet: { address: SOL_A } });
+    expect(f.calls).toBe(3);
+    canvas.unmount();
+  });
+  it('signed in to Privy without a FloFi session the server can see: UNAVAILABLE, the embedded wallet is chosen, never filled', async () => {
+    f.privy = { ready: true, userId: 'did:privy:alice', embedded: [{ ecosystem: 'solana', address: SOL_A }] };
+    f.answers = [answer({ availability: 'AVAILABLE', privy: null, account: null }), answer({ availability: 'AVAILABLE', privy: null, account: null })];
+    render(); await flush(); await vi.advanceTimersByTimeAsync(m.ACCOUNT_WALLETS_RETRY_DELAY_MS); await flush();
+    expect(render().accountUnavailable).toBe(true);
+    expect(solana(render())).toMatchObject({ kind: 'CHOOSE', candidates: [{ address: SOL_A }] });
   });
   it('the browser coming back online after a failed read reads once more', async () => {
     const listeners: (() => void)[] = [];

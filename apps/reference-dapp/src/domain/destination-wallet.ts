@@ -138,6 +138,18 @@ export function destinationIssueMessage(issue: DestinationIssue, surface: Destin
 }
 
 /**
+ * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (security and wallet-execution reviews): /approve prepares a handed-off proposal's simulation by
+ * itself — except a universal bridge whose receiving wallet was missing for this workflow revision (`held`, the revision key it was missing
+ * for). Once that wallet resolves (a connected wallet, Try again, a recovered read) its simulation may ask the source wallet to sign in, so the
+ * owner chooses Simulate. Returns the revision key to remember and whether automatic preparation is held.
+ */
+export function destinationHoldsPreparation(input: { readonly kind: string; readonly blocked: boolean; readonly held: string | null; readonly key: string }):
+  { readonly held: string | null; readonly holds: boolean } {
+  const held = input.kind === 'universal' && input.blocked ? input.key : input.held;
+  return { held, holds: input.kind === 'universal' && held === input.key };
+}
+
+/**
  * Review round 3: whether a Review's bound recipient may be called the owner's own wallet. The connected owner is; a destination wallet is only
  * when it is connected in this session or on the FloFi account (`own`). An address resolved from the device's saved Credentials is not proof
  * of control, and a typed (EXPLICIT) address is never claimed.

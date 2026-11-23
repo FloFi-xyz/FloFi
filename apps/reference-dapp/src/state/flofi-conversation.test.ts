@@ -1169,6 +1169,32 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 chat resumes after the d
     expect(texts(render()).slice(asked2).some(text => /Your wallets are read/.test(text))).toBe(false);
     expect(simulate).not.toHaveBeenCalled();
   });
+  it('wallet-execution review: a resume never simulates by itself, also when the workflow is between its steps', async () => {
+    await asked();
+    const sequence = { total: 2, current: 2, finished: false, issue: null, awaitingDelivery: false, steps: [
+      { number: 1, action: 'Swap', amount: '10 USDC', detail: null, network: 'Base', state: 'COMPLETED', funding: null, delivered: '0.004 WETH' },
+      { number: 2, action: 'Bridge', amount: '10 USDC', detail: null, network: 'Base → Solana', state: 'CURRENT', funding: null, delivered: null }] };
+    reviewedPatch = { manualSimulation: true, destinationLoading: null, sequence } as Partial<ConversationBridge>; lifecycle(reviewedPatch);
+    bridge = { ...bridge, simulationBlocked: null };
+    render(); await flush();
+    const chat = render();
+    expect(last(chat).text).toMatch(/^Your wallets are read and the receiving wallet on Solana is set\./);
+    expect(last(chat).options).toEqual(['Review workflow']);
+    expect(simulate).not.toHaveBeenCalled(); expect(controls.authorize).not.toHaveBeenCalled();
+  });
+  it('after three loading waits in a row the owner is told why, never left without an answer', async () => {
+    await asked();
+    for (let wait = 0; wait < 3; wait++) {
+      settled(); render(); await flush();
+      // The read starts again before the review could continue (a Try again, a recovered read elsewhere): the chat waits silently.
+      reviewedPatch = { manualSimulation: false, destinationLoading: loading }; lifecycle(reviewedPatch); bridge = { ...bridge, simulationBlocked: LOADING };
+      render(); await flush();
+    }
+    settled(LOADING); bridge = { ...bridge, destinationLoading: loading, manualSimulation: false }; render(); await flush();
+    const said = texts(render());
+    expect(said.filter(text => /identifying your wallets/.test(text))).toHaveLength(1);
+    expect(simulate).not.toHaveBeenCalled();
+  });
   it('in Portuguese, with the same single message and resume', async () => {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     waiting();

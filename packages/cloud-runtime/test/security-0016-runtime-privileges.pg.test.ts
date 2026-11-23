@@ -217,9 +217,9 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
     expect(before.identity).toEqual([expect.objectContaining({ version: 16, name: 'owner_history_purge', sha256: SHA_0016, certified: true, ledger_head: 36 })]);
     expect(before.role).toEqual([expect.objectContaining({ rolname: m.runtime, rolsuper: false, member_of: '' })]);
     expect(before.summary).toEqual({ runtime_reads_tombstones: true, runtime_writes_tombstones: true, runtime_touches_permits: true, runtime_column_writes: true,
-      runtime_execute: true, public_execute: false, public_touches_tables: false });
-    expect(before.integrity).toEqual({ open_permits: '0', tombstones: '1', tombstones_without_history_event: '0', logs_missing_segments: '0', runs_without_log: '0',
-      journals_with_gaps: '0' });
+      runtime_member_writes: false, runtime_creates_in_public: false, runtime_execute: true, public_execute: false, public_touches_tables: false });
+    expect(before.integrity).toEqual({ open_permits: '0', tombstones: '1', tombstones_without_history_event: '0', tombstones_with_live_records: '0',
+      logs_missing_segments: '0', runs_without_log: '0', journals_with_gaps: '0' });
     // The exposure: both forgery shapes delete protected history (rolled back here).
     expect(await forged(m, forgeWholeRun('completed'))).toBe(':FORGED_ROLLED_BACK:1,2,1,1');
     expect(await forged(m, forgeLogBytes('eligible-before', 'submitting'))).toBe(':FORGED_ROLLED_BACK:2');
@@ -251,7 +251,7 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
 
     const after = await verification(m);
     expect(after.summary).toEqual({ runtime_reads_tombstones: true, runtime_writes_tombstones: false, runtime_touches_permits: false, runtime_column_writes: false,
-      runtime_execute: true, public_execute: false, public_touches_tables: false });
+      runtime_member_writes: false, runtime_creates_in_public: false, runtime_execute: true, public_execute: false, public_touches_tables: false });
     expect(after.effective.filter(r => r.runtime === true)).toEqual([{ object: 'execution_purge_audit', privilege: 'SELECT', runtime: true, public: false }]);
     expect(after.effective.every(r => r.public !== true)).toBe(true);
     // 0033's provisioned privileges are untouched (its documented verification answers exactly as before).
@@ -281,19 +281,30 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
     expect(await history.change(OWNER_WALLET, 'EXECUTION_RUN', 'submitting', 'DELETE')).toMatchObject({ ok: false, code: 'RUN_DELETE_REFUSED' });
     expect(await history.change('0x' + '22'.repeat(20), 'EXECUTION_RUN', 'completed', 'DELETE')).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
     const final = await verification(m);
-    expect(final.integrity).toEqual({ open_permits: '0', tombstones: '2', tombstones_without_history_event: '0', logs_missing_segments: '0', runs_without_log: '0',
-      journals_with_gaps: '0' });
+    expect(final.integrity).toEqual({ open_permits: '0', tombstones: '2', tombstones_without_history_event: '0', tombstones_with_live_records: '0',
+      logs_missing_segments: '0', runs_without_log: '0', journals_with_gaps: '0' });
     expect((await m.asOwner.query(`SELECT run_id FROM execution_runs ORDER BY run_id`)).rows).toEqual([{ run_id: 'completed' }, { run_id: 'submitting' }]);
   });
 
   it('the verification’s integrity section detects each forgery shape once committed (throw-away database, before the remediation)', async () => {
     const m = await productionModel();
     await seed(m, 'eligible'); await seed(m, 'completed', { status: 'RECONCILED', evidence: true }); await seed(m, 'other', { status: 'RECONCILED' });
+    await seed(m, 'kept', { status: 'RECONCILED' });
     expect(await createOwnerHistory(m.asRuntime, 'default').change(OWNER_WALLET, 'EXECUTION_RUN', 'eligible', 'DELETE')).toMatchObject({ ok: true });
     expect(await forged(m, forgeLogBytes('eligible', 'other'), true)).toBeNull();
     expect(await forged(m, forgeWholeRun('completed'), true)).toBeNull();
-    expect((await verification(m)).integrity).toEqual({ open_permits: '0', tombstones: '2', tombstones_without_history_event: '1', logs_missing_segments: '1',
-      runs_without_log: '0', journals_with_gaps: '0' });
+    // Data-privacy review: a forged tombstone written WITH a forged History event, over a run whose records were not all deleted.
+    expect(await forged(m, async tx => {
+      await tx.query(`INSERT INTO execution_purge_audit (tenant_id, run_id, owner_account, namespace, log_name, log_sha256, log_version, segment_count, journal_count)
+        VALUES ('default', 'kept', $1, 'base-swap', 'kept.jsonl', $2, 2, 2, 1)`, [OWNER_WALLET, '0'.repeat(64)]);
+      await tx.query(`INSERT INTO owner_history_events (tenant_id, owner_account, kind, record_id, action) VALUES ('default', $1, 'EXECUTION_RUN', 'kept', 'DELETED')`, [OWNER_WALLET]);
+      await tx.query(`INSERT INTO execution_purge_permits VALUES ('default', 'kept', 'base-swap', 'kept.jsonl', txid_current())`);
+      const { rowCount } = await tx.query(`DELETE FROM journal_entries WHERE run_id = 'kept'`);
+      await tx.query(`DELETE FROM execution_purge_permits WHERE run_id = 'kept'`);
+      return String(rowCount);
+    }, true)).toBeNull();
+    expect((await verification(m)).integrity).toEqual({ open_permits: '0', tombstones: '3', tombstones_without_history_event: '1', tombstones_with_live_records: '1',
+      logs_missing_segments: '1', runs_without_log: '0', journals_with_gaps: '0' });
   });
 
   it('refuses, changing nothing: 0016 absent, an unknown or owning runtime role, a runtime-role connection, an inherited write, a lock timeout', async () => {
@@ -316,11 +327,29 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
     try { await admin.query(`CREATE ROLE ${writer} NOLOGIN`); await admin.query(`GRANT ${writer} TO ${m.runtime}`); } finally { await admin.close(); }
     await m.asOwner.query(`GRANT INSERT ON execution_purge_permits TO ${writer}`);
     const withWriter = await acls(m.asOwner);
-    expect(refusal(await remediate(m))).toBe('OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: execution_purge_permits:INSERT, execution_purge_permits:COLUMN');
+    expect(refusal(await remediate(m))).toBe(`OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: execution_purge_permits:INSERT, execution_purge_permits:COLUMN, MEMBER:${writer}:execution_purge_permits`);
     expect(await acls(m.asOwner)).toEqual(withWriter);
     await m.asOwner.query(`REVOKE ALL ON execution_purge_permits FROM ${writer}`);
     const admin2 = createDatabase({ connectionString: testDatabaseUrl().toString(), maxConnections: 1 });
     try { await admin2.query(`REVOKE ${writer} FROM ${m.runtime}`); } finally { await admin2.close(); }
+    expect(await acls(m.asOwner)).toEqual(unchanged);
+
+    // Security review: a membership the runtime role does NOT inherit (it could still SET ROLE to it) and a predefined write role are refused
+    // too; so is a runtime role that could CREATE in schema public (an object there could shadow a function the definer procedure calls).
+    const admin3 = createDatabase({ connectionString: testDatabaseUrl().toString(), maxConnections: 1 });
+    try {
+      await admin3.query(`GRANT ${writer} TO ${m.runtime} WITH INHERIT FALSE, SET TRUE`);
+      await m.asOwner.query(`GRANT DELETE ON execution_purge_audit TO ${writer}`);
+      expect(refusal(await remediate(m))).toBe(`OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: MEMBER:${writer}:execution_purge_audit`);
+      await m.asOwner.query(`REVOKE ALL ON execution_purge_audit FROM ${writer}`);
+      await admin3.query(`REVOKE ${writer} FROM ${m.runtime}`);
+      await admin3.query(`GRANT pg_write_all_data TO ${m.runtime} WITH INHERIT FALSE, SET TRUE`);
+      expect(refusal(await remediate(m))).toBe('OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: MEMBER:pg_write_all_data:execution_purge_permits, MEMBER:pg_write_all_data:execution_purge_audit');
+      await admin3.query(`REVOKE pg_write_all_data FROM ${m.runtime}`);
+      await m.asOwner.query(`GRANT CREATE ON SCHEMA public TO ${m.runtime}`);
+      expect(refusal(await remediate(m))).toBe('OWNER_HISTORY_PURGE_RUNTIME_PRIVILEGES_OPEN: SCHEMA_PUBLIC:CREATE');
+      await m.asOwner.query(`REVOKE CREATE ON SCHEMA public FROM ${m.runtime}`);
+    } finally { await admin3.close(); }
     expect(await acls(m.asOwner)).toEqual(unchanged);
 
     // A concurrent migration holds the migration lock: the remediation stops at its 5 s lock timeout and changes nothing; it applies once free.
