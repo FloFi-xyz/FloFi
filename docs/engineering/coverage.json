@@ -1925,6 +1925,14 @@
     "app.components.admin.studio-review": {
       "path": "apps/reference-dapp/src/components/admin/studio-review.test.tsx",
       "stage": "unit"
+    },
+    "workflow-contracts.erc4626-deposit": {
+      "path": "packages/workflow-contracts/test/erc4626-deposit.test.ts",
+      "stage": "unit"
+    },
+    "reference-reconciler.erc4626-deposit.fork": {
+      "path": "packages/reference-reconciler/test/erc4626-deposit.fork.test.ts",
+      "stage": "fork"
     }
   },
   "requiredUnitSuites": [
@@ -2111,7 +2119,8 @@
     "app.state.router-store",
     "app.studio.integration-probe",
     "developer-sdk.integration-package",
-    "app.components.admin.studio-review"
+    "app.components.admin.studio-review",
+    "workflow-contracts.erc4626-deposit"
   ],
   "modules": [
     {
@@ -9082,6 +9091,32 @@
         "Proposal RPC compatibility is reproducible with fixtures. Mainnet identity and execution need independent certification.",
         "External adapter intake accepts pinned source. A trusted signed attestation and financial runtime dispatch require a separate integration.",
         "Publication certifies supported read metadata. Financial runtime and unsupported architecture certification require separate evidence and enablement."
+      ]
+    },
+    {
+      "id": "packages--vault-deposit",
+      "primary": "flofi-lending",
+      "dependencies": [
+        "flofi-developers",
+        "flofi-protocol-integrations",
+        "flofi-security",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "packages/reference-compiler/src/erc4626-deposit.ts",
+        "packages/reference-reconciler/src/erc4626-deposit.ts",
+        "packages/workflow-contracts/src/erc4626-deposit.ts"
+      ],
+      "suites": [
+        "workflow-contracts.erc4626-deposit",
+        "reference-reconciler.erc4626-deposit.fork"
+      ],
+      "gaps": [
+        "The bounded deposit is proven on a closed local Anvil chain with a fixture vault only; no public chain, provider or real vault has been reached.",
+        "Plain ERC-4626 vaults have no atomic minimum-shares deposit: execution needs a vault with the bounded deposit(uint256,address,uint256) or a separately reviewed router.",
+        "No engine flow, surface, wallet handoff or Studio financial capability dispatches this adapter yet; Studio certification covers read metadata only (0036 allows network.read and vault.read)."
       ]
     }
   ],
