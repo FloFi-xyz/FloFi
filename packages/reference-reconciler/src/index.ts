@@ -34,6 +34,7 @@ export * from './withdraw.js';
 
 export * from './lending-composition.js';
 export * from './native-transfer.js';
+export * from './erc4626-deposit.js';
 export * from './robinhood-transfer-verifier.js';
 // BUILD-JOURNEY-001: wallet sign-in verification (no signing).
 export { checksumAddress, personalSignDigest, recoverPersonalSigner } from './personal-sign.js';

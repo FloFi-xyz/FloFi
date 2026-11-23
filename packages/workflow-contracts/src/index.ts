@@ -57,5 +57,6 @@ export * from './pix.js';
 export * from './boleto.js';
 export * from './payment.js';
 export * from './catalog-swap.js';
+export * from './erc4626-deposit.js';
 
 export { workflowDependencyOrder, workflowOrder } from './workflow-order.js';

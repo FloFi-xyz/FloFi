@@ -71,6 +71,7 @@ export * from './withdraw.js';
 
 export * from './lending-composition.js';
 export * from './native-transfer.js';
+export * from './erc4626-deposit.js';
 // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: owner account classification (standard, EIP-7702 delegated, contract).
 export * from './account-code.js';
 export * from './solana-transfer.js';
