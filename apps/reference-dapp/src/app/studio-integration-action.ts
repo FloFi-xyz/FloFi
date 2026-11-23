@@ -38,10 +38,23 @@ export async function changeStudioIntegration(_previous: Result | null, data: Fo
     const store = createStudioStore(host.db, host.tenantId, host.session.accountId);
     const operation = read('operation'), slug = read('slug'), version = read('version'), generation = read('generation');
     const ref = { slug, version: Number(version), generation: Number(generation) };
-    if (operation !== 'create' && (!/^[1-9][0-9]{0,8}$/.test(version) || !/^(0|[1-9][0-9]{0,8})$/.test(generation))) {
+    if (operation !== 'create' && operation !== 'create-package'
+      && (!/^[1-9][0-9]{0,8}$/.test(version) || !/^(0|[1-9][0-9]{0,8})$/.test(generation))) {
       return { ok: false, code: 'STUDIO_VERSION_NOT_FOUND' };
     }
     switch (operation) {
+      case 'create-package':
+      case 'revise-package': {
+        const input = read('package');
+        if (input.length > 12_000) return { ok: false, code: 'STUDIO_MANIFEST_INVALID' };
+        let manifest: unknown;
+        try { manifest = JSON.parse(input); } catch { return { ok: false, code: 'STUDIO_MANIFEST_INVALID' }; }
+        if (!manifest || typeof manifest !== 'object' || !('schemaVersion' in manifest) || manifest.schemaVersion !== 2) {
+          return { ok: false, code: 'STUDIO_MANIFEST_INVALID' };
+        }
+        await store.create(projectId, manifest, now, operation === 'revise-package' ? ref : undefined);
+        break;
+      }
       case 'create':
       case 'revise': {
         const kind = read('kind');
@@ -61,6 +74,7 @@ export async function changeStudioIntegration(_previous: Result | null, data: Fo
         break;
       }
       case 'submit': await store.submit(projectId, ref, now); break;
+      case 'submit-adapter': await store.submitAdapter(projectId, ref, now); break;
       case 'suspend':
       case 'revoke':
         if (read('confirm') !== 'on') return { ok: false, code: 'INVALID_REQUEST' };

@@ -7,6 +7,7 @@
  * client metadata documents (GET) and Developer webhook deliveries (POST).
  */
 import { lookup as dnsLookup } from 'node:dns/promises';
+import type { LookupAddress } from 'node:dns';
 import { request } from 'node:https';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 import type { LookupOptions } from 'node:dns';
@@ -39,7 +40,19 @@ export type PinnedRequest = {
 /** One HTTPS request pinned to a pre-checked public address of the URL's host (port 443, no redirects, bounded in size and time). */
 export async function pinnedHttpsRequest(input: PinnedRequest): Promise<PinnedResponse> {
   const { url, errorPrefix: prefix } = input;
-  const addresses = await dnsLookup(url.hostname, { all: true, verbatim: true });
+  const started = performance.now();
+  let lookupDeadline: ReturnType<typeof setTimeout> | undefined;
+  let addresses: LookupAddress[];
+  try {
+    addresses = await Promise.race([
+      dnsLookup(url.hostname, { all: true, verbatim: true }),
+      new Promise<never>((_, reject) => { lookupDeadline = setTimeout(() => reject(new Error(`${prefix}_TIMEOUT`)), input.timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(lookupDeadline);
+  }
+  const timeLeft = Math.ceil(input.timeoutMs - (performance.now() - started));
+  if (timeLeft <= 0) throw new Error(`${prefix}_TIMEOUT`);
   if (addresses.length === 0 || !addresses.every(a => isPublicAddress(a.address))) throw new Error(`${prefix}_ADDRESS_NOT_PUBLIC`);
   const pinned = addresses[0]!;
   return new Promise<PinnedResponse>((resolve, reject) => {
@@ -65,8 +78,8 @@ export async function pinnedHttpsRequest(input: PinnedRequest): Promise<PinnedRe
       response.on('end', () => done(result()));
       response.on('error', failed);
     });
-    req.setTimeout(input.timeoutMs, () => req.destroy(new Error(`${prefix}_TIMEOUT`)));
-    const deadline = setTimeout(() => req.destroy(new Error(`${prefix}_TIMEOUT`)), input.timeoutMs);
+    req.setTimeout(timeLeft, () => req.destroy(new Error(`${prefix}_TIMEOUT`)));
+    const deadline = setTimeout(() => req.destroy(new Error(`${prefix}_TIMEOUT`)), timeLeft);
     req.on('close', () => clearTimeout(deadline));
     req.on('error', failed);
     req.end(input.body);

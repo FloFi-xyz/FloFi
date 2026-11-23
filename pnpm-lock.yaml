@@ -62,6 +62,9 @@ importers:
       '@defi-workflow-engine/cloud-runtime':
         specifier: workspace:0.1.0
         version: link:../../packages/cloud-runtime
+      '@defi-workflow-engine/developer-sdk':
+        specifier: workspace:0.1.0
+        version: link:../../packages/developer-sdk
       '@defi-workflow-engine/reference-compiler':
         specifier: workspace:0.1.0
         version: link:../../packages/reference-compiler

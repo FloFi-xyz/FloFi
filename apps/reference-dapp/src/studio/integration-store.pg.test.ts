@@ -4,7 +4,7 @@ import { assertSchemaCompatible, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { runAdminCommand } from '../admin/cli-commands.ts';
 import { createDeveloperConsoleStore } from '../developer/console-store.ts';
-import { HYPEREVM } from './integration-manifest.ts';
+import { HYPEREVM, parseStudioIntegration } from './integration-manifest.ts';
 import type { StudioEvidence } from './integration-probe.ts';
 import { createStudioStore, studioInstalled, studioReviewQueue } from './integration-store.ts';
 
@@ -48,7 +48,7 @@ afterAll(async () => { await database?.drop(); });
 
 describe('Studio proposal persistence and isolation', () => {
   it('adds and pins schema 35 while preserving the account-owned project schema', async () => {
-    expect(await assertSchemaCompatible(database.db, SHIPPED_MIGRATIONS)).toMatchObject({ version: 35, application: 28 });
+    expect(await assertSchemaCompatible(database.db, SHIPPED_MIGRATIONS)).toMatchObject({ version: process.env.FLOFI_TEST_CERTIFIED_AHEAD === '1' ? 36 : 35, application: 28 });
     expect(await studioInstalled(database.db)).toBe(true);
     expect(await runAdminCommand('studio-migrate', {}, database.db, tenant)).toEqual({ applied: [] });
     expect(await runAdminCommand('developer-projects-migrate', {}, database.db, tenant)).toEqual({ applied: [] });
@@ -144,5 +144,53 @@ describe('Studio proposal persistence and isolation', () => {
     for (const table of ['studio_integration_versions', 'studio_integration_events']) {
       expect((await database.db.query(`SELECT 1 FROM ${table} WHERE tenant_id=$1 AND project_id=$2`, [tenant, id])).rowCount).toBe(0);
     }
+  });
+
+  it('preserves a legacy pending version and binds V2 evidence to the new package', async () => {
+    const id = await ownerProject.create('Universal package upgrade', '', now);
+    const store = studio();
+    await store.create(id, manifest, now);
+    await store.probe(id, await headOf(id), 'verify', clock, read(verification));
+    await store.probe(id, await headOf(id), 'test', clock, read(testResult));
+    await store.submit(id, await headOf(id), now);
+    const legacy = await headOf(id);
+    const proposal = parseStudioIntegration({
+      ...manifest, schemaVersion: 2, architecture: 'evm', environment: 'mainnet', rpcUrl: HYPEREVM.rpcUrl,
+      checkpoint: { height: '0x1', hash }, capabilities: ['network.read'], dependencies: [],
+      adapter: { kind: 'builtin', id: 'evm-rpc', version: 1 },
+    });
+    await store.create(id, proposal, now, legacy);
+    const draft = await headOf(id);
+    await expect(store.probe(id, draft, 'verify', clock, read(verification))).rejects.toThrow('STUDIO_EVIDENCE_INVALID');
+    const evidence = {
+      ...verification, schemaVersion: 2, source: 'PROPOSAL_RPC', adapterId: 'evm-rpc', adapterVersion: 1,
+    } as const;
+    await expect(store.probe(id, draft, 'verify', clock, read({ ...evidence, rpcUrl: 'https://rpc.example.org/' })))
+      .rejects.toThrow('STUDIO_EVIDENCE_INVALID');
+    await store.probe(id, draft, 'verify', clock, read(evidence));
+    await store.probe(id, await headOf(id), 'test', clock, read({ ...evidence, mode: 'test' }));
+    await store.submit(id, await headOf(id), now);
+    const [current, historical] = await store.list(id);
+    expect(current).toMatchObject({ version: 2, status: 'CERTIFICATION_PENDING', verification: evidence });
+    expect(historical).toEqual(legacy);
+  });
+
+  it('accepts immutable external adapter intake without manufacturing probe evidence', async () => {
+    const id = await ownerProject.create('External adapter intake', '', now);
+    const store = studio();
+    await store.create(id, {
+      kind: 'network', name: 'Move Network', slug: 'move-network', schemaVersion: 2, architecture: 'move',
+      environment: 'mainnet', chainRef: 'move:example', capabilities: ['network.read'], dependencies: [],
+      adapter: { kind: 'external', repository: 'https://github.com/example-org/adapter',
+        commit: 'a'.repeat(40), sourceSha256: 'b'.repeat(64), sdkVersion: 1 },
+    }, now);
+    const draft = await headOf(id);
+    await expect(store.probe(id, draft, 'verify', clock, read(verification))).rejects.toThrow('STUDIO_CONNECTOR_UNAVAILABLE');
+    await store.submitAdapter(id, draft, now);
+    const queued = await headOf(id);
+    expect(queued).toMatchObject({ status: 'DRAFT', verification: null, test_result: null, adapter_submitted_at: now });
+    await expect(store.submitAdapter(id, queued, now)).rejects.toThrow('STUDIO_TRANSITION_FORBIDDEN');
+    expect(await studio(outsider).activity(id)).toEqual([]);
+    expect((await store.activity(id)).map(row => row.event)).toEqual(['SUBMITTED', 'CREATED']);
   });
 });

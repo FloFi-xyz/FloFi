@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHash } from 'node:crypto';
 import { isChecksumAddress } from '@defi-workflow-engine/action-registry';
+import { defineIntegrationPackage, type IntegrationCategory, type IntegrationPackage } from '@defi-workflow-engine/developer-sdk';
 
 /** A proposal declares configuration and intent. The execution registry owns financial capabilities. */
-export type StudioKind = 'network' | 'vault' | 'staking' | 'cex';
+export type StudioKind = IntegrationCategory;
 type Base = { readonly schemaVersion: 1; readonly slug: string; readonly name: string };
 export type NetworkIntegration = Base & { readonly kind: 'network'; readonly chainRef: string };
 export type VaultIntegration = Base & { readonly kind: 'vault'; readonly standard: 'ERC-4626';
@@ -11,7 +13,18 @@ export type StakingIntegration = Base & { readonly kind: 'staking'; readonly pro
   readonly chainRef: string; readonly contractAddress: string };
 export type CexIntegration = Base & { readonly kind: 'cex'; readonly provider: string;
   readonly access: 'user-scoped'; readonly withdrawals: false };
-export type StudioIntegration = NetworkIntegration | VaultIntegration | StakingIntegration | CexIntegration;
+export type StudioIntegration = NetworkIntegration | VaultIntegration | StakingIntegration | CexIntegration | IntegrationPackage;
+type ProbePackage = IntegrationPackage & { readonly chainRef: string; readonly rpcUrl: string;
+  readonly adapter: Extract<IntegrationPackage['adapter'], { kind: 'builtin' }> };
+
+export function supportsStudioProbe(manifest: StudioIntegration): manifest is NetworkIntegration | VaultIntegration | ProbePackage {
+  if (manifest.schemaVersion === 1) return manifest.kind === 'network' || manifest.kind === 'vault';
+  return manifest.adapter.kind === 'builtin' && manifest.chainRef !== undefined && manifest.rpcUrl !== undefined;
+}
+
+export function studioManifestDigest(manifest: StudioIntegration): string {
+  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+}
 
 export interface StakingReadConnector {
   readPosition(manifest: StakingIntegration, walletAddress: string): Promise<readonly {
@@ -48,10 +61,11 @@ function address(value: unknown) {
   return normalized;
 }
 
-/** Closed manifest version with no caller-selected RPC endpoints, credentials or execution metadata. */
+/** The v1 parse and property order remain identical for stored 0035 digests. */
 export function parseStudioIntegration(input: unknown): StudioIntegration {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid();
   const v = input as Record<string, unknown>;
+  if (v.schemaVersion === 2) return defineIntegrationPackage(v);
   if (v.schemaVersion !== 1) return invalid();
   const common = { schemaVersion: 1 as const, slug: text(v.slug, SLUG), name: text(v.name, LABEL) };
   switch (v.kind) {
