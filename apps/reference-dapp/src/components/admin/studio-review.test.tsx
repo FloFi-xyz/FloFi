@@ -23,7 +23,8 @@ describe('BUILD-FLOFI-STUDIO-UNIVERSAL-002 Studio certification card', () => {
   it('summarizes the evidence the decision rests on and shows the RPC host only, never its path', () => {
     const html = render(row());
     expect(html).toContain('<dl class="admin-dl">');
-    for (const text of ['Awaiting review', 'eip155:924001', 'evm-rpc v1', 'aurora.rpc.example.org', 'Evidence valid until', 'Current publication', 'None'])
+    for (const text of ['Awaiting review', 'eip155:924001', 'evm-rpc v1', 'aurora.rpc.example.org', 'Evidence valid until', 'Current publication', 'None',
+      '2026-11-22 20:00 UTC', '2026-11-23 20:00 UTC'])
       expect(html).toContain(text);
     expect(html.replace(/<pre[\s\S]*?<\/pre>/, '')).not.toContain('secret-path');
     expect(html).toMatch(/<label for="[^"]+-decision">Decision<\/label><select id="[^"]+-decision"/);

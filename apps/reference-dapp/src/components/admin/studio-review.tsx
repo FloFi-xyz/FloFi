@@ -167,9 +167,11 @@ export function StudioReview({ row, pt, csrf, canWrite, now }: { row: StudioRevi
   const name = text(manifest.name) ?? row.slug, chain = text(manifest.chainRef), deployment = text(manifest.deploymentRef);
   const observed = [text(verify.observedAt), text(test.observedAt)].filter((value): value is string => value !== null).map(value => Date.parse(value));
   const validUntil = observed.length === 2 && observed.every(Number.isFinite) ? Math.min(...observed) + EVIDENCE_TTL : null;
-  const locale = pt ? 'pt-BR' : 'en';
-  const when = (value: number | string | null) => value === null ? t.labels.none
-    : new Date(value).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC';
+  // A fixed UTC format renders identically on the server and in every browser (no hydration mismatch from locale data).
+  const when = (value: number | string | null) => {
+    const date = value === null ? null : new Date(value);
+    return date && Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : t.labels.none;
+  };
   const publication = row.published_version === null ? t.labels.none
     : `v${row.published_version} · ${row.published_suspended ? t.labels.suspended : row.published_visibility === 'PRIVATE' ? t.private : t.public}`;
   const message = (code: string) => t.messages[code] ?? (UNCERTAIN.has(code) ? t.uncertain(code) : t.refused(code));
@@ -191,7 +193,8 @@ export function StudioReview({ row, pt, csrf, canWrite, now }: { row: StudioRevi
     setBusy(false);
     const outcome = response.ok ? { ok: true, text: t.recorded } : { ok: false, text: message(response.code) };
     setResult(outcome);
-    setAnnounce(outcome.text);
+    // The focused result reads the outcome; the live region only announces progress, so nothing is announced twice.
+    setAnnounce('');
     if (response.ok) { choose(''); setReviewed(false); setVisibility(''); }
     if (response.ok || REFRESH.has(response.code)) router.refresh();
   }
