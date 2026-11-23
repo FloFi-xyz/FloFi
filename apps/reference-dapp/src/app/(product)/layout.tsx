@@ -59,12 +59,13 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const initialWorkflowId = `workflow-${randomUUID()}`;
   const jar = await cookies();
   const configured = copilotConfiguredMode(process.env);
-  const account = await currentAccountBootstrap();
+  const account = await currentAccountBootstrap(process.env, true);
   const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured,
     // HOTFIX-P1-CHAT-RECOVERY: the signed-in account's opaque chat scope (null: memory only), so a reload keeps this account's conversation.
     conversationScope: account.conversationScope,
     // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the Settings menu's account presence from the same verified-session read (null: unknown).
     accountPresence: account.accountPresence,
+    publishedIntegrations: account.publishedIntegrations,
     privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const,
     // BUILD-FLOFI-UX-FIX-003: what `learningAvailability()` returns, known with the page instead of asked when Settings first opens.
     learningTier: learningConfig(process.env).enabled ? 'ENABLED' as const : sessionAdaptation(process.env) ? 'SESSION' as const : 'OFF' as const };

@@ -22,6 +22,7 @@ import { createIdempotencyStore, IDEMPOTENCY_KEY, requestHash, type Database, ty
 import { compileSchema, strategyInputIssues } from '../engine/strategy-spec';
 import { assertSafeOutput, createPgHandoffStore, createPgWorkflowRunStore, deploymentEngineRuntime, fixedWindow, typedId, type ApprovalHost, type EngineRuntime } from '../platform/index.ts';
 import { platformStateHost } from '../server/platform-state-host.ts';
+import { listPublishedStudioIntegrations } from '../platform/studio-catalog.ts';
 import { readDeveloperConfig, type DeveloperConfig, type DeveloperScope } from './config.ts';
 import { developerOwnershipInstalled } from './console-store.ts';
 import { syncAndDispatch, type WebhookTransport } from './dispatch.ts';
@@ -282,6 +283,8 @@ export async function handleDeveloperRequest(request: Request, options: Develope
     const ctx: DeveloperContext = { config, tenantId: host.tenantId, principal, scope, store, handoffs: createPgHandoffStore(host.db, host.tenantId),
       runtime: options.runtime ?? deploymentEngineRuntime(env), limits, allow: window.allow, now, signal: request.signal,
       workflowRuns: createPgWorkflowRunStore(host.db, host.tenantId),
+      publishedIntegrations: async () => (await listPublishedStudioIntegrations(host.db, host.tenantId, { projectId: scope.projectId }))
+        .map(integration => ({ ...integration, capabilities: [...integration.capabilities] })),
       write: work => host.db.transaction(async tx => work(await credentialStores(tx, transactionDb(tx)))) };
     const input: Input = { params: route.path.exec(path)!.slice(1), body, query };
 

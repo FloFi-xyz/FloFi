@@ -17,6 +17,7 @@
  *   workflow-run-purge-migrate                                            applies certified 0033 on exact schema 32 (never 0029–0032)
  *   developer-projects-migrate                                          applies certified 0034 on exact schema 33
  *   studio-migrate                                                      applies certified 0035 on exact schema 34
+ *   studio-certification-migrate                                        applies certified 0036 on exact schema 35
  *   studio-queue  [--limit 50]                                            reads pending Studio submissions for the selected tenant
  *   reconcile-history [--flow crosschain-universal] [--code A,B] [--limit 100] [--apply --approval-ref REF --reason TEXT]
  *                                                                         dry run by default; --apply queues read-only re-observation (no transaction)
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
     flow: { type: 'string' }, reason: { type: 'string' }, apply: { type: 'boolean' } } });
   const migration = command === 'finops-migrate' || command === 'finops-sync-migrate' || command === 'position-purge-migrate'
     || command === 'single-step-runs-migrate' || command === 'workflow-run-purge-migrate' || command === 'developer-projects-migrate'
-    || command === 'studio-migrate';
+    || command === 'studio-migrate' || command === 'studio-certification-migrate';
   const tenantId = tenantOf(values), databaseUrl = (migration ? process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL : process.env.DATABASE_URL) ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });

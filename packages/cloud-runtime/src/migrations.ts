@@ -89,7 +89,7 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
     // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): 0033 adds a tombstone and a private permit table and one checked procedure,
     // and redefines only the body of 0015's `workflow_run_append_only` (same refusal; a DELETE passes only under that procedure's permit), so an
     // owner can delete a single-card attempt that provably never reached a chain. Applied by an operator command on exact schema 32; never by default.
-    // 0035 adds two Studio tables tied to project ownership. See SCHEMA-COMPATIBILITY.md section 27.
+    // 0035 adds Studio proposals. 0036 adds append-only decisions and publication events.
     base: { version: 28, name: 'saved_recipients', sha256: 'ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f' },
     migrations: [{ version: 29, name: 'finops_ledger', sha256: '9c04f837b7409622b6b485a21facafb25ce1d579ea2bd492ae859e71795c8de7' },
       { version: 30, name: 'finops_sync', sha256: '63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b' },
@@ -97,8 +97,9 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
       { version: 32, name: 'single_step_runs', sha256: '1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c' },
       { version: 33, name: 'workflow_run_purge', sha256: '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2' },
       { version: 34, name: 'developer_project_ownership', sha256: '7c698ed7779703abdd6110b39802aa0dad50c74798d6b1eb11a5e35bb4ea1485' },
-      { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' }],
-    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#27-certificate-0035_studio_integrations',
+      { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' },
+      { version: 36, name: 'studio_certification', sha256: '47d9ab5d5c1736cdfcd2b1110433e5caba9055ec2e90dfd313b7ed1a4e429aa3' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#28-certificate-0036_studio_certification',
   },
   {
     // BUILD-FLOFI-UNIFIED-COPILOT-001 (Release A): the v27 build keeps working on a database with 0028 — one new table, flofi_account_recipients

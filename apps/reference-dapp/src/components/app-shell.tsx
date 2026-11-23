@@ -183,6 +183,19 @@ export function solanaPoolSimulation(staged: StagedPosition | null, previous: { 
 
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();
 const shortAccount = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
+function PublishedStudioMetadata() {
+  const { language } = useLocale();
+  const { publishedIntegrations } = useProductBootstrap();
+  if (!publishedIntegrations?.length) return null;
+  const pt = language === 'PT';
+  return <details className="shell-details studio-discovery">
+    <summary>{pt ? 'Integrações publicadas' : 'Published integrations'}</summary>
+    <p>{pt ? 'Metadados certificados para consulta.' : 'Certified metadata for discovery.'}</p>
+    <ul>{publishedIntegrations.map(item => <li key={`${item.projectId}/${item.slug}/${item.version}`}>
+      <strong>{item.name}</strong> <code>{item.chainRef}</code> · <code>{item.capabilities.join(', ')}</code>
+    </li>)}</ul>
+  </details>;
+}
 function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi }: ProductNavigation) {
   const { t: tr, language } = useLocale();
   const { conversationScope = null } = useProductBootstrap();
@@ -962,6 +975,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (tab === BUILD_ENTRY) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className="main build-entry-workspace" tabIndex={-1} aria-label={tr('Chat')}>
+      <PublishedStudioMetadata/>
       <p className="editor-restore-status" role="status">{tr('Loading…')}</p>
       <BuildEntry conversation={conversation} workflow={state.workflow} proposal={proposal} actions={orderedActions.length} draft={entryDraft} setDraft={setEntryDraft}
         interactive={interactive} openBuilder={() => setTab('Build')}/>
@@ -1092,6 +1106,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
+      {tab === 'Build' && <PublishedStudioMetadata/>}
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary} reviewBlock={reviewBlock} canvasExecution={canvasExecution}
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         actionInFooter={chatFirst && !groupedPrimary && placement === 'footer'} review={executeReview}

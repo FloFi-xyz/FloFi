@@ -1917,6 +1917,10 @@
     "developer-sdk.integration-package": {
       "path": "packages/developer-sdk/test/integration-package.test.ts",
       "stage": "unit"
+    },
+    "app.studio.certification-store.pg": {
+      "path": "apps/reference-dapp/src/studio/certification-store.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -9041,25 +9045,36 @@
         "flofi-data-privacy",
         "flofi-frontend-ux",
         "flofi-protocol-integrations",
-        "flofi-security"
+        "flofi-security",
+        "flofi-admin-analytics"
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/app/admin/api/studio/route.ts",
+        "apps/reference-dapp/src/app/admin/studio/page.tsx",
         "apps/reference-dapp/src/app/studio-integration-action.ts",
+        "apps/reference-dapp/src/components/admin/studio-review.tsx",
         "apps/reference-dapp/src/components/site/developer-studio.tsx",
+        "apps/reference-dapp/src/platform/studio-catalog.ts",
+        "apps/reference-dapp/src/studio/certification-http.ts",
+        "apps/reference-dapp/src/studio/certification-store.ts",
         "apps/reference-dapp/src/studio/integration-manifest.ts",
         "apps/reference-dapp/src/studio/integration-probe.ts",
         "apps/reference-dapp/src/studio/integration-store.ts",
-        "packages/cloud-runtime/optional-migrations/0035_studio_integrations.sql"
+        "packages/cloud-runtime/optional-migrations/0035_studio_integrations.sql",
+        "packages/cloud-runtime/optional-migrations/0036_studio_certification.sql"
       ],
       "suites": [
         "app.studio.integration-probe",
         "app.studio.integration-store.pg",
-        "e2e.developer-journey"
+        "e2e.developer-journey",
+        "app.studio.certification-store.pg",
+        "app.e2e.admin-console"
       ],
       "gaps": [
         "Proposal RPC compatibility is reproducible with fixtures. Mainnet identity and execution need independent certification.",
-        "External adapter intake accepts pinned source. A trusted signed attestation and financial runtime dispatch require a separate integration."
+        "External adapter intake accepts pinned source. A trusted signed attestation and financial runtime dispatch require a separate integration.",
+        "Publication certifies supported read metadata. Financial runtime and unsupported architecture certification require separate evidence and enablement."
       ]
     }
   ],
@@ -9136,6 +9151,7 @@
     "app.backend.workflow-run-purge-migrate.pg",
     "cloud-runtime.list-runs-single-card.pg",
     "app.backend.owner-history.pg",
-    "app.studio.integration-store.pg"
+    "app.studio.integration-store.pg",
+    "app.studio.certification-store.pg"
   ]
 }

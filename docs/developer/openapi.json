@@ -4384,6 +4384,86 @@
               }
             }
           },
+          "publishedIntegrations": {
+            "description": "Certified Studio metadata visible to this project. These entries carry no financial execution authority.",
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "projectId",
+                "slug",
+                "version",
+                "revision",
+                "manifestSha256",
+                "name",
+                "kind",
+                "architecture",
+                "chainRef",
+                "capabilities",
+                "visibility"
+              ],
+              "properties": {
+                "projectId": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "revision": {
+                  "type": "string"
+                },
+                "manifestSha256": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "architecture": {
+                  "type": "string"
+                },
+                "chainRef": {
+                  "type": "string"
+                },
+                "deploymentRef": {
+                  "type": "string"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "const": "network.read",
+                        "type": "string"
+                      },
+                      {
+                        "const": "vault.read",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "visibility": {
+                  "anyOf": [
+                    {
+                      "const": "PUBLIC",
+                      "type": "string"
+                    },
+                    {
+                      "const": "PRIVATE",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "ownerExecution": {
             "const": "IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY",
             "type": "string"

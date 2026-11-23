@@ -12,6 +12,7 @@ import styles from '../../../components/site/site.module.css';
 import { DEVELOPER_CONSOLE_PATH, developerConsoleHost } from '../../../server/developer-console-host';
 import { DEVELOPER_SCOPES } from '../../../developer/config';
 import { createStudioStore, studioInstalled } from '../../../studio/integration-store';
+import { listStudioOwnerCertificationStatus } from '../../../studio/certification-store';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'FloFi Developer Console', robots: { index: false, follow: false }, referrer: 'no-referrer' };
@@ -32,8 +33,11 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
     ? await (async () => {
       if (!await studioInstalled(host.db)) return null;
       const store = createStudioStore(host.db, host.tenantId, host.session.accountId);
-      const [versions, events] = await Promise.all([store.list(selected.id), store.activity(selected.id)]);
-      return { versions, events };
+      const [versions, events, certifications] = await Promise.all([
+        store.list(selected.id), store.activity(selected.id),
+        listStudioOwnerCertificationStatus(host.db, host.tenantId, host.session.accountId, selected.id),
+      ]);
+      return { versions, events, certifications };
     })().catch(() => null)
     : null;
   const locale = language === 'PT' ? 'pt-BR' : 'en';
@@ -108,7 +112,7 @@ export default async function DeveloperConsole({ searchParams }: { searchParams:
             </>}
           </details>
           <DeveloperStudio language={language} projectId={selected.id} active={selected.status === 'ACTIVE'}
-            versions={studio?.versions ?? null} activity={studio?.events ?? []}
+            versions={studio?.versions ?? null} activity={studio?.events ?? []} certifications={studio?.certifications ?? []}
             now={new Date().toISOString()}/>
           {selected.status === 'ACTIVE' && <DeveloperPlayground language={language} projectId={selected.id}/>}
         </section>}

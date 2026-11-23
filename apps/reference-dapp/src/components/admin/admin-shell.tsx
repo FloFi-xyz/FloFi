@@ -26,6 +26,7 @@ export const ADMIN_NAV_GROUPS = [
     { id: 'support', href: '/admin/support', label: 'Support & Recovery', hint: 'Incidents, diagnostics and safe recovery' },
     { id: 'workflows', href: '/admin/workflows', label: 'Workflows', hint: 'Executions and what needs attention' },
     { id: 'automations', href: '/admin/automations', label: 'Automations', hint: 'Rules, proposals and delegated runs' },
+    { id: 'studio', href: '/admin/studio', label: 'Studio certification', hint: 'Review integration evidence and publications' },
   ] },
   { id: 'ai', label: 'AI Copilot', items: [
     { id: 'ai-settings', href: '/admin/ai-settings', label: 'AI Settings', hint: 'Provider, model and channel settings' },

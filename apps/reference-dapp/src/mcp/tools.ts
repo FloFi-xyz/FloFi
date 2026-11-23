@@ -223,6 +223,7 @@ export type ToolEvent = { readonly tool: string; readonly outcome: string; reado
 export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: McpRuntime; readonly onTool?: (event: ToolEvent) => void; readonly now?: () => number;
   /** BUILD-MCP-002: present for OAuth deployments. */
   readonly oauth?: OAuthConfig; readonly state?: McpState;
+  readonly publicStudioIntegrations?: NonNullable<McpState['publishedIntegrations']>;
   /** BUILD-MCP-002: the MCP handoff policy (default: test funds only, every mainnet off). */
   readonly policy?: HandoffPolicy;
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
@@ -381,7 +382,12 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   };
 
   register('get_supported_networks', 'Supported networks', 'Networks FloFi can author strategies for, with CAIP-2 ids, network class and the actions available. ' +
-    'Derived from FloFi\'s registries.', Schemas.none, pure, () => ({ ok: true, networks: supportedNetworks(scope) }));
+    'Also lists Studio metadata visible to the requester. Published metadata confers no financial execution capability.', Schemas.none, pure, async () => {
+    const publishedIntegrations = await (ctx.principal.kind === 'mcp-oauth'
+      ? ctx.state?.publishedIntegrations?.(ctx.principal.accountId)
+      : ctx.publicStudioIntegrations?.());
+    return { ok: true, networks: supportedNetworks(scope), ...(publishedIntegrations?.length ? { publishedIntegrations } : {}) };
+  });
 
   register('get_supported_assets', 'Supported assets', 'Assets a strategy may name, per network, with the exact token address or mint, decimals and the actions that use ' +
     'each, from the currently loaded validated catalog or the pinned registry assets. Native currencies have a null token address. ' +

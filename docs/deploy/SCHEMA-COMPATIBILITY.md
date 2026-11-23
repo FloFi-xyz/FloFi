@@ -1214,3 +1214,16 @@ Developer Console remains available and shows Studio as unavailable. The
 operator command requires 34 and is repeatable. After 0035, any rollback binary
 must recognize its exact identity. The previous schema-34 build refuses 0035.
 The migration records proposals and evidence according to project ownership.
+
+## 28. Certificate 0036_studio_certification
+
+0036 follows 0035 and adds append-only Studio certification and publication
+records. It preserves proposal versions, evidence, and pending submissions.
+The shipped schema remains 28. The exact SQL is in
+`packages/cloud-runtime/optional-migrations`.
+
+Roll out the 0036 forward-compatibility certificate to every database consumer
+before the owner uses `studio-certification-migrate`. This command requires
+schema 35 and applies only 0036. Verify read and insert grants, including use of
+the publication sequence, in a disposable database before applying it to any
+shared database. A binary that recognizes only 0035 refuses schema 36.

@@ -18,7 +18,7 @@ import { activateRetention, applyRetention, completePrivacyRequest, decidePrivac
  */
 export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit', 'index', 'retention-report', 'retention-activate', 'retention-revoke', 'retention-apply',
   'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate', 'position-purge-migrate',
-  'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate', 'studio-queue', 'reconcile-history'] as const;
+  'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate', 'studio-certification-migrate', 'studio-queue', 'reconcile-history'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -65,12 +65,14 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'single-step-runs-migrate':
     case 'workflow-run-purge-migrate':
     case 'developer-projects-migrate':
-    case 'studio-migrate': {
+    case 'studio-migrate':
+    case 'studio-certification-migrate': {
       const activateSync = command === 'finops-sync-migrate', positionPurge = command === 'position-purge-migrate', singleStep = command === 'single-step-runs-migrate';
       const runPurge = command === 'workflow-run-purge-migrate';
       const projects = command === 'developer-projects-migrate';
       const studio = command === 'studio-migrate';
-      const count = studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
+      const studioCertification = command === 'studio-certification-migrate';
+      const count = studioCertification ? 8 : studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
       const target = await db.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1');
       if (activateSync && (target.rows[0]?.version ?? 0) < 29) throw new Error('FINOPS_LEDGER_NOT_MIGRATED');
       // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: 0031 follows the optional FinOps 0029/0030, which keep their own owner-run procedures; this
@@ -84,20 +86,22 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       if (runPurge && (target.rows[0]?.version ?? 0) < 32) throw new Error('WORKFLOW_RUN_PURGE_REQUIRES_SCHEMA_32');
       if (projects && (target.rows[0]?.version ?? 0) < 33) throw new Error('DEVELOPER_PROJECTS_REQUIRES_SCHEMA_33');
       if (studio && (target.rows[0]?.version ?? 0) < 34) throw new Error('STUDIO_REQUIRES_SCHEMA_34');
+      if (studioCertification && (target.rows[0]?.version ?? 0) < 35) throw new Error('STUDIO_CERTIFICATION_REQUIRES_SCHEMA_35');
       const migrations = await loadMigrations();
       // A command whose last migration is already applied verifies a newer certified schema against the shipped history (and the base-28
       // certificate) and leaves it alone: e.g. `finops-sync-migrate` on schema 31, or `single-step-runs-migrate` on schema 33.
       if ((target.rows[0]?.version ?? 0) > 28 + count) return { applied: await migrate(db, migrations) };
       const identities = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.slice(0, count);
       if (identities?.length !== count || (singleStep && identities[3]?.name !== 'single_step_runs') || (runPurge && identities[4]?.name !== 'workflow_run_purge')
-        || (projects && identities[5]?.name !== 'developer_project_ownership') || (studio && identities[6]?.name !== 'studio_integrations'))
-        throw new Error(studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
+        || (projects && identities[5]?.name !== 'developer_project_ownership') || (studio && identities[6]?.name !== 'studio_integrations')
+        || (studioCertification && identities[7]?.name !== 'studio_certification'))
+        throw new Error(studioCertification ? 'STUDIO_CERTIFICATION_MIGRATION_NOT_CERTIFIED' : studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
           : positionPurge ? 'POSITION_PURGE_MIGRATION_NOT_CERTIFIED' : 'FINOPS_MIGRATION_NOT_CERTIFIED');
       // A later release that ships 0029/0030 in its own migration list applies them as ordinary migrations; never twice.
       const migrationsToApply = await Promise.all(identities.filter(identity => !migrations.some(shipped => shipped.version === identity.version)).map(async identity => {
         const sql = await readFile(forwardMigrationSqlUrl(identity), 'utf8');
         if (createHash('sha256').update(sql).digest('hex') !== identity.sha256)
-          throw new Error(identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
+          throw new Error(identity.version === 36 ? 'STUDIO_CERTIFICATION_MIGRATION_DIGEST_MISMATCH' : identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
             : identity.version === 31 ? 'POSITION_PURGE_MIGRATION_DIGEST_MISMATCH' : 'FINOPS_MIGRATION_DIGEST_MISMATCH');
         return { ...identity, sql };
       }));

@@ -72,7 +72,16 @@ export const CapabilityView = Type.Object({ object: Type.Literal('capability'), 
   availability: Type.Object({ supportedByCode: Type.Boolean(), enabledByDeployment: Type.Boolean(), enabledByPolicy: Type.Boolean(), demonstratedEvidence: Type.String(),
     mockedHarness: Type.Boolean() }, strict),
   exampleStrategy: Type.Record(Type.String(), Type.Unknown(), { description: 'A valid version 1 strategy for this row.' }) }, strict);
+const PublishedIntegration = Type.Object({
+  projectId: Type.String(), slug: Type.String(), version: Type.Integer(), revision: Type.String(), manifestSha256: Type.String(),
+  name: Type.String(), kind: Type.String(), architecture: Type.String(), chainRef: Type.String(),
+  deploymentRef: Type.Optional(Type.String()), capabilities: Type.Array(literals(['network.read', 'vault.read'] as const)),
+  visibility: literals(['PUBLIC', 'PRIVATE'] as const),
+}, strict);
 export const CapabilityList = Type.Object({ object: Type.Literal('list'), environment: Environment, data: Type.Array(CapabilityView),
+  publishedIntegrations: Type.Optional(Type.Array(PublishedIntegration, {
+    description: 'Certified Studio metadata visible to this project. These entries carry no financial execution authority.',
+  })),
   ownerExecution: Type.Literal('IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY') }, strict);
 
 export const StrategyView = Type.Object({ id: StrategyId, object: Type.Literal('strategy'), environment: Environment,

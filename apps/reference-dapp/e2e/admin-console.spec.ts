@@ -5,11 +5,20 @@
  * built from seeded durable records, changes the Copilot settings (versioned, audited), cannot be driven cross-origin, and signs out.
  * The injected test wallet only signs sign-in messages; nothing is sent to any chain and no public network is reached.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { CERTIFIED_FORWARD_MIGRATIONS, createDatabase, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
+import { defineIntegrationPackage, type IntegrationPackage } from '@defi-workflow-engine/developer-sdk';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { runAdminCommand } from '../src/admin/cli-commands.ts';
+import { adminConfig } from '../src/admin/config.ts';
+import { authenticateAdmin } from '../src/admin/guard.ts';
+import { sealAdminSession } from '../src/admin/session.ts';
+import { createAdminStore } from '../src/admin/store.ts';
+import { createDeveloperConsoleStore } from '../src/developer/console-store.ts';
+import { decideStudioCertification, parseStudioDecision } from '../src/studio/certification-store.ts';
+import type { StudioEvidence } from '../src/studio/integration-probe.ts';
+import { createStudioStore } from '../src/studio/integration-store.ts';
 import { persistCopilotInterpretation, persistCopilotTurn } from '../src/server/copilot-metrics-store.ts';
 import { expect, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
@@ -524,6 +533,123 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
       headers: { origin: new URL(page.url()).origin } });
     expect([tokenless.status(), (await tokenless.json()).code]).toEqual([403, 'ADMIN_CSRF_INVALID']);
     expect((await db.query(`SELECT count(*)::int AS n FROM admin_audit_events WHERE kind = 'SUPPORT_NOTE'`)).rows).toEqual([{ n: 1 }]);
+    expect(errors).toEqual([]);
+    networkGuard.assertClean();
+  } finally { await db.close(); }
+});
+
+test('Studio certification: an independent operator publishes, suspends and revokes certified metadata and rejects another package', async ({ page, networkGuard }, info) => {
+  test.setTimeout(120_000);
+  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 2 });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const operator = createTestWallet();
+  try {
+    // The optional Studio schema through the operator CLI, exactly as an owner would apply it (0029–0036, each step repeatable).
+    for (const command of ['finops-migrate', 'finops-sync-migrate', 'position-purge-migrate', 'single-step-runs-migrate', 'workflow-run-purge-migrate',
+      'developer-projects-migrate', 'studio-migrate', 'studio-certification-migrate'] as const) await runAdminCommand(command, {}, db, 'default');
+    const owner = `acct_${randomBytes(16).toString('hex')}`, reviewer = `acct_${randomBytes(16).toString('hex')}`;
+    await db.query('INSERT INTO flofi_accounts (tenant_id,account_id) VALUES ($1,$2),($1,$3)', ['default', owner, reviewer]);
+    await runAdminCommand('grant', { wallet: operator.address, role: 'OPERATOR', label: 'Studio reviewer' }, db, 'default');
+    // The reviewer's admin wallet is bound to a FloFi account other than the package owner's: no self-certification.
+    await db.query(`INSERT INTO flofi_account_identities (tenant_id,kind,subject,account_id) VALUES ('default','EIP155',$1,$2)`, [operator.address.toLowerCase(), reviewer]);
+
+    // Two submitted packages for networks absent from FloFi's registries, with fixture observations: this profile never reaches an RPC.
+    const now = new Date(), projectId = await createDeveloperConsoleStore(db, 'default', owner).create('Partner networks', '', now);
+    const studio = createStudioStore(db, 'default', owner);
+    const evidence = (manifest: IntegrationPackage, mode: 'verify' | 'test'): StudioEvidence => ({ schemaVersion: 2, source: 'PROPOSAL_RPC', mode,
+      adapterId: 'evm-rpc', adapterVersion: 1, chainRef: manifest.chainRef!, rpcUrl: manifest.rpcUrl!, observedAt: now.toISOString(),
+      checkpointHash: manifest.checkpoint!.hash, block: { height: '0x10', hash: `0x${'2'.repeat(64)}`, timestamp: '0x1', baseFeePerGas: '0x1' },
+      facts: { browserFixture: true } });
+    const network = (slug: string, name: string, chainRef: string) => defineIntegrationPackage({ schemaVersion: 2, kind: 'network', slug, name, chainRef,
+      architecture: 'evm', environment: 'mainnet', rpcUrl: `https://${slug}.rpc.example.org/`, checkpoint: { height: '0x0', hash: `0x${'1'.repeat(64)}` },
+      adapter: { kind: 'builtin', id: 'evm-rpc', version: 1 }, capabilities: ['network.read'], dependencies: [] });
+    const submit = async (manifest: IntegrationPackage) => {
+      const latest = async () => (await studio.list(projectId)).find(item => item.slug === manifest.slug)!;
+      await studio.create(projectId, manifest, now);
+      await studio.probe(projectId, await latest(), 'verify', () => now, async () => evidence(manifest, 'verify'));
+      await studio.probe(projectId, await latest(), 'test', () => now, async () => evidence(manifest, 'test'));
+      await studio.submit(projectId, await latest(), now);
+      const { slug, version, generation } = await latest();
+      return { projectId, slug, version, generation };
+    };
+    const certified = await submit(network('aurora-partner', 'Aurora Partner Network', 'eip155:924001'));
+    await submit(network('boreal-partner', 'Boreal Partner Network', 'eip155:924002'));
+
+    // Approval needs an independent RPC observation; here it is injected, the only step not driven through the console.
+    const config = adminConfig({ FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') });
+    if (!config.enabled) throw new Error('ADMIN_TEST_CONFIG_INVALID');
+    const store = createAdminStore(db, 'default');
+    const { rows: [principal] } = await db.query<{ principal_id: string }>(
+      `SELECT principal_id FROM admin_principals WHERE tenant_id='default' AND account=$1 AND state='ACTIVE'`, [operator.address.toLowerCase()]);
+    const sessionId = randomBytes(16).toString('hex'), expiresAt = new Date(now.getTime() + 3_600_000);
+    await store.createSession({ sessionId, principalId: principal!.principal_id, createdAt: now, expiresAt });
+    const token = sealAdminSession(config.key, { sessionId, principalId: principal!.principal_id, issuedAt: now, expiresAt, domain: '127.0.0.1' });
+    const reviewerContext = await authenticateAdmin({ store, key: config.key, token, now, domain: '127.0.0.1' });
+    if (!reviewerContext) throw new Error('TEST_ADMIN_UNAVAILABLE');
+    expect(await decideStudioCertification(db, 'default', reviewerContext, parseStudioDecision({ ...certified, action: 'approve', catalogRevision: '0',
+      reason: 'Chain identity and checkpoint confirmed independently', reference: 'https://aurora-reference.example.org/', rpcUrl: 'https://aurora-independent.example.org/' }),
+    () => now, async manifest => evidence(manifest, 'test'))).toEqual({ status: 'CERTIFIED' });
+
+    await installJourneyWallet(page, [operator], { chain: '0x14a34' });
+    await page.goto('/admin/studio');
+    expect(new URL(page.url()).pathname).toBe('/admin/login');
+    await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
+    await page.waitForURL(url => url.pathname === '/admin');
+    await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Studio certification' }).click();
+    await expect(page.getByRole('heading', { name: 'Submitted integrations' })).toBeVisible();
+    const card = (name: string) => page.getByRole('article').filter({ has: page.getByRole('heading', { name: new RegExp(name) }) });
+    const aurora = card('Aurora Partner Network'), boreal = card('Boreal Partner Network');
+    await expect(aurora).toContainText('Certified');
+    await expect(boreal).toContainText('Awaiting review');
+    await page.screenshot({ path: info.outputPath('studio-certification-queue-desktop.png'), fullPage: true });
+    const decide = async (target: typeof aurora, action: string, reason: string) => {
+      await target.getByLabel('Decision', { exact: true }).selectOption({ label: action });
+      await target.getByLabel('Decision reason, visible to the owner').fill(reason);
+      const response = page.waitForResponse(item => new URL(item.url()).pathname === '/admin/api/studio');
+      await target.getByRole('button', { name: action }).click();
+      expect((await response).status()).toBe(200);
+    };
+
+    // Rejection is destructive: the console asks for confirmation before it records the decision.
+    page.once('dialog', dialog => dialog.accept());
+    await decide(boreal, 'Reject', 'Checkpoint could not be corroborated');
+    await expect(boreal).toContainText('Rejected');
+    await expect(boreal).toContainText('Checkpoint could not be corroborated');
+
+    // Publication reaches the product catalog as metadata only; suspension and revocation remove it immediately.
+    await decide(aurora, 'Publish', 'Published for every eligible FloFi user');
+    await expect(aurora).toContainText('Published');
+    const product = await page.context().newPage();
+    await product.goto('/app');
+    const discovery = product.locator('details.studio-discovery');
+    await discovery.locator('summary').click();
+    await expect(discovery).toContainText('Aurora Partner Network');
+    await expect(discovery).toContainText('eip155:924001');
+    await expect(discovery).not.toContainText('Boreal Partner Network');
+    await expect(discovery).not.toContainText('rpc.example.org');
+    await product.screenshot({ path: info.outputPath('studio-published-metadata-product.png') });
+
+    page.once('dialog', dialog => dialog.accept());
+    await decide(aurora, 'Suspend', 'Provider incident under investigation');
+    await expect(aurora).toContainText('Suspended');
+    await product.reload();
+    await expect(product.locator('details.studio-discovery')).toHaveCount(0);
+
+    page.once('dialog', dialog => dialog.accept());
+    await decide(aurora, 'Revoke', 'Certification withdrawn');
+    await expect(aurora).toContainText('Revoked');
+    await expect(aurora.getByLabel('Decision', { exact: true })).toHaveCount(0);
+    expect((await db.query<{ kind: string }>(`SELECT kind FROM admin_audit_events WHERE target LIKE $1 ORDER BY event_id`, [`${projectId}:%`])).rows.map(row => row.kind))
+      .toEqual(['ADMIN_STUDIO_APPROVE', 'ADMIN_STUDIO_REJECT', 'ADMIN_STUDIO_PUBLISH', 'ADMIN_STUDIO_SUSPEND', 'ADMIN_STUDIO_REVOKE']);
+
+    await chooseLanguage(page.context(), 'PT');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(card('Aurora Partner Network')).toContainText('Revogada');
+    await expect(card('Boreal Partner Network')).toContainText('Rejeitada');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath('studio-certification-queue-pt-mobile.png'), fullPage: true });
     expect(errors).toEqual([]);
     networkGuard.assertClean();
   } finally { await db.close(); }

@@ -27,6 +27,8 @@ const TYPE_ONLY = new Set(['backend/flows.ts', 'src/server/flow-runtime.ts', 'sr
 const ENGINE_SERVICES = ['src/workflow-runs/'];
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (an environment read and the hosted check: no surface, no I/O). */
 const DEPLOYMENT_FACTS = new Set(['src/server/network-scope.ts']);
+/** BUILD-FLOFI-STUDIO-UNIVERSAL-002: the Studio manifest contract (normalization and digest only; packages and no I/O), read by the catalog. */
+const STUDIO_CONTRACT = new Set(['src/studio/integration-manifest.ts']);
 const PACKAGES = /^(node:|@defi-workflow-engine\/)/;
 
 function allowed(file: string, statement: string, specifier: string): boolean {
@@ -34,7 +36,7 @@ function allowed(file: string, statement: string, specifier: string): boolean {
   if (!specifier.startsWith('.')) return false;
   const target = relative(app, resolve(dirname(file), specifier)).replace(/\\/g, '/'), withTs = target.endsWith('.ts') ? target : `${target}.ts`;
   if (withTs.startsWith('src/platform/') || withTs.startsWith('src/engine/') || withTs.startsWith('src/domain/')) return true;
-  if (SHARED_UNDER_MCP.has(withTs) || DEPLOYMENT_FACTS.has(withTs) || ENGINE_SERVICES.some(prefix => withTs.startsWith(prefix))) return true;
+  if (SHARED_UNDER_MCP.has(withTs) || DEPLOYMENT_FACTS.has(withTs) || STUDIO_CONTRACT.has(withTs) || ENGINE_SERVICES.some(prefix => withTs.startsWith(prefix))) return true;
   return TYPE_ONLY.has(withTs) && /^(import|export) type\b/.test(statement);
 }
 
@@ -44,6 +46,11 @@ describe('BUILD-DEVELOPER-001 shared platform boundary', () => {
     const violations = sources.flatMap(file => importsOf(file).filter(([statement, specifier]) => !allowed(file, statement, specifier))
       .map(([, specifier]) => `${relative(app, file)} → ${specifier}`));
     expect(violations).toEqual([]);
+  });
+
+  it('allows only the package-only Studio manifest contract into the platform, so the catalog cannot reach a surface through it', () => {
+    for (const path of STUDIO_CONTRACT)
+      expect(importsOf(join(app, path)).map(([, specifier]) => specifier).filter(specifier => !PACKAGES.test(specifier))).toEqual([]);
   });
 
   it('keeps the historical handoff service and store as pure re-exports of the platform (compatibility surfaces for MCP, the UI and tests)', () => {
