@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { setActiveNetworkScope } from './network-scope';
-import { stepNodeKey, validCompletions, workflowSequence } from './workflow-sequence';
+import { stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence } from './workflow-sequence';
 import { completedByRecord, ownerByRecord, proveCompletions, storedCompletions, type RecordReader, type StoredCompletion } from './sequence-restore';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence/intelligence.test-harness';
 
@@ -162,6 +162,15 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(await proveCompletions(pointer('5'), s.workflow, sequence, read(record(proof)))).toEqual({ unreadable: true, proven: [] });
     // A bridge that is not reconciled is still not restored.
     expect(await proveCompletions(pointer(null), s.workflow, sequence, read({ ...record(proof), verdict: 'PENDING' }))).toEqual({ unreadable: false, proven: [] });
+    // The proven delivery binds the Aave Supply: a below-cap delivery re-authors the Supply at exactly what arrived (same USDC, 6 decimals);
+    // a zero delivery binds nothing; an unproven delivery binds nothing and the Supply keeps no runtime amount of its own.
+    const supplyStep = sequence.steps[1]!, below = await proveCompletions(pointer(null), s.workflow, sequence, read(record({ ...proof, amount: '9500000' }, '9500000')));
+    const bound = stepRuntimeWorkflow(supplyStep, below.proven, s.context);
+    expect(bound.bound).toBe('9500000');
+    const limit = bound.workflow!.nodes[0]!.userConstraints.find(c => c.kind === 'MAXIMUM_INPUT') as unknown as { quantity: { amount: string; asset: { chainId: string; address: string; decimals: number } } };
+    expect(limit.quantity).toMatchObject({ amount: '9500000', asset: { chainId: 'eip155:8453', address: USDC, decimals: 6 } });
+    expect(stepRuntimeWorkflow(supplyStep, [{ ...below.proven[0]!, received: '0' }], s.context)).toMatchObject({ bound: '0', workflow: null });
+    expect(stepRuntimeWorkflow(supplyStep, (await proveCompletions(pointer(null), s.workflow, sequence, read(record(undefined)))).proven, s.context).bound).toBeNull();
   });
   it('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card run as a one-step workflow run is restored from its server-proven record, never dropped', async () => {
     const { s, sequence, swapNode } = composed();

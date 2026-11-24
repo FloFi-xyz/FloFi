@@ -504,6 +504,9 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
         expect((await continued(h, approval.approvalId)).command).toBeNull();
         return;
       }
+      // The internal order-proof marker never leaks into the published run status (MCP, Developer API, channels).
+      expect((await progressOf(h, approval.approvalId)).workflowRun!.steps[1]!.outcome!.received)
+        .toEqual([{ asset: `${baseChain}/erc20:${composed.bindings[1]!.asset.address}`, amount: '39000000' }]);
       const destSwap = await continued(h, approval.approvalId);
       expect(destSwap.view.workflowRun!.step).toEqual({ index: 2, count: 3 });
       const swapStep = (await h.store.steps(run.runId))[2]!;

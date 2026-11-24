@@ -239,7 +239,9 @@ Each test below was confirmed to fail against a mutation of the code it guards.
 - `workflow-store.test.tsx`: a producer with `received: null` yields `DELIVERY_NOT_PROVEN`, which is
   distinct from `NOTHING_DELIVERED`. This guards where the earlier HIGH was found.
 - `sequence-restore.test.ts`: the owner journey **USDC Ethereum → Bridge to Base → Aave Supply**
-  after a reload, proven and unproven.
+  after a reload, proven and unproven. A below-cap proven delivery (9.5 USDC) re-authors the Supply at
+  exactly 9.5 USDC; zero and unproven deliveries bind nothing.
+- `confirm-run.pg.test.ts`: the published run status carries `received` as `{asset, amount}` only.
 - `universal-router/service.test.ts`, incident replay: a `RECOVERY_REQUIRED` run with a persisted
   FILLED hint and an already-final, registered-executor, type-2 direct payout (`data === orderId`,
   22,280 gas) reconciles in one ordinary observation after a restart. The fresh hint is `unknown`,
@@ -254,10 +256,10 @@ Local gates are not CircleCI certification.
 | `pnpm typecheck` / `pnpm lint` / `schemas:check` | PASS |
 | `CI=1 pnpm build` (incl. TypeScript over tests) + `function_traces.py` | PASS (112 functions, largest 48.4 MB) |
 | Unit job (`agent_guard check` → `pnpm test` → `verify-results` → self-tests) | see §10.6 |
-| PostgreSQL (`pnpm test:postgres` + `verify-results --stage postgres`) | see §10.6 |
+| PostgreSQL (`pnpm test:postgres`, local **PG 16**; CI uses 18.6) | 1012+ pass. All 18 `confirm-run` cases pass, including proven and unproven Relay ERC-20. 6 failures are environmental: 5 `database-privileges` (`MAINTAIN` is PG 17+) and 1 `forward-compatibility`. Both fail identically on a clean `origin/main` worktree. `api-failover` failed once while sharing the CPU with browser runs; it passed in the first full run and 5/5 alone. `verify-results --stage postgres` therefore fails locally; CircleCI on PG 18.6 is authoritative. Installing PG 18 was not permitted in this session |
 | Fork job (`ci-fork.sh`, pinned Anvil, ports 8545–8547 free) | PASS: Anvil 4 passed / 10 owner-gated skips; fork 32 passed / 32 owner-gated skips; F1 five-pass; 3 closed transcripts verified |
 | Governance (`governance_lite`, unittest 21 + 336, `git diff --check`) | PASS |
-| Browser (critical tier + selected profiles) | see §10.6 |
+| Browser (CI environment, verified headless shell 1243, `FLOFI_E2E_APP_PORT=3100`) | Critical tier: 6 profiles, 74 passed. Profiles exposed to this PR (`swap-read-acceptance`, `universal-bridge`, `ethereum-authoring-certification`, `arbitrum-authoring-certification`, `base-mainnet-authoring`, `workflow-ux-authoring`, `canvas-workflow-ux`, `execution-continuity-1`): 103 passed. 0 skipped, failed or flaky. The other extended profiles were not run locally |
 
 Skipped cases are not passes. The prior `E2E_PORT_OCCUPIED` came from concurrent worktrees on another
 machine. The supported remedy is `FLOFI_E2E_FORK_PORT`, never killing a process.
@@ -271,6 +273,9 @@ machine. The supported remedy is `FLOFI_E2E_FORK_PORT`, never killing a process.
 | flofi-workflow | M1, M2, L1–L3 | **M1:** not a defect. Any `fundingIssue` makes `sequenceIssue` non-null, which makes every runtime's simulation source `unavailable` and refuses Continue. **M2:** fixed. **L1:** store test added. **L2:** fixed. **L3:** documented in §10.5 |
 | flofi-bridge | no false binding found; M1, M2, L1, L2 | **M2:** measured against real fills, see below. **M1, L1, L2:** follow-ups, all fail-closed |
 | flofi-security | MEDIUM, LOW | **MEDIUM:** fixed (legacy stored amount). **LOW:** defence in depth; every Canvas entry point gates on `sequenceIssue`. The single completion call site uses the proof-gated `deliveredByRecord` and waits (`awaitingDelivery`) rather than completing with an unproven amount |
+| flofi-wallet-execution | 3 low | `providerExplorer` is built from a registry base and a validated hash, never a provider URL, and is labelled non-authoritative. The signing surface does not change what is signed. Wallet continuity holds after restore. No forced success or resubmission. **L1 (copy):** the RECOVERY_REQUIRED row does not say "do not send another deposit". **L2 (copy):** "not proven … yet" never resolves for ERC-20 bridges reconciled before deploy. **L3:** a step AWAITING_OWNER before deploy is refused on each load without a terminal state. All three are follow-ups, deferred because copy changes alter browser baselines |
+| flofi-lending | MEDIUM, 2 low | A proven delivery binds Supply by exact asset identity. Added a test showing a below-cap delivery (9.5 USDC) re-authors the Supply at exactly 9.5 USDC; zero and unproven deliveries bind nothing. **MEDIUM (defence in depth, pre-existing pattern):** the engineering-workspace Supply panel calls the supply store directly, so only the shell's `sequenceIssue` gates it. This is not public and the owner still signs; it is a follow-up. **Low:** durable runs report unproven deliveries as `WORKFLOW_BINDING_NOTHING_RECEIVED`; the continuation card may show the authored cap. Both are follow-ups |
+| flofi-mcp | MEDIUM, 2 low | **F2: fixed.** `runView` projects `received` to its declared `{asset, amount}`, so `orderProof` never reaches MCP, Developer API or channel responses; a PostgreSQL assertion guards it. **F1 (follow-up, fail-closed):** a step already READY at deploy from a legacy unproven producer is refused at /approve while status still says "sign", until the run expires. **F3 (follow-up, display only):** user-funded `receivedOf` reads raw `received` for the recorded bound. QUOTE/NDJSON do not affect MCP tools |
 
 The read hook blocked the reviewers from the diff files. Each reviewed the current source instead.
 AI review is advisory.
@@ -296,6 +301,13 @@ read from Relay's public requests API and Base public RPC.
   `RECOVERY_REQUIRED`: fail-closed, but it would block the dependent Aave step.
 
 **Residual follow-ups (fail-closed, not addressed here).**
+- **Messaging and status (wallet-execution L1–L3, lending, MCP F1/F3):**
+  - The RECOVERY_REQUIRED row should say "do not send another deposit".
+  - "Not proven … yet" never resolves for ERC-20 bridges reconciled before this deploy.
+  - Durable runs need a distinct `…DELIVERY_NOT_PROVEN` code.
+  - READY steps funded before this deploy should halt rather than stay RUNNING.
+  - The engineering Supply panel should gate on `fundingIssue`.
+  - Copy changes alter browser baselines, so they need their own certification.
 - **Legacy token re-proof failure (bridge M1):** the run stays `DESTINATION_OBSERVED` with no attention escalation.
 - **Block-pinned `eth_getCode` (bridge L1):** the mock does not prove the call is block-pinned.
 - **In-flight Bridge → Supply runs (workflow L3):** runs whose ERC-20 bridge reconciled before this

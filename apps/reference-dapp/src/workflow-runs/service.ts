@@ -1046,7 +1046,9 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     const local = s.outcome?.evidence?.environment === 'MOCKED';
     const outcome = options.outcomes && s.outcome ? { executionId: s.outcome.executionId, kind: s.outcome.kind, status: s.outcome.status, evidence: s.outcome.evidence,
       submissions: s.outcome.transactions.map(t => ({ chain: t.chain, hash: t.hash, explorerUrl: executionExplorer(t.chain, t.hash, local) })),
-      spent: s.outcome.spent, received: s.outcome.received,
+      // BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003 (flofi-mcp review): the published status keeps its declared { asset, amount } shape; the
+      // internal Relay order-proof marker stays a funding fact, never a field of MCP, Developer API or channel responses.
+      spent: s.outcome.spent, received: s.outcome.received.map(({ asset, amount }) => ({ asset, amount })),
       receiptUrl: options.origin && s.outcome.kind === 'OWNER_RUN' && s.state === 'RECONCILED' ? `${options.origin}/app/dashboard/runs/${encodeURIComponent(s.outcome.executionId)}` : null } : null;
     return { index: s.stepIndex, action: composed.ok ? composed.steps[s.stepIndex]?.strategy.action ?? 'unknown' : 'unknown', state: s.state, flow: s.flow,
       // A bound step's own hash encodes the amount it resolved to: withheld with the amounts when status is not shared.
