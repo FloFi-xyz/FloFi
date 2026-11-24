@@ -132,4 +132,13 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 Telegram approval actions (PostgreS
     expect(d.api.texts().at(-1)).toMatch(/A new link would propose it again, so none was sent/);
     expect((await d.handoffs()).map(h => h.status)).toEqual(['APPLIED']);
   });
+
+  it('a correction right after the owner APPLIED a proposal is a new, separate proposal and says so', async () => {
+    const d = await deployment();
+    await d.say(SWAP);
+    await d.ownerApplies(d.api.lastLink()!);
+    await d.say('swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
+    expect((await d.handoffs()).map(h => h.status)).toEqual(['APPLIED', 'PENDING']);
+    expect(d.api.texts().at(-1)).toContain('This is a new, separate proposal: it does not replace or undo the earlier one.');
+  });
 });

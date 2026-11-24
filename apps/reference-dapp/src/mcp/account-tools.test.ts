@@ -17,6 +17,9 @@ import { readOAuthConfig, type McpScope, type OAuthConfig } from './oauth/config
 import { oauthEnv } from './oauth/oauth-test-harness';
 import type { McpState } from './oauth/state';
 import type { McpRuntime } from './runtime';
+import { listOwnerRuns } from '../server/cloud-api-client';
+import { WALLET_PRINCIPAL_HEADER } from '../server/run-ownership';
+import { WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow';
 
 const A = '0x' + 'a'.repeat(40), B = '0x' + 'b'.repeat(40), S = 'So11111111111111111111111111111111111111112';
 // Links made at or after this instant were made under the Connections text that discloses balance and position reads.
@@ -180,6 +183,29 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
     delete (local as { history?: unknown }).history;
     expect((await session({ env, token: tokens.X, state: state(handoffs([])), runtime: local }).callTool('list_executions', {})).output)
       .toEqual({ ok: false, code: 'HISTORY_NOT_AVAILABLE' });
+  });
+});
+
+describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 owner history read (cloud API contract)', () => {
+  it('sends the Dashboard\'s owner headers (EVM principal / Solana workflow owner), validates the cursor and keeps only the owner\'s runs', async () => {
+    const seen: Headers[] = [], urls: string[] = [];
+    const transport = (async (url: URL, init: RequestInit) => {
+      urls.push(String(url)); seen.push(new Headers(init.headers));
+      return Response.json({ ok: true, value: { next: 'n1', items: [
+        { runId: 'r1', flow: 'base-swap', status: 'RECONCILED', ownerAccount: A, hasEvidence: true, updatedAt: 't', errorCode: 'bad code' },
+        { runId: 'r2', flow: 'jupiter-swap', status: 'RECONCILED', ownerAccount: S, hasEvidence: true, updatedAt: 't', needsObservation: true },
+        { runId: 'r3', flow: 'base-swap', status: 'RECONCILED', ownerAccount: B, hasEvidence: true, updatedAt: 't' }] } });
+    }) as unknown as typeof fetch;
+    const env = { API_BASE_URL: 'https://api.flofi.test', API_AUTH_TOKEN: 'internal-test-token' };
+    const evm = await listOwnerRuns(A, { env, transport });
+    expect(evm).toMatchObject({ ok: true, value: { next: 'n1', items: [{ runId: 'r1', errorCode: null, needsObservation: false }] } });
+    expect(seen[0]!.get(WALLET_PRINCIPAL_HEADER)).toBe(A);
+    const sol = await listOwnerRuns(S, { env, transport });
+    expect(sol).toMatchObject({ ok: true, value: { items: [{ runId: 'r2', needsObservation: true }] } });
+    expect(seen[1]!.get(WORKFLOW_OWNER_HEADER)).toBe(`solana:${S}`);
+    expect(seen[1]!.get(WALLET_PRINCIPAL_HEADER)).toBeNull();
+    expect(urls[0]).toMatch(/\/v1\/runs\?limit=25$/);
+    expect(await listOwnerRuns(A, { env, transport, cursor: 'bad cursor!' })).toEqual({ ok: false, code: 'CURSOR_INVALID' });
   });
 });
 

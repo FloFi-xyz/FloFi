@@ -336,6 +336,8 @@ const canRequestApproval = (ctx: ToolContext) => ctx.principal.kind === 'mcp-oau
 export const SIMULATIONS_PER_ACCOUNT_HOUR = 30;
 /** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an OAuth account's hourly portfolio reads (each one reads several public networks and protocol positions). */
 export const PORTFOLIO_READS_PER_ACCOUNT_HOUR = 30;
+/** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an OAuth account's hourly history reads (one cross-flow API read per linked wallet each). */
+export const HISTORY_READS_PER_ACCOUNT_HOUR = 60;
 
 export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   const scope = ctx.scope ?? networkScope(), Schemas = SCHEMAS[scope];
@@ -697,6 +699,9 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'another owner\'s runs never appear. A wallet that could not be read makes the list INCOMPLETE, never empty. Use get_execution_status / get_evidence for one ' +
     'execution\'s transactions and evidence.', Schemas.none, { ...pure, idempotentHint: false }, async () => {
     if (!principalOwners(ctx.principal).length) return linkRequired();
+    const who = ctx.principal, store = ctx.state;
+    if (who.kind === 'mcp-oauth' && store && !await store.oauth.allow(`history:account:${who.accountId}`, HISTORY_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
+      return failWith('HISTORY_RATE_LIMITED');
     const history = await historyView(ctx.runtime, linkedOwners(ctx.principal));
     if (!history.available) return failWith('HISTORY_NOT_AVAILABLE');
     const omitted = omittedOwners(ctx.principal);

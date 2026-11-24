@@ -236,12 +236,13 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
     // NEW/CANCEL also forgets the open question; the service revokes the live approval link.
     if (kind === 'CANCEL') return decision('CANCEL', 'CANCELLED', greet([]), { ...greeted, pending: null, approvalId: null, copilot: null, steps: [] });
     if (kind === 'SUBSCRIBE') return decision('SUBSCRIBE', 'SUBSCRIBE', greet([]), greeted, { subscribeCode: local[1].exec(normalized)![1]!.toUpperCase() });
-    return decision(kind, kind === 'STATUS' ? 'STATUS' : 'LINK', greet([]), greeted);
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: STATUS is read-only, so FloFi's open question keeps its choices (a later tap still answers it).
+    return decision(kind, kind === 'STATUS' ? 'STATUS' : 'LINK', greet([]), kind === 'STATUS' ? { ...greeted, choices: state.choices } : greeted);
   }
   if (memoryCommand) return decision('MEMORY', `MEMORY_${memoryCommand[0]}`, greet([]), greeted, { memoryCommand: memoryCommand[0] });
   if (stepCommand) {
     const [kind, pattern] = stepCommand, match = pattern.exec(normalized)!, all = [...state.steps ?? [], ...state.pending ? [state.pending] : []];
-    if (kind === 'LIST') return decision('STEPS', 'STEPS', greet([]), greeted);
+    if (kind === 'LIST') return decision('STEPS', 'STEPS', greet([]), { ...greeted, choices: state.choices });
     if (kind === 'ADD') {
       if (!state.pending) return decision('REPLY', 'STEP_NOTHING_PENDING', greet([text(m.noPending)]), greeted);
       if (all.length >= MAX_WORKFLOW_STEPS) return decision('REPLY', 'STEPS_FULL', greet([text(m.stepsFull(MAX_WORKFLOW_STEPS))]), greeted);

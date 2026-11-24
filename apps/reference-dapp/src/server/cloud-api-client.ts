@@ -10,6 +10,7 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
+import { WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow.ts';
 import { DEVELOPER_LIVE_HEADER } from '../workflow-runs/external-step.ts';
 import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
 import { betaIdentityHeaders, currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
@@ -191,8 +192,10 @@ export async function listOwnerRuns(principal: string, options: { env?: Readonly
   const target = new URL(`v1/runs?${new URLSearchParams({ limit: '25', ...options.cursor ? { cursor: options.cursor } : {} })}`,
     base.href.endsWith('/') ? base : new URL(base.href + '/'));
   try {
+    // The same owner headers as the Dashboard history: an EVM wallet as the wallet principal, a Solana wallet as its workflow owner.
+    const owner = /^0x/.test(principal) ? { [WALLET_PRINCIPAL_HEADER]: principal } : { [WORKFLOW_OWNER_HEADER]: `solana:${principal}` };
     const response = await transport(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 30_000, signal),
-      headers: { ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WALLET_PRINCIPAL_HEADER]: principal } });
+      headers: { ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, ...owner } });
     const body = await response.json() as { ok?: unknown; value?: { items?: unknown; next?: unknown } };
     if (!response.ok || body.ok !== true || !Array.isArray(body.value?.items)) return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
     const next = typeof body.value.next === 'string' && /^[A-Za-z0-9_-]{1,400}$/.test(body.value.next) ? body.value.next : null;

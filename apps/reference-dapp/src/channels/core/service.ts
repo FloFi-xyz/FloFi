@@ -429,7 +429,9 @@ export function createChannelService(ctx: ChannelContext) {
     const networks = [...new Set(specs.flatMap(spec => spec.action === 'bridge' ? [spec.sourceNetwork, spec.destinationNetwork] : [(spec as { network: string }).network]))];
     const plan = approval.authorizationPlan;
     const reply: ChannelReply = { text: readyText(state.language, { lines: strategy.steps.map(s => stepSummary(s, state.language)), networks, fundsClass: strategy.fundsClass,
-      notes: [...revoked ? [m.replaced] : [], ...dropped ? [m.earlierApplied] : [], ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
+      // The previous proposal already in the owner's signing flow may have run: this one never replaces it (a correction is a new, separate proposal).
+      notes: [...revoked ? [m.replaced] : [], ...dropped ? [m.earlierApplied] : inSigningFlow(ended) ? [m.separateProposal] : [],
+        ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
       intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null, aiInterpreted,
       expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
     choices: adapter.linkWithChoices ? approvalActions(state.language, specs.length > 1) : [], link: { label: m.linkLabel, url: approval.approvalUrl },

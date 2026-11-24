@@ -54,6 +54,16 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 Telegram one-tap actions', () => {
     }
   });
 
+  it('Check status and Show steps are read-only: FloFi\'s open question keeps its choices', async () => {
+    const c = chat('EN');
+    await c.turn({ kind: 'TEXT', text: SWAP });
+    const asked = { ...c.state, choices: [{ id: 'c1', label: 'Base' }, { id: 'c2', label: 'Arbitrum One' }] };
+    for (const id of ['act:status', 'act:steps']) {
+      const decided = await decideTurn({ content: { kind: 'CHOICE', id, label: id }, state: asked, optedOut: false, interpret: null, support: 's', privacy: 'p' });
+      expect(decided.state.choices, id).toEqual(asked.choices);
+    }
+  });
+
   it('a tap that sounds like an approval is never one, and an unknown action id is not a command', async () => {
     const c = chat('EN');
     await c.turn({ kind: 'TEXT', text: SWAP });
