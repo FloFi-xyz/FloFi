@@ -5,6 +5,7 @@
  * recorded. Addresses and hashes are always shortened. No copy ever says or implies that a message authorized, signed or executed
  * anything; execution happens only in FloFi with the owner's wallet.
  */
+import { userFacingError } from '../../platform/conversation-state.ts';
 import type { ChannelLanguage } from './config.ts';
 import { LANDED_LABELS_PT, landedKind, type LandedKind } from '../../domain/landed-attempts.ts';
 
@@ -94,7 +95,8 @@ const EN = {
   ai: 'Interpreted from your message with an AI assistant. It is not financial advice; you decide.',
   linkLabel: 'Authorize',
   authority: 'Nothing can be authorized here — not with "yes", "confirm" or any other message. To execute, open FloFi with the approval link, connect your wallet, check the fresh simulation and the Strategy Manifest, and sign there. Send LINK for a fresh link.',
-  refused: (code: string) => REFUSALS_EN[code] ?? `FloFi couldn't prepare an approval link (${code}). Nothing was proposed.`,
+  // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an unmapped refusal is explained in plain words (`platform/conversation-state.ts`), never by its closed code.
+  refused: (code: string) => REFUSALS_EN[code] ?? `FloFi couldn't prepare an approval link. ${userFacingError(code).EN} Nothing was proposed.`,
   noPending: 'There is no pending strategy. Tell me what you want to do.',
   cancelled: 'Cancelled. The previous approval link no longer works.',
   replaced: 'The previous approval link no longer works.',
@@ -136,6 +138,14 @@ const EN = {
   // BUILD-CHAT-E2E-001: multi-step workflows — the step list, authorization counts and the run's durable status.
   stepsFull: (max: number) => `A workflow has at most ${max} steps.`,
   stepUnknown: (count: number) => count ? `There is no such step. This workflow has ${count} step${count === 1 ? '' : 's'}.` : 'There are no steps yet. Tell me what you want to do.',
+  // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: one-tap actions under an approval message, and the guards that never carry an applied workflow's steps forward.
+  actions: { status: 'Check status', add: 'Add another action', steps: 'Show steps', cancel: 'Cancel request' },
+  stepAfterApplied: 'Your previous workflow is already in your FloFi signing flow, so it may have run. Its steps will not be added again: describe the next action and it becomes a new, separate workflow.',
+  workflowApplied: 'That workflow is already in your FloFi signing flow, so it cannot be edited here. Describe a new action to start a separate workflow.',
+  earlierApplied: 'Your earlier workflow is already in your FloFi signing flow; its steps are not included again.',
+  separateProposal: 'Your earlier proposal is already in your FloFi signing flow and may have run. This is a new, separate proposal: it does not replace or undo the earlier one.',
+  linkApplied: 'That proposal is already in your FloFi signing flow, so it may have run. A new link would propose it again, so none was sent. To do it again on purpose, describe the action as a new request.',
+  cancelApplied: 'This request is already in your FloFi signing flow, so it cannot be cancelled here. Reject it in your wallet or stop it in the FloFi signing page. Nothing confirmed onchain can be undone.',
   stepKept: (n: number) => `Step ${n} kept. Describe step ${n + 1}: it runs only after step ${n} is reconciled. STEPS shows the workflow; NEW starts over.`,
   stepsList: (lines: readonly string[]) => lines.length ? `Workflow (${lines.length} step${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
     : 'There are no steps yet. Tell me what you want to do.',
@@ -226,7 +236,7 @@ const PT: Copy = {
   ai: 'Interpretado da sua mensagem com um assistente de IA. Não é recomendação financeira; a decisão é sua.',
   linkLabel: 'Autorizar',
   authority: 'Nada pode ser autorizado aqui — nem com "sim", "confirmo" ou qualquer outra mensagem. Para executar, abra o FloFi pelo link de aprovação, conecte sua carteira, confira a nova simulação e o Strategy Manifest e assine lá. Envie LINK para um novo link.',
-  refused: code => REFUSALS_PT[code] ?? `O FloFi não conseguiu preparar um link de aprovação (${code}). Nada foi proposto.`,
+  refused: code => REFUSALS_PT[code] ?? `O FloFi não conseguiu preparar um link de aprovação. ${userFacingError(code).PT} Nada foi proposto.`,
   noPending: 'Não há estratégia pendente. Diga o que você quer fazer.',
   cancelled: 'Cancelado. O link de aprovação anterior não funciona mais.',
   replaced: 'O link de aprovação anterior não funciona mais.',
@@ -265,6 +275,13 @@ const PT: Copy = {
   error: 'Algo deu errado do lado do FloFi. Nada foi proposto nem autorizado. Tente de novo.',
   stepsFull: max => `Um fluxo tem no máximo ${max} etapas.`,
   stepUnknown: count => count ? `Essa etapa não existe. Este fluxo tem ${count} etapa${count === 1 ? '' : 's'}.` : 'Ainda não há etapas. Diga o que você quer fazer.',
+  actions: { status: 'Ver status', add: 'Adicionar outra ação', steps: 'Ver etapas', cancel: 'Cancelar pedido' },
+  stepAfterApplied: 'O seu fluxo anterior já foi aberto para assinatura no FloFi, então pode ter sido executado. As etapas dele não serão adicionadas de novo: descreva a próxima ação e ela vira um fluxo novo e separado.',
+  workflowApplied: 'Esse fluxo já foi aberto para assinatura no FloFi, então não pode ser editado aqui. Descreva uma nova ação para começar um fluxo separado.',
+  earlierApplied: 'O seu fluxo anterior já foi aberto para assinatura no FloFi; as etapas dele não são incluídas de novo.',
+  separateProposal: 'A sua proposta anterior já foi aberta para assinatura no FloFi e pode ter sido executada. Esta é uma proposta nova e separada: não substitui nem desfaz a anterior.',
+  linkApplied: 'Essa proposta já foi aberta para assinatura no FloFi, então pode ter sido executada. Um novo link a proporia de novo, então nenhum foi enviado. Para fazer de novo de propósito, descreva a ação como um pedido novo.',
+  cancelApplied: 'Este pedido já foi aberto para assinatura no FloFi, então não pode ser cancelado aqui. Rejeite-o na sua carteira ou interrompa-o na página de assinatura do FloFi. Nada confirmado na rede pode ser desfeito.',
   stepKept: n => `Etapa ${n} mantida. Descreva a etapa ${n + 1}: ela só roda depois que a etapa ${n} for reconciliada. ETAPAS mostra o fluxo; NOVO recomeça.`,
   stepsList: lines => lines.length ? `Fluxo (${lines.length} etapa${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
     : 'Ainda não há etapas. Diga o que você quer fazer.',

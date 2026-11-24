@@ -29,7 +29,7 @@ describe('BUILD-MCP-002 OAuth discovery', () => {
     expect(as).toMatchObject({ issuer: ORIGIN, authorization_endpoint: ORIGIN + '/oauth/authorize', token_endpoint: ORIGIN + '/oauth/token',
       revocation_endpoint: ORIGIN + '/oauth/revoke', response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'], client_id_metadata_document_supported: true,
-      authorization_response_iss_parameter_supported: true });
+      authorization_response_iss_parameter_supported: true, scopes_supported: ['flofi.strategy', 'flofi.approval', 'flofi.runs', 'offline_access'] });
     expect(as).not.toHaveProperty('registration_endpoint');
     expect(JSON.stringify(as)).not.toMatch(/private_key_jwt|client_secret|implicit|password|client_credentials|plain/);
     const dcr = await (await oauthClient({ env: oauthEnv({ FLOFI_MCP_OAUTH_DCR: 'enabled' }) }).send('authorization-server', '/.well-known/oauth-authorization-server')).json();

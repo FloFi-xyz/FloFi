@@ -10,6 +10,7 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
+import { WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow.ts';
 import { DEVELOPER_LIVE_HEADER } from '../workflow-runs/external-step.ts';
 import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
 import { betaIdentityHeaders, currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
@@ -173,5 +174,35 @@ export async function listCloudRuns(flow: string, principal: string, options: { 
     if (!response.ok || body.ok !== true || !Array.isArray(body.value?.items)) return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
     return { ok: true, value: (body.value.items as CloudRunSummary[]).filter(r => r.ownerAccount === principal && r.flow === flow)
       .map(r => ({ runId: r.runId, flow: r.flow, status: r.status, ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence, updatedAt: r.updatedAt })) };
+  } catch (error) { return deadlineEnded(error, signal) ? DEADLINE : { ok: false, code: 'CLOUD_API_UNAVAILABLE' }; }
+}
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: one page of a wallet's runs across every flow (`GET /v1/runs`, the same read the Dashboard history
+ * makes), as `principal`. The API filters by the principal header; any item of another owner is dropped here as well.
+ */
+export type OwnerRunSummary = CloudRunSummary & { readonly errorCode?: string | null; readonly needsObservation?: boolean; readonly attentionRequired?: boolean };
+export async function listOwnerRuns(principal: string, options: { env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; cursor?: string | null;
+  timeoutMs?: number; signal?: AbortSignal } = {}): Promise<FlowResult<{ readonly items: OwnerRunSummary[]; readonly next: string | null }>> {
+  const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;
+  if (signal?.aborted) return DEADLINE;
+  if (options.cursor != null && !/^[A-Za-z0-9_-]{1,400}$/.test(options.cursor)) return { ok: false, code: 'CURSOR_INVALID' };
+  let base: URL | null;
+  try { base = cloudApiBaseUrl(env); } catch (error) { return { ok: false, code: (error as Error).message }; }
+  if (!base) return { ok: false, code: 'CLOUD_API_NOT_CONFIGURED' };
+  const target = new URL(`v1/runs?${new URLSearchParams({ limit: '25', ...options.cursor ? { cursor: options.cursor } : {} })}`,
+    base.href.endsWith('/') ? base : new URL(base.href + '/'));
+  try {
+    // The same owner headers as the Dashboard history: an EVM wallet as the wallet principal, a Solana wallet as its workflow owner.
+    const owner = /^0x/.test(principal) ? { [WALLET_PRINCIPAL_HEADER]: principal } : { [WORKFLOW_OWNER_HEADER]: `solana:${principal}` };
+    const response = await transport(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 30_000, signal),
+      headers: { ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, ...owner } });
+    const body = await response.json() as { ok?: unknown; value?: { items?: unknown; next?: unknown } };
+    if (!response.ok || body.ok !== true || !Array.isArray(body.value?.items)) return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
+    const next = typeof body.value.next === 'string' && /^[A-Za-z0-9_-]{1,400}$/.test(body.value.next) ? body.value.next : null;
+    return { ok: true, value: { next, items: (body.value.items as (CloudRunSummary & Record<string, unknown>)[]).filter(r => r && typeof r === 'object' && r.ownerAccount === principal
+      && typeof r.runId === 'string' && typeof r.flow === 'string' && typeof r.status === 'string')
+      .map(r => ({ runId: r.runId, flow: r.flow, status: r.status, ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence === true, updatedAt: r.updatedAt,
+        errorCode: typeof r.errorCode === 'string' && /^[A-Z][A-Z0-9_]{1,80}$/.test(r.errorCode) ? r.errorCode : null,
+        needsObservation: r.needsObservation === true, attentionRequired: r.attentionRequired === true })) } };
   } catch (error) { return deadlineEnded(error, signal) ? DEADLINE : { ok: false, code: 'CLOUD_API_UNAVAILABLE' }; }
 }

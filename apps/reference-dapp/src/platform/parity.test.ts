@@ -13,6 +13,7 @@ import { readHandoffPolicy } from '../mcp/execution';
 import { credential, gatewayEnv, session } from '../mcp/gateway.test-harness';
 import type { McpRuntime } from '../mcp/runtime';
 import type { CloudRun } from '../server/flow-runtime';
+import { executionState, validationState } from './conversation-state.ts';
 import { capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun, PlatformRefusal, reviewWorkflow, simulatePreview, stepViews,
   validateStrategy } from './index.ts';
 
@@ -74,7 +75,11 @@ describe('BUILD-DEVELOPER-001 platform parity: MCP ≡ platform ≡ engine', () 
     for (const [id, strategy] of [...STRATEGIES, ...invalid.map((s, i) => [`invalid-${i}`, s] as const)]) {
       for (const workflowHash of [undefined, H('e'), ...composeWorkflow(strategy).ok ? [hashOf(strategy)] : []]) {
         const args = { strategy, ...workflowHash ? { workflowHash } : {} };
-        expect((await client.callTool('validate_strategy', args)).output, `${id} ${workflowHash}`).toEqual({ ok: true, ...validateStrategy(strategy, workflowHash) });
+        // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the MCP result adds only the conversational state, derived from the same platform validation.
+        const { conversationState: validated, ...validation } = (await client.callTool('validate_strategy', args)).output as Record<string, unknown>;
+        const platformValidation = validateStrategy(strategy, workflowHash);
+        expect(validation, `${id} ${workflowHash}`).toEqual({ ok: true, ...platformValidation });
+        expect(validated, `${id} ${workflowHash}`).toEqual(validationState(platformValidation));
         const review = (await client.callTool('review_strategy', args)).output as Record<string, unknown>;
         const refusal = refusalOf(() => composeWorkflowOrRefuse(strategy, workflowHash));
         if (refusal) { expect(review, id).toEqual({ ok: false, ...refusal.extra, code: refusal.code }); continue; }
@@ -115,8 +120,10 @@ describe('BUILD-DEVELOPER-001 platform parity: MCP ≡ platform ≡ engine', () 
     const r = runtime(), client = mcp(r), found = await findOwnedRun(r, alice.wallets, RUN.runId);
     expect(found.owner).toBe(A);
     const status = (await client.callTool('get_execution_status', { executionId: RUN.runId, journalAfter: 2, journalLimit: 5 })).output as Record<string, unknown>;
-    const { notes: statusNotes, ...statusRest } = status;
-    expect(statusRest).toEqual({ ok: true, ...await executionStatusView(r, found, RUN.runId, 'OPERATOR_GRANTED_WALLET', { after: 2, limit: 5 }) });
+    const { notes: statusNotes, conversationState: statusState, ...statusRest } = status;
+    const platformStatus = await executionStatusView(r, found, RUN.runId, 'OPERATOR_GRANTED_WALLET', { after: 2, limit: 5 });
+    expect(statusRest).toEqual({ ok: true, ...platformStatus });
+    expect(statusState).toEqual(executionState(platformStatus.lifecycle));
     expect(statusNotes).toHaveLength(1);
     const evidence = (await client.callTool('get_evidence', { executionId: RUN.runId })).output as Record<string, unknown>;
     const { notes: evidenceNotes, ...evidenceRest } = evidence;

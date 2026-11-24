@@ -5,6 +5,7 @@
  */
 import type { McpBetaHost } from './beta-access';
 import type { AutomationReadPort } from './automations';
+import type { PortfolioReadPort } from './account';
 import { createHash, randomBytes } from 'node:crypto';
 import { handleMcpRequest, type GatewayLogger } from './gateway';
 import type { McpState } from './oauth/state';
@@ -27,17 +28,17 @@ const MODERN_META = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', '
 export type Session = {
   readonly post: (body: unknown, headers?: Record<string, string>) => Promise<{ status: number; headers: Headers; text: string; message: Record<string, unknown> | null }>;
   readonly request: (method: string, params?: Record<string, unknown>, options?: { modern?: boolean }) => Promise<Record<string, unknown>>;
-  readonly callTool: (name: string, args: unknown) => Promise<{ isError: boolean; output: Record<string, unknown>; text: string; meta: Record<string, unknown> }>;
+  readonly callTool: (name: string, args: unknown) => Promise<{ isError: boolean; output: Record<string, unknown>; text: string; meta: Record<string, unknown>; texts: readonly string[] }>;
 };
 /** One client of one gateway configuration. `token: null` sends no Authorization header. */
 export function session(options: { env: Record<string, string>; token: string | null; runtime?: McpRuntime; logger?: GatewayLogger; state?: McpState;
-  now?: () => Date; budgetMs?: number; marginMs?: number; signal?: AbortSignal; betaHost?: McpBetaHost; automations?: AutomationReadPort }): Session {
+  now?: () => Date; budgetMs?: number; marginMs?: number; signal?: AbortSignal; betaHost?: McpBetaHost; automations?: AutomationReadPort; portfolio?: PortfolioReadPort }): Session {
   let id = 0;
   const post: Session['post'] = async (body, headers = {}) => {
     const response = await handleMcpRequest(new Request('https://flofi.test/api/mcp', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body),
       ...options.signal ? { signal: options.signal } : {}, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...options.token === null ? {} : { authorization: `Bearer ${options.token}` }, ...headers } }),
     { env: options.env, ...options.betaHost ? { betaHost: options.betaHost } : {}, ...options.runtime ? { runtime: options.runtime } : {}, ...options.logger ? { logger: options.logger } : {},
-      ...options.state ? { state: options.state } : {}, ...options.now ? { now: options.now } : {}, ...options.automations ? { automations: options.automations } : {},
+      ...options.state ? { state: options.state } : {}, ...options.now ? { now: options.now } : {}, ...options.automations ? { automations: options.automations } : {}, ...options.portfolio ? { portfolio: options.portfolio } : {},
       ...options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }, ...options.marginMs === undefined ? {} : { marginMs: options.marginMs } });
     const text = await response.text();
     // Legacy stateless serving answers with one SSE `message` event; modern serving answers with a JSON body.
@@ -58,6 +59,7 @@ export function session(options: { env: Record<string, string>; token: string | 
     const result = message.result as { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean; _meta?: Record<string, unknown> } | undefined;
     if (!result) throw new Error('MCP_TOOL_PROTOCOL_ERROR: ' + JSON.stringify(message.error));
     const text = result.content?.[0]?.text ?? '';
-    return { isError: result.isError === true, output: result.structuredContent ?? { text }, text, meta: result._meta ?? {} };
+    return { isError: result.isError === true, output: result.structuredContent ?? { text }, text, meta: result._meta ?? {},
+      texts: (result.content ?? []).flatMap(c => typeof c.text === 'string' ? [c.text] : []) };
   } };
 }

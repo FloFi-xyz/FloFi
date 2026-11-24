@@ -15,7 +15,7 @@ import type { FlowName } from '../../backend/flows.ts';
 import type { DelegationFacts } from '../workflow-runs/authorization-plan.ts';
 import type { UserFundedFacts } from '../workflow-runs/execution-groups.ts';
 import { currentBetaIdentity } from '../flight/beta-context.ts';
-import { CLOUD_API_DEADLINE_EXCEEDED, listCloudRuns, type CloudRunSummary } from '../server/cloud-api-client.ts';
+import { CLOUD_API_DEADLINE_EXCEEDED, listCloudRuns, listOwnerRuns, type CloudRunSummary, type OwnerRunSummary } from '../server/cloud-api-client.ts';
 import { cloudFlow, cloudFlowMode, cloudPreview, cloudRun, cloudRunJournal, cloudRuns, flowRuntimeKind, type CloudJournalPage, type CloudRun, type EmbeddedRuntime,
   type FlowRuntimeKind, type FlowRuntimeMode } from '../server/flow-runtime.ts';
 import { budgetTransport, DeadlineError, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
@@ -40,6 +40,11 @@ export type McpRuntime = {
   /** BUILD-MCP-002: one wallet's most recent runs of one flow (owner-scoped). */
   readonly runs?: (flow: FlowName, owner: string) => Promise<Result<readonly CloudRunSummary[]>>;
   /**
+   * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: one page of a wallet's runs across every flow (owner-scoped, the Dashboard history read). Absent
+   * where the deployment has no cross-flow history read (a local or embedded runtime): history is then reported unavailable, never empty.
+   */
+  readonly history?: (owner: string, cursor: string | null) => Promise<Result<OwnerRunPage>>;
+  /**
    * BUILD-MCP-002: the flow's durable record of one run, read as its owner, for SERVER-SIDE checks only (the reviewed workflow's hash).
    * It contains executable material and is never returned to an MCP client.
    */
@@ -51,6 +56,7 @@ export type McpRuntime = {
    */
   readonly sequences?: () => Promise<SequenceFacts>;
 };
+export type OwnerRunPage = { readonly items: readonly OwnerRunSummary[]; readonly next: string | null };
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: `userFunded` — the deployment's user-funded execution facts (null where not described). */
 export type SequenceFacts = { readonly enabled: boolean; readonly delegation: DelegationFacts; readonly userFunded?: UserFundedFacts | null };
 
@@ -87,6 +93,7 @@ export function deploymentRuntime(env: Env = process.env, budget?: RequestBudget
     journal: async (runId, owner, after, limit) => await cloudRunJournal(runId, owner, after, limit, { env }) ?? REQUIRED,
     evidence: async (flow, runId, owner) => evidenceOf(flow, await cloudFlow(flow, 'status', [runId], { env, principal: owner })),
     runs: async (flow, owner) => await cloudRuns(flow, owner, env) ?? REQUIRED,
+    ...flowRuntimeKind(env) === 'remote' ? { history: (owner: string, cursor: string | null) => listOwnerRuns(owner, { env, cursor }) } : {},
     record: async (flow, runId, owner) => await cloudFlow<unknown>(flow, 'status', [runId], { env, principal: owner }) ?? REQUIRED,
     sequences: async () => (await import('../workflow-runs/facts.ts')).sequenceFacts(env),
   };
@@ -122,6 +129,8 @@ function budgetedDeploymentRuntime(env: Env, budget: RequestBudget): McpRuntime 
     // `cloudRuns` takes no transport: the remote read is made here with the same client, so it carries the deadline too.
     runs: async (flow, owner) => checked<readonly CloudRunSummary[]>(kind === 'remote' ? await listCloudRuns(flow, owner, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read), signal: budget.signal })
       : await cloudRuns(flow, owner, env) ?? REQUIRED),
+    ...kind === 'remote' ? { history: async (owner: string, cursor: string | null) => checked<OwnerRunPage>(await listOwnerRuns(owner,
+      { env, transport, cursor, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read), signal: budget.signal })) } : {},
     record: async (flow, runId, owner) => checked<unknown>(await cloudFlow<unknown>(flow, 'status', [runId], { ...read(), principal: owner }) ?? REQUIRED),
     sequences: async () => (await import('../workflow-runs/facts.ts')).sequenceFacts(env),
   };
@@ -150,6 +159,7 @@ export function boundedRuntime(runtime: McpRuntime, budget: RequestBudget): McpR
     journal: (runId, owner, after, limit) => bounded(read, () => runtime.journal(runId, owner, after, limit)),
     evidence: (flow, runId, owner) => bounded(read, () => runtime.evidence(flow, runId, owner)),
     ...runtime.runs ? { runs: (flow: FlowName, owner: string) => bounded(read, () => runtime.runs!(flow, owner)) } : {},
+    ...runtime.history ? { history: (owner: string, cursor: string | null) => bounded(read, () => runtime.history!(owner, cursor)) } : {},
     ...runtime.record ? { record: (flow: FlowName, runId: string, owner: string) => bounded(read, () => runtime.record!(flow, runId, owner)) } : {},
     ...runtime.sequences ? { sequences: () => withinBudget(budget, read, () => runtime.sequences!()) } : {},
   };

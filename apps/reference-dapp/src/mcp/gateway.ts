@@ -26,16 +26,17 @@ import { mcpBetaIdentity, mcpBetaWallets, type McpBetaHost } from './beta-access
 import { mcpStateHost } from './oauth/runtime.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
-import { authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
+import { portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { PANEL_URI } from './app/panel.ts';
 import { readHandoffPolicy } from './execution.ts';
 import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from './oauth/config.ts';
 import { credentialDigest, credentialOf } from './oauth/crypto.ts';
 import { mcpState, type McpState } from './oauth/state.ts';
 import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime.ts';
-import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, type ToolName } from './tools.ts';
+import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, userMessageContent, type ToolName } from './tools.ts';
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
 import { deploymentAutomationReader, type AutomationReadPort } from './automations.ts';
+import { deploymentPortfolioPort, type PortfolioReadPort } from './account.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type GatewayLogger = { readonly info: (event: string, fields?: Readonly<Record<string, string | number | boolean | null>>) => void;
@@ -45,6 +46,8 @@ export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime
   readonly betaHost?: McpBetaHost;
   /** Tests: the read-only automation port of `get_automation_status` (default: the deployment's Automations read path). */
   readonly automations?: AutomationReadPort;
+  /** Tests: the read-only portfolio port of `get_portfolio` (default: the deployment's Dashboard portfolio and position reads). */
+  readonly portfolio?: PortfolioReadPort;
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
@@ -119,7 +122,8 @@ function deadlineResponse(body: string | null, budget: RequestBudget): Response 
   // guidance (an approval request's outcome UNKNOWN, no automatic retry) instead of a bare protocol error; other methods keep the JSON-RPC error.
   const answers = requests.map(({ id, tool, call }) => {
     const body = timeoutResult(tool ?? 'get_supported_networks', 'MCP_REQUEST_TIMEOUT', budget.requestId);
-    return call ? { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body, isError: true } }
+    return call ? { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(body) }, userMessageContent('MCP_REQUEST_TIMEOUT')], structuredContent: body,
+      isError: true } }
       : { jsonrpc: '2.0', id, error: { code: -32001, message: 'FloFi MCP request timed out', data: body } };
   });
   return Response.json(batch ? answers : answers[0], { status: 200, headers: HEADERS });
@@ -219,8 +223,12 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const productIdentity = betaIdentity;
     const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
     // `owners` keeps each link's namespace (a Solana wallet owns its automations as `solana`); `wallets` stays the address list runs are read by.
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: balance/position reads only for links made once `/connections` disclosed them (fail closed when unset).
+    const portfolioFrom = portfolioLinksFrom(env);
     principal = Object.freeze({ ...principal, wallets: Object.freeze(eligible.map(l => l.address)),
-      owners: Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address }))) });
+      owners: Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address }))),
+      portfolioOwners: Object.freeze(portfolioFrom ? eligible.filter(e => links.some(l => l.namespace === e.namespace && l.address === e.address
+        && l.createdAt.getTime() >= portfolioFrom.getTime())).map(l => Object.freeze({ namespace: l.namespace, address: l.address })) : []) });
   }
   // Every runtime call of this request is bounded by its budget (an injected runtime too).
   const runtime = options.runtime ? boundedRuntime(options.runtime, budget) : deploymentRuntime(env, budget), active = principal;
@@ -228,6 +236,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the route passes `process.env`; a hosted deployment is always Mainnet-only).
   const scope = networkScope({ ...process.env, ...env });
   const automations = options.automations ?? deploymentAutomationReader(env, budget);
+  const portfolio = options.portfolio ?? deploymentPortfolioPort(env);
   const publicStudioIntegrations = async () => {
     if (!env.DATABASE_URL) return [];
     const host = await mcpStateHost(env).catch(() => null);
@@ -235,7 +244,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const { listPublishedStudioIntegrations } = await import('../platform/studio-catalog.ts');
     return listPublishedStudioIntegrations(host.db, host.tenantId);
   };
-  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, publicStudioIntegrations,
+  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, portfolio, publicStudioIntegrations,
     ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;
       logger?.info('mcp.tool', { request_id: budget.requestId, principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }); } }),

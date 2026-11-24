@@ -98,14 +98,17 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 MCP workflow presentation', () 
     expect(composed.structuredContent.visual).toMatchObject({ workflowHash: composeWorkflowOrRefuse(BRIDGE, undefined).workflowHash });
   });
 
-  it('a refused approval or composition is unchanged: one JSON text block, no visual, no picture', async () => {
+  it('a refused approval or composition is unchanged: the JSON text block and its plain explanation, no visual, no picture', async () => {
     const { call } = await consumer();
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a refusal carries a second text block with the person-readable explanation (EN and PT), never an image.
+    const textOnly = (result: { content: { type: string; text?: string }[] }) => [result.content.length, result.content.every(c => c.type === 'text'),
+      /^userMessage \(EN\): /.test(result.content[1]?.text ?? '')];
     const wrongHash = await call('request_user_approval', { strategy: BRIDGE, workflowHash: '0x' + '1'.repeat(64) });
-    expect([wrongHash.isError, wrongHash.content.length, wrongHash.structuredContent.visual, wrongHash._meta]).toEqual([true, 1, undefined, undefined]);
+    expect([wrongHash.isError, ...textOnly(wrongHash), wrongHash.structuredContent.visual, wrongHash._meta]).toEqual([true, 2, true, true, undefined, undefined]);
     const mainnet = await call('request_user_approval', { strategy: { ...BRIDGE, sourceNetwork: 'base', destinationNetwork: 'arbitrum-one' },
       workflowHash: composeWorkflowOrRefuse({ ...BRIDGE, sourceNetwork: 'base', destinationNetwork: 'arbitrum-one' }, undefined).workflowHash });
-    expect([mainnet.isError, mainnet.content.length, mainnet.structuredContent.visual, mainnet._meta]).toEqual([true, 1, undefined, undefined]);
+    expect([mainnet.isError, ...textOnly(mainnet), mainnet.structuredContent.visual, mainnet._meta]).toEqual([true, 2, true, true, undefined, undefined]);
     const unsupported = await call('compose_strategy', { strategy: { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'USDC', amount: '1' } });
-    expect([unsupported.isError, unsupported.content.length]).toEqual([true, 1]);
+    expect([unsupported.isError, ...textOnly(unsupported)]).toEqual([true, 2, true, true]);
   });
 });

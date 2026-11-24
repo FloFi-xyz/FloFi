@@ -132,6 +132,10 @@ const STEP_COMMANDS: readonly (readonly ['ADD' | 'LIST' | 'REMOVE' | 'MOVE', Reg
   ['REMOVE', /^(?:remove|delete) step ([1-8])$/, 'EN'], ['REMOVE', /^(?:remover|apagar|tirar) (?:a )?etapa ([1-8])$/, 'PT'],
   ['MOVE', /^move step ([1-8]) to ([1-8])$/, 'EN'], ['MOVE', /^mover (?:a )?etapa ([1-8]) para (?:a )?([1-8])$/, 'PT'],
 ];
+/** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the one-tap actions under an approval message → the exact local command words they stand for (no model). */
+export const APPROVAL_ACTIONS: Readonly<Record<string, Readonly<Record<ChannelLanguage, string>>>> = Object.freeze({
+  'act:status': { EN: 'status', PT: 'estado' }, 'act:add': { EN: 'add step', PT: 'adicionar etapa' }, 'act:steps': { EN: 'steps', PT: 'etapas' },
+  'act:cancel': { EN: 'cancel', PT: 'cancelar' } });
 const PORTUGUESE = /\b(?:coloca|quero|faz|fazer|empresta|emprestar|troca|trocar|muda|mudar|na|no|para|com|de|da|do|em|sim|não|nao)\b/i;
 
 // ── The Copilot conversation, persisted ────────────────────────────────────────────────────────────────────────────────
@@ -204,8 +208,10 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   // The user stopped the conversation on the provider's side (e.g. blocked the bot): honoured as STOP, and nothing is sent back.
   if (content.kind === 'PROVIDER_OPT_OUT') return optedOut ? decision('IGNORE', 'IGNORED_OPTED_OUT', []) : decision('OPT_OUT', 'OPTED_OUT_BY_PROVIDER', [], freshState(state.language));
   if (content.kind === 'UNSUPPORTED') return optedOut ? decision('IGNORE', 'IGNORED_OPTED_OUT', []) : decision('REPLY', 'UNSUPPORTED_MESSAGE', [text(channelCopy(state.language).unsupported)]);
+  // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a one-tap action under an approval message is exactly its typed command in the conversation's language.
+  const action = content.kind === 'CHOICE' && Object.hasOwn(APPROVAL_ACTIONS, content.id) ? APPROVAL_ACTIONS[content.id]![state.language] : null;
   // A tapped choice or a bare number answers FloFi's own last question with the label FloFi offered.
-  let raw = content.kind === 'CHOICE' ? state.choices.find(c => c.id === content.id)?.label ?? content.label : content.text;
+  let raw = action ?? (content.kind === 'CHOICE' ? state.choices.find(c => c.id === content.id)?.label ?? content.label : content.text);
   const numbered = /^\s*([1-9])\s*$/.exec(raw);
   if (numbered && state.choices[Number(numbered[1]) - 1]) raw = state.choices[Number(numbered[1]) - 1]!.label;
   const normalized = words(raw), local = COMMANDS.find(([, pattern]) => pattern.test(normalized));
@@ -230,12 +236,13 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
     // NEW/CANCEL also forgets the open question; the service revokes the live approval link.
     if (kind === 'CANCEL') return decision('CANCEL', 'CANCELLED', greet([]), { ...greeted, pending: null, approvalId: null, copilot: null, steps: [] });
     if (kind === 'SUBSCRIBE') return decision('SUBSCRIBE', 'SUBSCRIBE', greet([]), greeted, { subscribeCode: local[1].exec(normalized)![1]!.toUpperCase() });
-    return decision(kind, kind === 'STATUS' ? 'STATUS' : 'LINK', greet([]), greeted);
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: STATUS is read-only, so FloFi's open question keeps its choices (a later tap still answers it).
+    return decision(kind, kind === 'STATUS' ? 'STATUS' : 'LINK', greet([]), kind === 'STATUS' ? { ...greeted, choices: state.choices } : greeted);
   }
   if (memoryCommand) return decision('MEMORY', `MEMORY_${memoryCommand[0]}`, greet([]), greeted, { memoryCommand: memoryCommand[0] });
   if (stepCommand) {
     const [kind, pattern] = stepCommand, match = pattern.exec(normalized)!, all = [...state.steps ?? [], ...state.pending ? [state.pending] : []];
-    if (kind === 'LIST') return decision('STEPS', 'STEPS', greet([]), greeted);
+    if (kind === 'LIST') return decision('STEPS', 'STEPS', greet([]), { ...greeted, choices: state.choices });
     if (kind === 'ADD') {
       if (!state.pending) return decision('REPLY', 'STEP_NOTHING_PENDING', greet([text(m.noPending)]), greeted);
       if (all.length >= MAX_WORKFLOW_STEPS) return decision('REPLY', 'STEPS_FULL', greet([text(m.stepsFull(MAX_WORKFLOW_STEPS))]), greeted);

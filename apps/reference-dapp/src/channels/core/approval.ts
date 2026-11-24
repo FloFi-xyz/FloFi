@@ -65,10 +65,32 @@ export async function createChannelApproval(platform: ChannelPlatform, requester
   return { ok: true, approvalId: result.value.approvalId, approvalUrl: result.value.approvalUrl, expiresAt: new Date(result.value.expiresAt), authorizationPlan: plan };
 }
 /** Withdraws one of this conversation's handoffs that is not yet applied (an applied or ended one is left as it is). */
-export async function revokeChannelApproval(platform: Pick<ChannelPlatform, 'handoffs'>, conversationId: string, approvalId: string | null, now: Date): Promise<boolean> {
-  if (!approvalId) return false;
+export async function revokeChannelApproval(platform: Pick<ChannelPlatform, 'handoffs'> & Partial<Pick<ChannelPlatform, 'workflowRuns'>>, conversationId: string,
+  approvalId: string | null, now: Date): Promise<boolean> {
+  return await endChannelApproval(platform, conversationId, approvalId, now) === 'REVOKED';
+}
+/** What `endChannelApproval` found: a handoff status, RUN_STARTED (a multi-step run exists: left as it is), or null (no handoff). */
+export type EndedApproval = HandoffRecord['status'] | 'RUN_STARTED' | null;
+/** Whether the proposal reached the owner's signing flow, where steps may have run: its steps are never proposed again from the chat. */
+export const inSigningFlow = (ended: EndedApproval) => ended === 'APPLIED' || ended === 'RUN_STARTED';
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: withdraws the handoff when it is not yet applied and returns its status afterwards (REVOKED, or APPLIED /
+ * an ended status that was left as it is); null when there is none. APPLIED means the proposal is in the owner's signing flow and may have run:
+ * its steps must never be carried into a new proposal, and it is never reported as cancelled.
+ */
+export async function endChannelApproval(platform: Pick<ChannelPlatform, 'handoffs'> & Partial<Pick<ChannelPlatform, 'workflowRuns'>>, conversationId: string,
+  approvalId: string | null, now: Date): Promise<EndedApproval> {
+  if (!approvalId) return null;
+  // A multi-step proposal's run starts at the owner's claim and can sign steps while its handoff still reads CLAIMED: once a run exists the
+  // proposal is in the signing flow — never withdrawn from here and never carried into a new proposal.
+  if (platform.workflowRuns && await platform.workflowRuns.byHandoff(approvalId)) return 'RUN_STARTED';
+  // Claimed is enough for a multi-step proposal: its run is created right after the claim commits (never revoked from here).
+  const current = await platform.handoffs.forRequester(approvalId, conversationScope(conversationId), now);
+  if (current?.plan.kind === 'SEQUENTIAL' && current.claimed !== null && (current.status === 'CLAIMED' || current.status === 'APPLIED')) return 'RUN_STARTED';
   const h = await platform.handoffs.revokeForRequester(approvalId, conversationScope(conversationId), now);
-  return h?.status === 'REVOKED';
+  // A claim that landed between the read and the revoke (the store's locked row says so, or its run now exists) is in the signing flow too.
+  if (h?.plan.kind === 'SEQUENTIAL' && (h.claimed !== null || (platform.workflowRuns && await platform.workflowRuns.byHandoff(approvalId)))) return 'RUN_STARTED';
+  return h?.status ?? null;
 }
 /** One of this conversation's handoffs with its shared run progress, or null when it is not this conversation's. */
 export async function channelApprovalProgress(platform: Pick<ChannelPlatform, 'handoffs' | 'runtime'> & Partial<Pick<ChannelPlatform, 'origin' | 'workflowRuns'>>, conversationId: string,

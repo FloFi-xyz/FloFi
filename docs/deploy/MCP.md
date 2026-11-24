@@ -39,6 +39,7 @@ and [report](../builds/BUILD-MCP-001-REPORT.md); [MCP-002 plan](../builds/BUILD-
 | `FLOFI_MCP_APP` | no | `enabled` (default): attach the in-chat MCP App panel to `request_user_approval`. `disabled`: link only. |
 | `FLOFI_MCP_INFRAME_WALLET_HOSTS` | no | MCP Apps host names (`hostInfo.name`) on which the panel offers its in-frame environment probe (diagnostics only; never executes). Empty by default. |
 | `FLOFI_MCP_CLIENTS` | development/Preview only | Static developer credentials of BUILD-MCP-001: JSON `[{"principal":"dev-alice","tokenSha256":"<64 hex>","wallets":["0x…"]}]`. **Refused on a production deployment** (`503 MCP_CONFIGURATION_INVALID`). Optional when OAuth is enabled. They keep the read-only MCP-001 tools and cannot request approvals. |
+| `FLOFI_MCP_PORTFOLIO_LINKS_FROM` | to enable `get_portfolio` | BUILD-FLOFI-UNIVERSAL-CHANNELS-001: UTC instant (`2026-11-25T12:00:00Z`). Balance/position reads use only wallet links created at or after it, i.e. under the `/connections` text that discloses those reads. Set it in **Production only**, at or after the moment the deployment serving that text is live, then redeploy. Unset or invalid: `get_portfolio` fails closed (`PORTFOLIO_RELINK_REQUIRED`). Not a secret. On rollback, unset it first; when rolling forward again, use a new instant. |
 | `FLOFI_MCP_ALLOWED_ORIGINS` | no | Comma-separated browser origins (e.g. a hosted MCP inspector). Any other `Origin` header is refused (`403`). Server-to-server clients send no `Origin`. |
 
 OAuth, approvals and wallet links live in the deployment's PostgreSQL (migration `0005_mcp_oauth`, applied by the normal
@@ -84,10 +85,17 @@ clients in BUILD-MCP-002 (see the report's consumer acceptance section).
 | Scope | Tools |
 | --- | --- |
 | `flofi.strategy` | `get_supported_networks`, `get_supported_assets`, `get_capabilities`, `plan_strategy`, `compose_strategy`, `validate_strategy`, `review_strategy`, `simulate_strategy`; education and product guide (general knowledge, never live data): `explain_concept`, `explain_strategy`, `get_platform_help`; the static `list_automation_types` |
-| `flofi.approval` | `request_user_approval`, `get_approval_status`; app-only (MCP Apps visibility `["app"]`, hidden from the model): `open_approval_session`, `get_execution_progress` |
-| `flofi.runs` | `get_execution_status`, `get_evidence`, `get_automation_status` (read-only) — only runs and automations of wallets the account **linked on FloFi** (`/connections`) |
+| `flofi.approval` | `request_user_approval`, `get_approval_status`, `list_approvals`, `cancel_approval`; app-only (MCP Apps visibility `["app"]`, hidden from the model): `open_approval_session`, `get_execution_progress` |
+| `flofi.runs` | `get_account`, `get_portfolio`, `list_executions`, `get_execution_status`, `get_evidence`, `get_automation_status` (read-only) — only wallets the account **linked on FloFi** (`/connections`); `get_portfolio` only for links made under the current consent text (`FLOFI_MCP_PORTFOLIO_LINKS_FROM`) |
+
+BUILD-FLOFI-UNIVERSAL-CHANNELS-001: results that describe a workflow or execution add `conversationState` (`state`, `final`, `completed`,
+`nextStep`, `reason`) derived only from durable state — `DRAFT_CREATED`, `MISSING_INFORMATION`, `VALIDATION_REQUIRED`, `SIMULATION_COMPLETED`,
+`REVIEW_REQUIRED`, `AWAITING_WALLET_CONNECTION`, `AWAITING_SIGNATURE`, `SUBMITTED`, `PENDING_CONFIRMATION`, `PARTIALLY_EXECUTED`, `CONFIRMED`
+(the only completed state), `FAILED`, `CANCELLED`, `EXPIRED`, `NEEDS_ATTENTION`, `STATUS_UNKNOWN`. A failed call keeps its structured
+`{ ok: false, code }` and adds a second text block `userMessage (EN)` / `userMessage (PT)` for the person.
 
 Every tool input is a closed JSON Schema. Errors are `{ ok: false, code }`; schema violations name the path and rule, never the value.
+No account tool takes a wallet or address input.
 
 | Tool | Input | Notes |
 | --- | --- | --- |
@@ -99,6 +107,11 @@ Every tool input is a closed JSON Schema. Errors are `{ ok: false, code }`; sche
 | `request_user_approval` | `{ strategy, workflowHash }` | re-composes and re-checks; returns `approvalId`, the nonsecret `approvalUrl` (`<origin>/approve#apr_…`), `workflowHash`, `expiresAt`, `status`, `networkEnvironment`, `fundsClass`, `steps`, `authority: "NONE"`, `requires`, `preExecution`; attaches the panel. Private capability URLs are delivered to the panel through client-only `_meta`, outside model-visible content. |
 | `get_approval_status` | `{ approvalId }` | PENDING / CLAIMED / APPLIED / EXPIRED / SUPERSEDED / REVOKED / STALE, and the runs started from it while the owner shares them |
 | `get_execution_status`, `get_evidence` | `{ executionId, … }` | owner-scoped; anything not readable is `RUN_NOT_FOUND` |
+| `get_account` | `{}` | client, scopes, linked wallets (`balancesReadable` each), the `/connections` link; identity is only proven wallet links |
+| `get_portfolio` | `{ positions? }` | balances (Dashboard portfolio reader: enabled mainnets, validated catalogs, verified USD prices only) and Aave/Uniswap/Orca positions of up to 4 linked wallets; unread networks `UNAVAILABLE`, failed wallets `complete:false`; 30 per account per hour |
+| `list_executions` | `{}` | newest 25 runs per linked wallet (up to 4) across flows from `GET /v1/runs`, with canonical lifecycle and `conversationState`; remote runtime only (`HISTORY_NOT_AVAILABLE` otherwise); 60 per account per hour |
+| `list_approvals` | `{ limit? }` | this connection's approval requests with status and `conversationState` (APPLIED or claimed multi-step: read `get_approval_status`) |
+| `cancel_approval` | `{ approvalId }` | withdraws a PENDING request or a CLAIMED single-step one; `APPROVAL_NOT_CANCELLABLE` once APPLIED or a multi-step run was claimed; never reports a request cancelled that reached the signing flow |
 | `explain_concept` | `{ concept? \| term?, level?, protocol?, language? }` (exactly one of `concept` — a catalog id — or `term` — ≤ 80 characters in the user's words, EN/PT) | FloFi's shared concept catalog (`domain/intelligence/concepts.ts`, the same text as the web chat and channels): `id`, `name`, `text`, `notes`, `related`, `generalKnowledge: true`, `liveData: false`, `liveValues` (live values come only from Simulation and Review). `CONCEPT_UNKNOWN` (with the catalog ids; the term is never echoed), `CONCEPT_INPUT_INVALID` |
 | `explain_strategy` | `{ strategy, workflowHash?, language? }` | the same composition and hash as `compose_strategy` (same refusal codes); each canonical step in FloFi's presentation words with its key concepts, the deterministic review findings, and every concept that applies to the steps (collateral, health factor, liquidation, LTV for a borrow; slippage for swaps and bridges; token approvals; impermanent loss for liquidity) located in the workflow. No live health factor, LTV, price or APY; `authority: NONE…` |
 | `get_platform_help` | `{ topic? \| question?, language? }` | FloFi's platform guide on the MCP surface (`platformGuide(…, 'MCP')`: never an `APPLY_CHANGE` / `PREPARE_CHANGE` mode; web-only topics such as saved recipients are not offered); the whole guide without input; links are relative FloFi paths on `websiteUrl`. `PLATFORM_TOPIC_UNKNOWN`, `PLATFORM_HELP_INPUT_INVALID` |
@@ -149,7 +162,8 @@ iframe can see (diagnostics for the owner's experiments).
 ## 5. Wallet links (`/connections`)
 
 In the browser that holds the FloFi account (the consent cookie), prove a wallet and click **Link** to let that account's MCP
-connections read the wallet's runs and the read-only status of its automations (`flofi.runs`). Links expire after 30 days and can be
+connections read the wallet's runs (status, evidence, history), the read-only status of its automations and — for links made under the
+current text (`FLOFI_MCP_PORTFOLIO_LINKS_FROM`) — its balances and DeFi positions (`flofi.runs`). Links expire after 30 days and can be
 removed there; `/connections` also withdraws open approval requests. A link never lets anyone sign, move funds or change an automation.
 
 ## 6. Mainnet
