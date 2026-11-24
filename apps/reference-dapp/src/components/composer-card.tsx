@@ -545,6 +545,8 @@ export type ComposerCardData = {
     assetAddress?: string; lending?: LendingPickerData };
   /** BUILD AAVE-V3-CARD-CATALOG-FIX-001: the earlier step whose delivered output this step spends (a sequence such as Swap → Supply). */
   funding?: { readonly step: number; readonly symbol: string; readonly network: string; readonly changed: boolean };
+  /** BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): what this step takes from the step it is connected to (catalog message, `{0}` = that step). */
+  provenance?: { readonly step: number; readonly state: 'inherited' | 'mismatch'; readonly message: string };
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
@@ -808,6 +810,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           </form>;
         })()
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
+      {!card.funding && card.provenance && <span className="composer-quote-note composer-provenance-note" role="status" data-provenance={card.provenance.state}>
+        {tr(card.provenance.message, card.provenance.step)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}
         onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}/>}
       {/* Review round 2: a destination drafted alone says how it applies (Enter) and can be cancelled with the card's own cancel, which clears the

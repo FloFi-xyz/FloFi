@@ -39,7 +39,7 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   reviewCryptoPool(id: string, input: CryptoActionInput): string | null;
   actionSetup: CanvasActionSetup | null; amountInputs: CanvasAmountInputs; authoringIncomplete: boolean;
   bridgeNetworkInputs: CanvasBridgeNetworkInputs; editBridgeNetworks(id: string, patch: Partial<CanvasBridgeNetworks>): void;
-  startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment): string;
+  startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment, inheritedAmount?: string): string;
   /** BUILD-RH-002: the Stocks card, a Robinhood Chain catalog swap (USDG → Stock Token). */
   startStocksSetup(position: { x: number; y: number }): string;
   editCanvasAmount(id: string, amount: string): void; cancelCanvasAmount(id: string): void;
@@ -502,9 +502,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'UNDO' });
     return true;
   }, []);
-  function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment) {
+  function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment, inheritedAmount?: string) {
     if (history.actionSetup) return history.actionSetup.id;
-    dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}), ...(environment ? { environment } : {}) });
+    dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}), ...(environment ? { environment } : {}), ...(inheritedAmount ? { inheritedAmount } : {}) });
     return `action-setup-${history.setupSerial + 1}`;
   }
   function startStocksSetup(position: { x: number; y: number }) {
