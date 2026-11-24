@@ -372,3 +372,69 @@ Token-first painting is covered by tests rather than timing:
 | Incident recovery (`xuni-02c5…d970`) | Not recovered. Expected to reconcile through ordinary worker observation after deploy (replayed in tests). It must be verified read-only after deploy. `reconcile-history --apply` needs separate CTO authorization |
 | Real-wallet acceptance (USDC Ethereum → Base → Aave V3 Supply) | Not performed. Needs the owner's wallet and explicit signing. Automated and fixture evidence is not funded mainnet acceptance |
 
+## 11. Final certification of PR #250
+
+The [CircleCI workflow for `7b4198fe`](https://app.circleci.com/workflow/b2a90d5d-6233-4cfe-af91-a430af515229)
+had one failed job. Governance job 4129 passed its 21 governance tests, 336 CI tests and
+Governance-lite. Its cumulative `git diff --check` against the merge base with `main` then failed
+with `new blank line at EOF` on line 374 of this ledger. The working-tree and last-commit checks
+alone missed the line introduced in `0b8d8bb1`. Adding this section removes the blank line at EOF.
+There was no same-revision rerun. [Governance job 4129](https://app.circleci.com/workflow/b2a90d5d-6233-4cfe-af91-a430af515229/job/af84651b-9133-4928-9585-77d1575a0988)
+
+The certification build, including function traces, and Vercel Preview passed on `7b4198fe`.
+Supply chain, unit, PostgreSQL and fork checks, all eight browser shards, and the certification
+ledger never started because governance failed. The correction requires fresh certification on
+the PR head. See the [PR checks](https://github.com/FloFi-xyz/FloFi/pull/250/checks) for the current
+revision and the [PR description](https://github.com/FloFi-xyz/FloFi/pull/250) for the handback.
+
+### 11.1 Legacy downstream requests
+
+The release review found two paths that still used pre-deploy amounts. An approval tab that had
+already loaded an `AWAITING_OWNER` step could ask its ordinary flow for a wallet request. A valid
+cached `PREPARED` group could also be returned before the normal delivery check. A user operation
+recorded as `SUBMITTED` before relay could be sent for the first time during worker recovery.
+
+- New downstream wallet requests, including idempotent responses, require Relay proof for a
+  matching legacy step. The match uses the same tenant, wallet, flow, claim time and exact reviewed
+  workflow hash as the run observer. An independently authored action with identical reviewed
+  content inside that claim window can also be refused.
+- Cached group preparation, Circle signing and new authorization recheck proof. An unsent
+  authorized user operation is blocked before relay. Recovery of a recorded submission with
+  missing proof continues to read receipts and chain events without relaying the operation.
+- FloFi still accepts reports for a batch the owner's wallet may already have sent. An injected
+  wallet request already handed out before rollout can still execute under its existing terms.
+  The revised runtime checks FloFi-managed signing and broadcast before issuing or sending them.
+  A pre-deploy Canvas tab without a durable workflow claim has no server-side claim to match.
+  Reloading uses the existing sequence restore and `DELIVERY_NOT_PROVEN` check.
+
+### 11.2 Remaining release limitations
+
+- An already `READY` legacy step can still display a signing status. A fresh approval load refuses
+  it with `WORKFLOW_BINDING_NOTHING_RECEIVED`.
+- Historical pending ERC-20 observations that fail re-proof still withhold settlement evidence.
+  There is no immediate proof-specific escalation. Ordinary retries can exhaust the worker budget
+  and put the record in operator attention. Previously terminal records without proof contribute no
+  downstream funding.
+- The native incident replay and legacy restore tests preserve the original deposit attempts.
+  Production recovery of `xuni-02c5ec75ce6546413be3ceb55364d970` still depends on ordinary worker
+  observation after the owner deploys and on the work item remaining eligible. Any
+  `reconcile-history --apply` requires separate CTO authorization.
+- The unregistered Relay fill shape stays fail-closed. USDC Ethereum → Base → Aave V3 Supply still
+  requires owner-signed mainnet acceptance.
+
+### 11.3 Focused validation
+
+- Governance and CI self-tests passed locally. The cumulative branch whitespace check reproduced
+  the failure on `7b4198fe` and passed with this ledger update.
+- Thirty-five focused tests passed on a disposable PostgreSQL 18.6 server with UTF-8. They cover
+  legacy `READY` and `AWAITING_OWNER` binding, tenant and wallet isolation, cached group reuse,
+  already-sent batch reporting and refusing an unsent user operation. A focused rerun also checked
+  a Base swap whose first `begin` would have bound an owner and issued a request through the real
+  backend. The request was refused and the run kept zero attempts.
+- Seventy-five focused unit tests passed for group reconciliation, proof accounting and managed
+  signing. The lost-operation test checks that observation still recovers a mined event without
+  sending an operation.
+- The plain Node 24.21.0 backend entrypoint reached its normal command validation. Specialist
+  reviews covered workflow, bridge, security, wallet execution, lending, MCP and infrastructure CI.
+  CircleCI remains the authority for the exact revision, full PostgreSQL, traces and all browser
+  profiles. [PR #250 checks](https://github.com/FloFi-xyz/FloFi/pull/250/checks)

@@ -8,6 +8,7 @@
  */
 import { assetKey } from '../delegation/steps.ts';
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
+import type { BoundResolution, RunStepRecord } from './pg-store.ts';
 
 export type FlowAmount = { readonly asset: string; readonly amount: string; readonly orderProof?: 'RELAY_EVM_TOKEN_V1' };
 
@@ -18,6 +19,18 @@ export function amountsAvailable(outcome: { readonly flow: string | null; readon
   if (!outcome) return [];
   const required = proofRequired(outcome.flow, asset);
   return outcome.received.filter(fact => fact.asset === asset && (!required || fact.orderProof === 'RELAY_EVM_TOKEN_V1'));
+}
+
+export function missingDeliveryProof(binding: Pick<BoundResolution, 'amountFrom' | 'asset'>, steps: readonly RunStepRecord[]): boolean {
+  const producer = steps[binding.amountFrom];
+  const asset = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
+  return proofRequired(producer?.outcome?.flow ?? producer?.flow ?? null, asset) &&
+    !producer?.outcome?.received.some(fact => fact.asset === asset && fact.orderProof === 'RELAY_EVM_TOKEN_V1');
+}
+
+export function boundDeliveryRefusal(bound: BoundResolution | null, steps: readonly RunStepRecord[]): string | null {
+  return bound && [bound, ...bound.additional ?? []].some(binding => missingDeliveryProof(binding, steps))
+    ? 'WORKFLOW_BINDING_NOTHING_RECEIVED' : null;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);

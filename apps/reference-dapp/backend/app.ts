@@ -22,7 +22,8 @@ import { BETA_ACCOUNT_HEADER, BETA_SESSION_HEADER, betaIdentityFrom, type BetaRe
 import { APPROVAL_PRINCIPALS_HEADER } from '../src/automations/api-headers.ts';
 import { flightCalendarFrom } from '../src/flight/campaign.ts';
 import { executionRefusal, isNewExecutionMethod } from '../src/server/execution-guard.ts';
-import { DEVELOPER_LIVE_HEADER, externalWalletRequestRefusal, isExternalStepWorkflow, issuesWalletRequest } from '../src/workflow-runs/external-step.ts';
+import { DEVELOPER_LIVE_HEADER, externalWalletRequestRefusal, isExternalStepWorkflow, issuesWalletRequest, loadedOwnerStepDeliveryRefusal } from '../src/workflow-runs/external-step.ts';
+import { installSourceResolution } from './source-resolution.ts';
 import { isFlightRecoveryMethod } from '../src/server/flight-access.ts';
 
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
@@ -212,16 +213,27 @@ export function createBackend(options: BackendOptions) {
     return value;
   }
 
-  async function externalFlowRefusal(flow: FlowName, method: string, args: readonly unknown[], tenantId: string, principal: string | null, live: boolean) {
+  async function walletRequestRefusal(flow: FlowName, method: string, args: readonly unknown[], tenantId: string, principal: string | null, live: boolean) {
     const id = args[0];
-    if (!issuesWalletRequest(method) || typeof id !== 'string' || !FLOWS[flow].runId.test(id)) return null;
-    const { rows: [run] } = await db.query<{ workflow_id: string; owner_account: string | null }>(
-      'SELECT workflow_id, owner_account FROM execution_runs WHERE tenant_id = $1 AND run_id = $2 AND flow = $3', [tenantId, id, flow]);
-    if (!run || !isExternalStepWorkflow(run.workflow_id)) return null;
-    if (principal && ((run.owner_account && run.owner_account !== principal) || (method !== 'handoff' && normalizePrincipal(args[1]) !== principal)))
-      return 'RUN_OWNER_MISMATCH';
-    const record = await service(flow, tenantId).load(id);
-    return externalWalletRequestRefusal(db, { tenantId, flow, executionId: id, workflowId: run.workflow_id, principal, live, record });
+    const issues = issuesWalletRequest(method);
+    if ((!issues && method !== 'submitGasless') || typeof id !== 'string' || !FLOWS[flow].runId.test(id)) return null;
+    const { rows: [run] } = await db.query<{ workflow_id: string; owner_account: string | null; created_at: Date }>(
+      'SELECT workflow_id, owner_account, created_at FROM execution_runs WHERE tenant_id = $1 AND run_id = $2 AND flow = $3', [tenantId, id, flow]);
+    if (!run) return null;
+    const load = () => service(flow, tenantId).load(id);
+    if (issues && isExternalStepWorkflow(run.workflow_id)) {
+      if (principal && ((run.owner_account && run.owner_account !== principal) || (method !== 'handoff' && normalizePrincipal(args[1]) !== principal)))
+        return 'RUN_OWNER_MISMATCH';
+      const refusal = await externalWalletRequestRefusal(db, { tenantId, flow, executionId: id, workflowId: run.workflow_id, principal, live, record: await load() });
+      if (refusal) return refusal;
+    }
+    // Some catalog reviews bind their wallet on the first begin. Apply the guard before that begin can return a request.
+    const claimed = issues && method !== 'handoff' && typeof args[1] === 'string' ? normalizePrincipal(args[1].toLowerCase()) : null;
+    const owner = run.owner_account ?? claimed;
+    if (!owner?.startsWith('0x')) return null;
+    installSourceResolution();
+    return loadedOwnerStepDeliveryRefusal(db, { tenantId, flow, owner,
+      workflowId: run.workflow_id, createdAt: run.created_at, load });
   }
 
   /**
@@ -260,8 +272,8 @@ export function createBackend(options: BackendOptions) {
     return withSpan(logger, 'flow.call', { tenant_id: tenantId, flow, action: method, run_id: runId }, async () => {
       for (let attempt = 0; ; attempt++) {
         try {
-          const externalRefusal = await externalFlowRefusal(flow, method, args, tenantId, principal, developerLive);
-          if (externalRefusal) return { ok: false, code: externalRefusal } as const;
+          const walletRefusal = await walletRequestRefusal(flow, method, args, tenantId, principal, developerLive);
+          if (walletRefusal) return { ok: false, code: walletRefusal } as const;
           return { ok: true, value: await service(flow, tenantId).call(method, args) } as const;
         }
         catch (error) {
@@ -560,7 +572,7 @@ export function createBackend(options: BackendOptions) {
       let claim;
       try { claim = await store.begin(scope, key, hash); } catch (error) { if ((error as Error).message === 'IDEMPOTENCY_KEY_INVALID') throw new HttpError(400, 'IDEMPOTENCY_KEY_INVALID'); throw error; }
       if (claim.kind === 'REPLAY') {
-        const code = await externalFlowRefusal(flow, method, args, tenantId, principal, developerLive);
+        const code = await walletRequestRefusal(flow, method, args, tenantId, principal, developerLive);
         return { status: 200, body: code ? { ok: false, code } : claim.response };
       }
       if (claim.kind === 'CONFLICT') throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED');
