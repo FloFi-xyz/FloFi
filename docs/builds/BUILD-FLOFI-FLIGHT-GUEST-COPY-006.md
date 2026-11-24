@@ -104,6 +104,20 @@ browser tests. No browser surface changed, and no email was sent: all transport 
    - Never run both blindly.
    - CARD_FOUNDING stays as found.
 
+## Production read-only findings (24/11, about 01:50 UTC, before merge; aggregate SELECTs only, no address or code read)
+
+| Item | Finding |
+|---|---|
+| Campaign email | **Paused** since 13/11 (`EMAIL3_1311_AUTHORIZED_BATCH_COMPLETED`). Nothing campaign-category sends until `email-resume`. |
+| CREATOR invites | **10** ACTIVE (addressed, unredeemed, unrevoked, unexpired) with **no Email 6 row in any state**. 1 REDEEMED. The request expected **15**, so **the counts differ: owner decision before any send.** |
+| Beta-list overlap | 1 of the 10 active guests is also on the waiting list (`guestWaitlistOverlap` will report it, masked). Whether that is intended is an owner decision. |
+| Existing Email 6 rows | 1 row: v5, PENDING, for the **redeemed** invite. After the v6 deploy, housekeeping holds it (`TEMPLATE_VERSION_REVIEW`). It must not be superseded: delivery would cancel it as `INVITE_REDEEMED`, and that guest is already on board. |
+| CARD_FOUNDING | Not HELD: 1 **PENDING** (never attempted; held back only by the campaign pause, expires 2026-11-24 14:04 UTC = 11:04 BRT) and 2 CANCELLED/EXPIRED. **An `email-resume` without `email-hold-campaign --keep CREATOR_INVITE` would send this card.** Not modified by this build. |
+
+With this state, the only dispatch path for the 10 is `creator-requeue-missing`: dry-run, then `--apply`, which creates HELD batch
+`creators-v6`. Then `email-hold-campaign --keep CREATOR_INVITE`, `email-resume`, `email-release --batch creators-v6`.
+`creator-supersede-templates` is not needed and must not be applied (its only candidate is the redeemed guest's row).
+
 ## Rollback
 
 Roll forward is preferred. Reverting the code makes v6 rows "non-current": they are held (`TEMPLATE_VERSION_REVIEW`), never rendered

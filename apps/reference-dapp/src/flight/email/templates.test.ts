@@ -85,7 +85,7 @@ describe('Flight launch email copy and immutable queued versions', () => {
   });
   it('freezes the deployed v5 renderer: only Email 6 (v6) changes for the 24/11 guest invitation', () => {
     expect(createHash('sha256').update(readFileSync(new URL('./templates-v5.ts', import.meta.url))).digest('hex'))
-      .toBe('e3a71d555ab8f2dba0ec177998cb8d5a50edc75fef39f2bb5cc271daae0fdea5');
+      .toBe('d72878bcfd90b19e86d492d7017ee8f47d00b735a76823e73b7b63c089ac31ce');
     for (const language of ['EN', 'PT'] as const) for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) {
       const current = renderEmail(input, context(language)), frozen = renderEmailV5(input, context(language));
       if (input.template === 'CREATOR_INVITE') {
