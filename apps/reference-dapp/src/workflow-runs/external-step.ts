@@ -6,7 +6,7 @@ import type { Composition } from '../engine/strategy-engine';
 import type { Workflow } from '../domain/initial-workflow';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { normalizePrincipal } from '../server/run-ownership.ts';
-import type { RunRecord } from './pg-store';
+import type { RunRecord } from './pg-store.ts';
 
 const EXTERNAL_WORKFLOW = /^(wfr_[a-z2-7]{26})-step-([0-7])$/;
 export const isExternalStepWorkflow = (workflowId: string) => EXTERNAL_WORKFLOW.test(workflowId);
@@ -31,11 +31,33 @@ export function executionStep(run: Pick<RunRecord, 'runId' | 'requester'>, stepI
   return { ...composition, workflow, workflowHash: stepHash(workflow) };
 }
 
-export function externalStepWorkflow(record: unknown, workflowId?: string): Workflow | undefined {
+function recordWorkflows(record: unknown): readonly Workflow[] {
   const r = record as { readonly workflow?: Workflow; readonly review?: { readonly workflow?: Workflow };
     readonly prepared?: { readonly workflow?: Workflow }; readonly reviews?: readonly { readonly workflow?: Workflow }[] } | null;
   return [r?.workflow, r?.review?.workflow, r?.prepared?.workflow, r?.reviews?.[0]?.workflow]
-    .find(w => typeof w?.workflowId === 'string' && (workflowId === undefined ? isExternalStepWorkflow(w.workflowId) : w.workflowId === workflowId));
+    .filter((w): w is Workflow => typeof w?.workflowId === 'string');
+}
+
+export function externalStepWorkflow(record: unknown, workflowId?: string): Workflow | undefined {
+  return recordWorkflows(record).find(w => workflowId === undefined ? isExternalStepWorkflow(w.workflowId) : w.workflowId === workflowId);
+}
+
+/** Older owner proposals have an ordinary workflow ID. Apply the same wallet, flow, claim time and exact reviewed hash used by observation. */
+export async function loadedOwnerStepDeliveryRefusal(db: Database, input: {
+  readonly tenantId: string; readonly flow: string; readonly owner: string; readonly createdAt: Date; readonly workflowId: string;
+  readonly load: () => Promise<unknown>;
+}): Promise<string | null> {
+  const [{ createPgWorkflowRunStore }, { boundDeliveryRefusal }] = await Promise.all([import('./pg-store.ts'), import('./received-amounts.ts')]);
+  const store = createPgWorkflowRunStore(db, input.tenantId);
+  const steps = await store.loadedBoundSteps(input.owner, input.flow, input.createdAt);
+  if (!steps.length) return null;
+  const hashes = new Set(recordWorkflows(await input.load()).filter(w => w.workflowId === input.workflowId).map(stepHash));
+  for (const step of steps) {
+    if (!step.workflowHash || !hashes.has(step.workflowHash)) continue;
+    const refusal = boundDeliveryRefusal(step.bound, await store.steps(step.runId));
+    if (refusal) return refusal;
+  }
+  return null;
 }
 
 /** The existing flow owns its wallet request. A live external step also needs a current, applied approval

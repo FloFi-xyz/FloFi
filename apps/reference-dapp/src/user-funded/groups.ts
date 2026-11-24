@@ -976,7 +976,8 @@ export function supersede(previous: Prepared | null): readonly Superseded[] {
 }
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
 export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>,
-  authorization: Readonly<Record<string, unknown>> | null = null, runOwner?: BetaPrincipal): Promise<Reconciled> {
+  authorization: Readonly<Record<string, unknown>> | null = null, runOwner?: BetaPrincipal,
+  options: { readonly observeOnly?: boolean } = {}): Promise<Reconciled> {
   const group = prepared.group as EvmGroupCalls, t = deps.evm(group.chain);
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
@@ -1025,7 +1026,7 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
   // Recorded, but the bundler neither has a receipt nor knows it: whether it executed is read from the chain, never taken from the bundler's
   // word (`reconcileLostUserOperation`): it is relayed again (the SAME signed bytes) only while its nonce is provably unconsumed.
   if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false))
-    return reconcileLostUserOperation(deps, t, group, prepared, authorization, userOpHash, runOwner);
+    return reconcileLostUserOperation(deps, t, group, prepared, authorization, userOpHash, runOwner, options.observeOnly === true);
   return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null, circleReconciliationOf(prepared)));
 }
 /** ADR-0010: what a Circle-paid group's reconciliation checks (its EntryPoint, the pinned paymaster, USDC and the cap); null for any other group. */
@@ -1115,7 +1116,7 @@ async function findUserOperationEvent(t: ChainTransport, userOpHash: string, fro
  *   unreadable         nothing is decided (PENDING)
  */
 async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTransport, group: EvmGroupCalls, prepared: Prepared,
-  authorization: Readonly<Record<string, unknown>>, userOpHash: string, runOwner?: BetaPrincipal): Promise<Reconciled> {
+  authorization: Readonly<Record<string, unknown>>, userOpHash: string, runOwner: BetaPrincipal | undefined, observeOnly: boolean): Promise<Reconciled> {
   let op: erc4337.PackedUserOperation;
   try { op = opOf(prepared.op as SerialOp); } catch { return { status: 'PENDING' }; }
   const entryPoint = entryPointOf(prepared);
@@ -1124,6 +1125,8 @@ async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTranspor
   // passed with the nonce still unconsumed and the bundler not knowing it, it can no longer execute, and nothing was charged — FAILED.
   if (consumed === false && circleFactsOf(prepared) && !circleRelayOpen(prepared, deps.now()))
     return circleDeadlinePassed(prepared, deps.now()) ? { status: 'FAILED', code: 'CIRCLE_OPERATION_DEADLINE_PASSED', gasPaid: null, transactions: [] } : { status: 'PENDING' };
+  // SUBMITTED is persisted before the first relay. An old unproven binding can be observed, but its signed bytes cannot be sent again.
+  if (consumed === false && observeOnly) return { status: 'PENDING' };
   if (consumed === false) {
     const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
     if (resent.ok || resent.code.startsWith('BETA_') || RESEND_RETRYABLE.has(resent.code)) return { status: 'PENDING' };

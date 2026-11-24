@@ -12,13 +12,14 @@
 import { createHash } from 'node:crypto';
 import { canonicalAddress, isPrivyWallet, type AccountWallet } from '../accounts/account-model';
 import type { AccountStore } from '../accounts/account-store';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow, flowRuntimeKind } from '../server/flow-runtime';
 import { localCatalogNetworkMode } from '../server/catalog-networks';
 import { createManagedWalletEvm, type ManagedEvmBroadcast, type ManagedEvmExpected, type ManagedEvmFees, type ManagedWalletEvm } from '../server/managed-wallet-evm';
 import { resolveManagedSigning, type CircleSigningRun, type ManagedSigningDeps, type ManagedSigningRequest, type ManagedSigningResult } from '../server/managed-signing';
 import { platformStateHost } from '../server/platform-state-host';
 import { createPgWorkflowRunStore } from '../workflow-runs/pg-store';
-import { externalStepWorkflow, externalWalletRequestRefusal } from '../workflow-runs/external-step';
+import { externalStepWorkflow, externalWalletRequestRefusal, loadedOwnerStepDeliveryRefusal } from '../workflow-runs/external-step';
+import { preparedGroupDeliveryRefusal } from '../workflow-runs/user-funded-pass';
 import type { SigningContext, SigningFlow } from '../wallet/flofi-signing';
 import { jupiterStatus } from './jupiter-action';
 import { solanaTransferStatus } from './solana-transfer-action';
@@ -45,7 +46,21 @@ async function loadCircleSigningRun(runId: string): Promise<CircleSigningRun> {
   const host = await platformStateHost(process.env), store = createPgWorkflowRunStore(host.db, host.tenantId);
   const run = await store.byId(runId);
   if (!run) throw new Error('WORKFLOW_RUN_NOT_FOUND');
-  return { run, groups: await store.groups(runId) };
+  const groups = await store.groups(runId);
+  const group = groups.find(g => g.state === 'PREPARED' && g.strategy === 'EVM_USER_OPERATION' && g.stepFrom <= run.currentStep && run.currentStep <= g.stepTo);
+  const refusal = group ? preparedGroupDeliveryRefusal(run, group, await store.steps(runId)) : null;
+  if (refusal) throw new Error(refusal);
+  return { run, groups };
+}
+
+/** An already handed-out managed-wallet request still passes FloFi before signing or broadcast. */
+export async function managedOwnerDeliveryRefusal(context: SigningContext, owner: string, record: unknown): Promise<string | null> {
+  if (!owner.startsWith('0x') || flowRuntimeKind(process.env) === 'local') return null;
+  const host = await platformStateHost(process.env);
+  const { rows: [run] } = await host.db.query<{ workflow_id: string; created_at: Date }>(`SELECT workflow_id, created_at FROM execution_runs
+    WHERE tenant_id = $1 AND run_id = $2 AND flow = $3 AND owner_account = $4`, [host.tenantId, context.runId, context.flow, owner]);
+  return run ? loadedOwnerStepDeliveryRefusal(host.db, { tenantId: host.tenantId, flow: context.flow, owner,
+    workflowId: run.workflow_id, createdAt: run.created_at, load: async () => record }) : null;
 }
 
 let local: ManagedWalletEvm | null = null;
@@ -133,6 +148,8 @@ export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: 
           flow: context.flow, executionId: context.runId, principal: session.account, live: true, record });
         if (code) return { ok: false, code };
       }
+      const deliveryRefusal = await managedOwnerDeliveryRefusal(context, resolved.value.owner, record);
+      if (deliveryRefusal) return { ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' };
       claimed = await claimAttempt(store, 'signature', resolved.value.attempt, resolved.value.expiresAtMs);
     }
     catch { return { ok: false, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }; }

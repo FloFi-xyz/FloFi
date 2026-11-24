@@ -5,14 +5,21 @@
  * owner's flow runs are recorded by the isolated flow-runtime test double (as FloFi's flows would after the owner's wallet signature). MOCKED.
  */
 import { randomBytes } from 'node:crypto';
+import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
+import { createBackend } from '../../backend/app.ts';
 import { createPgDeveloperStore } from '../developer/pg-store.ts';
+import { validateSavedWorkflow } from '../domain/saved-workflow';
 import { composeWorkflowBound, semanticWorkflowHash } from '../engine/strategy-engine';
 import { ENGINE_VERSION, workflowPlan } from '../mcp/execution.ts';
 import { approvalLinkScheme, approvalProgress, applyApproval, assembleApprovalSurface, claimApproval, requestApproval, typedId,
   workflowRunCancel, workflowRunContinue, workflowRunResume, workflowRunStatus } from '../platform/index.ts';
 import { advanceRun } from './runner.ts';
+import { loadedOwnerStepDeliveryRefusal } from './external-step.ts';
+import { baseAsset, baseCatalog } from '../server/base-mainnet.test-harness';
+import { createDurablePublicTestnetService } from '../server/public-testnet-service';
+import { createRobinhoodMockChain, mockCatalogRuntime } from '../server/robinhood-mainnet.test-harness';
 import { workflowRunHarness, type RunHarness } from './workflow-run.test-harness.ts';
 
 const BASE_SWAP = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 };
@@ -453,7 +460,7 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
     } finally { await t.drop(); }
   });
 
-  it('BUILD-CROSSCHAIN-UNIVERSAL-001: Swap → Bridge → Swap with bindings resolves each received amount in confirm mode', async () => {
+  it.each(['proven', 'unproven', 'legacy bound'] as const)('BUILD-CROSSCHAIN-UNIVERSAL-001: Swap → Bridge → Swap with bindings resolves each received amount in confirm mode (%s Relay ERC-20 delivery)', async proof => {
     const t = await createTestDatabase();
     try {
       // Solana swap → universal bridge → Base swap. Flows mocked; policy allows the two mainnets for handoff.
@@ -474,7 +481,6 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
         bindings: [{ step: 1, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' }, { step: 2, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' }] });
       const run = await runOf(h, approval.approvalId);
       const solUsdc = `${composed.bindings[0]!.asset.chainId}/token:${composed.bindings[0]!.asset.address}`;
-      const baseUsdc = `${composed.bindings[1]!.asset.chainId}/erc20:${composed.bindings[1]!.asset.address}`;
       // Step 0 (Jupiter): delivers Solana USDC below the bridge cap.
       h.flows.ownerExecutes('jupiter-swap', h.sol.address, claimed.workflow, 'RECONCILED',
         { received: [{ asset: solUsdc, amount: '40' + '0'.repeat(6) }] }); // 40 USDC
@@ -485,10 +491,72 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
       expect(bridgeStep).toMatchObject({ state: 'AWAITING_OWNER', flow: 'crosschain-universal',
         bound: { used: '40000000', received: '40000000' }, strategy: { action: 'bridge', amount: '40' } });
       await applyApproval(h.surface, approval.secret, [h.evm, h.sol], bridgeLoad.workflow, h.d.now()).catch(() => undefined);
-      // Step 1 (universal bridge): delivers Base USDC below the destination swap cap.
-      h.flows.ownerExecutes('crosschain-universal', h.sol.address, bridgeLoad.workflow, 'RECONCILED',
-        { received: [{ asset: baseUsdc, amount: '39' + '0'.repeat(6) }] }); // 39 USDC on Base
+      // Step 1 (universal bridge): delivers 39 USDC on Base, below the destination swap cap. BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: the
+      // flow's own reconciled record is read by the real universal parser; an ERC-20 delivery funds a later step only with the Relay order
+      // proof (RELAY_EVM_TOKEN_V1) the destination verifier now persists. Without it the run never funds the destination swap.
+      const bridgeRun = h.flows.ownerExecutes('crosschain-universal', h.sol.address, bridgeLoad.workflow, 'RECONCILED');
+      const baseChain = composed.bindings[1]!.asset.chainId, solChain = composed.bindings[0]!.asset.chainId;
+      bridgeRun.recordExtras = { format: 'flofi.universal-bridge-run.v1', verdict: 'RECONCILED', received: '39000000',
+        destination: { chainId: baseChain, transactionHash: '0x' + '39'.repeat(32), final: true, amount: '39000000',
+          ...proof === 'proven' ? { orderProof: 'RELAY_EVM_TOKEN_V1' } : { orderBound: true } },
+        review: { workflow: bridgeLoad.workflow, recipient: h.evm.address, route: { sourceChain: solChain, destinationChain: baseChain, inputAmount: '40000000',
+          inputToken: { chainId: solChain, kind: 'TOKEN', address: composed.bindings[0]!.asset.address },
+          outputToken: { chainId: baseChain, kind: 'TOKEN', address: composed.bindings[1]!.asset.address } } } };
+      if (proof === 'legacy bound') {
+        // Persist the outcome and READY binding the pre-proof runner could have written, using the real store transitions.
+        const asset = composed.bindings[1]!.asset, received = '39000000', flow = 'base-swap';
+        await h.store.settleOwnerStep(run.runId, 1, 'RECONCILED', { kind: 'OWNER_RUN', executionId: bridgeRun.runId, flow: 'crosschain-universal',
+          status: 'RECONCILED', transactions: [], evidence: null, spent: [], received: [{ asset: `${baseChain}/erc20:${asset.address}`, amount: received }],
+          observedAt: h.d.now().toISOString() }, null);
+        const before = await runOf(h, approval.approvalId);
+        await h.store.transition(run.runId, { version: before.version, from: ['RUNNING'] }, 'RUNNING', { currentStep: 2 });
+        const destination = composeWorkflowBound({ ...workflow.steps[2], amount: '39' }, undefined);
+        if (!destination.ok) throw new Error(destination.code);
+        const { strategy, workflow: reviewed, workflowHash } = destination.steps[0]!;
+        await h.store.stepTransition(run.runId, 2, ['PENDING'], 'READY', { flow, strategy, workflowHash,
+          bound: { amountFrom: 1, asset, cap: composed.bindings[1]!.cap, received, used: received } });
+        await expect(continued(h, approval.approvalId)).rejects.toThrow('WORKFLOW_BINDING_NOTHING_RECEIVED');
+        const claimedAt = new Date();
+        await h.store.stepTransition(run.runId, 2, ['READY'], 'AWAITING_OWNER', { claimedAt });
+        const input = { tenantId: h.d.tenantId, flow, owner: h.evm.address, createdAt: claimedAt, workflowId: reviewed.workflowId,
+          load: async () => ({ review: { workflow: reviewed } }) };
+        await expect(loadedOwnerStepDeliveryRefusal(t.db, input)).resolves.toBe('WORKFLOW_BINDING_NOTHING_RECEIVED');
+        await expect(loadedOwnerStepDeliveryRefusal(t.db, { ...input, createdAt: new Date(claimedAt.getTime() - 2_000) })).resolves.toBeNull();
+        await expect(loadedOwnerStepDeliveryRefusal(t.db, { ...input, tenantId: 'other-tenant' })).resolves.toBeNull();
+        await expect(loadedOwnerStepDeliveryRefusal(t.db, { ...input, owner: '0x' + '12'.repeat(20) })).resolves.toBeNull();
+        await expect(loadedOwnerStepDeliveryRefusal(t.db, { ...input, load: async () => ({ review: { workflow: { ...reviewed, revision: reviewed.revision + 1 } } }) })).resolves.toBeNull();
+        // A Base Swap review intentionally has no projected owner until begin. Refuse before it can bind a wallet and issue a request.
+        const catalog = baseCatalog(), chain = createRobinhoodMockChain(catalog, { network: 'base', now: Date.now });
+        const usdc = baseAsset(catalog, 'USDC').address!, weth = baseAsset(catalog, 'WETH').address!;
+        chain.addPool(usdc, weth, { fee: 3000, liquidity: 10n ** 20n, rate: { [usdc]: 4n * 10n ** 26n, [weth]: 2_500_000n } });
+        chain.fund(usdc, h.evm.address, 50_000_000n);
+        chain.fundNative(h.evm.address, 10n ** 18n);
+        const backend = createBackend({ db: t.db, tenantId: h.d.tenantId, holderId: 'legacy-relay-binding', evidenceStore: null,
+          env: { GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, rpc: { 'base-swap': chain.rpc }, catalog: async () => catalog,
+          logger: createLogger({ service: 'legacy-relay-binding', sink: () => undefined }) });
+        const swap = createDurablePublicTestnetService({ rpc: chain.rpc, rpcs: { [baseChain]: chain.rpc }, storage: backend.storage(flow, h.d.tenantId),
+          idPrefix: 'bas', catalog: mockCatalogRuntime(catalog) });
+        const quote = (await swap.prepare(validateSavedWorkflow(reviewed), h.evm.address)).quote, id = quote.executionId;
+        await swap.review(id, quote.manifestHash);
+        const args = [id, h.evm.address];
+        expect((await t.db.query('SELECT owner_account, status FROM execution_runs WHERE run_id = $1', [id])).rows)
+          .toEqual([{ owner_account: null, status: 'AUTHORIZED' }]);
+        await expect(backend.callFlow(flow, 'begin', args, h.d.tenantId, h.evm.address)).resolves.toEqual({ ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' });
+        expect((await swap.load(id)).attempts).toEqual([]);
+        return;
+      }
       await h.drain(run.runId);
+      if (proof === 'unproven') {
+        // Fail closed: the bridge is final but proves no amount a later step may spend, so the destination swap is never funded or offered.
+        expect((await h.store.steps(run.runId)).map(step => [step.state, step.bound?.used ?? null, step.outcome?.received ?? null])).toEqual([
+          ['RECONCILED', null, [{ asset: solUsdc, amount: '40000000' }]], ['RECONCILED', '40000000', []], ['BLOCKED', null, null]]);
+        expect((await progressOf(h, approval.approvalId)).workflowRun).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' });
+        expect((await continued(h, approval.approvalId)).command).toBeNull();
+        return;
+      }
+      // The internal order-proof marker never leaks into the published run status (MCP, Developer API, channels).
+      expect((await progressOf(h, approval.approvalId)).workflowRun!.steps[1]!.outcome!.received)
+        .toEqual([{ asset: `${baseChain}/erc20:${composed.bindings[1]!.asset.address}`, amount: '39000000' }]);
       const destSwap = await continued(h, approval.approvalId);
       expect(destSwap.view.workflowRun!.step).toEqual({ index: 2, count: 3 });
       const swapStep = (await h.store.steps(run.runId))[2]!;

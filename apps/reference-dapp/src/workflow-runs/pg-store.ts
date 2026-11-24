@@ -31,7 +31,8 @@ export type StepOutcome = {
   readonly kind: 'OWNER_RUN' | 'DELEGATED_STEP' | 'USER_FUNDED_GROUP'; readonly executionId: string; readonly flow: string | null; readonly status: string;
   readonly transactions: readonly { readonly chain: string; readonly hash: string }[];
   readonly evidence: { readonly environment: string; readonly outcome: string; readonly bundleHash: string | null } | null;
-  readonly spent: readonly { readonly asset: string; readonly amount: string }[]; readonly received: readonly { readonly asset: string; readonly amount: string }[];
+  readonly spent: readonly { readonly asset: string; readonly amount: string }[];
+  readonly received: readonly import('./received-amounts.ts').FlowAmount[];
   readonly observedAt: string;
   /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: network fees actually paid for the group this step ran in, and by whom (always the owner's wallet). */
   readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number;
@@ -170,6 +171,13 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     },
     async steps(runId: string): Promise<readonly RunStepRecord[]> {
       return (await db.query('SELECT * FROM workflow_run_steps WHERE tenant_id = $1 AND run_id = $2 ORDER BY step_index', [tenantId, runId])).rows.map(stepOf);
+    },
+    async loadedBoundSteps(wallet: string, flow: string, createdAt: Date): Promise<readonly RunStepRecord[]> {
+      return (await db.query(`SELECT s.* FROM workflow_runs r JOIN workflow_run_steps s USING (tenant_id, run_id)
+        WHERE r.tenant_id = $1 AND r.wallets->>'eip155' = $2 AND s.flow = $3 AND s.bound IS NOT NULL
+          AND r.mode IN ('CONFIRM_EACH_STEP', 'USER_FUNDED') AND s.claimed_at <= $4::timestamptz + interval '1 second'
+          AND (r.current_step = s.step_index AND r.state IN ('RUNNING', 'ATTENTION') AND s.state IN ('AWAITING_OWNER', 'UNCERTAIN')
+            OR $4::timestamptz <= LEAST(r.expires_at, s.updated_at))`, [tenantId, wallet, flow, createdAt])).rows.map(stepOf);
     },
     async events(runId: string, limit = 100): Promise<readonly RunEvent[]> {
       return (await db.query(`SELECT * FROM workflow_run_events WHERE tenant_id = $1 AND run_id = $2 ORDER BY event_id DESC LIMIT $3`,

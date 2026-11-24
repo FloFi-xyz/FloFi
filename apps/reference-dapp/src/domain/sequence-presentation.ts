@@ -68,10 +68,13 @@ export function sequenceUnservedMessage(workflow: Workflow, context: ReviewConte
   return translate(language, 'Step {0} ({1} on {2}) cannot run on this deployment: its provider is not available here. Nothing was simulated or sent.',
     step.index + 1, translate(language, summary?.action ?? 'Action'), summary?.network ?? step.chainId);
 }
-/** Why the current funded step cannot use what its producer delivered (nothing delivered, or an amount its card refuses). */
+/** Why the current funded step cannot use what its producer delivered (unproven, nothing delivered, or an amount its card refuses). */
 export function sequenceFundingMessage(sequence: SequenceView, language: Language = 'EN'): string | null {
   const step = sequence.current;
   if (step.fundedBy === null) return null;
+  // BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: an ERC-20 universal delivery without RELAY_EVM_TOKEN_V1 stores received=null.
+  // That must block the dependent step the same way as a zero delivery — otherwise Bridge→Aave is simulated at the authored cap.
+  if (sequence.fundingIssue === 'DELIVERY_NOT_PROVEN') return translate(language, 'Step {0} cannot spend what step {1} delivered: FloFi has not independently proven that delivery yet. Nothing was simulated or sent.', step.index + 1, step.fundedBy + 1);
   if (sequence.fundingIssue === 'NOTHING_DELIVERED') return translate(language, 'Step {0} has nothing to spend: step {1} delivered none of its asset.', step.index + 1, step.fundedBy + 1);
   if (sequence.fundingIssue === 'BOUND_REFUSED') return translate(language, 'Step {0} cannot spend the amount step {1} delivered: the step refuses that amount.', step.index + 1, step.fundedBy + 1);
   return null;

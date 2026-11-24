@@ -258,6 +258,9 @@ export function deliveredByRecord(kind: string, record: unknown, output: Sequenc
   }
   if (kind === 'universal' && record.verdict === 'RECONCILED' && isObject(record.review) && isObject(record.review.route)) {
     const token = record.review.route.outputToken, units = record.received;
+    if (output.chainId.startsWith('eip155:') && output.address !== null &&
+      (!isObject(record.destination) || record.destination.orderProof !== 'RELAY_EVM_TOKEN_V1' ||
+        record.destination.final !== true || record.destination.amount !== units)) return null;
     return isObject(token) && same(token.chainId, token.kind === 'NATIVE' ? null : token.address) && typeof units === 'string' && UNITS.test(units) ? units : null;
   }
   if (kind === 'router' && record.verdict === 'RECONCILED' && isObject(record.destination)) {

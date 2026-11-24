@@ -185,3 +185,69 @@ describe('production native ETH swap quotes through cloudPreview', () => {
       .toMatchObject({ ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' });
   });
 });
+
+/**
+ * BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003 (Workstream B): the BFF asks the API for the read-only QUOTE preview first. Vercel and Railway roll
+ * independently, so an API that does not offer QUOTE yet (PREVIEW_QUOTE_NOT_AVAILABLE) is asked once more for the verified ownerless SIMULATION
+ * preview within what is left of the same time budget — never for any other refusal, and never after the browser cancelled.
+ */
+describe('production QUOTE preview with the SIMULATION compatibility fallback', () => {
+  type Preview = NonNullable<NonNullable<Parameters<typeof readBuildEstimate>[2]>['preview']>;
+  /** A preview port that refuses with `codes` first, then (optionally) answers as the verified runtime does. */
+  const refusing = (codes: string[], then?: Preview, before?: () => void) => vi.fn<Preview>(async (...args) => {
+    before?.();
+    const code = codes.shift();
+    return code ? { ok: false as const, code } : then ? then(...args) : { ok: false as const, code: 'TEST_PREVIEW_EXHAUSTED' };
+  });
+  const ask = (s: ReturnType<typeof evmSetup>, preview: Preview, signal?: AbortSignal) =>
+    readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, { preview, prices: null, ...signal ? { signal } : {} });
+
+  it('asks for the QUOTE purpose first and uses its answer', async () => {
+    const s = evmSetup(networkCases[2]);
+    expect(await ask(s, s.preview)).toMatchObject({ ok: true, estimate: { symbol: 'WETH' } });
+    expect(s.preview).toHaveBeenCalledOnce();
+    expect(s.preview.mock.calls[0]![2]).toMatchObject({ purpose: 'QUOTE', timeoutMs: 30_000, maxAttempts: 1 });
+  });
+
+  it('an API without QUOTE is asked once for SIMULATION within the remaining budget, and its verified quote reaches the card', async () => {
+    const s = evmSetup(networkCases[2]), preview = refusing(['PREVIEW_QUOTE_NOT_AVAILABLE'], s.preview);
+    expect(await ask(s, preview)).toMatchObject({ ok: true, estimate: { symbol: 'WETH' } });
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(preview.mock.calls.map(call => call[2]?.purpose)).toEqual(['QUOTE', 'SIMULATION']);
+    expect(preview.mock.calls[1]![0]).toBe(s.flow);
+    expect(preview.mock.calls[1]![1]).toEqual([s.w]);
+    expect(preview.mock.calls[1]![2]!.timeoutMs).toBeGreaterThan(0);
+    expect(preview.mock.calls[1]![2]!.timeoutMs).toBeLessThanOrEqual(30_000);
+  });
+
+  it.each(['CLOUD_API_DEADLINE_EXCEEDED', 'POOL_UNUSABLE', 'CLOUD_RUNTIME_NOT_CONFIGURED'])('%s is final: no SIMULATION retry', async code => {
+    const s = evmSetup(networkCases[2]);
+    const preview = refusing([code], s.preview);
+    expect(await ask(s, preview)).toMatchObject({ ok: false });
+    expect(preview).toHaveBeenCalledOnce();
+  });
+
+  it('never falls back after the browser cancelled', async () => {
+    const s = evmSetup(networkCases[2]), cancelled = new AbortController();
+    const preview = refusing(['PREVIEW_QUOTE_NOT_AVAILABLE'], s.preview, () => cancelled.abort());
+    expect(await ask(s, preview, cancelled.signal)).toMatchObject({ ok: false, code: 'ESTIMATE_CANCELLED' });
+    expect(preview).toHaveBeenCalledOnce();
+  });
+
+  it('with the stream seam the token estimate returns before a slow USD source answers, and USD follows on its own promise', async () => {
+    const s = evmSetup(networkCases[2]);
+    let answer!: (value: import('../automations/price-source').PriceResult) => void;
+    const prices = { id: 'fixture' as const, maxAgeMs: 60_000, assets: ['ETH' as const],
+      observe: vi.fn(() => new Promise<import('../automations/price-source').PriceResult>(resolve => { answer = resolve; })) };
+    let usd: Promise<unknown> | undefined;
+    const result = await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production,
+      { preview: s.preview, prices, onUsd: pending => { usd = pending; } });
+    // The price source has not answered: the token estimate is already complete, without USD.
+    expect(result).toMatchObject({ ok: true, estimate: { symbol: 'WETH', usd: null } });
+    expect(prices.observe).toHaveBeenCalled();
+    expect(usd).toBeDefined();
+    answer({ ok: true, observation: { asset: 'ETH', priceUsd: '2500', observedAt: new Date().toISOString(), receivedAt: new Date().toISOString(),
+      source: 'FIXTURE', evidence: 'MOCKED', provenance: {} } });
+    expect(await usd).toMatchObject({ output: expect.stringMatching(/^[0-9]+\.[0-9]{2}$/), source: 'FIXTURE', evidence: 'MOCKED' });
+  });
+});

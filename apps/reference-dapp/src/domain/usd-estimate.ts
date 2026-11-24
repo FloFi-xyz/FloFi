@@ -18,6 +18,14 @@ export function priceAssetOf(symbol: string | null | undefined): PriceAsset | nu
 export type UsdEstimate = { readonly input: string | null; readonly output: string | null; readonly source: 'CHAINLINK' | 'FIXTURE';
   readonly evidence: 'PUBLIC_READ_ONLY' | 'MOCKED'; readonly observedAt: string };
 
+/** BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: a streamed USD line is attached to a card only when it has exactly this shape. */
+export function isUsdEstimate(value: unknown): value is UsdEstimate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const usd = value as Record<string, unknown>, cents = (field: unknown) => field === null || typeof field === 'string' && /^(0|[1-9][0-9]{0,29})\.[0-9]{2}$/.test(field);
+  return cents(usd.input) && cents(usd.output) && (usd.input !== null || usd.output !== null) &&
+    (usd.source === 'CHAINLINK' || usd.source === 'FIXTURE') && (usd.evidence === 'PUBLIC_READ_ONLY' || usd.evidence === 'MOCKED') &&
+    typeof usd.observedAt === 'string' && Number.isFinite(Date.parse(usd.observedAt));
+}
 const UNITS = /^(0|[1-9][0-9]{0,77})$/, PRICE = /^(0|[1-9][0-9]{0,29})(?:\.([0-9]{1,8}))?$/;
 /** `units` / 10^`decimals` × `priceUsd`, rounded half-up to cents, in exact integer arithmetic; null for malformed input. */
 export function usdAmount(units: string, decimals: number, priceUsd: string): string | null {

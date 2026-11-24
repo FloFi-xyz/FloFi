@@ -438,6 +438,22 @@
       "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
       "stage": "unit"
     },
+    "app.domain.sequence-presentation": {
+      "path": "apps/reference-dapp/src/domain/sequence-presentation.test.ts",
+      "stage": "unit"
+    },
+    "app.server.catalog-quote-rpc": {
+      "path": "apps/reference-dapp/src/server/catalog-quote-rpc.test.ts",
+      "stage": "unit"
+    },
+    "app.app.api.build-estimate.route": {
+      "path": "apps/reference-dapp/src/app/api/build-estimate/route.test.ts",
+      "stage": "unit"
+    },
+    "app.state.build-estimate": {
+      "path": "apps/reference-dapp/src/state/build-estimate.test.ts",
+      "stage": "unit"
+    },
     "app.domain.intelligence": {
       "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
       "stage": "unit"
@@ -2171,7 +2187,10 @@
     "workflow-contracts.erc4626-deposit",
     "app.mcp.account-tools",
     "app.platform.conversation-state",
-    "app.channels.telegram.universal-actions"
+    "app.channels.telegram.universal-actions",
+    "app.domain.sequence-presentation",
+    "app.server.catalog-quote-rpc",
+    "app.app.api.build-estimate.route"
   ],
   "modules": [
     {
@@ -3370,7 +3389,8 @@
         "workflow-contracts.revision-state",
         "app.app.api.dashboard.history.route",
         "app.app.api.dashboard.activity.route",
-        "app.api.dashboard-positions"
+        "app.api.dashboard-positions",
+        "app.app.api.build-estimate.route"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5208,6 +5228,7 @@
         "app.domain.editor-overview",
         "app.domain.editor-run",
         "app.domain.flight-refusal",
+        "app.domain.sequence-presentation",
         "app.domain.p0-swap-bridge-connections",
         "app.domain.gas-payment",
         "app.domain.new-workflow-isolation",
@@ -7707,7 +7728,8 @@
         "app.server.base-position-harness",
         "app.e2e.liquidity-position-management",
         "app.server.defi-positions-cache",
-        "app.e2e.orca-position-management"
+        "app.e2e.orca-position-management",
+        "app.server.catalog-quote-rpc"
       ],
       "gaps": [
         "Catalog/discovery and offline provider responses do not certify provider uptime or real execution.",
@@ -8432,7 +8454,8 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.state.build-estimate"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",

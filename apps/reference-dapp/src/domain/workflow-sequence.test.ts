@@ -179,8 +179,11 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     expect(deliveredByRecord('public', { ...swap, outcome: null }, weth)).toBeNull();
     expect(deliveredByRecord('public', { ...swap, quote: { chainId: 8453, outputToken: BASE_USDC } }, weth)).toBeNull();
     const arbWeth = { chainId: 'eip155:42161', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 };
-    const universal = { verdict: 'RECONCILED', received: '77', review: { route: { outputToken: { chainId: 'eip155:42161', kind: 'TOKEN', address: arbWeth.address } } } };
+    const universal = { verdict: 'RECONCILED', received: '77', destination: { orderProof: 'RELAY_EVM_TOKEN_V1', amount: '77', final: true },
+      review: { route: { outputToken: { chainId: 'eip155:42161', kind: 'TOKEN', address: arbWeth.address } } } };
     expect(deliveredByRecord('universal', universal, arbWeth)).toBe('77');
+    expect(deliveredByRecord('universal', { ...universal, destination: { ...universal.destination, orderProof: undefined, orderBound: true } }, arbWeth)).toBeNull();
+    expect(deliveredByRecord('universal', { ...universal, destination: { ...universal.destination, amount: '78' } }, arbWeth)).toBeNull();
     expect(deliveredByRecord('universal', { ...universal, verdict: 'PENDING' }, arbWeth)).toBeNull();
     const native = { verdict: 'RECONCILED', received: '9', review: { route: { outputToken: { chainId: 'eip155:42161', kind: 'NATIVE', address: null } } } };
     expect(deliveredByRecord('universal', native, { chainId: 'eip155:42161', address: null, decimals: 18 })).toBe('9');

@@ -27,7 +27,8 @@ import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from 
 import type { RunRecord, RunStepRecord, VerifiedDecline, WorkflowRunStore } from './pg-store.ts';
 import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
-import { stopRunFromCurrent } from './user-funded-pass.ts';
+import { amountsAvailable, boundDeliveryRefusal } from './received-amounts.ts';
+import { preparedGroupDeliveryRefusal, stopRunFromCurrent } from './user-funded-pass.ts';
 import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
@@ -131,8 +132,11 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   const fresh = (await deps.store.byId(run.runId))!;
   if (isLiveDeveloperRun(fresh) && fresh.expiresAt <= deps.now()) return null;
   if (fresh.state !== 'RUNNING' && fresh.state !== 'ATTENTION') return null;
-  let step = (await deps.store.steps(run.runId))[fresh.currentStep];
+  const steps = await deps.store.steps(run.runId);
+  let step = steps[fresh.currentStep];
   if (!step || !step.strategy || !step.workflowHash || !['READY', 'AWAITING_OWNER'].includes(step.state)) return null;
+  const deliveryRefusal = boundDeliveryRefusal(step.bound, steps);
+  if (deliveryRefusal) return refuse(deliveryRefusal);
   // Owner requirement (FloFi Wallet + Circle): a READY step whose group was just prepared as one Circle-paid operation is never loaded into its own
   // flow too (the switch moves it out of READY right after; this closes the window in between).
   if (fresh.mode === 'USER_FUNDED' && step.state === 'READY') {
@@ -383,7 +387,7 @@ export async function startUserFunded(deps: WorkflowRunDeps, run: RunRecord, wal
  * missing spend evidence can never unlock the owner's unrelated balance.
  */
 function reconciledAvailable(steps: readonly RunStepRecord[], producer: number, asset: string, before: number): bigint {
-  const received = (steps[producer]?.outcome?.received ?? []).filter(r => r.asset === asset).reduce((sum, r) => sum + BigInt(r.amount), 0n);
+  const received = amountsAvailable(steps[producer]?.outcome, asset).reduce((sum, r) => sum + BigInt(r.amount), 0n);
   const used = steps.filter(s => s.stepIndex > producer && s.stepIndex < before && s.bound).reduce((sum, s) => {
     const bound = [s.bound!, ...s.bound!.additional ?? []].filter(b => b.amountFrom === producer && assetKey({ chain: b.asset.chainId, address: b.asset.address }) === asset);
     if (!bound.length) return sum;
@@ -464,6 +468,8 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   // A batch already handed to a browser goes again, or is prepared again, only to that browser (`handedTo`).
   if (batch && g.state === 'PREPARED' && !handedTo(g, handout)) refuse('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
   if (g.state === 'PREPARED' && g.validUntil && g.validUntil > now) {
+    const deliveryRefusal = preparedGroupDeliveryRefusal(run, g, steps);
+    if (deliveryRefusal) return refuse(deliveryRefusal);
     // P0 universal execution: a cached wallet batch is handed out only with enough validity left to review and confirm it before its on-chain
     // deadline. With less, it is NOT prepared again while it is still valid: two devices or wallet instances share no EIP-5792 id dedupe, so a
     // second, overlapping batch could execute too. The owner confirms the open request, or asks again once its validUntil has passed.
@@ -612,6 +618,8 @@ export async function consentUserFundedGroupUpgrade(deps: WorkflowRunDeps, run: 
   const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const deliveryRefusal = preparedGroupDeliveryRefusal(run, g, await deps.store.steps(run.runId));
+  if (deliveryRefusal) return refuse(deliveryRefusal);
   const consented = consentCircleUpgrade(g.prepared as Prepared, deps.now());
   if (!consented.ok) return refuse(consented.code);
   const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
@@ -667,6 +675,8 @@ export async function authorizeUserFundedGroupUpgrade(deps: WorkflowRunDeps, run
   const c = circleFactsOf(g.prepared);
   if (g.state !== 'PREPARED' || !c?.upgrade) refuse(g.state !== 'PREPARED' ? `WORKFLOW_RUN_GROUP_${g.state}` : 'CIRCLE_UPGRADE_NOT_PREPARED');
   if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const deliveryRefusal = preparedGroupDeliveryRefusal(run, g, await deps.store.steps(run.runId));
+  if (deliveryRefusal) return refuse(deliveryRefusal);
   const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     validUntil: validUntil.toISOString(), prepared: publicPrepared(prepared), handout: null });
   if (c!.stage !== 'AUTHORIZATION') return c!.upgrade!.signature === String(signature).toLowerCase() ? view(g.prepared as Prepared, g.validUntil!) : refuse('CIRCLE_AUTHORIZATION_STAGE_INVALID');
@@ -699,6 +709,8 @@ export async function permitUserFundedGroup(deps: WorkflowRunDeps, run: RunRecor
   const c = circleFactsOf(g.prepared);
   if (g.state !== 'PREPARED' || !c) refuse(g.state !== 'PREPARED' ? `WORKFLOW_RUN_GROUP_${g.state}` : 'CIRCLE_PERMIT_STAGE_INVALID');
   if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const deliveryRefusal = preparedGroupDeliveryRefusal(run, g, await deps.store.steps(run.runId));
+  if (deliveryRefusal) return refuse(deliveryRefusal);
   const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     validUntil: validUntil.toISOString(), prepared: publicPrepared(prepared), handout: null });
   if (c!.stage === 'OPERATION') return c!.permitSignature === String(permitSignature).toLowerCase() ? view(g.prepared as Prepared, g.validUntil!) : refuse('CIRCLE_PERMIT_STAGE_INVALID');
@@ -733,6 +745,10 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   // A wallet batch's answer arrives AFTER the wallet sent it: refusing a late one would only lose track of a batch already on chain (the chain
   // decides at reconciliation). Every other artifact is still unsigned or unsent here, so its validity window applies.
   if (g.strategy !== 'EVM_WALLET_BATCH' && (!g.validUntil || g.validUntil <= deps.now())) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  if (g.strategy === 'EVM_USER_OPERATION') {
+    const deliveryRefusal = preparedGroupDeliveryRefusal(run, g, await deps.store.steps(run.runId));
+    if (deliveryRefusal) return refuse(deliveryRefusal);
+  }
   const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
   if (!verified.ok) return refuse(verified.code);
   // ADR-0010 §2: a Circle-paid group is authorized only while the policy would still pick Circle — ETH that arrived since the Review means native
@@ -1038,7 +1054,9 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     const local = s.outcome?.evidence?.environment === 'MOCKED';
     const outcome = options.outcomes && s.outcome ? { executionId: s.outcome.executionId, kind: s.outcome.kind, status: s.outcome.status, evidence: s.outcome.evidence,
       submissions: s.outcome.transactions.map(t => ({ chain: t.chain, hash: t.hash, explorerUrl: executionExplorer(t.chain, t.hash, local) })),
-      spent: s.outcome.spent, received: s.outcome.received,
+      // BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003 (flofi-mcp review): the published status keeps its declared { asset, amount } shape; the
+      // internal Relay order-proof marker stays a funding fact, never a field of MCP, Developer API or channel responses.
+      spent: s.outcome.spent, received: s.outcome.received.map(({ asset, amount }) => ({ asset, amount })),
       receiptUrl: options.origin && s.outcome.kind === 'OWNER_RUN' && s.state === 'RECONCILED' ? `${options.origin}/app/dashboard/runs/${encodeURIComponent(s.outcome.executionId)}` : null } : null;
     return { index: s.stepIndex, action: composed.ok ? composed.steps[s.stepIndex]?.strategy.action ?? 'unknown' : 'unknown', state: s.state, flow: s.flow,
       // A bound step's own hash encodes the amount it resolved to: withheld with the amounts when status is not shared.

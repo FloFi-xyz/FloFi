@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { setActiveNetworkScope } from './network-scope';
-import { stepNodeKey, validCompletions, workflowSequence } from './workflow-sequence';
+import { stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence } from './workflow-sequence';
 import { completedByRecord, ownerByRecord, proveCompletions, storedCompletions, type RecordReader, type StoredCompletion } from './sequence-restore';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence/intelligence.test-harness';
 
@@ -127,6 +127,50 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(ownerByRecord('universal', universal('RECONCILED', { review: { recipient: solanaRecipient, route: { sourceChain: 'eip155:8453', destinationChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } } })))
       .toBe(solanaRecipient);
     expect(ownerByRecord('universal', universal('RECONCILED', { review: { route: { sourceChain: 'eip155:8453', destinationChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } } }))).toBeNull();
+  });
+  it('BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: USDC Ethereum → Bridge to Base → Aave Supply restores an executed bridge without funding the Supply from an unproven delivery', async () => {
+    const s = new CopilotSession(); s.walletChainId = 'eip155:1';
+    s.say('bridge 10 USDC from Ethereum to Base then supply up to 9.9 USDC on Aave on Base', intent.composition([
+      act.bridge({ sourceNetwork: 'ETHEREUM', destinationNetwork: 'BASE', asset: 'USDC', amount: '10', routing: 'BEST' }),
+      act.lending('SUPPLY', { network: 'BASE', asset: 'USDC', amount: '9.9' })]));
+    s.apply();
+    const sequence = workflowSequence(s.workflow, candidate => lintWorkflow(candidate, s.context))!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    const bridgeStep = sequence.steps[0]!, bridgeNode = s.workflow.nodes.find(node => node.nodeId === bridgeStep.nodeId)!;
+    expect(bridgeStep.output).toMatchObject({ chainId: 'eip155:8453', address: USDC });
+    const record = (destination: Record<string, unknown> | undefined, received = '9990000') => ({ format: 'flofi.universal-bridge-run.v1', verdict: 'RECONCILED', owner: OWNER,
+      workflow: { workflowId: s.workflow.workflowId, nodes: [{ nodeId: bridgeNode.nodeId }] }, received, ...destination ? { destination } : {},
+      review: { route: { sourceChain: 'eip155:1', destinationChain: 'eip155:8453', outputToken: { chainId: 'eip155:8453', kind: 'TOKEN', address: USDC, decimals: 6 } } } });
+    const pointer = (received: string | null): StoredCompletion[] => [{ nodeId: bridgeNode.nodeId, node: stepNodeKey(bridgeNode), kind: 'universal', runKey: 'xuni-' + 'b'.repeat(32), received }];
+    const read = (value: unknown): RecordReader => async () => value;
+    // Reconciled, but no RELAY_EVM_TOKEN_V1 proof (or a proof of a different amount): the bridge ran — it is restored as completed, never offered
+    // again — and it proves no amount, so the Supply it funds stays blocked (DELIVERY_NOT_PROVEN) exactly as in the visit that ran it.
+    for (const destination of [undefined, { orderBound: true, amount: '9990000', final: true }, { orderProof: 'RELAY_EVM_TOKEN_V1', amount: '1', final: true },
+      { orderProof: 'RELAY_EVM_TOKEN_V1', amount: '9990000', final: false }]) {
+      const restored = await proveCompletions(pointer(null), s.workflow, sequence, read(record(destination)));
+      expect(restored).toEqual({ unreadable: false, proven: [expect.objectContaining({ kind: 'universal', received: null })] });
+    }
+    // With the independent Relay ERC-20 order proof the delivered amount funds the Supply.
+    const proof = { orderProof: 'RELAY_EVM_TOKEN_V1', amount: '9990000', final: true };
+    expect((await proveCompletions(pointer(null), s.workflow, sequence, read(record(proof)))).proven).toMatchObject([{ kind: 'universal', received: '9990000' }]);
+    expect((await proveCompletions(pointer('9990000'), s.workflow, sequence, read(record(proof)))).proven).toMatchObject([{ received: '9990000' }]);
+    // A pointer an earlier client stored with an amount the record no longer proves (no RELAY_EVM_TOKEN_V1, which a reconciled legacy record can
+    // never gain): the bridge still ran, so it is restored as completed with no provable amount — never UNVERIFIED, whose Discard re-offers it.
+    expect(await proveCompletions(pointer('9990000'), s.workflow, sequence, read(record(undefined))))
+      .toEqual({ unreadable: false, proven: [expect.objectContaining({ kind: 'universal', received: null })] });
+    // Two proven amounts that disagree stay unverified (retry), never a new step and never a funded one.
+    expect(await proveCompletions(pointer('5'), s.workflow, sequence, read(record(proof)))).toEqual({ unreadable: true, proven: [] });
+    // A bridge that is not reconciled is still not restored.
+    expect(await proveCompletions(pointer(null), s.workflow, sequence, read({ ...record(proof), verdict: 'PENDING' }))).toEqual({ unreadable: false, proven: [] });
+    // The proven delivery binds the Aave Supply: a below-cap delivery re-authors the Supply at exactly what arrived (same USDC, 6 decimals);
+    // a zero delivery binds nothing; an unproven delivery binds nothing and the Supply keeps no runtime amount of its own.
+    const supplyStep = sequence.steps[1]!, below = await proveCompletions(pointer(null), s.workflow, sequence, read(record({ ...proof, amount: '9500000' }, '9500000')));
+    const bound = stepRuntimeWorkflow(supplyStep, below.proven, s.context);
+    expect(bound.bound).toBe('9500000');
+    const limit = bound.workflow!.nodes[0]!.userConstraints.find(c => c.kind === 'MAXIMUM_INPUT') as unknown as { quantity: { amount: string; asset: { chainId: string; address: string; decimals: number } } };
+    expect(limit.quantity).toMatchObject({ amount: '9500000', asset: { chainId: 'eip155:8453', address: USDC, decimals: 6 } });
+    expect(stepRuntimeWorkflow(supplyStep, [{ ...below.proven[0]!, received: '0' }], s.context)).toMatchObject({ bound: '0', workflow: null });
+    expect(stepRuntimeWorkflow(supplyStep, (await proveCompletions(pointer(null), s.workflow, sequence, read(record(undefined)))).proven, s.context).bound).toBeNull();
   });
   it('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card run as a one-step workflow run is restored from its server-proven record, never dropped', async () => {
     const { s, sequence, swapNode } = composed();

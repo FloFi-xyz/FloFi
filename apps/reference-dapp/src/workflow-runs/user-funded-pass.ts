@@ -36,6 +36,7 @@ import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BA
 import { executionRefusal } from '../server/execution-guard.ts';
 import { plannedStrategyOf } from '../user-funded/circle-gas.ts';
 import { expireTokenGasPreparation } from './owner-step-circle.ts';
+import { missingDeliveryProof } from './received-amounts.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -51,6 +52,16 @@ const settled = (run: RunRecord, retryMs: number | null = null, progressed = fal
 /** A code stored on a group, its steps and its run: the runs/steps/events grammar (a detail after `:` is dropped, never the whole code). */
 const stored = (code: string) => { const head = code.split(':')[0]!; return /^[A-Z][A-Z0-9_]{2,80}$/.test(head) ? head : 'USER_FUNDED_GROUP_REFUSED'; };
 const ownerStep = (g: GroupRecord) => g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP';
+
+/** Preparations persisted before Relay proof was required must pass the same delivery gate on reuse. */
+export function preparedGroupDeliveryRefusal(run: RunRecord, group: GroupRecord, steps: readonly RunStepRecord[]): string | null {
+  if (group.namespace !== 'eip155' || !steps.some(step => step.stepIndex < group.stepFrom &&
+    (step.outcome?.flow ?? step.flow) === 'crosschain-universal')) return null;
+  const composed = composeWorkflowBound(run.strategy, run.workflowHash);
+  if (!composed.ok) return 'WORKFLOW_RUN_STALE';
+  return composed.bindings.some(binding => binding.step >= group.stepFrom && binding.step <= group.stepTo &&
+    binding.amountFrom < group.stepFrom && missingDeliveryProof(binding, steps)) ? 'WORKFLOW_BINDING_NOTHING_RECEIVED' : null;
+}
 
 /** The strategy a grouped step actually executed (its bound amount fixed to what it spent), for its RECONCILED record. */
 function executedStrategy(composed: WorkflowComposition, index: number, spent: string | null) {
@@ -125,7 +136,11 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
       // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.
       return settled(run, run.expiresAt <= now && g.validUntil ? Math.max(1_000, Math.min(OWNER_WAIT_MS, g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS - now.getTime())) : OWNER_WAIT_MS,
         false, 'OWNER_SIGNS_GROUP');
-    case 'AUTHORIZED': return authorizedGroup(deps, run, g, block);
+    case 'AUTHORIZED': {
+      // A wallet batch's authorization is a report that the wallet already sent it. Keep observing it.
+      const deliveryRefusal = g.strategy === 'EVM_USER_OPERATION' ? preparedGroupDeliveryRefusal(run, g, steps) : null;
+      return deliveryRefusal ? block(deliveryRefusal) : authorizedGroup(deps, run, g, block);
+    }
     case 'SUBMITTED': case 'UNCERTAIN': return submittedGroup(deps, run, g, steps);
     case 'RECONCILED': return afterGroup(deps, run, g);
     case 'FAILED': {
@@ -203,7 +218,10 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
       if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...latest, hashes: (latest.hashes as (string | null)[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
       else r = await reconcileSolanaGroup(deps.userFunded, prepared, latest, g.chain, g.feePayer);
-    } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization, run.owner);
+    } else {
+      const observeOnly = g.strategy === 'EVM_USER_OPERATION' && preparedGroupDeliveryRefusal(run, g, steps) !== null;
+      r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization, run.owner, { observeOnly });
+    }
   } catch (cause) {
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'RECONCILIATION_FAILED';
     if (g.state === 'SUBMITTED') await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'UNCERTAIN', { code });

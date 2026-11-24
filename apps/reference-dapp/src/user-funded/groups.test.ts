@@ -245,11 +245,19 @@ async function lostOperation(runId: string) {
     state.sequence = 1n;
     return txHash;
   };
-  const reconcile = (prep: Prepared = p) => reconcileEvmGroup(deps, prep, record.value, authorization.value);
+  const reconcile = (prep: Prepared = p, observeOnly = false) => reconcileEvmGroup(deps, prep, record.value, authorization.value, undefined, { observeOnly });
   return { address, p, state, sent, mine, reconcile };
 }
 
 describe('P1 review fix: a user operation the bundler forgot is decided by the chain (EntryPoint nonce, its own event), never by the bundler alone', () => {
+  it('observes a persisted submission without sending it, and still reconciles a mined event', async () => {
+    const o = await lostOperation('wfr_' + 'v'.repeat(26));
+    expect(await o.reconcile(o.p, true)).toEqual({ status: 'PENDING' });
+    expect(o.sent).toHaveLength(0);
+    o.mine(o.state.head - 3n);
+    expect(await o.reconcile(o.p, true)).toMatchObject({ status: 'RECONCILED' });
+    expect(o.sent).toHaveLength(0);
+  });
   it('mined and forgotten (nonce consumed): reconciled from its own UserOperationEvent found on the chain, never resent', async () => {
     const o = await lostOperation('wfr_' + 'l'.repeat(26));
     // Mined 5,000 blocks ago and forgotten; the owner then spent the ETH, so a resend would be refused AA21 (the red-team case).

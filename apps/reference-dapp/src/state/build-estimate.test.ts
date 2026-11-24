@@ -6,7 +6,7 @@ import { savedWorkflowHash, validateSavedWorkflow } from '../domain/saved-workfl
 import type { BuildEstimate, BuildEstimateResult } from '../domain/build-estimate';
 import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { clearLiveQuoteCache, quoteSnapshot, sharedEstimate, useBuildEstimate, useLiveQuote } from './build-estimate';
-import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS } from '../domain/build-estimate';
+import { BUILD_ESTIMATE_STREAM, LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS } from '../domain/build-estimate';
 import { createUniversalBridgeNode, UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { parseDiscoveryRequest } from '../server/universal-router/requests';
@@ -22,7 +22,7 @@ const estimate = (workflow = authored(), extra: Partial<BuildEstimate> = {}): Bu
 let host: HookHarness, transport: ReturnType<typeof vi.fn>;
 beforeEach(() => { clearLiveQuoteCache(); host = new HookHarness(); vi.useFakeTimers(); vi.setSystemTime(now); transport = vi.fn(); vi.stubGlobal('fetch', transport); });
 afterEach(() => { host.unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
-const response = (value: BuildEstimateResult) => ({ json: async () => value });
+const response = (value: BuildEstimateResult) => Response.json(value);
 describe('Build estimate snapshot, freshness and provider binding', () => {
   it('publishes a matching success, sends an AbortSignal and clears at exact expiry', async () => {
     const workflow = authored(), value = estimate(workflow); transport.mockResolvedValue(response({ ok: true, estimate: value }));
@@ -293,5 +293,86 @@ describe('P0 review follow-up: the journey metric counts a request once', () => 
     expect(transport).toHaveBeenCalledTimes(1);
     expect(journeys).toHaveBeenCalledTimes(1);
     other.unmount();
+  });
+});
+
+describe('BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003 token-first NDJSON Live Quote', () => {
+  const usd = { input: '10.00', output: '9.98', source: 'FIXTURE' as const, evidence: 'MOCKED' as const, observedAt: now.toISOString() };
+  /** A streamed quote answer whose lines the test pushes one at a time, exactly as the endpoint sends them. */
+  function stream() {
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+    return { response: new Response(body, { headers: { 'content-type': BUILD_ESTIMATE_STREAM } }),
+      push: (value: unknown) => controller.enqueue(encoder.encode(JSON.stringify(value) + '\n')), raw: (text: string) => controller.enqueue(encoder.encode(text)),
+      end: () => controller.close() };
+  }
+
+  it('asks for the stream and shows the token amount before USD, then enriches the same answer in place', async () => {
+    const workflow = authored(), value = estimate(workflow, { usd: null }), answer = stream();
+    transport.mockResolvedValue(answer.response);
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner'));
+    read();
+    answer.push({ ok: true, estimate: value });
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(transport.mock.calls[0]![1].headers).toMatchObject({ accept: BUILD_ESTIMATE_STREAM });
+    // The USD line has not arrived: the card already has its token amount.
+    expect(read()).toEqual({ status: 'ready', estimate: value });
+    answer.push(usd); answer.end();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual({ status: 'ready', estimate: { ...value, usd } });
+  });
+
+  it('keeps the token amount when the stream ends without USD', async () => {
+    const workflow = authored(), value = estimate(workflow, { usd: null }), answer = stream();
+    transport.mockResolvedValue(answer.response);
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner'));
+    read(); answer.push({ ok: true, estimate: value }); answer.end();
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(read()).toEqual({ status: 'ready', estimate: value });
+    // A malformed or missing USD line never removes the amount.
+    const broken = stream(), next = authored('3'), nextValue = estimate(next, { usd: null });
+    transport.mockResolvedValue(broken.response);
+    const readNext = () => host.render(() => useLiveQuote(next, 'node-002', 'owner'));
+    readNext(); broken.push({ ok: true, estimate: nextValue }); broken.raw('{not json\n'); broken.end();
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(readNext()).toEqual({ status: 'ready', estimate: nextValue });
+  });
+
+  it('never applies a USD line that arrives after the quote expired, even before the expiry timer runs (a throttled tab)', async () => {
+    const workflow = authored(), value = estimate(workflow, { usd: null }), answer = stream();
+    transport.mockResolvedValueOnce(answer.response).mockReturnValue(deferred<Response>().promise);
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner'));
+    read(); answer.push({ ok: true, estimate: value });
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(read()).toEqual({ status: 'ready', estimate: value });
+    // The clock passes expiresAt but the expiry timer has not fired yet (fake timers do not run on a system-time change).
+    vi.setSystemTime(Date.parse(value.expiresAt) + 1);
+    answer.push(usd); answer.end();
+    // Flush the stream fully; this runs no timer, since the fake timer clock did not move.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual({ status: 'ready', estimate: value });
+    // Once the (delayed) expiry timer runs, the answer is marked expired, still without USD.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(read()).toEqual({ status: 'expired', estimate: value });
+  });
+
+  it.each([{ ok: false }, 42, [], { ...usd, source: 'COINGECKO' }, { ...usd, evidence: 'GUESSED' }, { ...usd, input: '1e9' }, { ...usd, observedAt: 'yesterday' },
+    { ...usd, input: null, output: null }])('drops a malformed USD line (%j) and keeps the token amount', async line => {
+    const workflow = authored(), value = estimate(workflow, { usd: null }), answer = stream();
+    transport.mockResolvedValue(answer.response);
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner'));
+    read(); answer.push({ ok: true, estimate: value }); answer.push(line); answer.end();
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(read()).toEqual({ status: 'ready', estimate: value });
+  });
+
+  it('a malformed first line is FloFi\'s own request failure, never an amount', async () => {
+    const workflow = authored(), answer = stream();
+    transport.mockResolvedValue(answer.response);
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner'));
+    read(); answer.raw('<html>gateway error</html>\n'); answer.end();
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(read()).toMatchObject({ status: 'unavailable', code: 'ESTIMATE_REQUEST_FAILED' });
   });
 });

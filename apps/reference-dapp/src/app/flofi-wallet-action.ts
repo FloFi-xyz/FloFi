@@ -29,7 +29,7 @@ import { decodeSignedEip1559, parseSigningRequest, resolveManagedSigning } from 
 import { expectedBroadcast, managedEvmNetwork, type ManagedEvmBroadcast, type ManagedEvmFees } from '../server/managed-wallet-evm';
 import { requestOrigin } from '../server/session-principal';
 import { isSigningFlow, parseSigningContext, type SigningSummary } from '../wallet/flofi-signing';
-import { claimAttempt, managedEvmBroadcast, managedEvmFees, managedEvmPendingNonce, managedWallets, signingDeps, signingGate } from './flofi-wallet-signing';
+import { claimAttempt, managedEvmBroadcast, managedEvmFees, managedEvmPendingNonce, managedOwnerDeliveryRefusal, managedWallets, signingDeps, signingGate } from './flofi-wallet-signing';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 export type FloFiManagedWallet = { readonly ecosystem: 'evm' | 'solana'; readonly address: string; readonly label: string };
@@ -155,10 +155,16 @@ export async function floFiEvmBroadcast(signing: unknown, raw: unknown): Promise
     if (!decoded) fail('FLOFI_WALLET_SIGNED_TRANSACTION_INVALID');
     const { host, session } = await signedIn(), wallets = await accountManagedWallets(host, session);
     // The same resolution FloFi Wallet's relay applied before signing, now on the signed bytes and their recovered sender.
-    const resolved = await resolveManagedSigning(context!, { ecosystem: 'evm', tx: decoded!.tx }, { ...signingDeps(wallets), filledBoundedAtSigning: true });
+    const deps = signingDeps(wallets);
+    let record: unknown;
+    const resolved = await resolveManagedSigning(context!, { ecosystem: 'evm', tx: decoded!.tx }, {
+      ...deps, filledBoundedAtSigning: true, load: async (flow, runId) => { record = await deps.load(flow, runId); return record; },
+    });
     if (!resolved.ok) fail(resolved.code);
     const match = (resolved as Extract<typeof resolved, { ok: true }>).value;
     if (!match.evm || match.owner !== decoded!.tx.from) fail('FLOFI_WALLET_SIGNER_MISMATCH');
+    const refusal = await managedOwnerDeliveryRefusal(context!, match.owner, record);
+    if (refusal) fail(refusal);
     if (!await claimAttempt(host.store, 'broadcast', match.attempt, match.expiresAtMs)) fail('FLOFI_WALLET_ALREADY_SIGNED');
     return { ok: true, value: await managedEvmBroadcast(match.evm!.chainId, (raw as string).toLowerCase(), expectedBroadcast(decoded!.tx, decoded!.hash)) };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_SUBMISSION_UNKNOWN'); }

@@ -14,6 +14,7 @@
  *   4. Arbitrum Swap → Bridge to Base → Base Supply of the delivery: three groups of one step each — as many wallet interactions as steps, never
  *      more (confirming each step is a lower bound) — so the claim leaves the choice to the owner (PENDING, user-funded recommended) and it runs.
  */
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
@@ -220,6 +221,46 @@ describe('P0 universal execution: mixed workflows end to end through the real ru
       expect(base.control.tokenBalance(B_USDC, owner)).toBe(50_000_000n);
       expect(base.control.tokenBalance(B_USDC, RECIPIENT)).toBe(0n);
       expect(base.control.accountData(owner).collateral).toBe(0n);
+    } finally { await t.drop(); }
+  });
+
+  it.each(['EVM_WALLET_BATCH', 'EVM_USER_OPERATION'] as const)('refuses new use of a legacy %s without Relay proof', async strategy => {
+    const t = await createTestDatabase();
+    try {
+      const { h, base, owner, wallets, approval } = await start(t.db, ['crosschain-universal', 'base-aave', 'base-mainnet-transfer'], 'arbitrum-one,base',
+        o => ({ version: 2, steps: [
+          { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5', routing: 'relay' },
+          { action: 'supply', network: 'base', asset: 'USDC', amount: '3', beneficiary: o },
+          { action: 'transfer', network: 'base', asset: 'USDC', amount: '1', recipient: RECIPIENT },
+        ], bindings: [{ step: 1, amountFrom: 0 }, { step: 2, amountFrom: 0 }] }));
+      base.control.fundToken(owner, B_USDC, 50_000_000n);
+      const bridge = await workflowRunContinue(h.surface, approval.approvalId, wallets);
+      const { runId } = await ownedRun(h.runs, approval.approvalId, wallets);
+      const mockRun = h.flows.ownerExecutes('crosschain-universal', owner, bridge.workflow, 'RECONCILED');
+      expect(await h.store.settleOwnerStep(runId, 0, 'RECONCILED', { kind: 'OWNER_RUN', executionId: mockRun.runId, flow: 'crosschain-universal',
+        status: 'RECONCILED', transactions: [], evidence: null, spent: [], received: [{ asset: `${BASE}/erc20:${B_USDC}`, amount: '4700000' }],
+        observedAt: h.d.now().toISOString() }, null)).toBe('RECORDED');
+      await h.drain(runId);
+      expect(await ownedRun(h.runs, approval.approvalId, wallets)).toMatchObject({ state: 'RUNNING', currentStep: 1 });
+      const handout = 'a'.repeat(43), handoutHash = createHash('sha256').update(handout).digest('hex'), batchId = '0x' + '32'.repeat(32);
+      const prepared = { kind: strategy, request: { id: batchId }, handoutHash };
+      expect(await h.store.groupTransition(runId, 1, ['PLANNED'], 'PREPARED', { strategy, prepared,
+        validUntil: new Date(h.d.now().getTime() + 360_000) })).toMatchObject({ state: 'PREPARED' });
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 1, handout)).rejects.toThrow('WORKFLOW_BINDING_NOTHING_RECEIVED');
+      if (strategy === 'EVM_WALLET_BATCH') {
+        // The wallet can already have sent a handed-out request. Keep accepting its report.
+        await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 1, { kind: strategy, batchId });
+        expect((await h.store.groups(runId))[1]).toMatchObject({ state: 'AUTHORIZED' });
+      } else {
+        await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 1, { kind: strategy,
+          signature: '0x' + '12'.repeat(65) })).rejects.toThrow('WORKFLOW_BINDING_NOTHING_RECEIVED');
+        expect(await h.store.groupTransition(runId, 1, ['PREPARED'], 'AUTHORIZED', { authorization: { kind: strategy } })).toMatchObject({ state: 'AUTHORIZED' });
+        await h.drain(runId);
+        expect((await h.store.groups(runId))[1]).toMatchObject({ state: 'BLOCKED', submission: null });
+        expect(await ownedRun(h.runs, approval.approvalId, wallets)).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' });
+      }
+      expect(base.control.tokenBalance(B_USDC, owner)).toBe(50_000_000n);
+      expect(base.control.sends()).toBe(0);
     } finally { await t.drop(); }
   });
 

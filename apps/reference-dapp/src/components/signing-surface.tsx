@@ -71,7 +71,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
   // Funds belong to the reviewed network, including while the wallet is on the wrong network.
   const requiredNetwork = networkIdentity(authorization.chain ?? review.manifest?.owner.chainId);
   const limits = review.limits.filter(line => SIGNING_LIMITS.includes(line.label)).filter((line, index, all) => all.findIndex(other => other.label === line.label && other.value === line.value) === index);
-  const operations = live?.steps.flatMap(step => step.operations.filter(operation => operation.hash || operation.explorer).map(operation => ({ step, operation }))) ?? [];
+  const operations = live?.steps.flatMap(step => step.operations.filter(operation => operation.hash || operation.explorer
+    || !operation.wallet && ['pending', 'uncertain'].includes(operation.state)).map(operation => ({ step, operation }))) ?? [];
   let status: { label: string; message: string; tone: string };
   if (props.gated) status = { label: 'Connect your wallet', message: 'Connect the wallet that will sign. Nothing is authorized until you confirm in your wallet.', tone: 'neutral' };
   else if (live) status = { label: result?.label ?? live.label, message: result?.message ?? live.message, tone: result?.tone ?? (live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : 'attention') };
@@ -125,7 +126,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
         {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
           {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
-            {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}</li>)}
+            {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}
+            {operation.providerExplorer && <a href={operation.providerExplorer} target="_blank" rel="noreferrer">{tr('View provider-reported transaction')}</a>}</li>)}
         </ul>}
         {live?.evidence?.knownCosts.length ? <dl className="simulation-summary-values">{live.evidence.knownCosts.map(cost => <div key={cost.label}><dt>{tr(cost.label)}</dt><dd>{tr(cost.value)}</dd></div>)}</dl> : null}
         {live && <details><summary>{tr('Transaction and reconciliation evidence')}</summary><ExecutionEvidenceDetails progress={live}/>

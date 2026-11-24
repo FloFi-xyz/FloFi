@@ -8,8 +8,30 @@
  */
 import { assetKey } from '../delegation/steps.ts';
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
+import type { BoundResolution, RunStepRecord } from './pg-store.ts';
 
-export type FlowAmount = { readonly asset: string; readonly amount: string };
+export type FlowAmount = { readonly asset: string; readonly amount: string; readonly orderProof?: 'RELAY_EVM_TOKEN_V1' };
+
+export function proofRequired(flow: string | null, asset: string): boolean {
+  return flow === 'crosschain-universal' && /^eip155:[0-9]+\/erc20:/.test(asset);
+}
+export function amountsAvailable(outcome: { readonly flow: string | null; readonly received: readonly FlowAmount[] } | null | undefined, asset: string): readonly FlowAmount[] {
+  if (!outcome) return [];
+  const required = proofRequired(outcome.flow, asset);
+  return outcome.received.filter(fact => fact.asset === asset && (!required || fact.orderProof === 'RELAY_EVM_TOKEN_V1'));
+}
+
+export function missingDeliveryProof(binding: Pick<BoundResolution, 'amountFrom' | 'asset'>, steps: readonly RunStepRecord[]): boolean {
+  const producer = steps[binding.amountFrom];
+  const asset = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
+  return proofRequired(producer?.outcome?.flow ?? producer?.flow ?? null, asset) &&
+    !producer?.outcome?.received.some(fact => fact.asset === asset && fact.orderProof === 'RELAY_EVM_TOKEN_V1');
+}
+
+export function boundDeliveryRefusal(bound: BoundResolution | null, steps: readonly RunStepRecord[]): string | null {
+  return bound && [bound, ...bound.additional ?? []].some(binding => missingDeliveryProof(binding, steps))
+    ? 'WORKFLOW_BINDING_NOTHING_RECEIVED' : null;
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const units = (v: unknown): string | null => typeof v === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(v) ? v : null;
@@ -61,13 +83,23 @@ export function amountsFromOwnerRecord(record: unknown): OwnerAmounts {
   // A universal-router record always carries its verdict: anything but RECONCILED (pending, divergent, failed, refunded) delivered nothing a
   // step may count, and must not fall through to an older record shape below that would read its destination amount without a verdict.
   if (typeof record.received === 'string' && isObject(record.review) && isObject(record.review.route) && record.verdict !== 'RECONCILED') return { spent: [], received: [] };
+  // BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003 (flofi-workflow review): a universal record is recognised by its own format too, so one
+  // whose delivered amount is not proven (`received: null`) never falls through to the Router shape below, which would count its
+  // destination amount without a verdict or an order proof.
+  if (record.format === 'flofi.universal-bridge-run.v1' && (record.verdict !== 'RECONCILED' || !units(record.received))) return { spent: [], received: [] };
   if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)) {
     const route = record.review.route, out = isObject(route.outputToken) ? route.outputToken : null, inn = isObject(route.inputToken) ? route.inputToken : null;
     const received: FlowAmount[] = [];
     const spent: FlowAmount[] = [];
     if (out && typeof route.destinationChain === 'string') {
       const address = tokenAddress(out);
-      if (address && units(record.received)) received.push({ asset: assetKey({ chain: route.destinationChain, address }), amount: record.received });
+      const orderVerified = !route.destinationChain.startsWith('eip155:') || out.kind === 'NATIVE' ||
+        isObject(record.destination) && record.destination.orderProof === 'RELAY_EVM_TOKEN_V1' && record.destination.final === true &&
+          record.destination.amount === record.received;
+      if (address && orderVerified) {
+        const asset = assetKey({ chain: route.destinationChain, address });
+        received.push({ asset, amount: record.received, ...(proofRequired('crosschain-universal', asset) ? { orderProof: 'RELAY_EVM_TOKEN_V1' as const } : {}) });
+      }
     }
     if (inn && typeof route.sourceChain === 'string' && typeof route.inputAmount === 'string' && units(route.inputAmount)) {
       const address = tokenAddress(inn);

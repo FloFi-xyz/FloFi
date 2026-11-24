@@ -26,7 +26,7 @@ export type CatalogNetworkRuntime = {
   /** The deployment-wide real-funds owner-execution opt-in (`GRYLOO_<NETWORK>_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`). */
   readonly ownerExecutionEnabled: (mode: CatalogNetworkMode, env: Env) => boolean;
   /** The chain-bound read client (allowlisted read methods only). */
-  readonly rpc: (mode: 'live' | 'harness', env: Env, methods?: readonly string[]) => Rpc;
+  readonly rpc: (mode: 'live' | 'harness', env: Env, methods?: readonly string[], purpose?: 'QUOTE' | 'EXECUTION') => Rpc;
   readonly rpcMethods: readonly string[]; readonly liquidityRpcMethods: readonly string[];
   /** The process-wide validated official catalog of a mode (fails closed; never a recorded copy). */
   readonly catalogFor: (mode: 'live' | 'harness') => (chain: string) => Promise<AssetCatalog>;

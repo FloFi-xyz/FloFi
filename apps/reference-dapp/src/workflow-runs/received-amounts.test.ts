@@ -27,4 +27,11 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 bridge delivery facts', () => {
     // Without a delivery there is nothing to bind, whatever the route's expected or minimum output was.
     expect(amountsFromOwnerRecord(record({ received: null })).received).toEqual([]);
   });
+  it('BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: a universal record whose delivery is not proven never counts its destination amount through another shape', () => {
+    const format = 'flofi.universal-bridge-run.v1', destination = { amount: '24848243', chainId: BASE, token: USDC_BASE };
+    for (const patch of [{ received: null }, { received: null, verdict: 'PENDING' }, { verdict: undefined }, { received: '1e6' }])
+      expect(amountsFromOwnerRecord(record({ format, destination, ...patch })).received).toEqual([]);
+    // A reconciled, proven delivery still counts.
+    expect(amountsFromOwnerRecord(record({ format })).received).toEqual([{ asset: `${SOLANA}/token:${USDC_SOL}`, amount: '24848243' }]);
+  });
 });
