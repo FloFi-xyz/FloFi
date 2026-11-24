@@ -438,6 +438,10 @@
       "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
       "stage": "unit"
     },
+    "app.domain.sequence-presentation": {
+      "path": "apps/reference-dapp/src/domain/sequence-presentation.test.ts",
+      "stage": "unit"
+    },
     "app.domain.intelligence": {
       "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
       "stage": "unit"
@@ -5208,6 +5212,7 @@
         "app.domain.editor-overview",
         "app.domain.editor-run",
         "app.domain.flight-refusal",
+        "app.domain.sequence-presentation",
         "app.domain.p0-swap-bridge-connections",
         "app.domain.gas-payment",
         "app.domain.new-workflow-isolation",

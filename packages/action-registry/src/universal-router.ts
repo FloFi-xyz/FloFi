@@ -45,7 +45,8 @@ export type UniversalRouterDeployment = {
  * forwards the value by an internal call (BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002 P0 incident, Base, 2026-11-18). Router address from
  * Relay GET /chains `contracts.v3.2.erc20Router`; bytecode sha256 05acc78feee62dee91038a20707e37e13097745985bc33881a2e344f73e0a71d is
  * identical on all four networks (eth_getCode, 2026-11-18). Executors are that response's `solverAddresses` per chain. They only
- * authorize the order binding: the credit itself is always proven from a validated trace of the canonical transaction.
+ * authorize the order binding, through a router call or an exact order word in a direct payment to the reviewed recipient.
+ * The verifier independently proves the value credited by the canonical transaction.
  */
 export const RELAY_ROUTER_V3_2 = '0x0729e2a4716d9f7dd17858d5d504426d228697f7';
 const relaySolvers = (addresses: readonly string[]) => Object.freeze({ router: RELAY_ROUTER_V3_2, executors: Object.freeze([...addresses]) });

@@ -94,6 +94,8 @@ export function validateUniversalLog(bytes: Uint8Array): void {
         (run.verdict === 'RECONCILED') !== (run.evidence !== null) || (run.verdict === 'RECONCILED') !== (run.phase === 'RECONCILED') ||
         (run.evidence !== null && (run.evidence.evidenceClass !== universalEvidenceClass(run.provenance) || run.evidence.bundle?.environment !== run.evidence.evidenceClass)) ||
         (run.evidence !== null && (run.destination === null || run.source === null)) || (run.destination !== null && run.source === null) ||
+        (run.destination?.orderProof !== undefined && (run.destination.orderProof !== 'RELAY_EVM_TOKEN_V1' || !run.destination.orderBound ||
+          run.destination.position.kind !== 'BLOCK' || run.destination.token === 'native')) ||
         (run.phase !== 'RECONCILIATION_REQUIRED' && (UNIVERSAL_SETTLING.includes(run.phase) || run.phase === 'RECONCILED' || run.phase === 'REFUNDED') !== (run.source !== null)) ||
         (run.phase === 'REFUNDED') !== (run.refund !== null) || (run.phase === 'REFUNDED') !== (run.verdict === 'REFUNDED') ||
         (run.phase === 'FAILED') !== (run.verdict === 'FAILED') || (run.phase === 'RECONCILIATION_REQUIRED') !== (run.verdict === 'DIVERGENT') ||
@@ -105,10 +107,14 @@ export function validateUniversalLog(bytes: Uint8Array): void {
         (run.verdict !== 'PENDING' && run.verdict !== 'RECONCILED' && run.feeObligation?.status !== 'WAIVED'))
       fail('UNIVERSAL_STORE_CORRUPT');
     if (prior) {
+      const upgradedTokenProof = prior.verdict === 'PENDING' && run.verdict === 'RECONCILED' &&
+        prior.destination?.orderProof === undefined && run.destination?.orderProof === 'RELAY_EVM_TOKEN_V1';
+      const acceptedDestination = upgradedTokenProof && prior.destination
+        ? { ...prior.destination, orderBound: true, orderProof: 'RELAY_EVM_TOKEN_V1' } : prior.destination;
       if (run.id !== prior.id || run.owner !== prior.owner || run.provenance !== prior.provenance || !same(run.workflow, prior.workflow) ||
           run.attempts.length < prior.attempts.length || (prior.evidence && !same(run.evidence, prior.evidence)) || (prior.refund && !same(run.refund, prior.refund)) ||
           (prior.source && !same({ ...run.source, final: null }, { ...prior.source, final: null })) || (prior.source?.final && !run.source?.final) ||
-          (prior.destination && !same({ ...run.destination, final: null }, { ...prior.destination, final: null })) || (prior.destination?.final && !run.destination?.final) ||
+          (acceptedDestination && !same({ ...run.destination, final: null }, { ...acceptedDestination, final: null })) || (prior.destination?.final && !run.destination?.final) ||
           (prior.verdict !== 'PENDING' && run.verdict !== prior.verdict) ||
           (!same(run.review, prior.review) && prior.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state))))
         fail('UNIVERSAL_STORE_CORRUPT');
@@ -718,6 +724,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     if (network.ecosystem === 'EVM') {
       if (!/^0x[0-9a-f]{64}$/.test(hash)) return { ok: false, reason: 'INVALID_HASH' };
       const { d, rpc } = evmOf(chain), check = await evm.verifyEvmCredit(rpc, { hash, chainId: d.chainId, recipient, token: token.address, minimum, orderId: order.orderId,
+        requireTokenBinding: allowSettlementExecutor,
         nativeAuthority: { solver: order.solver, ...allowSettlementExecutor && d.relaySettlement ? { settlement: d.relaySettlement } : {} } });
       if (!check.ok) return { ok: false, reason: check.reason };
       const safe = await evm.evmSafeHead(rpc);
@@ -725,6 +732,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       if (!isObject(canonical) || evm.hex(canonical.hash) !== check.blockHash) return { ok: false, reason: 'NOT_CANONICAL' };
       return { ok: true, final: check.blockNumber <= safe, delivery: { chainId: chain, transactionHash: hash, position: { kind: 'BLOCK', height: check.blockNumber },
         blockHash: check.blockHash, timestamp: check.timestamp, recipient, token: token.address ?? 'native', amount: check.amount.toString(), orderBound: check.orderBound,
+        ...(token.address && allowSettlementExecutor ? { orderProof: 'RELAY_EVM_TOKEN_V1' as const } : {}),
         contentHash: check.contentHash } };
     }
     if (!/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(hash)) return { ok: false, reason: 'INVALID_HASH' };
@@ -755,7 +763,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       if (check.reason === 'BELOW_MINIMUM') divergent ??= 'UNIVERSAL_DELIVERY_BELOW_MINIMUM';
       else if (check.reason === 'NO_CREDIT') divergent ??= 'UNIVERSAL_DELIVERY_RECIPIENT_MISMATCH';
       else if (check.reason === 'UNVERIFIABLE_NATIVE') waiting = 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE';
-      else if (check.reason === 'UNBOUND_NATIVE') waiting ??= 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND';
+      else if (check.reason === 'UNBOUND_NATIVE' || check.reason === 'UNBOUND_TOKEN') waiting ??= 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND';
       else if (check.reason === 'NOT_CANONICAL') waiting ??= 'UNIVERSAL_DESTINATION_PENDING';
     }
     if (waiting) return { waiting };
@@ -860,6 +868,17 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       }
     }
     if (record.source!.final && record.destination?.final) {
+      const destination = record.destination;
+      if (destination.position.kind === 'BLOCK' && destination.token !== 'native' && !destination.orderProof) {
+        // A persisted observation from the old verifier may already be final. Prove the order before issuing evidence.
+        const route = record.review.route;
+        const again = await verifyCredit(destination.chainId, destination.transactionHash, route.recipient, route.outputToken, BigInt(route.minimumOutput), route.order, true);
+        if (!again.ok || !again.final) return save({ ...record, error: !again.ok && again.reason === 'UNBOUND_TOKEN'
+          ? 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND' : 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE' });
+        if (again.delivery.amount !== destination.amount || again.delivery.blockHash !== destination.blockHash)
+          return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
+        record = { ...record, destination: { ...destination, orderBound: true, orderProof: 'RELAY_EVM_TOKEN_V1' } };
+      }
       const feeObligation = feeObligationFor(record.review.route, 'RECONCILED');
       const evidence = buildEvidence(record, feeObligation);
       return save({ ...transition(record, 'RECONCILED'), evidence, verdict: 'RECONCILED', error: null, feeObligation });

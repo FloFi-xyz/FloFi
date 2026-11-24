@@ -1224,7 +1224,8 @@ export function catalogTokenPolicy(P: CatalogSwapProfile, codePins: Partial<Reco
  */
 export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, asset: CanonicalAsset, side: StockQuoteState['side'],
   block: string, headTime: number, reviewTtlSeconds: number, now: () => Date,
-  facts: { readonly cache: DeploymentFactCache; readonly chainId: number; readonly learn: (key: string) => void } | null = null): Promise<StockQuoteState | null> {
+  facts: { readonly cache: DeploymentFactCache; readonly chainId: number; readonly learn: (key: string) => void } | null = null,
+  indicative = false): Promise<StockQuoteState | null> {
   const call = async (to: string, data: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
   const addressOf = (value: string) => address('0x' + value.slice(-40));
@@ -1237,8 +1238,9 @@ export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, a
   if (!known && (typeof code !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(code))) fail('RPC_RESPONSE_INVALID');
   if (!known && code === '0x') fail('CONTRACT_CODE_MISSING');
   const tokenCode = known ? null : sha256Hex((code as string).toLowerCase());
-  if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
+  const decimals = async () => { if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH'); };
   if (!asset.stock) {
+    await decimals();
     if (!known && (pin !== undefined ? tokenCode !== pin : policy.listedTokens !== 'CODE_AND_DECIMALS')) fail('TOKEN_DEPLOYMENT_MISMATCH');
     // An EIP-7702 delegation designator (`0xef0100‖delegate`) is code an account can later change or clear: never remembered as a fact.
     if (factKey !== null && !known && !(code as string).toLowerCase().startsWith('0xef0100')) facts!.learn(factKey);
@@ -1246,11 +1248,19 @@ export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, a
   }
   // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
   const stockPolicy = policy.stockToken ?? fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
-  if (tokenCode !== stockPolicy.proxySha256 || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, stockPolicy.beaconSlot, block]))) !== stockPolicy.beacon)
-    fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
-  if ('0x' + word0(await call(asset.address!, '0xf514ce36')).toString(16).padStart(64, '0') !== asset.stock.officialId) fail('STOCK_TOKEN_IDENTITY_MISMATCH');
-  const multiplier = word0(await call(asset.address!, '0xa60bf13d')), scheduled = word0(await call(asset.address!, '0xdc767007'));
-  const effectiveAt = Number(word0(await call(asset.address!, '0x97a4064f')));
+  const stock = asset.stock;
+  const beacon = async () => {
+    if (tokenCode !== stockPolicy.proxySha256 || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, stockPolicy.beaconSlot, block]))) !== stockPolicy.beacon)
+      fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
+  };
+  const identity = async () => {
+    if ('0x' + word0(await call(asset.address!, '0xf514ce36')).toString(16).padStart(64, '0') !== stock.officialId) fail('STOCK_TOKEN_IDENTITY_MISMATCH');
+  };
+  const readWord = async (selector: string) => word0(await call(asset.address!, selector));
+  const [, , , multiplier, scheduled, activation] = indicative
+    ? await Promise.all([decimals(), beacon(), identity(), readWord('0xa60bf13d'), readWord('0xdc767007'), readWord('0x97a4064f')])
+    : [await decimals(), await beacon(), await identity(), await readWord('0xa60bf13d'), await readWord('0xdc767007'), await readWord('0x97a4064f')] as const;
+  const effectiveAt = Number(activation);
   if (multiplier <= 0n || !Number.isSafeInteger(effectiveAt)) fail('STOCK_MULTIPLIER_INVALID');
   // The registry and the chain must agree on the multiplier the Review shows; a disagreement is not resolved by guessing.
   if (multiplier.toString() !== asset.stock.multiplierWad) fail('STOCK_MULTIPLIER_MISMATCH');
@@ -1293,7 +1303,8 @@ function catalogSwapRead(workflow: SemanticWorkflow, P: CatalogSwapProfile): { n
  * The catalog quote: official identity, deployment code, Stock Token uid and multiplier state, and every locally derived
  * canonical pool are read at one pinned block; the best live fee tier is bound with its pool. Read-only.
  */
-async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: CatalogSwapProfile, rpc: Rpc, runtime: CatalogSwapRuntime, now: () => Date): Promise<PublicQuote> {
+async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: CatalogSwapProfile, rpc: Rpc, runtime: CatalogSwapRuntime, now: () => Date,
+  indicative: boolean): Promise<PublicQuote> {
   const { node, fields } = catalogSwapRead(workflow, P);
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a side may be the network's native ETH; ETH ⇄ WETH9 is a WETH9 conversion (its own adapter, no pool).
   const kind = catalogSwapKind(fields), native = fields.input.address === null ? 'INPUT' as const : fields.output.address === null ? 'OUTPUT' as const : null;
@@ -1309,8 +1320,19 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const call = async (to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
   const addressOf = (value: string) => address('0x' + value.slice(-40));
-  if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
-  const head = await rpc('eth_getBlockByNumber', ['latest', false]);
+  const together = async <T>(tasks: readonly (() => Promise<T>)[]): Promise<T[]> => {
+    if (indicative) {
+      const settled = await Promise.allSettled(tasks.map(task => task()));
+      return settled.map(result => { if (result.status === 'rejected') throw result.reason; return result.value; });
+    }
+    const values: T[] = [];
+    for (const task of tasks) values.push(await task());
+    return values;
+  };
+  const [, head] = await together<unknown>([
+    async () => { if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN'); },
+    () => rpc('eth_getBlockByNumber', ['latest', false]),
+  ]);
   if (!isObject(head) || typeof head.number !== 'string' || typeof head.hash !== 'string' || typeof head.timestamp !== 'string') fail('RPC_RESPONSE_INVALID');
   const blockNumber = Number(quantity(head.number)), blockHash = hex(head.hash), block = blockHex(blockNumber), headTime = Number(quantity(head.timestamp));
   if (!Number.isSafeInteger(blockNumber) || !HASH.test(blockHash)) fail('RPC_RESPONSE_INVALID');
@@ -1325,26 +1347,24 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const facts = deploymentFactsOf(runtime), factKey = (key: string) => `${P.chainId}:${key}`, verified: string[] = [];
   const known = (key: string) => facts !== null && facts.has(factKey(key), now().getTime());
   const learn = (key: string) => { if (facts) verified.push(factKey(key)); };
-  for (const [name, target] of [['factory', P.factory], ['router', P.router], ['quoter', P.quoter]] as const) {
+  await together(([['factory', P.factory], ['router', P.router], ['quoter', P.quoter]] as const).map(([name, target]) => async () => {
     const key = `protocol-code:${name}:${target}:${pins[name]}`;
-    if (known(key)) continue;
+    if (known(key)) return;
     if (sha256Hex(await code(target)) !== pins[name]) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
     learn(key);
-  }
+  }));
   // A router's and quoter's factory/WETH9 are immutables compiled into their pinned code.
   const pointers = `protocol-pointers:${P.quoter}:${P.router}:${P.factory}:${P.weth}:${pins.quoter}:${pins.router}`;
   if (!known(pointers)) {
-    for (const target of [P.quoter, P.router])
-      if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
+    await together([P.quoter, P.router].map(target => async () => {
+      const [factory, wrapped] = await together(['0xc45a0155', '0x4aa4a4fc'].map(data => () => call(target, data, block)));
+      if (!factory || !wrapped || addressOf(factory) !== P.factory || addressOf(wrapped) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
+    }));
     learn(pointers);
   }
-  const stocks: StockQuoteState[] = [];
-  for (const [side, asset] of [['input', input], ['output', output]] as const) {
-    if (asset.kind === 'NATIVE') continue;
-    const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now,
-      facts ? { cache: facts, chainId: P.chainId, learn: key => verified.push(key) } : null);
-    if (stock) stocks.push(stock);
-  }
+  const stocks = (await together(([['input', input], ['output', output]] as const).map(([side, asset]) => async () =>
+    asset.kind === 'NATIVE' ? null : verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now,
+      facts ? { cache: facts, chainId: P.chainId, learn: key => verified.push(key) } : null, indicative)))).filter(stock => stock !== null);
   // Native ETH travels through the router's WETH9 (the router's own `WETH9()`, checked above): it must carry its pinned code.
   const wethKey = `weth-code:${P.weth}:${pins.weth}`;
   if (native && !known(wethKey)) { if (sha256Hex(await code(P.weth)) !== pins.weth) fail('TOKEN_DEPLOYMENT_MISMATCH'); learn(wethKey); }
@@ -1360,18 +1380,26 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     const poolKey = `pool:${pool}:${P.factory}:${token0}:${token1}:${tier.fee}`;
     if (!known(poolKey)) {
       if (await codeAt(pool) === '0x') return { fee: tier.fee, pool, expectedOut: null };
-      if (addressOf(await call(pool, '0xc45a0155', block)) !== P.factory || addressOf(await call(pool, '0x0dfe1681', block)) !== token0 ||
-          addressOf(await call(pool, '0xd21220a7', block)) !== token1 || BigInt(await call(pool, '0xddca3f43', block)) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
+      const [factory, first, second, fee] = await together(['0xc45a0155', '0x0dfe1681', '0xd21220a7', '0xddca3f43'].map(data => () => call(pool, data, block)));
+      if (!factory || !first || !second || !fee || addressOf(factory) !== P.factory || addressOf(first) !== token0 ||
+          addressOf(second) !== token1 || BigInt(fee) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
       learn(poolKey);
     }
-    if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) return { fee: tier.fee, pool, expectedOut: null };
+    const [liquidity, slot] = indicative
+      ? await together(['0x1a686502', '0x3850c7bd'].map(data => () => call(pool, data, block)))
+      : [await call(pool, '0x1a686502', block), null];
+    if (BigInt(liquidity) === 0n || word0(slot ?? await call(pool, '0x3850c7bd', block)) === 0n) return { fee: tier.fee, pool, expectedOut: null };
     // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate. BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read the
     // node never answered (after the transport's own retries) is not a revert — the tier's price is unknown, so the quote fails closed instead of
     // silently binding another tier. An explicit revert (code 3, or revert text under any code, -32603 included) still only removes this tier;
     // a bare -32603 without revert text is an internal error, so it is treated as unanswered (public-testnet-rpc.ts).
     let out: bigint | null;
     try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); }
-    catch (cause) { if (readNotAnswered(cause)) throw cause; out = null; }
+    catch (cause) {
+      const reverted = isObject(cause) && cause.rpcReverted === true || cause instanceof Error && cause.message === 'execution reverted';
+      if (readNotAnswered(cause) || indicative && !reverted) throw cause;
+      out = null;
+    }
     return { fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null };
   };
   const settled = await Promise.allSettled((kind === 'SWAP' ? P.feeTiers : []).map(quoteTier));
@@ -1565,13 +1593,14 @@ async function bindSwapGas(q: PublicQuote, ownerValue: string, rpc: Rpc, runtime
 }
 
 /** Shared verified read path. It has no persistence, Review or transaction submission port. */
-export function createPublicSwapQuoteReader(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date = () => new Date(), catalog?: CatalogSwapRuntime) {
+export function createPublicSwapQuoteReader(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date = () => new Date(), catalog?: CatalogSwapRuntime,
+  purpose: 'QUOTE' | 'EXECUTION' = 'EXECUTION') {
   const read = async (rpc: Rpc, to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   async function quote(workflow: SemanticWorkflow, executionId: string, account?: string, expiresAt?: string): Promise<PublicQuote> {
     // A swap on a catalog network (Robinhood Chain, Base) takes the catalog path; BUILD-BASE-001: Base's reference pair included.
     const swapNode = workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input'), catalogProfile = swapNode ? swapProfile(swapNode.chainId) : null;
     if (catalogProfile?.kind === 'CATALOG') {
-      const q = await catalogQuote(workflow, executionId, catalogProfile, rpcFor(catalogProfile), catalog ?? fail('PUBLIC_NETWORK_UNAVAILABLE'), now);
+      const q = await catalogQuote(workflow, executionId, catalogProfile, rpcFor(catalogProfile), catalog ?? fail('PUBLIC_NETWORK_UNAVAILABLE'), now, purpose === 'QUOTE');
       return ownerBoundSwapReview(catalogProfile) && account !== undefined ? bindSwapOwner(q, rpcFor(catalogProfile), account, expiresAt) : q;
     }
     const swap = swapOf(workflow), P = swap.profile, rpc = rpcFor(P);

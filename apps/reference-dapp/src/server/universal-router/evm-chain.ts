@@ -168,7 +168,7 @@ export async function evmCanonicalReceipt(rpc: Rpc, hash: string): Promise<(Reco
 }
 
 export type DeliveryCheck = { ok: true; amount: bigint; blockNumber: number; blockHash: string; timestamp: number; orderBound: boolean; contentHash: string }
-  | { ok: false; reason: 'NOT_CANONICAL' | 'REVERTED' | 'NO_CREDIT' | 'BELOW_MINIMUM' | 'UNVERIFIABLE_NATIVE' | 'UNBOUND_NATIVE' };
+  | { ok: false; reason: 'NOT_CANONICAL' | 'REVERTED' | 'NO_CREDIT' | 'BELOW_MINIMUM' | 'UNVERIFIABLE_NATIVE' | 'UNBOUND_NATIVE' | 'UNBOUND_TOKEN' };
 
 type NativeMovement = { path: string; kind: 'call' | 'create' | 'suicide'; from: string; to: string; value: string };
 type TraceFrame = { path: number[]; children: number; reverted: boolean; movement: NativeMovement | null };
@@ -272,7 +272,16 @@ async function tracedMovements(rpc: Rpc, hash: string, tx: Record<string, unknow
 }
 
 type EvmCreditInput = { hash: string; chainId: number; recipient: string; token: string | null; minimum: bigint; orderId: string;
-  nativeAuthority: { solver: string; settlement?: UniversalEvmDeployment['relaySettlement'] } };
+  nativeAuthority: { solver: string; settlement?: UniversalEvmDeployment['relaySettlement'] }; requireTokenBinding?: boolean };
+
+/** Relay's direct ERC-20 payout appends the order word to standard token calldata. */
+function directTokenPayout(data: string, sender: string, recipient: string, order: string): { from: string; amount: bigint } | null {
+  const transfer = /^0xa9059cbb(0{24}[0-9a-f]{40})([0-9a-f]{64})([0-9a-f]{64})$/.exec(data);
+  const transferFrom = /^0x23b872dd(0{24}[0-9a-f]{40})(0{24}[0-9a-f]{40})([0-9a-f]{64})([0-9a-f]{64})$/.exec(data);
+  const match = transfer ?? transferFrom;
+  if (!match || match.at(-1) !== order || '0x' + match.at(-3)!.slice(24) !== recipient) return null;
+  return { from: transfer ? sender : '0x' + match[1]!.slice(24), amount: BigInt('0x' + match.at(-2)!) };
+}
 
 /**
  * Native fills carry the order ID as direct calldata or as a suffix on a
@@ -292,32 +301,46 @@ export async function verifyEvmCredit(rpc: Rpc, input: EvmCreditInput): Promise<
       || t.chainId !== undefined && quantity(t.chainId) !== BigInt(input.chainId)) return { ok: false, reason: 'NOT_CANONICAL' };
   const logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as EvmLog[] : [];
   const data = hex(t.input), id = input.orderId.slice(2);
+  const to = typeof t.to === 'string' ? t.to.toLowerCase() : null, from = hex(t.from);
+  if (raw.from !== undefined && hex(raw.from) !== from || raw.to !== undefined && (raw.to === null ? null : hex(raw.to)) !== to)
+    return { ok: false, reason: 'NOT_CANONICAL' };
+  const solver = from === input.nativeAuthority.solver, settlement = input.nativeAuthority.settlement;
+  const registeredExecutor = settlement?.executors.includes(from) ?? false;
+  const signed = typeof t.type === 'string' && /^0x[0-4]$/.test(t.type);
+  const marked = data === input.orderId || (data.length >= 74 && (data.length - 10) % 64 === 0 && data.endsWith(id));
+  const routerOrder = registeredExecutor && to === settlement?.router && data.startsWith('0xcd6e13f7') && marked;
   let orderBound: boolean;
   let amount = 0n;
   let movements: NativeMovement[] | undefined;
   if (input.token) {
-    orderBound = data.includes(id) || logs.some(l => String(l.data).toLowerCase().includes(id) || l.topics?.some(x => String(x).toLowerCase() === input.orderId));
+    const payout = signed && to === input.token && (solver || registeredExecutor) ? directTokenPayout(data, from, input.recipient, id) : null;
+    orderBound = input.requireTokenBinding ? payout !== null
+      : data.includes(id) || logs.some(l => String(l.data).toLowerCase().includes(id) || l.topics?.some(x => String(x).toLowerCase() === input.orderId));
+    if (input.requireTokenBinding && !orderBound) return { ok: false, reason: 'UNBOUND_TOKEN' };
+    let matchingCredit = false;
     for (const l of logs) {
       if (String(l.address).toLowerCase() !== input.token || String(l.topics?.[0]).toLowerCase() !== RELAY_TOPICS.transfer || l.topics.length !== 3) continue;
-      const from = '0x' + String(l.topics[1]).slice(26).toLowerCase(), to = '0x' + String(l.topics[2]).slice(26).toLowerCase(), value = BigInt(String(l.data));
-      if (to === input.recipient) amount += value;
-      if (from === input.recipient) amount -= value;
+      if (!/^0x0{24}[0-9a-f]{40}$/i.test(String(l.topics[1])) || !/^0x0{24}[0-9a-f]{40}$/i.test(String(l.topics[2])) || !HASH.test(String(l.data)))
+        return { ok: false, reason: 'NO_CREDIT' };
+      const debit = '0x' + String(l.topics[1]).slice(26).toLowerCase(), credit = '0x' + String(l.topics[2]).slice(26).toLowerCase(), value = BigInt(String(l.data));
+      if (credit === input.recipient) {
+        amount += value;
+        if (payout && debit === payout.from && value === payout.amount) matchingCredit = true;
+      }
+      if (debit === input.recipient) amount -= value;
     }
+    if (input.requireTokenBinding && payout && (!matchingCredit || amount !== payout.amount)) return { ok: false, reason: 'NO_CREDIT' };
   } else {
-    const to = typeof t.to === 'string' ? t.to.toLowerCase() : null;
-    const from = hex(t.from);
-    const solver = from === input.nativeAuthority.solver;
-    const settlement = input.nativeAuthority.settlement;
-    // Relay contract fills put a 32-byte order id after selector and ABI words.
-    const marked = data === input.orderId || (data.length >= 74 && (data.length - 10) % 64 === 0 && data.endsWith(id));
-    const relayExecutor = settlement && to === settlement.router && settlement.executors.includes(from) && data.startsWith('0xcd6e13f7');
-    orderBound = marked && (solver || Boolean(relayExecutor));
+    // Relay can pay directly from a registered destination solver distinct from the order's origin solver.
+    // Its signed transaction must name the reviewed recipient and carry exactly the order word.
+    const directOrder = to === input.recipient && data === input.orderId && (solver || (registeredExecutor && signed));
+    orderBound = directOrder || marked && solver || routerOrder;
     if (!orderBound) return { ok: false, reason: 'UNBOUND_NATIVE' };
     if (from === input.recipient || to === null) return { ok: false, reason: 'UNVERIFIABLE_NATIVE' };
     // The direct solver EOA transfer can be verified without archive-trace support.
     // With at most one 32-byte calldata word and 23k gas used, execution
     // cannot have paid for an outgoing value call or self-destruct.
-    const direct = solver && to === input.recipient && data === input.orderId && t.type !== '0x4'
+    const direct = directOrder && t.type !== '0x4'
       && quantity(raw.gasUsed) <= 23_000n && await rpc('eth_getCode', [to, { blockHash, requireCanonical: true }]).catch(() => null) === '0x';
     if (direct) amount = quantity(t.value);
     else {

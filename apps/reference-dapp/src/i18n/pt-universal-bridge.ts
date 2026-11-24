@@ -154,6 +154,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'The delivery could not be verified independently yet. FloFi keeps observing.': 'Ainda não foi possível verificar a entrega de forma independente. O FloFi continua observando.',
   'The reported transaction could not be linked to this order. FloFi keeps observing.': 'Não foi possível vincular a transação informada a esta ordem. O FloFi continua observando.',
   'Provider reports delivery · awaiting independent verification': 'O provedor informa a entrega · aguardando verificação independente',
+  'Delivery needs attention · provider report still unverified': 'A entrega precisa de atenção · a informação do provedor ainda não foi verificada',
+  'View provider-reported transaction': 'Ver transação informada pelo provedor',
   'Refund pending verification': 'Reembolso aguardando verificação',
   'Manual attention required': 'Requer atenção manual',
   'The deposit reverted on the source network; nothing was bridged.': 'O depósito foi revertido na rede de origem; nada foi transferido pela bridge.',

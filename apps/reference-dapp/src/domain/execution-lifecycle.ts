@@ -113,6 +113,7 @@ export function executionExplorer(chain: string, hash: string, local = false): s
  */
 export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean; wallet: boolean;
   phase?: ExecutionPhase; labelArgs?: readonly string[];
+  providerExplorer?: string;
   /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: why a request was not submitted (the attempt's closed refusal code), for the owner's sentence. */
   reason?: string };
 export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[];
@@ -260,7 +261,13 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       else if (r.verdict === 'DIVERGENT') op.label = 'Manual attention required';
       else if (r.verdict === 'PENDING' && r.lastHint?.status === 'REFUNDED') op.label = 'Refund pending verification';
       else if (r.verdict === 'PENDING' && r.destination) op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
-      else if (r.verdict === 'PENDING' && r.lastHint?.status === 'FILLED') op.label = 'Provider reports delivery · awaiting independent verification';
+      else if (r.verdict === 'PENDING' && r.lastHint?.status === 'FILLED') {
+        op.label = r.phase === 'RECOVERY_REQUIRED' ? 'Delivery needs attention · provider report still unverified'
+          : 'Provider reports delivery · awaiting independent verification';
+        const hash = r.lastHint.destinationTxHashes[0];
+        const link = hash && executionExplorer(op.chain, hash, r.provenance === 'MOCKED');
+        if (link) op.providerExplorer = link;
+      }
       else if (r.phase === 'RECOVERY_REQUIRED') op.label = 'Manual attention required';
       else if (destinationState === 'PENDING') phrase(op, 'AWAITING_DESTINATION');
       break;

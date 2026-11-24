@@ -18,6 +18,7 @@ export type BuildEstimate = { readonly workflowHash: string; readonly nodeId: st
   /** BUILD-FIX-UX-001: USD equivalents from the deployment's verified price source (mainnet assets only); absent when none applies. */
   readonly usd?: UsdEstimate | null };
 export type BuildEstimateResult = { ok: true; estimate: BuildEstimate } | { ok: false; code: string; reason?: string; correlationId?: string; discovery?: DiscoveryResult };
+export const BUILD_ESTIMATE_STREAM = 'application/x-ndjson';
 
 /** Economic validation also runs in the browser: HTTP 200 and a matching hash alone cannot put an amount on a card. */
 export function estimateMatchesNode(estimate: BuildEstimate, workflow: SemanticWorkflow, nodeId: string): boolean {

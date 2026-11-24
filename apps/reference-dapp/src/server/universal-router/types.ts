@@ -90,7 +90,7 @@ export type SourceSettlement = { readonly chainId: string; readonly transactionH
   readonly confirmedAt: string };
 export type DestinationDelivery = { readonly chainId: string; readonly transactionHash: string; readonly position: { readonly kind: 'BLOCK' | 'SLOT'; readonly height: number };
   readonly blockHash: string | null; readonly timestamp: number | null; readonly recipient: string; readonly token: string; readonly amount: string;
-  readonly orderBound: boolean; readonly discoveredBy: 'PROVIDER_HINT'; readonly contentHash: string; readonly final: boolean };
+  readonly orderBound: boolean; readonly orderProof?: 'RELAY_EVM_TOKEN_V1'; readonly discoveredBy: 'PROVIDER_HINT'; readonly contentHash: string; readonly final: boolean };
 export type RefundRecord = { readonly chainId: string; readonly transactionHash: string; readonly recipient: string; readonly token: string; readonly amount: string };
 export type UniversalFeeObligation = {
   readonly rateBps: 10; readonly basis: 'COMPLETED_WORKFLOW_INPUT';

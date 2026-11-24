@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
-import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc, readPacingFor } from './public-testnet-rpc.ts';
+import { chainBoundRpc, createBaseSepoliaReadRpc, createCatalogQuoteReadRpc, pacedReadRpc, readPacingFor } from './public-testnet-rpc.ts';
 import { createOfficialCatalogLoader, type RegistryFetch } from './network-catalog.ts';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 
@@ -25,10 +25,13 @@ export function createEvmCatalogRuntime(profile: { chain: string; chainId: numbe
     if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error(`${profile.prefix}_RPC_CONFIGURATION_INVALID`);
     return url.href;
   }
-  const rpc = (m: 'live' | 'harness', env: Env, methods: readonly string[] = EVM_CATALOG_RPC_METHODS): Rpc => {
+  const rpc = (m: 'live' | 'harness', env: Env, methods: readonly string[] = EVM_CATALOG_RPC_METHODS, purpose: 'QUOTE' | 'EXECUTION' = 'EXECUTION'): Rpc => {
     if (m === 'harness' && !profile.harness) throw new Error(`${profile.prefix}_MAINNET_NOT_ENABLED`);
-    const read = createBaseSepoliaReadRpc(m === 'harness' ? profile.harness!.rpc : rpcUrl(env[`${envPrefix}_RPC_URL`]), methods);
-    return chainBoundRpc(m === 'harness' ? read : pacedReadRpc(read, readPacingFor(env, Boolean(env[`${envPrefix}_RPC_URL`]))), profile.chainId);
+    const override = env[`${envPrefix}_RPC_URL`], url = m === 'harness' ? profile.harness!.rpc : rpcUrl(override);
+    const pacing = readPacingFor(env, Boolean(override));
+    if (m === 'live' && purpose === 'QUOTE') return createCatalogQuoteReadRpc(url, profile.chainId, pacing);
+    const read = createBaseSepoliaReadRpc(url, methods);
+    return chainBoundRpc(m === 'harness' ? read : pacedReadRpc(read, pacing), profile.chainId);
   };
   function createCatalogLoader(options: { mode: 'live' | 'harness'; fetcher?: RegistryFetch; now?: () => Date; ttlMs?: number }) {
     if (options.mode === 'harness' && !profile.harness) throw new Error(`${profile.prefix}_MAINNET_NOT_ENABLED`);

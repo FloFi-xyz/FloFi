@@ -31,7 +31,8 @@ export type StepOutcome = {
   readonly kind: 'OWNER_RUN' | 'DELEGATED_STEP' | 'USER_FUNDED_GROUP'; readonly executionId: string; readonly flow: string | null; readonly status: string;
   readonly transactions: readonly { readonly chain: string; readonly hash: string }[];
   readonly evidence: { readonly environment: string; readonly outcome: string; readonly bundleHash: string | null } | null;
-  readonly spent: readonly { readonly asset: string; readonly amount: string }[]; readonly received: readonly { readonly asset: string; readonly amount: string }[];
+  readonly spent: readonly { readonly asset: string; readonly amount: string }[];
+  readonly received: readonly import('./received-amounts.ts').FlowAmount[];
   readonly observedAt: string;
   /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: network fees actually paid for the group this step ran in, and by whom (always the owner's wallet). */
   readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number;

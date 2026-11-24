@@ -9,7 +9,16 @@
 import { assetKey } from '../delegation/steps.ts';
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 
-export type FlowAmount = { readonly asset: string; readonly amount: string };
+export type FlowAmount = { readonly asset: string; readonly amount: string; readonly orderProof?: 'RELAY_EVM_TOKEN_V1' };
+
+export function proofRequired(flow: string | null, asset: string): boolean {
+  return flow === 'crosschain-universal' && /^eip155:[0-9]+\/erc20:/.test(asset);
+}
+export function amountsAvailable(outcome: { readonly flow: string | null; readonly received: readonly FlowAmount[] } | null | undefined, asset: string): readonly FlowAmount[] {
+  if (!outcome) return [];
+  const required = proofRequired(outcome.flow, asset);
+  return outcome.received.filter(fact => fact.asset === asset && (!required || fact.orderProof === 'RELAY_EVM_TOKEN_V1'));
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const units = (v: unknown): string | null => typeof v === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(v) ? v : null;
@@ -67,7 +76,13 @@ export function amountsFromOwnerRecord(record: unknown): OwnerAmounts {
     const spent: FlowAmount[] = [];
     if (out && typeof route.destinationChain === 'string') {
       const address = tokenAddress(out);
-      if (address && units(record.received)) received.push({ asset: assetKey({ chain: route.destinationChain, address }), amount: record.received });
+      const orderVerified = !route.destinationChain.startsWith('eip155:') || out.kind === 'NATIVE' ||
+        isObject(record.destination) && record.destination.orderProof === 'RELAY_EVM_TOKEN_V1' && record.destination.final === true &&
+          record.destination.amount === record.received;
+      if (address && orderVerified) {
+        const asset = assetKey({ chain: route.destinationChain, address });
+        received.push({ asset, amount: record.received, ...(proofRequired('crosschain-universal', asset) ? { orderProof: 'RELAY_EVM_TOKEN_V1' as const } : {}) });
+      }
     }
     if (inn && typeof route.sourceChain === 'string' && typeof route.inputAmount === 'string' && units(route.inputAmount)) {
       const address = tokenAddress(inn);

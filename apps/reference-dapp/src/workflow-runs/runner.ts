@@ -29,6 +29,7 @@ import { evaluateGates, handoffFindings, type HandoffPolicy } from '../mcp/execu
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { executionStep, isLiveDeveloperRun } from './external-step.ts';
 import { observeOwnerStep } from './observe.ts';
+import { amountsAvailable } from './received-amounts.ts';
 import type { BoundResolution, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { OWNER_EXECUTION_CLAIMED } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
@@ -114,7 +115,7 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
         const producer = steps[binding.amountFrom]!;
         if (producer.state !== 'RECONCILED' || !producer.outcome) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_PRODUCER_NOT_RECONCILED');
         const key = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
-        const received = producer.outcome.received.filter(r => r.asset === key).reduce((sum, r) => sum + BigInt(r.amount), 0n);
+        const received = amountsAvailable(producer.outcome, key).reduce((sum, r) => sum + BigInt(r.amount), 0n);
         // One reconciled delivery is a finite funding budget across all its consumers. Reserve an earlier consumer's approved maximum
         // unless its reconciled record proves it spent less; missing spend evidence must never unlock the owner's unrelated balance.
         const consumed = steps.filter(previous => previous.stepIndex < k && previous.bound).reduce((sum, previous) => {

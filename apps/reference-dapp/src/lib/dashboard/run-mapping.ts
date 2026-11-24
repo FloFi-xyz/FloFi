@@ -194,6 +194,7 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
     status = 'Unresolved'; message = 'The latest request was not submitted, but the earlier requests of this run could not be read, so an earlier confirmed action (such as a token approval) cannot be ruled out. Refresh history to check again.';
   }
   if (run.flow === 'crosschain-universal') {
+    if (run.needsObservation && (run.status === 'RECOVERY_REQUIRED' || run.attentionRequired)) status = 'Needs attention';
     if (run.status === 'REFUNDED' && !run.needsObservation) message = 'Refunded';
     else if (run.needsObservation && run.errorCode === 'UNIVERSAL_REFUND_NOT_OBSERVED') message = 'Refund pending verification';
     else if (run.needsObservation && ['UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE', 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'].includes(run.errorCode ?? ''))

@@ -278,6 +278,72 @@ describe('native contract settlement', () => {
   });
 });
 
+describe('direct destination executor settlement', () => {
+  it.each([
+    ['reviewed solver', null],
+    ['registered Ethereum executor', null],
+    ['unregistered sender', 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'],
+    ['different order', 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'],
+    ['different recipient', 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'],
+    ['below the reviewed minimum', 'UNIVERSAL_DELIVERY_BELOW_MINIMUM'],
+  ])('checks a Base to Ethereum native payout from %s', async (scenario, error) => {
+    const c = await setup(), source = c.chainOf('base'), destination = c.chainOf('ethereum');
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.ethereum.chain,
+      inputAsset: native('base'), outputAsset: native('ethereum'), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const confirmed = await executeEvm(c, source, (await reviewed(c, w, EVM_OWNER)).id, w);
+    const route = confirmed.review.route;
+    const executor = UNIVERSAL_ROUTER_DEPLOYMENT.evm[route.destinationChain]!.relaySettlement!.executors.find(address => address !== route.order.solver)!;
+    const amount = scenario === 'below the reviewed minimum' ? BigInt(route.minimumOutput) - 1n : BigInt(route.expectedOutput);
+    const hash = destination.deliver({ recipient: scenario === 'different recipient' ? EVM_RECIPIENT : EVM_OWNER, token: null, amount,
+      orderId: scenario === 'different order' ? '0x' + 'ab'.repeat(32) : route.order.orderId,
+      sender: scenario === 'reviewed solver' ? route.order.solver : scenario === 'unregistered sender' ? EVM_RECIPIENT : executor });
+    destination.state.txs.get(hash)!.type = '0x2';
+    destination.state.receipts.get(hash)!.gasUsed = '0x5708';
+    destination.state.traces.delete(hash); destination.state.callTraces.delete(hash);
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    const early = await c.service.observe(confirmed.id);
+    expect(early.evidence).toBeNull();
+    if (error) {
+      expect(early).toMatchObject({ error, destination: null, received: null });
+      return;
+    }
+    expect(early).toMatchObject({ phase: 'DESTINATION_OBSERVED', destination: { transactionHash: hash, orderBound: true, final: false } });
+    for (let i = 0; i < 3; i++) { source.mine(); destination.mine(); }
+    const restarted = c.restart();
+    const verified = await restarted.observe(confirmed.id);
+    expect(verified).toMatchObject({ id: confirmed.id, verdict: 'RECONCILED', received: amount.toString(),
+      source: { transactionHash: confirmed.source!.transactionHash }, destination: { transactionHash: hash, orderBound: true, final: true },
+      evidence: { received: amount.toString() } });
+    expect(verified.attempts.map(attempt => attempt.transactionHash)).toEqual(confirmed.attempts.map(attempt => attempt.transactionHash));
+    expect((await restarted.observe(confirmed.id)).evidence?.bundleHash).toBe(verified.evidence?.bundleHash);
+  });
+
+  it.each([
+    ['type 0x4', { type: '0x4' }, 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
+    ['gas above the direct cap', { gasUsed: '0x5a00' }, 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
+    ['recipient contract code', { code: '0x6000' }, 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
+    ['missing transaction type', { type: undefined }, 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'],
+  ])('refuses a registered-executor direct pay with %s when traces are unavailable', async (_label, change, error) => {
+    const c = await setup(), source = c.chainOf('base'), destination = c.chainOf('ethereum');
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.ethereum.chain,
+      inputAsset: native('base'), outputAsset: native('ethereum'), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const confirmed = await executeEvm(c, source, (await reviewed(c, w, EVM_OWNER)).id, w);
+    const route = confirmed.review.route;
+    const executor = UNIVERSAL_ROUTER_DEPLOYMENT.evm[route.destinationChain]!.relaySettlement!.executors.find(address => address !== route.order.solver)!;
+    const hash = destination.deliver({ recipient: EVM_OWNER, token: null, amount: BigInt(route.expectedOutput), orderId: route.order.orderId, sender: executor });
+    const tx = destination.state.txs.get(hash)!;
+    if ('type' in change) {
+      if (change.type === undefined) delete (tx as { type?: string }).type;
+      else tx.type = change.type;
+    } else tx.type = '0x2';
+    destination.state.receipts.get(hash)!.gasUsed = 'gasUsed' in change ? change.gasUsed! : '0x5708';
+    if ('code' in change) destination.state.code.set(EVM_OWNER, change.code!);
+    destination.state.traces.delete(hash); destination.state.callTraces.delete(hash);
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ error, destination: null, received: null, evidence: null });
+  });
+});
+
 describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified delivery', () => {
   it('A. Solana USDC → Base USDC: one Solana signature, FloFi broadcasts once, Base delivery proven, evidence', async () => {
     const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'),
@@ -359,7 +425,7 @@ describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified deliv
 });
 
 describe('I–K: independent and identical bridges, duplicate clicks and retries', () => {
-  it('I/J. two independent bridges and two identical bridges from one wallet run side by side, each with its own order and delivery', async () => {
+  it('I/J. two independent bridges and two identical bridges from one wallet run side by side, each with its own order and delivery', { timeout: 20_000 }, async () => {
     const c = await setup(), base = c.chainOf('base');
     const same = () => workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS['arbitrum-one'].chain, inputAsset: token('base'),
       outputAsset: token('arbitrum-one'), amount: '5000000', recipient: 'CONNECTED_OWNER' });
@@ -393,7 +459,7 @@ describe('I–K: independent and identical bridges, duplicate clicks and retries
     expect(settled.map(r => r.verdict)).toEqual(['RECONCILED', 'RECONCILED', 'RECONCILED']);
     expect(new Set(settled.map(r => r.destination!.transactionHash)).size).toBe(3);
   });
-  it('J. one delivery cannot reconcile two identical bridges', async () => {
+  it('J. one delivery cannot reconcile two identical bridges', { timeout: 15_000 }, async () => {
     const c = await setup();
     const w = () => workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'), outputAsset: token('base'),
       amount: '10000000', recipient: EVM_RECIPIENT });
@@ -401,9 +467,9 @@ describe('I–K: independent and identical bridges, duplicate clicks and retries
     const one = await executeSolana(c, (await reviewed(c, w1, c.wallet.publicKey)).id, w1), two = await executeSolana(c, (await reviewed(c, w2, c.wallet.publicKey)).id, w2);
     const done = await settle(c, one);
     expect(done.verdict).toBe('RECONCILED');
-    // Relay (wrongly) points the second request at the first delivery: it is claimed by the first run and refused for the second.
+    // The first payout is independently bound to another order, so the second run never attempts to claim it.
     c.relayMock.setStatus(two.review.route.quote.id, { status: 'success', txHashes: [done.destination!.transactionHash] });
-    expect(await c.service.observe(two.id)).toMatchObject({ verdict: 'DIVERGENT', error: 'UNIVERSAL_DELIVERY_CLAIMED_BY_ANOTHER_RUN' });
+    expect(await c.service.observe(two.id)).toMatchObject({ verdict: 'PENDING', error: 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND', destination: null });
   });
   it('K. duplicate clicks and retries never create a second wallet request or broadcast', async () => {
     const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'),

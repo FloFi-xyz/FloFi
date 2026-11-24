@@ -9,10 +9,12 @@ import { archiveEvidence, backoffMs, createIdempotencyStore, createPostgresLease
   readVerifiedEvidence, requestHash, withSpan, type Database, type EvidenceStore, type HttpRequest, type HttpResponse, type Logger, type Route,
   type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createHash } from 'node:crypto';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName, type FlowService, type Rpc } from './flows.ts';
 import { jupiterQuotePreview, PREVIEW_METHODS, previewStorage, type PreviewPurpose } from './preview.ts';
+import { measureQuoteRpc } from '../src/server/public-testnet-rpc.ts';
 import { assertRunOwnership, normalizePrincipal, WALLET_PRINCIPAL_HEADER } from '../src/server/run-ownership.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from '../src/server/test-network-flows.ts';
 import { betaAccessMode, createBetaAccessStore, type BetaPrincipal } from '../src/flight/beta-access.ts';
@@ -53,7 +55,8 @@ export function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps 
     evmRpcs: Object.fromEntries(Object.entries(deps.universal.evmRpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
   // Per-chain read clients (Aave supply, transfers, catalog liquidity) share the same paced transports (follow-up review).
   const chains = deps.chains ? { chains: { ...deps.chains, rpcs: Object.fromEntries(Object.entries(deps.chains.rpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
-  return { ...deps, ...router, ...universal, ...chains, rpc: untilAborted(deps.rpc, signal) };
+  return { ...deps, ...router, ...universal, ...chains, rpc: untilAborted(deps.rpc, signal),
+    ...deps.quoteRpc ? { quoteRpc: untilAborted(observeOnly(deps.quoteRpc), signal) } : {} };
 }
 
 export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string; correlationId?: string };
@@ -292,11 +295,15 @@ export function createBackend(options: BackendOptions) {
     callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number; readonly betaIdentity?: BetaRequestIdentity | null } = {}): Promise<FlowResult> {
     const refused = await betaRefusal(options.tenantId, callOptions.betaIdentity);
     if (refused) return { ok: false, code: refused };
+    return computePreview(flow, args, purpose, callOptions);
+  }
+  async function computePreview(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION',
+    callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<FlowResult> {
     if (purpose !== 'SIMULATION' && purpose !== 'QUOTE') return { ok: false, code: 'ARGUMENTS_INVALID' };
-    if (purpose === 'QUOTE' && flow !== 'jupiter-swap') return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
+    if (purpose === 'QUOTE' && flow !== 'jupiter-swap' && !definition.quote) return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     if (!method) return { ok: false, code: 'PREVIEW_NOT_AVAILABLE' };
-    if (!definition.methods[method]!.validate(args)) throw new HttpError(400, 'ARGUMENTS_INVALID');
+    if (!definition.methods[method]!.validate(args) || purpose === 'QUOTE' && definition.quote && args.length !== 1) throw new HttpError(400, 'ARGUMENTS_INVALID');
     const mode = flowMode(flow, env);
     if (mode === 'off') return { ok: false, code: disabledCode(flow) };
     const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
@@ -328,8 +335,14 @@ export function createBackend(options: BackendOptions) {
         try {
           // Inside the try: a transport that cannot be built (e.g. an invalid RPC URL) is this preview's classified refusal, never a rejection.
           const deps = previewTransport(depsFor(flow, true), abandoned.signal);
-          return await Promise.race([deadline, gone, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, deps)
-            : await definition.create(previewStorage(), deps, {}).call(method, args) }) as const)()]);
+          const compute = async (): Promise<FlowResult> => {
+            if (purpose === 'SIMULATION') return { ok: true, value: await definition.create(previewStorage(), deps, {}).call(method, args) };
+            const quote = definition.quote;
+            if (quote) return { ok: true, value: await measureQuoteRpc(() => quote(args[0] as SemanticWorkflow, deps),
+              metrics => logger.info('flow.quote_rpc', { flow, ...metrics })) };
+            return { ok: true, value: await jupiterQuotePreview(args, deps) };
+          };
+          return await Promise.race([deadline, gone, compute()]);
         }
         catch (error) {
           if (abandoned.signal.aborted) return { ok: false, code: stopCode };
@@ -410,9 +423,13 @@ export function createBackend(options: BackendOptions) {
       const flowMatch = request.path.match(/^\/v1\/flows\/[a-z-]{1,40}\/([A-Za-z]{1,40})$/);
       const recoveryPath = (flowMatch !== null && isFlightRecoveryMethod(flowMatch[1]!)) || request.path.startsWith('/v1/runs');
       // Recovery surfaces need a live session only. Every other private route still rechecks the Flight grant.
-      const refused = recoveryPath
-        ? await betaSessionRefusal(options.tenantId, identity)
-        : await betaRefusal(options.tenantId, identity, principal);
+      const checkAccess = () => recoveryPath
+        ? betaSessionRefusal(options.tenantId, identity)
+        : betaRefusal(options.tenantId, identity, principal);
+      const refused = request.path.startsWith('/v1/previews/') ? await withSpan(logger, 'flow.preview_access', {}, async () => {
+        const code = await checkAccess();
+        return code ? { ok: false as const, code } : { ok: true as const, code: null };
+      }).then(decision => decision.code) : await checkAccess();
       if (refused) return { status: 403, body: { ok: false, code: refused } };
       // Tenant-wide operator reads remain available in open mode. During beta/closed the API bearer alone cannot enumerate any wallet's data.
       if (betaAccessMode(env) !== 'open' && request.path.startsWith('/v1/runs')) {
@@ -563,9 +580,12 @@ export function createBackend(options: BackendOptions) {
       // P0 catalog reliability: the caller's remaining budget (the BFF sends its own attempt timeout) bounds the preview; a disconnect abandons it.
       const budget = request.headers[PREVIEW_DEADLINE_HEADER];
       const deadlineMs = typeof budget === 'string' && /^[1-9][0-9]{2,5}$/.test(budget) ? Number(budget) : undefined;
-      return { status: 200, body: await previewFlow(flow, body.args, body.purpose as PreviewPurpose | undefined, {
-        betaIdentity: requestIdentity(request),
-        ...request.signal ? { signal: request.signal } : {}, ...deadlineMs === undefined ? {} : { deadlineMs } }) };
+      const availability = { ...(request.signal ? { signal: request.signal } : {}), ...(deadlineMs === undefined ? {} : { deadlineMs }) };
+      // The HTTP wrapper already checked a principal-free request. A principal-bound request keeps both existing checks.
+      const purpose = body.purpose as PreviewPurpose | undefined;
+      const result = indexPrincipal(request) ? await previewFlow(flow, body.args, purpose, { ...availability, betaIdentity: requestIdentity(request) })
+        : await computePreview(flow, body.args, purpose, availability);
+      return { status: 200, body: result };
     }) },
     { method: 'GET', name: 'runs', pattern: /^\/v1\/runs$/, handler: wrap(async request => {
       const limit = integerParam(request.query.get('limit')), flow = request.query.get('flow');

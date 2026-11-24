@@ -5,6 +5,7 @@
  */
 import { BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP } from '../domain/public-testnet-swap.ts';
 import type { Rpc, RpcContext } from './public-testnet-service.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * P0 catalog reliability: the code of a read whose caller stopped waiting before it could start (or between its retries). Never sent to a node;
@@ -23,6 +24,23 @@ function backoff(sleep: (ms: number) => Promise<void>, ms: number, context: RpcC
 }
 
 const SEND_METHODS = new Set(['eth_sendTransaction', 'eth_sendRawTransaction', 'sendTransaction', 'eth_sign', 'eth_signTransaction', 'personal_sign']);
+function rpcResult(result: unknown): unknown {
+  const error = result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object'
+    ? result.error as { code?: unknown; message?: unknown } : null;
+  const code = error && 'code' in error ? Number(error.code) : undefined, message = error && typeof error.message === 'string' ? error.message : '';
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an error carries the node's JSON-RPC code (`rpcErrorCode`) so a caller can tell an answer about the call
+  // from no usable answer; the provider's text never leaves this client. A lagging backend (no such block yet) is missing history, an
+  // explicit revert is an answer (never retried as an outage, whatever code the provider uses for it), and a rate limit reported in the body
+  // is an outage like an HTTP 429.
+  if (error && (/missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available|header not found|unknown block|block not found/i.test(message)))
+    throw Object.assign(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'), { rpcErrorCode: code });
+  if (error && (code === 3 || /revert/i.test(message))) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code, rpcReverted: true });
+  if (error && (code === -32005 || code === -32007 || code === -32011 || code === -32016 || code === -32603 || code === 429 || /rate limit|request limit|too many requests/i.test(message)))
+    throw Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: code });
+  if (error) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code });
+  if (!result || typeof result !== 'object' || !('result' in result) || 'error' in result) throw new Error('PUBLIC_RPC_RESPONSE_INVALID');
+  return result.result;
+}
 export function createBaseSepoliaReadRpc(url: string, methods: readonly string[], timeoutMs = 10_000): Rpc {
   if (methods.some(method => SEND_METHODS.has(method))) throw new Error('PUBLIC_RPC_METHOD_DENIED');
   const allowed = new Set(methods);
@@ -41,21 +59,7 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
       const text = await response.text();
       if (text.length > 1_048_576) throw new Error('PUBLIC_RPC_RESPONSE_TOO_LARGE');
       const result: unknown = JSON.parse(text);
-      const error = result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object'
-        ? result.error as { code?: unknown; message?: unknown } : null;
-      const code = error && 'code' in error ? Number(error.code) : undefined, message = error && typeof error.message === 'string' ? error.message : '';
-      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an error carries the node's JSON-RPC code (`rpcErrorCode`) so a caller can tell an answer about the call
-      // from no usable answer; the provider's text never leaves this client. A lagging backend (no such block yet) is missing history, an
-      // explicit revert is an answer (never retried as an outage, whatever code the provider uses for it), and a rate limit reported in the body
-      // is an outage like an HTTP 429.
-      if (error && (/missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available|header not found|unknown block|block not found/i.test(message)))
-        throw Object.assign(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'), { rpcErrorCode: code });
-      if (error && (code === 3 || /revert/i.test(message))) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code, rpcReverted: true });
-      if (error && (code === -32005 || code === -32011 || code === -32016 || code === -32603 || code === 429 || /rate limit|too many requests/i.test(message)))
-        throw Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: code });
-      if (error) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code });
-      if (!result || typeof result !== 'object' || !('result' in result) || 'error' in result) throw new Error('PUBLIC_RPC_RESPONSE_INVALID');
-      return result.result;
+      return rpcResult(result);
     } catch (cause) {
       if (cause instanceof Error && /^[A-Z_]+$/.test(cause.message)) throw cause;
       if (abandoned(context)) throw new Error(READ_ABANDONED, { cause });
@@ -65,6 +69,119 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
 }
 const PUBLIC_SWAP_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode',
   'eth_call', 'eth_getBalance', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionReceipt', 'eth_getTransactionByHash']);
+
+const QUOTE_READ_METHODS = ['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_call'] as const;
+const BATCH_LIMIT = 16;
+const BATCH_REQUEST = 'quote.batch';
+type PendingRead = { method: string; params: readonly unknown[]; resolve: (value: unknown) => void; reject: (reason: unknown) => void };
+type QuoteRpcMetrics = {
+  logical_calls: number;
+  wire_calls: number;
+  requests: number;
+  batch_requests: number;
+  fallbacks: number;
+  provider_ms: number;
+  paced_ms: number;
+};
+const quoteRpcMetrics = new AsyncLocalStorage<QuoteRpcMetrics>();
+export async function measureQuoteRpc<T>(run: () => Promise<T>, log: (metrics: QuoteRpcMetrics) => void): Promise<T> {
+  const metrics: QuoteRpcMetrics = { logical_calls: 0, wire_calls: 0, requests: 0, batch_requests: 0, fallbacks: 0, provider_ms: 0, paced_ms: 0 };
+  try { return await quoteRpcMetrics.run(metrics, run); }
+  finally { log(metrics); }
+}
+
+/** Coalesce independent reads from one indicative quote into a paced HTTP envelope. Review uses the regular transport. */
+export function createCatalogQuoteReadRpc(url: string, chainId: number, pacing: ReturnType<typeof readPacingFor>): Rpc {
+  const single = createBaseSepoliaReadRpc(url, QUOTE_READ_METHODS);
+  const pending = new Map<AbortSignal | undefined, PendingRead[]>();
+  // Public Base counts items even when they arrive in one envelope (25/second limit).
+  const batchLimit = chainId === 8453 && !pacing.maxInFlight ? 5 : BATCH_LIMIT;
+  let batchDisabledUntil = 0;
+  const send: Rpc = async (method, params, context) => {
+    if (method !== BATCH_REQUEST) return single(method, params, context);
+    const deadline = AbortSignal.timeout(10_000);
+    const signal = context?.signal ? AbortSignal.any([context.signal, deadline]) : deadline;
+    const response = await fetch(url, { method: 'POST', cache: 'no-store', signal,
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) }).catch(() => {
+      throw new Error(abandoned(context) ? READ_ABANDONED : 'PUBLIC_RPC_UNAVAILABLE');
+    });
+    if ([400, 405, 413, 415, 422].includes(response.status)) return null;
+    if (!response.ok) throw new Error('PUBLIC_RPC_UNAVAILABLE');
+    const body = await response.text().catch(() => {
+      throw new Error(abandoned(context) ? READ_ABANDONED : 'PUBLIC_RPC_UNAVAILABLE');
+    });
+    if (body.length > 1_048_576) return null;
+    try { return JSON.parse(body) as unknown; } catch { return null; }
+  };
+  const paced = pacedReadRpc(async (method, params, context) => {
+    const metrics = quoteRpcMetrics.getStore(), start = performance.now();
+    if (metrics) {
+      metrics.requests++;
+      metrics.wire_calls += method === BATCH_REQUEST ? params.length : 1;
+      if (method === BATCH_REQUEST) metrics.batch_requests++;
+    }
+    try { return await send(method, params, context); }
+    finally { if (metrics) metrics.provider_ms += Math.round(performance.now() - start); }
+  }, { ...pacing, retries: 2 });
+  const dispatch: Rpc = async (method, params, context) => {
+    const metrics = quoteRpcMetrics.getStore(), start = performance.now();
+    try { return await paced(method, params, context); }
+    finally { if (metrics) metrics.paced_ms += Math.round(performance.now() - start); }
+  };
+  async function flush(entries: PendingRead[], context: RpcContext | undefined) {
+    const metrics = quoteRpcMetrics.getStore();
+    const solo = (entry: PendingRead) => dispatch(entry.method, entry.params, context).then(entry.resolve, entry.reject);
+    if (Date.now() < batchDisabledUntil || entries.length === 1) { await Promise.all(entries.map(solo)); return; }
+    try {
+      const result = await dispatch(BATCH_REQUEST, entries.map(({ method, params }, index) => ({ jsonrpc: '2.0', id: index + 1, method, params })), context);
+      const byId = new Map<number, unknown>();
+      if (Array.isArray(result)) for (const item of result) {
+        if (!item || typeof item !== 'object' || item.jsonrpc !== '2.0' || !Number.isSafeInteger(item.id) || item.id < 1 || item.id > entries.length || byId.has(item.id)
+          || ('result' in item) === ('error' in item) || ('error' in item && (!item.error || typeof item.error !== 'object'))) {
+          byId.clear(); break;
+        }
+        byId.set(item.id, item);
+      }
+      // Treat incomplete, rejected and ambiguous envelopes as provider incompatibility. No item from one is used.
+      if (byId.size !== entries.length) {
+        batchDisabledUntil = Date.now() + 30_000;
+        if (metrics) metrics.fallbacks += entries.length;
+        await Promise.all(entries.map(solo));
+        return;
+      }
+      await Promise.all(entries.map(async (entry, index) => {
+        try { entry.resolve(rpcResult(byId.get(index + 1))); }
+        catch (cause) {
+          if (!readNotAnswered(cause)) { entry.reject(cause); return; }
+          if (metrics) metrics.fallbacks++;
+          await solo(entry);
+        }
+      }));
+    } catch (cause) {
+      for (const entry of entries) entry.reject(cause);
+    }
+  }
+  return chainBoundRpc(async (method, params, context) => {
+    if (!QUOTE_READ_METHODS.some(allowed => allowed === method)) throw new Error('PUBLIC_RPC_METHOD_DENIED');
+    const metrics = quoteRpcMetrics.getStore();
+    if (metrics) metrics.logical_calls++;
+    if (Date.now() < batchDisabledUntil) return dispatch(method, params, context);
+    const scope = context?.signal;
+    return new Promise<unknown>((resolve, reject) => {
+      let queue = pending.get(scope);
+      if (!queue) {
+        queue = [];
+        pending.set(scope, queue);
+        queueMicrotask(() => {
+          const entries = pending.get(scope)!;
+          pending.delete(scope);
+          for (let start = 0; start < entries.length; start += batchLimit) void flush(entries.slice(start, start + batchLimit), context);
+        });
+      }
+      queue.push({ method, params, resolve, reject });
+    });
+  }, chainId);
+}
 /**
  * BUILD-CLOUD-PARITY-001: the Base Sepolia read client of the public swap, at the public endpoint or the deployment's HTTPS override
  * `GRYLOO_BASE_SEPOLIA_RPC_URL` (the one Base Sepolia endpoint setting every Base Sepolia flow shares), bound to chain 84532 and paced

@@ -2,10 +2,11 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { estimateMatchesNode, requestBuildEstimate, type BuildEstimate, type BuildEstimateResult } from '../domain/build-estimate';
+import { BUILD_ESTIMATE_STREAM, estimateMatchesNode, requestBuildEstimate, type BuildEstimate, type BuildEstimateResult } from '../domain/build-estimate';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { createJourney, reportJourney } from '../domain/journey-metrics';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
+import type { UsdEstimate } from '../domain/usd-estimate';
 
 /**
  * UX-007: the card's live quote. `calculating` from the first edit of a quotable snapshot until its own answer; `unavailable` when the
@@ -31,7 +32,38 @@ export function quoteSnapshot(workflow: SemanticWorkflow, nodeId: string): Seman
 // Answers already received, per exact snapshot (workflow hash, node, owner), reused only until the estimate's own expiry so that returning
 // to an amount shows it at once. Never a Review input; a different amount, node, owner, chain or provider is a different key.
 const answered = new Map<string, BuildEstimate>();
+const pendingUsd = new WeakMap<BuildEstimate, Promise<UsdEstimate | null>>();
 const ANSWERED_LIMIT = 32;
+async function readEstimate(response: Response): Promise<BuildEstimateResult> {
+  if (response.headers.get('content-type') !== BUILD_ESTIMATE_STREAM || !response.body) return await response.json() as BuildEstimateResult;
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  let handedOff = false;
+  async function line() {
+    let end = buffer.indexOf('\n');
+    while (end < 0) {
+      const chunk = await reader.read();
+      if (chunk.done) return null;
+      buffer += chunk.value;
+      end = buffer.indexOf('\n');
+    }
+    const value: unknown = JSON.parse(buffer.slice(0, end));
+    buffer = buffer.slice(end + 1);
+    return value;
+  }
+  try {
+    const result = await line() as BuildEstimateResult | null;
+    if (result?.ok && result.estimate) {
+      const enrichment = line().then(value => value as UsdEstimate | null, () => null).finally(() => reader.cancel().catch(() => undefined));
+      pendingUsd.set(result.estimate, enrichment);
+      handedOff = true;
+      return result;
+    }
+    return result ?? { ok: false, code: 'ESTIMATE_RESPONSE_INVALID' };
+  } finally {
+    if (!handedOff) void reader.cancel().catch(() => undefined);
+  }
+}
 function remember(scope: string, estimate: BuildEstimate) {
   answered.delete(scope); answered.set(scope, estimate);
   while (answered.size > ANSWERED_LIMIT) answered.delete(answered.keys().next().value!);
@@ -104,6 +136,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
   const scope = JSON.stringify([key, nodeId, owner ?? null, destinationWallet ?? null]);
   const node = snapshot?.nodes.find(node => node.nodeId === nodeId);
   const chain = node?.chainId;
+  const unresolved = node?.inputs.some(input => input.kind === 'OUTPUT_REFERENCE');
   const bridge = node?.actionType === 'asset.bridge' ? bridgeEstimateRequest(node) : null;
   const provider = node?.adapterConstraints.protocols.some(protocol => protocol === 'uniswap' || protocol === 'uniswap-v3') ? 'Uniswap V3'
     : node?.adapterConstraints.protocols.includes('jupiter') ? 'Jupiter'
@@ -116,27 +149,36 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
   const [refresh, setRefresh] = useState(0);
   const quotable = Boolean(workflow && key && chain && provider);
   useEffect(() => {
-    if (!snapshot || !key || !chain || !provider) return;
+    if (!snapshot || !key || !chain || !provider || unresolved) return;
     if (frozen) {
       const known = recalled(scope);
       if (known) setResult(current => current?.key === scope ? current : { key: scope, estimate: known, failed: false });
       return;
     }
     const ticket = ++generation.current;
-    let expire: ReturnType<typeof setTimeout> | undefined;
+    let expire: ReturnType<typeof setTimeout> | undefined, disposed = false;
     const accept = (estimate: BuildEstimate | null, failed: boolean, failure?: Extract<BuildEstimateResult, { ok: false }>) => {
       if (ticket !== generation.current) return;
       setResult({ key: scope, estimate, failed, ...failure ? { failure } : {} });
-      if (estimate) { setExpired(null); expire = setTimeout(() => {
+      if (estimate) {
+        setExpired(null);
+        void pendingUsd.get(estimate)?.then(usd => {
+          if (!usd || disposed || ticket !== generation.current || Date.parse(estimate.expiresAt) <= Date.now()) return;
+          const enriched = { ...estimate, usd };
+          if (recalled(scope) === estimate) remember(scope, enriched);
+          setResult(current => current?.key === scope && current.estimate === estimate ? { ...current, estimate: enriched } : current);
+        });
+        expire = setTimeout(() => {
         if (ticket !== generation.current) return;
         answered.delete(scope); setExpired({ key: scope, estimate }); setResult(null);
         // A fresh quote is requested at once while the page is visible; a hidden tab waits until it is shown again (no background polling).
         if (typeof document === 'undefined' || document.visibilityState !== 'hidden') setRefresh(v => v + 1);
         else document.addEventListener('visibilitychange', () => { if (ticket === generation.current) setRefresh(v => v + 1); }, { once: true });
-      }, Math.max(0, Date.parse(estimate.expiresAt) - Date.now())); }
+        }, Math.max(0, Date.parse(estimate.expiresAt) - Date.now()));
+      }
     };
     const known = recalled(scope);
-    if (known) { accept(known, false); return () => { clearTimeout(expire); }; }
+    if (known) { accept(known, false); return () => { disposed = true; clearTimeout(expire); }; }
     const correlationId = crypto.randomUUID();
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: intent → first quote, content-free (the chain and provider label only), reported once per answered snapshot.
     // Its own random id, never the quote correlation id: a journey line must not join the quote's server trace.
@@ -147,9 +189,9 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     let sent = false;
     const cancel = requestBuildEstimate(signal => { const ready = recalled(scope); return ready ? Promise.resolve({ ok: true as const, estimate: ready }) : sharedEstimate(scope, async shared => {
       sent = true;
-      const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-quote-correlation-id': correlationId },
+      const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', accept: BUILD_ESTIMATE_STREAM, 'x-quote-correlation-id': correlationId },
         body: JSON.stringify({ workflow: snapshot, nodeId, owner, ...destinationWallet ? { destinationWallet } : {} }), signal: shared });
-      const result = await response.json() as BuildEstimateResult;
+      const result = await readEstimate(response);
       if (!result || typeof result !== 'object' || result.ok !== true && result.ok !== false || result.ok && (!result.estimate || typeof result.estimate !== 'object'))
         return { ok: false, code: 'ESTIMATE_RESPONSE_INVALID', correlationId };
       return response.ok === false && result.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_INVALID', correlationId } : result;
@@ -160,9 +202,10 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
       if (estimate && sent && ticket === generation.current) { journey.mark('first_quote'); reportJourney(journey.event('in_progress')); }
       accept(estimate, !estimate, response.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' } : response);
     });
-    return () => { cancel(); clearTimeout(expire); };
-  }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh, frozen]);
+    return () => { disposed = true; cancel(); clearTimeout(expire); };
+  }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh, frozen, unresolved]);
   if (!quotable) return { status: 'idle' };
+  if (unresolved) return { status: 'unavailable', code: 'ESTIMATE_DEPENDENCY_UNRESOLVED' };
   // A frozen card that never had an answer for this snapshot shows none (never "calculating": nothing is asked); an answer it keeps past its
   // expiry is marked expired (no refresh is asked while frozen).
   if (frozen && result?.key !== scope && expired?.key !== scope) return { status: 'idle' };

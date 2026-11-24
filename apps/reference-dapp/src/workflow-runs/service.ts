@@ -27,6 +27,7 @@ import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from 
 import type { RunRecord, RunStepRecord, VerifiedDecline, WorkflowRunStore } from './pg-store.ts';
 import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
+import { amountsAvailable, proofRequired } from './received-amounts.ts';
 import { stopRunFromCurrent } from './user-funded-pass.ts';
 import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
@@ -131,8 +132,15 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   const fresh = (await deps.store.byId(run.runId))!;
   if (isLiveDeveloperRun(fresh) && fresh.expiresAt <= deps.now()) return null;
   if (fresh.state !== 'RUNNING' && fresh.state !== 'ATTENTION') return null;
-  let step = (await deps.store.steps(run.runId))[fresh.currentStep];
+  const steps = await deps.store.steps(run.runId);
+  let step = steps[fresh.currentStep];
   if (!step || !step.strategy || !step.workflowHash || !['READY', 'AWAITING_OWNER'].includes(step.state)) return null;
+  if (step.bound) for (const binding of [step.bound, ...step.bound.additional ?? []]) {
+    const producer = steps[binding.amountFrom]?.outcome;
+    const asset = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
+    if (producer && proofRequired(producer.flow, asset) && amountsAvailable(producer, asset).length === 0)
+      return refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+  }
   // Owner requirement (FloFi Wallet + Circle): a READY step whose group was just prepared as one Circle-paid operation is never loaded into its own
   // flow too (the switch moves it out of READY right after; this closes the window in between).
   if (fresh.mode === 'USER_FUNDED' && step.state === 'READY') {
@@ -383,7 +391,7 @@ export async function startUserFunded(deps: WorkflowRunDeps, run: RunRecord, wal
  * missing spend evidence can never unlock the owner's unrelated balance.
  */
 function reconciledAvailable(steps: readonly RunStepRecord[], producer: number, asset: string, before: number): bigint {
-  const received = (steps[producer]?.outcome?.received ?? []).filter(r => r.asset === asset).reduce((sum, r) => sum + BigInt(r.amount), 0n);
+  const received = amountsAvailable(steps[producer]?.outcome, asset).reduce((sum, r) => sum + BigInt(r.amount), 0n);
   const used = steps.filter(s => s.stepIndex > producer && s.stepIndex < before && s.bound).reduce((sum, s) => {
     const bound = [s.bound!, ...s.bound!.additional ?? []].filter(b => b.amountFrom === producer && assetKey({ chain: b.asset.chainId, address: b.asset.address }) === asset);
     if (!bound.length) return sum;

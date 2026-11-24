@@ -22,7 +22,7 @@ const estimate = (workflow = authored(), extra: Partial<BuildEstimate> = {}): Bu
 let host: HookHarness, transport: ReturnType<typeof vi.fn>;
 beforeEach(() => { clearLiveQuoteCache(); host = new HookHarness(); vi.useFakeTimers(); vi.setSystemTime(now); transport = vi.fn(); vi.stubGlobal('fetch', transport); });
 afterEach(() => { host.unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
-const response = (value: BuildEstimateResult) => ({ json: async () => value });
+const response = (value: BuildEstimateResult) => Response.json(value);
 describe('Build estimate snapshot, freshness and provider binding', () => {
   it('publishes a matching success, sends an AbortSignal and clears at exact expiry', async () => {
     const workflow = authored(), value = estimate(workflow); transport.mockResolvedValue(response({ ok: true, estimate: value }));

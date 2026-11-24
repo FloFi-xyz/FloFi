@@ -130,10 +130,11 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
     const logs = input.token ? [{ address: input.token, topics: [TRANSFER, '0x' + addrWord(solver), '0x' + addrWord(input.recipient)], data: '0x' + word(input.amount) }] : [];
     if (input.token) state.balances.set(key(input.token, input.recipient), (state.balances.get(key(input.token, input.recipient)) ?? 0n) + input.amount);
     else state.native.set(input.recipient.toLowerCase(), (state.native.get(input.recipient.toLowerCase()) ?? 0n) + input.amount);
-    const to = input.via ?? (input.token ? '0x251e4b432d5c69d8f4d3d31aae4ae4f3c4816fc7' : input.recipient);
-    const data = input.via ? '0xcd6e13f7' + input.orderId.slice(2) : input.token ? '0x6bf15957' + input.orderId.slice(2) : input.orderId;
+    const to = input.via ?? input.token ?? input.recipient;
+    const data = input.via ? '0xcd6e13f7' + input.orderId.slice(2) : input.token
+      ? '0x23b872dd' + addrWord(solver) + addrWord(input.recipient) + word(input.amount) + input.orderId.slice(2) : input.orderId;
     const value = '0x' + (input.token ? 0n : input.amount).toString(16);
-    record({ hash: h, from: solver, to, input: data,
+    record({ hash: h, from: solver, to, input: data, type: '0x2',
       value, nonce: '0x1', chainId: tagN(d.chainId), blockHash: hash(state.head), blockNumber: tagN(state.head), transactionIndex: '0x0' },
       { transactionHash: h, status: '0x1', blockNumber: tagN(state.head), blockHash: hash(state.head), transactionIndex: '0x0', from: solver, to, gasUsed: input.via ? '0xfb99' : '0x5208', effectiveGasPrice: '0x1',
         logs: logs.map((l, i) => ({ ...l, logIndex: tagN(i), transactionHash: h })) });

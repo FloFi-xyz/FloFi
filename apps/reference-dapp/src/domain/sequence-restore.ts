@@ -82,7 +82,10 @@ export async function proveCompletions(stored: readonly StoredCompletion[], work
     if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) break;
     const received = deliveredByRecord(item.kind, record, step.output), owner = ownerByRecord(item.kind, record);
     const funds = sequence.steps.some(later => later.funding.some(funding => funding.fundedBy === index));
-    if ((item.received !== null && received !== item.received) || (funds && received === null)) break;
+    if ((item.received !== null && received !== item.received) || (funds && received === null)) {
+      if (item.kind === 'universal') return { proven, unreadable: true };
+      break;
+    }
     proven.push({ nodeId: item.nodeId, node: item.node, received, runKey: item.runKey, kind: item.kind, ...owner ? { owner } : {}, allocations: fundingAllocations(step, proven) });
   }
   return { proven, unreadable: false };

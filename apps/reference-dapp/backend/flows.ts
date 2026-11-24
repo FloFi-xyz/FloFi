@@ -17,7 +17,7 @@ import { boundCompositionNeedsObservation, boundCompositionPhase, type Execution
 import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/cloud-runtime';
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService, type SupplyRecord, type SupplyWalletDiagnostic } from '../src/server/supply-service.ts';
-import { createDurablePublicTestnetService, type PublicRun } from '../src/server/public-testnet-service.ts';
+import { createDurablePublicTestnetService, createPublicSwapQuoteReader, type PublicRun } from '../src/server/public-testnet-service.ts';
 import { gaslessNeedsObservation } from '../src/server/zeroex-gasless/swap.ts';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER,
   type AssetCatalog, type OrcaLiquidityProfile, type SolanaTransferProfile } from '@defi-workflow-engine/action-registry';
@@ -75,6 +75,7 @@ export type FlowName = `crosschain-router-${EthereumRouterNetwork}` | 'robinhood
 export type Rpc = (method: string, params: readonly unknown[], context?: { readonly signal?: AbortSignal }) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
+  readonly quoteRpc?: Rpc;
   /** BUILD-ROUTER-001: the destination chain and the routing providers (the source chain is `rpc`). */
   readonly router?: { readonly destinationRpc: Rpc; readonly providers: Readonly<Record<RoutingProvider, RouteProvider>> };
   /** BUILD-ETHEREUM-001: further chain-bound read clients of a multi-network flow, keyed by CAIP-2 chain (`rpc` is its original network). */
@@ -92,6 +93,7 @@ export type FlowDefinition = {
   readonly methods: Readonly<Record<string, { readonly mutates: boolean; readonly validate: (args: Args) => boolean }>>;
   readonly create: (storage: ExecutionStorage, deps: FlowDeps, related?: Readonly<Partial<Record<FlowName, ExecutionStorage>>>) => FlowService;
   readonly transport: (mode: 'live' | 'harness', env: Readonly<Record<string, string | undefined>>) => Omit<FlowDeps, 'mode' | 'env'>;
+  readonly quote?: (workflow: SemanticWorkflow, deps: FlowDeps) => Promise<unknown>;
   readonly needsObservation: (record: unknown) => boolean;
   readonly projector: Projector;
   readonly evidence: (record: unknown) => { bundleHash: string; environment: string; outcome: string; bytes: Uint8Array } | null;
@@ -397,7 +399,20 @@ function catalogSwapFlow(network: CatalogNetworkRuntime): FlowDefinition {
     status: { mutates: false, validate: shape(id(RUN)) },
     ...gasless,
   },
-  transport: (mode, env) => ({ rpc: network.rpc(mode, env), catalog: network.catalogFor(mode) }),
+  transport: (mode, env) => ({ rpc: network.rpc(mode, env), quoteRpc: network.rpc(mode, env, undefined, 'QUOTE'), catalog: network.catalogFor(mode) }),
+  async quote(workflow, { rpc, quoteRpc, mode, env, catalog }) {
+    const swap = workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input');
+    if (swap?.chainId !== network.chain) throw new Error('PUBLIC_WORKFLOW_UNSUPPORTED');
+    const reader = createPublicSwapQuoteReader(() => quoteRpc ?? rpc, undefined, network.swapRuntime(mode, env, catalog ?? network.catalogFor(mode)), 'QUOTE');
+    const result = await reader(workflow, 'read-only');
+    return { quote: {
+      workflowHash: result.workflowHash, nodeId: result.nodeId, chainId: result.chainId, amountIn: result.amountIn,
+      inputToken: result.inputToken, inputDecimals: result.inputDecimals, inputSymbol: result.inputSymbol,
+      outputToken: result.outputToken, outputDecimals: result.outputDecimals, outputSymbol: result.outputSymbol,
+      expectedOut: result.expectedOut, minimumOut: result.minimumOut, slippageBps: result.slippageBps,
+      observedAt: result.observedAt, expiresAt: result.expiresAt,
+    } };
+  },
   create(storage, { rpc, mode, env, catalog }) {
     const unavailable = async (): Promise<AssetCatalog> => { throw new Error(network.catalogUnavailableCode); };
     const s = createDurablePublicTestnetService({ storage, rpc: networkNotEnabled('PUBLIC_NETWORK_UNAVAILABLE'), rpcs: { [network.chain]: rpc }, idPrefix: prefix,
