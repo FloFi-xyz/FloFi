@@ -183,6 +183,25 @@ time. Their reports are advisory; every finding below was checked against the so
 | 22 | Minor (infra) | Solana history should use the Dashboard's owner header; history had no per-account budget; portfolio reads are not aborted with the request. | Solana owners sent as `x-flofi-workflow-owner: solana:…`; 60 history reads/account/hour; abort propagation recorded in §13; test of the read contract. |
 | 23 | Note (chat, infra) | Buttons on older messages act on the current proposal; `/api/mcp` bundle grows by the portfolio readers (trace gate in CI decides). | §13 / CI. |
 
+**Batch 4 — verification on the final head (`f3e8ecb`): flofi-workflow (re-review), flofi-frontend-ux, flofi-protocol-integrations.** No blocking
+findings. flofi-workflow confirmed every earlier blocking finding (#1, #12) and #13–#17 **resolved** in the current source.
+
+| # | Severity | Finding (verified) | Resolution |
+| --- | --- | --- | --- |
+| 24 | Medium (workflow) | The generic run reader's `terminal` is false for a declined/failed run without an error code, which the mapping read as "still observed" (STATUS_UNKNOWN forever, hiding an earlier confirmed run). | `sharedRunsRead` adds `observing: true` only while the run needs observation; the mapping uses it (and passes it to the canonical lifecycle); tests for declined/failed without error code. |
+| 25 | Important (protocol-integrations) | Portfolio `complete` ignored UNAVAILABLE / partly checked networks and truncated holdings; raw units of an uninterpretable Token-2022 balance were returned; MCP balance reads bypassed the Dashboard's shared portfolio limiter and cache; a slow call could lose every result at the tool cap; the health factor was a raw 18-decimal integer. | Per-wallet `complete` + `incompleteNetworks`; `rawUnits` withheld when `displayUnits` is null, `unavailableCode` and price time returned, a note to show `displayUnits`; cached snapshot first, then a slot of the shared limiter (`PORTFOLIO_BUSY` = UNKNOWN); wallets and position scans read one at a time only while ≥ 15 s of the budget remains (`*_SKIPPED_DEADLINE`); health factor as a 4-place decimal plus the raw WAD; `NETWORK_UNAVAILABLE`/`UNSUPPORTED` scans count as "not offered", not failures; tests. |
+| 26 | Important (protocol-integrations) | Aave reserve reads (`app/supply-action.ts` `supplyReserves`) run inside `withFlightAccess`, which needs the FloFi web session; an MCP request has none, so on a beta-gated deployment the Aave scan reports UNAVAILABLE through MCP. | Fails closed (UNAVAILABLE, `complete:false`, never empty). Not changed here: it is a Flight access boundary; recorded in §13 for a follow-up that reads reserves with the gateway's verified beta identity. |
+| 27 | Important (frontend-ux) | PT docs called the page "Conexões" while the PT UI says "Ligações"; "link a wallet once" ignored the 30-day expiry and the consent cutoff; tracking omitted the status-sharing step and used an internal state name; `PORTFOLIO_RELINK_REQUIRED` got "try again later"; "já está na assinatura" is ambiguous in PT. | Docs EN/PT rewritten accordingly ("Ligações (Connections)", 30-day links and re-linking, sharing step, "reconciled result"), a dedicated relink message, PT "já foi aberto(a) para assinatura no FloFi", "Adicionar outra ação", alternatives introduced as "Connect one of these", Claude Team/Enterprise owner note, preview "where available", fee sentence matching the review card's "FloFi fee" with its charging status. |
+| 28 | Note (frontend-ux) | `/connections` "Withdraw" (`withdrawApproval` → `handoffs.revoke`) is offered for a claimed multi-step request, which MCP and Telegram now treat as in the signing flow. | Pre-existing browser action, not changed; recorded in §13 for the owner. |
+
+
+**Domains not separately reviewed (recorded skips).** `agent_guard.py review` also expects the action domains because `src/platform/` is shared
+financial core: **flofi-swap, flofi-bridge, flofi-lending, flofi-liquidity, flofi-transfer-payments, flofi-payments-billing** — no action
+adapter, composition, execution, fee or payment path changed; the only shared-core change is the read-only `conversation-state.ts` derivation
+(reviewed by flofi-workflow twice) and an additive `observing` flag on run progress. **flofi-admin-analytics, flofi-automations** — no admin,
+analytics or automation code changed (selected through module dependencies only; `get_automation_status` is untouched). Reviews of batches 1–3
+ran on earlier commits of this branch; every later change was a fix of their findings and was covered by batch 4 or by the reviewer that raised it.
+
 ## 11. Platform distribution requirements (checked 2026-11-24)
 
 - **ChatGPT:** full MCP in Developer mode is documented for Business and Enterprise/Edu workspaces on the web; an admin may need to enable it
@@ -226,6 +245,9 @@ suites and SBOM/audit jobs — CircleCI runs them. Production endpoints could no
   in `decideTurn` without this change); typing a fresh command after NEW works.
 - **History** is the newest 25 runs per linked wallet (≤4 wallets) on remote-runtime deployments; older runs are read by id.
 - **No asynchronous MCP notifications** are promised; ChatGPT/Claude read status when asked.
+- Through MCP, the **Aave** position scan reports UNAVAILABLE on a beta-gated deployment (reserve reads require the web session's Flight
+  access); balances and Uniswap/Orca scans are unaffected. Follow-up: read reserves with the gateway's verified beta identity.
+- `/connections` still offers "Withdraw" for a claimed multi-step request (pre-existing); MCP and Telegram refuse to cancel it.
 - `get_portfolio` RPC reads are not aborted when the MCP request ends (they finish in the background within their own time budget).
 - Telegram STATUS keeps its existing wording; it does not show `conversationState`.
 - The public privacy policy page does not yet describe MCP connections (pre-existing); updating legal text is an owner/legal decision.

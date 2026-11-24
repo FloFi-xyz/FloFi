@@ -88,6 +88,8 @@ export function executionState(lifecycle: CanonicalLifecycle, options: { readonl
 
 export type ApprovalRunFacts = { readonly status: string; readonly reconciled: boolean; readonly errorCode?: string | null; readonly evidenceOutcome?: string | null;
   readonly updatedAt?: string; readonly terminal?: boolean; readonly landed?: string | null;
+  /** FloFi still observes the run (`sharedRunsRead`): a final-looking outcome is not final yet. */
+  readonly observing?: boolean;
   /** A run's own canonical lifecycle when its reader computed it from the full facts (Pix); otherwise it is derived from the summary. */
   readonly lifecycle?: CanonicalLifecycle };
 export type WorkflowRunFacts = { readonly state: string; readonly nextAction: string; readonly halted: 'PARTIAL' | 'NOTHING_SENT' | 'STOPPED' | null; readonly resumable: boolean;
@@ -177,11 +179,13 @@ export function approvalState(approval: ApprovalFacts): ConversationState {
  * final outcome that FloFi still observes (`terminal` false) is not final yet.
  */
 function runState(run: ApprovalRunFacts): ConversationState {
-  const lifecycle = run.lifecycle ?? canonicalRunLifecycle({ status: run.status, errorCode: run.errorCode ?? null, hasEvidence: run.evidenceOutcome != null });
+  const lifecycle = run.lifecycle ?? canonicalRunLifecycle({ status: run.status, errorCode: run.errorCode ?? null, hasEvidence: run.evidenceOutcome != null,
+    needsObservation: run.observing === true });
   if (!run.lifecycle && (lifecycle.status === 'NOT_STARTED' || lifecycle.status === 'AUTHORIZATION_PENDING')) return conversationState('STATUS_UNKNOWN', 'READ_EXECUTION_STATUS');
   const state = executionState(lifecycle, { reconciled: run.reconciled });
   if (run.landed && (state.state === 'CANCELLED' || state.state === 'FAILED')) return conversationState('NEEDS_ATTENTION', 'EARLIER_ACTION_CONFIRMED');
-  if (run.terminal === false && state.final && !state.completed) return conversationState('STATUS_UNKNOWN', 'OBSERVATION_PENDING');
+  // Still observed (the generic reader's flag), or a reader-computed lifecycle that is not final while its run reads final: not final yet.
+  if (run.observing === true && state.final && !state.completed) return conversationState('STATUS_UNKNOWN', 'OBSERVATION_PENDING');
   return state;
 }
 
@@ -203,6 +207,8 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
     PT: 'Há muitas solicitações agora. Aguarde um momento e tente de novo.' }],
   [/WALLET_LINK_REQUIRED|WALLET_NOT_LINKED/, { EN: 'Link your wallet to FloFi first: open the FloFi link, connect your wallet and confirm its sign-in message. That message moves no funds.',
     PT: 'Vincule primeiro a sua carteira ao FloFi: abra o link do FloFi, conecte a carteira e confirme a mensagem de acesso. Essa mensagem não movimenta fundos.' }],
+  [/RELINK_REQUIRED/, { EN: 'Link your wallet again on FloFi\u2019s Connections page to allow balance reads. It needs only a sign-in message and moves no funds.',
+    PT: 'Vincule a carteira de novo na página Ligações (Connections) do FloFi para permitir a leitura de saldos. Só pede uma mensagem de acesso e não movimenta fundos.' }],
   [/(?:^PORTFOLIO_|^HISTORY_|POSITION_SCAN)/, { EN: 'FloFi cannot read balances, positions or history here right now. Try again in a few minutes.',
     PT: 'O FloFi não consegue ler saldos, posições ou histórico aqui agora. Tente de novo em alguns minutos.' }],
   [/(?:INSUFFICIENT_SCOPE|MCP_UNAUTHORIZED|^OAUTH_|INVALID_GRANT|ACCESS_TOKEN)/, { EN: 'FloFi needs you to reconnect and grant access again in this app.',

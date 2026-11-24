@@ -82,7 +82,7 @@ const portfolioOf = (owner: McpWalletOwner): WalletPortfolio => ({ format: 'flof
 const SCAN: PositionScan = { protocol: 'Aave V3', network: 'base', chain: 'eip155:8453', status: 'COMPLETE', observedAt: '2026-11-24T10:00:00.000Z', provenance: 'PUBLIC_MAINNET',
   positions: [{ id: 'aave-usdc', type: 'SUPPLIED', collateralEnabled: true, assets: [{ address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', symbol: 'USDC', decimals: 6, units: '2000000',
     valuation: { usd: '2.00', observedAt: '2026-11-24T10:00:00.000Z', expiresAt: '2026-11-24T10:05:00.000Z' } }] }],
-  risk: { healthFactor: '3.1', liquidationThresholdBps: '7800' } };
+  risk: { healthFactor: '3100000000000000000', liquidationThresholdBps: '7800' } };
 function port(fail: Record<string, string> = {}) {
   const calls: string[] = [];
   const p: PortfolioReadPort = {
@@ -112,9 +112,12 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
     expect(calls.sort()).toEqual([`balances:eip155:${A}`, `balances:solana:${S}`, `positions:eip155:${A}`].sort());
     expect(out).toMatchObject({ ok: true, readOnly: true, complete: false, note: expect.stringMatching(/UNKNOWN \(not zero\)/) });
     const [evm, sol] = out.wallets as Record<string, unknown>[];
-    expect(evm).toMatchObject({ read: true, wallet: { address: A }, pricedTotalUsd: '1.50', holdings: [{ symbol: 'USDC', units: '1500000', valueUsd: '1.50' }],
+    // An unread network makes the wallet's snapshot incomplete and is named; the total covers only priced holdings of networks that were read.
+    expect(evm).toMatchObject({ read: true, wallet: { address: A }, complete: false, incompleteNetworks: ['arbitrum-one'], pricedTotalUsd: '1.50',
+      holdings: [{ symbol: 'USDC', rawUnits: '1500000', displayUnits: '1500000', valueUsd: '1.50' }],
       networks: expect.arrayContaining([expect.objectContaining({ id: 'arbitrum-one', status: 'UNAVAILABLE' })]),
-      positions: [{ protocol: 'Aave V3', count: 1, risk: { healthFactor: '3.1' }, positions: [{ type: 'SUPPLIED', assets: [{ symbol: 'USDC', valueUsd: '2.00' }] }] }] });
+      positions: [{ protocol: 'Aave V3', count: 1, risk: { healthFactor: '3.1000', healthFactorWad: '3100000000000000000' },
+        positions: [{ type: 'SUPPLIED', assets: [{ symbol: 'USDC', valueUsd: '2.00' }] }] }] });
     expect(sol).toEqual({ read: false, wallet: { namespace: 'solana', address: S }, code: 'PORTFOLIO_SOLANA_ADDRESS_INVALID' });
     // Another account reads only its own wallet; an account with no link gets the link instruction, and nothing is read.
     const y = port();
@@ -160,6 +163,22 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
     }
     const account = (await session({ env, token: tokens.X, state: state(handoffs([])) }).callTool('get_account', {})).output;
     expect((account.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([true, true]);
+  });
+
+  it('a balance that cannot be interpreted carries no raw number; a partly checked network is incomplete; reads stop before the deadline', async () => {
+    const odd = (owner: McpWalletOwner): WalletPortfolio => { const base = portfolioOf(owner);
+      return { ...base, networks: [{ ...base.networks[0]!, tokens: 'PARTIAL', uncheckedTokens: 3 }],
+        holdings: [{ ...base.holdings[0]!, displayUnits: null, unavailableCode: 'TOKEN_2022_EXTENSION_UNSUPPORTED', valueUsd: null }] } as unknown as WalletPortfolio; };
+    const p: PortfolioReadPort = { balances: async owner => odd(owner) };
+    const out = (await session({ env, token: tokens.Y, state: state(handoffs([])), portfolio: p }).callTool('get_portfolio', {})).output as { wallets: Record<string, unknown>[] };
+    expect(out).toMatchObject({ ok: true, complete: false });
+    expect(out.wallets[0]).toMatchObject({ complete: false, incompleteNetworks: ['base'],
+      holdings: [{ displayUnits: null, rawUnits: null, unavailableCode: 'TOKEN_2022_EXTENSION_UNSUPPORTED' }] });
+    // With too little of the request budget left, nothing more is read and the skipped wallet is UNKNOWN, never empty.
+    const { port: slow, calls } = port();
+    const late = await session({ env, token: tokens.X, state: state(handoffs([])), portfolio: slow, budgetMs: 10_000, marginMs: 0 }).callTool('get_portfolio', {});
+    expect(late.output).toMatchObject({ ok: true, complete: false, wallets: [{ read: false, code: 'PORTFOLIO_SKIPPED_DEADLINE' }, { read: false, code: 'PORTFOLIO_SKIPPED_DEADLINE' }] });
+    expect(calls).toEqual([]);
   });
 
   it('get_portfolio and list_executions accept no wallet or address argument', async () => {

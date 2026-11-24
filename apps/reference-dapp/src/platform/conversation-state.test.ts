@@ -116,7 +116,12 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
     expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'REJECTED', reconciled: false, landed: 'APPROVAL_CONFIRMED' }] }))
       .toMatchObject({ state: 'NEEDS_ATTENTION', reason: 'EARLIER_ACTION_CONFIRMED' });
     // A failure FloFi still observes is not final.
-    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'FAILED', reconciled: false, terminal: false }] }).state).toBe('STATUS_UNKNOWN');
+    const observed = approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'FAILED', reconciled: false, terminal: false, observing: true }] });
+    expect(observed.final).toBe(false);
+    expect(['STATUS_UNKNOWN', 'NEEDS_ATTENTION']).toContain(observed.state);
+    // The generic reader's `terminal` is false for a declined/failed run without an error code: that is NOT "still observed".
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'REJECTED', reconciled: false, terminal: false }] }).state).toBe('CANCELLED');
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'FAILED', reconciled: false, terminal: false }] }).state).toBe('FAILED');
     // A reader's own full-fact lifecycle (Pix) is used as computed.
     expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'PAYMENT_PENDING', reconciled: false,
       lifecycle: { status: 'SETTLEMENT_PENDING', final: false, completed: false } }] })).toMatchObject({ state: 'PENDING_CONFIRMATION', reason: 'DESTINATION_SETTLEMENT_PENDING' });

@@ -89,7 +89,7 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 Telegram approval actions (PostgreS
     await d.ownerApplies(d.api.lastLink()!);
     // A new last step is proposed alone: the applied workflow's kept swap is never part of it.
     await d.say('swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
-    expect(d.api.texts().at(-1)).toContain('Your earlier workflow is already in your signing flow; its steps are not included again.');
+    expect(d.api.texts().at(-1)).toContain('Your earlier workflow is already in your FloFi signing flow; its steps are not included again.');
     const latest = (await d.handoffs()).at(-1)!;
     expect(actions(latest.strategy)).toEqual(['"action":"swap"']);
     expect(JSON.stringify(latest.strategy)).toContain('"amount":"2"');

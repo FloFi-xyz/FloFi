@@ -17,6 +17,7 @@ import type { PositionScan } from '../domain/defi-positions.ts';
 import { shortAddress, type WalletPortfolio } from '../domain/wallet-portfolio.ts';
 import { conversationState, executionState } from '../platform/conversation-state.ts';
 import { principalOwners, principalScopes, type McpPrincipal, type McpWalletOwner } from './config.ts';
+import { createAdmissionLimiter, type AdmissionLimiter } from '../server/admission-limiter.ts';
 import type { McpRuntime } from './runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -30,10 +31,24 @@ export type PortfolioReadPort = {
   readonly positions?: (wallet: McpWalletOwner) => Promise<readonly PositionScan[]>;
 };
 /** The deployment's portfolio reads: the same modules as the Dashboard's widgets (loaded only when a portfolio is asked for). */
+/** The Dashboard's per-process portfolio limiter (`app/portfolio-action.ts`, same global key and limits): MCP and the Dashboard share it. */
+function sharedPortfolioLimiter(): AdmissionLimiter {
+  const key = Symbol.for('flofi.portfolio.limiter'), holder = globalThis as unknown as Record<symbol, AdmissionLimiter | undefined>;
+  holder[key] ??= createAdmissionLimiter({ windowMs: 60_000, maxConcurrent: 2, maxPerWindow: 60 });
+  return holder[key];
+}
 export function deploymentPortfolioPort(env: Env = process.env): PortfolioReadPort {
   return {
-    balances: async wallet => (await import('../server/wallet-portfolio.ts')).readWalletPortfolio(
-      wallet.namespace === 'eip155' ? { evm: wallet.address, solana: null } : { evm: null, solana: wallet.address }, env),
+    // A recent snapshot of the same wallet is served from the shared cache; an uncached read takes a slot of the shared limiter (busy: UNKNOWN).
+    balances: async wallet => {
+      const reader = await import('../server/wallet-portfolio.ts');
+      const input = wallet.namespace === 'eip155' ? { evm: wallet.address, solana: null } : { evm: null, solana: wallet.address };
+      const cached = reader.cachedWalletPortfolio(input);
+      if (cached) return cached;
+      const release = sharedPortfolioLimiter().acquire();
+      if (!release) throw new Error('PORTFOLIO_BUSY');
+      try { return await (env === process.env ? reader.readWalletPortfolio(input) : reader.readWalletPortfolio(input, env)); } finally { release(); }
+    },
     positions: async wallet => (await import('../server/defi-positions.ts')).readWalletPositions(wallet),
   };
 }
@@ -70,16 +85,31 @@ export function accountView(principal: McpPrincipal, origin: string) {
 /** A portfolio snapshot reduced to what a conversation shows: per-network read status and the listed holdings (largest priced first). */
 export function portfolioView(wallet: McpWalletOwner, portfolio: WalletPortfolio) {
   const holdings = [...portfolio.holdings].sort((a, b) => Number(b.valueUsd ?? -1) - Number(a.valueUsd ?? -1)).slice(0, MAX_PORTFOLIO_HOLDINGS);
+  // A network that could not be read, or whose listed tokens were only partly checked, leaves the snapshot incomplete (never zero, never a total).
+  const unread = portfolio.networks.filter(n => n.status === 'UNAVAILABLE' || (n.status === 'READ' && n.tokens !== 'ALL')).map(n => n.id);
+  const holdingsOmitted = Math.max(0, portfolio.holdings.length - holdings.length);
   return { wallet: { namespace: wallet.namespace, address: wallet.address, label: label(wallet) }, observedAt: portfolio.observedAt,
-    pricedTotalUsd: portfolio.pricedTotalUsd, unpricedCount: portfolio.unpricedCount, unlistedTokens: portfolio.unlisted, priceSource: portfolio.priceSource,
-    networks: portfolio.networks.map(n => ({ id: n.id, name: n.name, status: n.status, provenance: n.provenance, observedAt: n.observedAt, tokens: n.tokens, code: n.code })),
-    holdings: holdings.map(h => ({ network: h.networkId, symbol: h.symbol, name: h.name, tokenAddress: h.address, decimals: h.decimals, units: h.units,
-      displayUnits: h.displayUnits, displayBasis: h.displayBasis, valueUsd: h.valueUsd, provenance: h.provenance, native: h.native })),
-    holdingsOmitted: Math.max(0, portfolio.holdings.length - holdings.length) };
+    complete: unread.length === 0 && holdingsOmitted === 0, ...unread.length ? { incompleteNetworks: unread } : {},
+    pricedTotalUsd: portfolio.pricedTotalUsd, pricedTotalCovers: 'Priced holdings of the networks that were read only; unpriced and unread assets are not included.',
+    unpricedCount: portfolio.unpricedCount, unlistedTokens: portfolio.unlisted, priceSource: portfolio.priceSource,
+    networks: portfolio.networks.map(n => ({ id: n.id, name: n.name, status: n.status, provenance: n.provenance, observedAt: n.observedAt, tokens: n.tokens,
+      uncheckedTokens: n.uncheckedTokens, code: n.code })),
+    // `displayUnits` (at `decimals`) is what to show: a Stock Token's underlying shares or a Token-2022 balance by its own on-chain rules. `rawUnits`
+    // is the on-chain base amount, withheld when the balance cannot be interpreted safely (`unavailableCode`).
+    holdings: holdings.map(h => ({ network: h.networkId, symbol: h.symbol, name: h.name, tokenAddress: h.address, decimals: h.decimals,
+      displayUnits: h.displayUnits, displayBasis: h.displayBasis, rawUnits: h.displayUnits === null ? null : h.units, unavailableCode: h.unavailableCode,
+      valueUsd: h.valueUsd, priceObservedAt: h.price?.observedAt ?? null, provenance: h.provenance, native: h.native })),
+    holdingsOmitted };
+}
+/** An 18-decimal fixed-point value (Aave's health factor) as a decimal string with 4 places, truncated; the raw value is kept beside it. */
+function wad(value: string): string | null {
+  if (!/^\d{1,78}$/.test(value)) return null;
+  const raw = BigInt(value), whole = raw / 10n ** 18n, fraction = (raw % 10n ** 18n) / 10n ** 14n;
+  return `${whole}.${fraction.toString().padStart(4, '0')}`;
 }
 export function positionsView(scans: readonly PositionScan[]) {
   return scans.map(scan => ({ protocol: scan.protocol, network: scan.network, status: scan.status, observedAt: scan.observedAt, provenance: scan.provenance,
-    ...scan.risk ? { risk: { healthFactor: scan.risk.healthFactor, liquidationThresholdBps: scan.risk.liquidationThresholdBps } } : {},
+    ...scan.risk ? { risk: { healthFactor: wad(scan.risk.healthFactor), healthFactorWad: scan.risk.healthFactor, liquidationThresholdBps: scan.risk.liquidationThresholdBps } } : {},
     count: scan.positions.length,
     // An explicit allowlist of public facts: what the position holds and its range state; never prepared operations or position internals.
     positions: scan.positions.slice(0, 20).map(p => ({ type: p.type, ...p.collateralEnabled != null ? { collateralEnabled: p.collateralEnabled } : {},

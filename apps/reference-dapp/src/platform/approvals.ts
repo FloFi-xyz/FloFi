@@ -273,6 +273,8 @@ function reviewedWorkflows(record: unknown): unknown[] {
 export type RunProgress = { readonly executionId: string; readonly flow: string; readonly status: string; readonly reconciled: boolean; readonly terminal: boolean;
   readonly errorCode: string | null; readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null;
   readonly updatedAt: string; readonly receiptUrl?: string | null;
+  /** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: present (true) only while FloFi still observes the run: a final-looking status can still change. */
+  readonly observing?: true;
   /**
    * BUILD-FLOFI-E2E-RELIABILITY-001: what of an unreconciled run is confirmed onchain (e.g. "Approval confirmed · main action not sent",
    * "Earlier actions confirmed onchain · a later action is not complete"), from the run's own recorded attempts — so no surface reads the run's
@@ -333,7 +335,9 @@ export async function sharedRunsRead(h: HandoffRecord, runtime: EngineRuntime, h
     const landed = reconciled ? null : landedAttempts(Array.isArray(run.value.attempts) ? run.value.attempts as readonly AttemptFacts[] : []);
     out.push({ executionId: run.value.runId, flow: run.value.flow, status: run.value.status, reconciled, errorCode: run.value.errorCode,
       ...landed?.label ? { landed: landed.label } : {},
-      terminal: !run.value.needsObservation && (reconciled || run.value.errorCode !== null), evidenceEnvironment: evidence?.environment ?? null,
+      terminal: !run.value.needsObservation && (reconciled || run.value.errorCode !== null),
+      // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: FloFi still observes this run (its outcome can change); present only when true.
+      ...run.value.needsObservation === true ? { observing: true as const } : {}, evidenceEnvironment: evidence?.environment ?? null,
       evidenceOutcome: evidence?.outcome ?? null, evidenceBundleHash: evidence?.bundleHash ?? null, updatedAt: run.value.updatedAt });
   }
   const known = new Set(h.runIds), fresh = out.map(r => r.executionId).filter(id => !known.has(id));

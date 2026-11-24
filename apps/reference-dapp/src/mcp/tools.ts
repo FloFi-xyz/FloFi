@@ -336,6 +336,8 @@ const canRequestApproval = (ctx: ToolContext) => ctx.principal.kind === 'mcp-oau
 export const SIMULATIONS_PER_ACCOUNT_HOUR = 30;
 /** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an OAuth account's hourly portfolio reads (each one reads several public networks and protocol positions). */
 export const PORTFOLIO_READS_PER_ACCOUNT_HOUR = 30;
+/** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a portfolio read (balances or one position scan) starts only with at least this much of the tool budget left. */
+export const PORTFOLIO_READ_RESERVE_MS = 15_000;
 /** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an OAuth account's hourly history reads (one cross-flow API read per linked wallet each). */
 export const HISTORY_READS_PER_ACCOUNT_HOUR = 60;
 
@@ -664,34 +666,41 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     if (!principalOwners(ctx.principal).length) return linkRequired();
     const port = ctx.portfolio;
     if (!port) return failWith('PORTFOLIO_NOT_AVAILABLE');
-    // An OAuth account's hourly portfolio budget: each call reads public chains and shares the per-process position limiter with the Dashboard.
+    // An OAuth account's hourly portfolio budget: each call reads public chains through the readers (and limiters) the Dashboard uses.
     const principal = ctx.principal, state = ctx.state;
     if (principal.kind === 'mcp-oauth' && state && !await state.oauth.allow(`portfolio:account:${principal.accountId}`, PORTFOLIO_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
       return failWith('PORTFOLIO_RATE_LIMITED');
-    // Balances of every wallet in parallel; positions one wallet after another (the shared position limiter admits two scans at a time).
     const readable = portfolioOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
     // Linked before the Connections page disclosed balance reads: the owner re-links the wallet there to allow them (nothing is read meanwhile).
     if (!readable.length) return failWith('PORTFOLIO_RELINK_REQUIRED', { linkWalletUrl: `${origin}/connections`,
       next: 'The person opens FloFi Connections, links the wallet again (sign-in message only) and agrees to balance and position reads; then ask again.' });
-    const balances = await Promise.all(readable.map(wallet => port.balances(wallet).then(value => ({ ok: true as const, value }),
-      (error: unknown) => ({ ok: false as const, code: error instanceof Error && CODE.test(error.message) ? error.message : 'PORTFOLIO_READ_FAILED' }))));
+    // One wallet after another, each read only while the request still has time for it: a skipped read is UNKNOWN, and the rest of the answer survives.
+    const timeLeft = () => ctx.budget ? ctx.budget.remaining() >= PORTFOLIO_READ_RESERVE_MS : true;
+    const code = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
     const wallets: Output[] = [];
-    let positionsComplete = true;
-    for (const [index, wallet] of readable.entries()) {
-      const read = balances[index]!;
-      if (!read.ok) { wallets.push({ read: false, wallet: { namespace: wallet.namespace, address: wallet.address }, code: read.code }); continue; }
+    let complete = true;
+    for (const wallet of readable) {
+      const id = { namespace: wallet.namespace, address: wallet.address };
+      if (!timeLeft()) { wallets.push({ read: false, wallet: id, code: 'PORTFOLIO_SKIPPED_DEADLINE' }); complete = false; continue; }
+      let view: ReturnType<typeof portfolioView>;
+      try { view = portfolioView(wallet, await port.balances(wallet)); }
+      catch (error) { wallets.push({ read: false, wallet: id, code: code(error, 'PORTFOLIO_READ_FAILED') }); complete = false; continue; }
+      if (!view.complete) complete = false;
       let positions: unknown = null;
       if (args.positions !== false && port.positions) {
-        positions = await port.positions(wallet).then(positionsView, (error: unknown) =>
-          ({ unavailable: error instanceof Error && CODE.test(error.message) ? error.message : 'POSITION_SCAN_UNAVAILABLE' }));
-        if (!Array.isArray(positions) || positions.some(scan => scan.status !== 'COMPLETE' && scan.status !== 'UNSUPPORTED')) positionsComplete = false;
+        positions = !timeLeft() ? { unavailable: 'POSITION_SCAN_SKIPPED_DEADLINE' }
+          : await port.positions(wallet).then(positionsView, (error: unknown) => ({ unavailable: code(error, 'POSITION_SCAN_UNAVAILABLE') }));
+        // NETWORK_UNAVAILABLE / UNSUPPORTED: the protocol is not offered there (like a network the deployment does not enable) — not a failed read.
+        if (!Array.isArray(positions) || positions.some(scan => !['COMPLETE', 'UNSUPPORTED', 'NETWORK_UNAVAILABLE'].includes(scan.status))) complete = false;
       }
-      wallets.push({ read: true, ...portfolioView(wallet, read.value), positions });
+      wallets.push({ read: true, ...view, positions });
     }
-    const omitted = principalOwners(principal).length - readable.length, complete = wallets.every(w => w.read) && positionsComplete && omitted === 0;
+    const omitted = principalOwners(principal).length - readable.length;
+    if (omitted) complete = false;
     return { ok: true, readOnly: true, wallets, complete, authority: AUTHORITY, ...omitted ? { walletsOmitted: omitted } : {},
-      ...complete ? {} : { note: 'Some balances, positions or wallets could not be read now; they are UNKNOWN (not zero). Try again.' },
-      notes: ['Balances are public chain state at observedAt. Before any action FloFi re-reads balances and simulates again in the signing page.'] };
+      ...complete ? {} : { note: 'Some balances, positions, networks or wallets could not be read now; they are UNKNOWN (not zero). Try again.' },
+      notes: ['Show displayUnits at decimals; rawUnits is the on-chain base amount. Balances are public chain state at observedAt, not a quote.',
+        'Before any action FloFi re-reads balances and simulates again in the signing page.'] };
   });
 
   register('list_executions', 'Execution history', 'The linked wallets\' recent FloFi executions across every action and surface (web app, ChatGPT, Claude, Telegram), ' +
