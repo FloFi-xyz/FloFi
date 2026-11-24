@@ -17,7 +17,7 @@ real-money transaction was touched. Origin: real beta-tester feedback.
 
 | Workstream | Priority | Status | Why not COMPLETE (when applicable) |
 | --- | --- | --- | --- |
-| WS01 Automatic Privy wallet initialization | P0 | **PARTIAL** | Implemented and unit-tested; not yet exercised against real Privy (Google/email) or in the MOCKED browser suite in this session (§10, §13). |
+| WS01 Automatic Privy wallet initialization | P0 | **COMPLETE (engineering evidence)** | Unit-tested and browser-verified end to end against the MOCKED loopback Privy (§10b). Real Privy (Google/email/Apple) on a preview remains to be validated (§13); not claimed. |
 | WS02 Wallet address accessibility | P1 | **PARTIAL** | Header, Credentials and Review rows copy the full address (browser-verified in the header, §10b); the Editor's destination-wallet field and the Dashboard positions selector keep their existing displays (Dashboard portfolio already had Copy). |
 | WS03 Editor quote performance | P1 | **COMPLETE (FloFi-controlled tail)** | One measured FloFi-controlled tail removed with before/after evidence under controlled conditions; production median/p95 need real-traffic measurement (§7, §13). |
 | WS04 Universal workflow propagation | P0 | **PARTIAL** | Authoring-side inference, explicit-connect proposals and per-card provenance for every action, using the existing execution binding. Not browser-verified here; actual-above-estimate settlements are intentionally capped (§5). |
@@ -173,7 +173,12 @@ coalesced, unrelated card edits never re-quote, an older answer never overwrites
 
 ## 8. Screenshots
 
-Not captured in this session (no running app with a Privy stand-in was started). To be added from the MOCKED browser suites / preview.
+MOCKED loopback evidence only (the auth-wallets suite's Privy stand-in, disposable database; generated keys, no real identity or funds):
+
+![A Google user who skipped Add wallets lands on /app with the account's EVM wallet already connected; the copy control shows "copied"](../assets/beta-ux-intelligence-001/ws01-app-wallet-ready-mocked.png)
+
+`/app` right after "Skip for now": the header shows the automatically provisioned wallet (`0xf4d8…9164 · Base`) and its copy control in the
+copied state — no Credentials visit. Editor propagation (WS04) and mobile/PT renders were not captured in this session (§13).
 
 ## 9. Specialist review evidence
 
@@ -222,7 +227,9 @@ flofi-admin-analytics, flofi-automations, flofi-data-privacy, flofi-payments-bil
 | `python3 scripts/governance_lite.py` | PASS | local |
 | `python3 scripts/agent_guard.py check` | PASS (19 domains, 187 modules) | local |
 | PostgreSQL: `accounts/account-service.pg.test.ts`, `accounts/wallet-service.pg.test.ts` | PASS 48/48 on **PostgreSQL 16.15** loopback (CI requires 18.6: supplementary only) | local |
-| Browser (MOCKED loopback auth-wallets suite) | see §10b | local |
+| Browser: auth-wallets suite, default (engineering) scope | **19 passed, 1 skipped** (the skip is the new public-scope journey) on build `55917fc` | local, pinned Chromium 1243, PG 16 loopback |
+| Browser: new `auth-wallets-public` profile (PUBLIC_MAINNET scope) | **1 passed**: skip Add wallets → `/app` → 2 Privy creations, 0 signatures, both saved, header connected, Copy = full address, reload restores the same wallets | local |
+| `scripts/test_ci_optimization.py` (runner profiles), `scripts/test_governance_lite.py` | 81 + 21 passed | local |
 | CircleCI certification | runs on push; authoritative | PR checks |
 
 New suites: `state/account-wallet-lifecycle.test.ts` (provisioning policy, liveness, cross-tab lock, bounded steps, account switch, approval
@@ -230,6 +237,15 @@ cancel), `components/wallet-address.test.tsx`, `domain/workflow-propagation.test
 Canvas summary/inversion/label agreement, settled-vs-estimated binding, Chat-commit draft supersession, PT coverage),
 `server/build-estimate-latency.test.ts` (WS03 benchmark). Updated for the intentional markup change: `components/product-shell.test.tsx`,
 `components/secondary-product-workspace.test.tsx`. No test was deleted, skipped or weakened.
+
+### 10b. Browser evidence notes
+
+The account wallet lifecycle (and the pre-existing auto-connect) are off in engineering certification, which is the browser suites' default scope.
+The new journey therefore runs in a dedicated runner profile, `auth-wallets-public` (`scripts/guarded-release-browser.mjs`, PUBLIC_MAINNET scope,
+same MOCKED loopback harnesses), and is skipped with that reason in the default `auth-wallets` run. This is the existing precedent for
+public-scope journeys (`copilot-pool-dialogue`, `solana-mainnet-network`). First attempts failed for test reasons, fixed in the test: a click
+before hydration (now waits for the page's readiness, as the other journeys do), the engineering scope (now its own profile), and the
+renamed copy button.
 
 ## 11. Security considerations
 
@@ -249,7 +265,8 @@ Canvas summary/inversion/label agreement, settled-vs-estimated binding, Chat-com
 ## 13. Remaining limitations (need real-user or authorized validation)
 
 - Real Privy Google/email/Apple sign-in with automatic creation, on a preview with a test Privy app; two tabs signing in at once.
-- Browser journeys (MOCKED loopback suites) for the header states, copy on mobile, Swap → Bridge → Supply authoring, connect proposals.
+- Browser journeys not yet automated: header failure/initializing states, copy on mobile and in Portuguese, Swap → Bridge → Supply authoring
+  and connection proposals on the Canvas (unit-covered at the reducer/domain level only).
 - Production quote latency distribution (journey metrics) after deployment.
 - Actual-above-estimate settlement leaves surplus by design; a "use all of the upstream output" mode would need a reviewed change to the
   sequence binding and its authorization semantics.

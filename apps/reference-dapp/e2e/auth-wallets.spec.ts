@@ -411,11 +411,16 @@ test('a wallet whose save never finished is recovered on the next visit, and Cre
 });
 
 test('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001: a Google user who skips Add wallets gets both wallets in /app automatically, connected and copyable, without Credentials', async ({ page, context }) => {
+  // The account wallet lifecycle and auto-connect are off in engineering certification (deterministic wallets): this journey certifies the
+  // public product, in its own runner profile (`auth-wallets-public`, scripts/guarded-release-browser.mjs).
+  test.skip(process.env.FLOFI_E2E_NETWORK_SCOPE !== 'PUBLIC_MAINNET', 'Runs in the auth-wallets-public profile (PUBLIC_MAINNET scope)');
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: E2E_APP_ORIGIN });
   await setup(page, { google: 'e2e-beta-ux' });
   const before = await privyStats();
   await googleSignIn(page);
   await expect(page).toHaveURL('/onboarding/wallets');
+  // The page is hydrated and its provider ready (as the other journeys wait) before the person skips.
+  await expect(card(page, 'evm').getByRole('button', { name: /Create wallet/ })).toBeEnabled();
   await page.getByRole('button', { name: 'Skip for now', exact: true }).click();
   await expect(page).toHaveURL(/\/app$/);
   const header = page.getByRole('group', { name: 'Wallet connection' });
@@ -431,7 +436,7 @@ test('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001: a Google user who skips Add wallets 
   const evm = (await header.locator('[data-wallet-address]').getAttribute('data-wallet-address'))!;
   expect(saved.map(row => row.address)).toContain(evm);
   // Copy puts the full public address on the clipboard (never the shortened text).
-  await header.getByRole('button', { name: 'Copy Your EVM wallet' }).click();
+  await header.getByRole('button', { name: 'Copy EVM address' }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(evm);
   await shot(page, 'beta-ux-01-app-wallet-ready');
   // A reload restores the same wallets: nothing new is created, Credentials was never needed.
