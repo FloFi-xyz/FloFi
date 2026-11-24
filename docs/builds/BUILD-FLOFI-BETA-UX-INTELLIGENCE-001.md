@@ -18,7 +18,7 @@ real-money transaction was touched. Origin: real beta-tester feedback.
 | Workstream | Priority | Status | Why not COMPLETE (when applicable) |
 | --- | --- | --- | --- |
 | WS01 Automatic Privy wallet initialization | P0 | **PARTIAL** | Implemented and unit-tested; not yet exercised against real Privy (Google/email) or in the MOCKED browser suite in this session (§10, §13). |
-| WS02 Wallet address accessibility | P1 | **PARTIAL** | Header, Credentials and Review rows copy the full address; the Editor's destination-wallet field and Dashboard selectors keep their existing displays (Dashboard portfolio already had Copy). No browser screenshot captured (§8). |
+| WS02 Wallet address accessibility | P1 | **PARTIAL** | Header, Credentials and Review rows copy the full address (browser-verified in the header, §10b); the Editor's destination-wallet field and the Dashboard positions selector keep their existing displays (Dashboard portfolio already had Copy). |
 | WS03 Editor quote performance | P1 | **COMPLETE (FloFi-controlled tail)** | One measured FloFi-controlled tail removed with before/after evidence under controlled conditions; production median/p95 need real-traffic measurement (§7, §13). |
 | WS04 Universal workflow propagation | P0 | **PARTIAL** | Authoring-side inference, explicit-connect proposals and per-card provenance for every action, using the existing execution binding. Not browser-verified here; actual-above-estimate settlements are intentionally capped (§5). |
 
@@ -117,11 +117,14 @@ legacy or linked external wallet counts), and never for external-wallet logins.
   (receipt), Repay (debt reduction), Transfer, vault deposit and liquidity positions (position ids, two-token removals) deliver nothing a single later
   input can bind to; a Bridge/Transfer to an explicit recipient delivers to someone else.
 - **Adding a card after a step**: Swap/Send/Aave/Pool cards keep `followOnSelection`; **Bridge now follows too** (`bridgeFollowOn`: source network and
-  spending asset of the upstream output, symbol only when it resolves back to the same asset, else `address@decimals`; destination stays a
-  different network). When the new card spends exactly that output, its amount starts from the upstream card's live estimate (`knownLiveEstimate`,
+  spending asset of the upstream output, symbol only when it resolves back to the same asset; the received asset is named too, and the destination
+  follows the picker's Base-first order within the same ecosystem; an asset without a default route keeps the card's defaults). When the new card spends exactly that output, its amount starts from the upstream card's live estimate (`knownLiveEstimate`,
   read-only cache; truncated to the asset's decimals).
-- **Connecting two existing cards**: when the consumer is connected but spends another asset/network and has no draft of its own, FloFi proposes
-  the network, asset and amount **as the card's ordinary draft** (shown with Apply), and says so. A card being edited, a card already funded, or
+- **Connecting two existing cards**: when the consumer is connected but spends another asset/network, has no draft of its own and is not already
+  funded by the runtime, FloFi proposes the network, asset and amount **as the card's ordinary draft**, and says so. A proposed draft never applies
+  on a timer: only Enter, Apply or leaving the edited field applies it. Without a live estimate the amount is left empty (never the old number in
+  the new asset's units); native outputs, Pools, Borrow and Withdraw never get an inherited amount. A later Chat command on that step drops the
+  draft. A card being edited, a card already funded, or
   an ambiguous/unsupported case is left as is with a plain-language reason. Nothing is applied silently; applying re-validates through the card's
   own command and invalidates its quote and any simulation/Review exactly as a manual edit does (new snapshot, new revision).
 - **Provenance on every card**: "Uses what step N delivers, up to this card's amount." when the sequence runtime funds it (`sequence.fundedBy`, the runtime's
@@ -142,9 +145,10 @@ legacy or linked external wallet counts), and never for external-wallet logins.
 | Swap → Bridge | network + asset + amount | new in this build |
 | Swap → Swap / Send / Supply / Repay | network + asset (+ amount) | `followOnSelection` (+ amount new) |
 | Bridge → Swap / Send / Supply | destination network + asset (+ amount) | including Base/Arbitrum/Ethereum/Robinhood/Solana per registry |
-| Bridge → Bridge | network + asset | source = previous destination |
+| Bridge → Bridge | network + asset (+ received asset) | source = previous destination |
 | EVM ↔ Solana bridge → Solana/EVM step | destination ecosystem asset | destination wallet resolution unchanged (`destination-wallets.ts`) |
-| Withdraw / Borrow → spend | asset | delivered to owner |
+| Withdraw / Borrow → Bridge | network + asset | other consumers: funded by the runtime when the reserve matches, no pre-fill (§13) |
+| Anything → Borrow / Withdraw | none | draws from Aave; reported as such |
 | Supply / Repay / Send / vault / liquidity → anything | none | explained on the card |
 | Swap → Pool | network + one side | two-sided amounts stay explicit |
 | Multi-output / ambiguous terminal | none | explicit selection required |
@@ -194,9 +198,38 @@ its `agent_guard.py domain` contract and selected skills. Their reports are advi
 | flofi-swap | 5 findings, highest low | Cold price source now drops USD for that estimate (display-only, accepted; wording follow-up); proposal from a committed snapshot while the producer shows a draft → skipped; native outputs proposed the whole delivery (gas) → no inherited amount for native assets; reducer could pair an amount with another tail → `inheritedFrom` check; benchmark timing → bound relaxed, owner to decide its stage. Confirmed: no fabricated quote, no $1 stablecoin assumption, dedup/staleness guards unchanged, `knownLiveEstimate` read-only. |
 | flofi-bridge | 8 findings, highest high | Input-only seeded universal draft could throw in render (`defaultUniversalOutput`) and showed a different pair than Apply → seeded networks always include `outputAsset`, else the card keeps its defaults; Arbitrum outputs defaulted to Robinhood Chain → picker's Base-first order; a connected universal card kept a stale/foreign output → proposal sets the output explicitly; testnet destination kept → only mainnet bridge networks. Not changed: bridge follow-on issues are silent (the card keeps its defaults; minor). Confirmed: certified Router stays for USDC Base→Arbitrum, Solana destination wallet resolution unchanged, settlement/recovery unchanged. |
 
+### Batch 3 (HEAD `5d775c7`)
+
+| Specialist | Result | Findings and resolution |
+| --- | --- | --- |
+| flofi-chat | 4 findings, highest medium | A direct Chat commit on a step kept a connection-proposed draft that a later Apply would use to overwrite the Chat's change → a non-Canvas command that changes a step drops that card's drafts (the card's own settings edits keep their amount draft, as an existing test requires); mismatch wording implied a mistake on Chat auto-links → "Runs after step N with its own asset…"; "never applies by itself" overstated → comment corrected (Enter, Apply or leaving an edited field are the person's gestures). Parity gap kept as a limitation (§13): the Chat does not yet pre-fill a Bridge from the previous swap. Confirmed: Chat and Editor get the same dependencies and card notes; pending proposals are retired by the drafts. |
+| flofi-lending | 5 findings, highest low | Supply → Borrow reported "no reusable output" → draws are reported first; mismatch note stayed while a draft fixed it → hidden while drafted; zero inherited amount accepted → rejected. Kept as limitations: Borrow/Withdraw outputs are not used to pre-fill the next card (IR declares no `asset-out`); a new Borrow after a native output opens blocked on reserve choice (pre-existing `followOnSelection` behavior). Confirmed: aTokens never treated as spendable, reserve identity exact, execution unchanged. |
+| flofi-channels | 1 finding, low | A run started on `/app` could continue after a client-side navigation into `/approve` → turning the provisioner off cancels the run before its next side effect; the compact approval header ignores the lifecycle. Confirmed: no channel/MCP/Telegram file changed, none imports the changed modules, i18n only adds keys. |
+
+Not invoked (with reason): flofi-mcp, flofi-developers (no MCP tool schema, developer API or SDK contract changed; confirmed by flofi-channels'
+import check); flofi-liquidity (positions are classified as non-reusable outputs only; no liquidity code changed); flofi-transfer-payments
+(Send only receives inferred drafts through the shared picker); flofi-protocol-integrations (no catalog/RPC/provider adapter changed);
+flofi-admin-analytics, flofi-automations, flofi-data-privacy, flofi-payments-billing, flofi-infrastructure-ci (selected only because
+`coverage.json` changed; no source in their domains changed, no migration, no CI or deployment file changed).
+
 ## 10. Automated tests and certification
 
-See §10a.
+| Gate | Result | Where |
+| --- | --- | --- |
+| `pnpm check` (typecheck, lint, build, schemas:check, unit) | **PASS** on `5d775c7`: 781 test files passed, 2 skipped; 10,083 tests passed, 2 skipped | local, Node **24.21.0** (official binary, SHA-256 verified), pnpm 11.22.0 |
+| Focused suites after batch-3 fixes (`domain`, `state`, `components`, `i18n`, `wallet`, `editor`, excluding PG/fork/live as `pnpm test` does) | **PASS** on `55917fc`: 320 files, 4,283 tests | local |
+| Typecheck + lint of changed files after batch-3 fixes | PASS on `55917fc` | local |
+| `python3 scripts/governance_lite.py` | PASS | local |
+| `python3 scripts/agent_guard.py check` | PASS (19 domains, 187 modules) | local |
+| PostgreSQL: `accounts/account-service.pg.test.ts`, `accounts/wallet-service.pg.test.ts` | PASS 48/48 on **PostgreSQL 16.15** loopback (CI requires 18.6: supplementary only) | local |
+| Browser (MOCKED loopback auth-wallets suite) | see §10b | local |
+| CircleCI certification | runs on push; authoritative | PR checks |
+
+New suites: `state/account-wallet-lifecycle.test.ts` (provisioning policy, liveness, cross-tab lock, bounded steps, account switch, approval
+cancel), `components/wallet-address.test.tsx`, `domain/workflow-propagation.test.ts` (outputs, provenance, Bridge follow-on for several sources,
+Canvas summary/inversion/label agreement, settled-vs-estimated binding, Chat-commit draft supersession, PT coverage),
+`server/build-estimate-latency.test.ts` (WS03 benchmark). Updated for the intentional markup change: `components/product-shell.test.tsx`,
+`components/secondary-product-workspace.test.tsx`. No test was deleted, skipped or weakened.
 
 ## 11. Security considerations
 
@@ -208,7 +241,10 @@ See §10a.
 
 ## 12. PR, tested SHA and deployment readiness
 
-See §12a.
+- PR: opened from `claude/beta-ux-intelligence-001` against `main` (link in the PR itself and the session report).
+- Tested SHA: full `pnpm check` on `5d775c7`; focused suites, typecheck and lint on `55917fc` (batch-3 fixes); CircleCI runs on the pushed head.
+- Deployment readiness: no migration, no environment variable, no infrastructure change. Vercel (web), Railway `flofi-api` / `flofi-worker`
+  and Neon need no action beyond the normal deploy of this code. Do not merge before owner review and CircleCI certification.
 
 ## 13. Remaining limitations (need real-user or authorized validation)
 
@@ -217,6 +253,15 @@ See §12a.
 - Production quote latency distribution (journey metrics) after deployment.
 - Actual-above-estimate settlement leaves surplus by design; a "use all of the upstream output" mode would need a reviewed change to the
   sequence binding and its authorization semantics.
+- Chat parity: the Chat does not yet pre-fill a Bridge's network/asset from the previous swap ("bridge it to Arbitrum" still asks); the amount
+  cannot come from an estimate in Chat by its grounding policy. The workflow itself (dependencies, provenance) is identical in Chat and Editor.
+- Borrow/Withdraw outputs are not used to pre-fill the next card; a Bridge after them is. Native outputs (ETH, SOL) never get an inherited
+  amount (gas headroom); the person enters it.
+- Privy SDK details not verifiable offline: whether `createWallet` waits for its wallet frame, and the exact "already has a wallet" error text
+  for both chains (mapped to `PRIVY_WALLET_LIMIT`). A failure is recoverable with Try again; real Privy validation on a preview is required.
+- A pre-existing catalog template rewrites "Treasury address" as "Treasury addres s" in Portuguese (also on `main`): owner follow-up.
+- A cold USD price source now omits the USD figure for that estimate instead of delaying the token quote (display-only).
+- The WS03 benchmark uses real timers; its bound has headroom, but the owner may prefer to move it out of the required unit stage.
 
 ## 14. Jira workstream references
 
