@@ -43,15 +43,17 @@ async function sample(rpcDelayMs: number, priceDelayMs: number) {
 
 describe('WS03 time to first quote (FloFi-controlled latency, controlled provider delays)', () => {
   it('a slow price source no longer holds the token estimate after the quote is ready', async () => {
-    const runs: { ms: number; ok: boolean }[] = [];
+    // One discarded warm-up (first-call schema compilation and reader construction are not what is measured; infrastructure-ci review).
+    await sample(80, 0);
+    const runs: { ms: number; ok: boolean; priceDelayMs: number }[] = [];
     // Provider 80–160 ms, price source 1.2–1.6 s (slower than the quote): same conditions before and after.
-    for (let i = 0; i < 12; i++) runs.push(await sample(80 + (i % 5) * 20, 1_200 + (i % 4) * 100));
-    const times = runs.map(run => run.ms), median = quantile(times, 0.5), p95 = quantile(times, 0.95);
-    console.info(JSON.stringify({ benchmark: 'ws03-slow-price', samples: runs.length, medianMs: Math.round(median), p95Ms: Math.round(p95) }));
+    for (let i = 0; i < 12; i++) { const priceDelayMs = 1_200 + (i % 4) * 100; runs.push({ ...await sample(80 + (i % 5) * 20, priceDelayMs), priceDelayMs }); }
+    const times = runs.map(run => run.ms);
+    // Printed only (local engineering evidence); the assertion below is relative to each run's own price delay, not a wall-clock percentile.
+    console.info(JSON.stringify({ benchmark: 'ws03-slow-price', samples: runs.length, medianMs: Math.round(quantile(times, 0.5)), maxMs: Math.round(Math.max(...times)) }));
     expect(runs.every(run => run.ok)).toBe(true);
-    // Provider (≤ 160 ms) + at most the 300 ms post-quote grace + local overhead, with headroom for a loaded CI executor; the old tail was ≥ 1.2 s
-    // in every sample (the price delay), so this bound still separates before from after.
-    expect(p95).toBeLessThan(1_100);
+    // Before this build every run waited for the price source (≥ its delay); now each answers before it — the provider plus ≤ 300 ms grace.
+    for (const run of runs) expect(run.ms).toBeLessThan(run.priceDelayMs);
   }, 60_000);
   it('a price source that answers in time still gives the USD figure (no regression)', async () => {
     const runs: { ms: number; usd: boolean }[] = [];

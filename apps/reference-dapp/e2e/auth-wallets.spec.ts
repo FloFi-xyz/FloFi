@@ -410,10 +410,10 @@ test('a wallet whose save never finished is recovered on the next visit, and Cre
   expect((await privyUser({ google: 'e2e-bruno' }))!.wallets).toEqual([address]);
 });
 
-test('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001: a Google user who skips Add wallets gets both wallets in /app automatically, connected and copyable, without Credentials', async ({ page, context }) => {
-  // The account wallet lifecycle and auto-connect are off in engineering certification (deterministic wallets): this journey certifies the
-  // public product, in its own runner profile (`auth-wallets-public`, scripts/guarded-release-browser.mjs).
-  test.skip(process.env.FLOFI_E2E_NETWORK_SCOPE !== 'PUBLIC_MAINNET', 'Runs in the auth-wallets-public profile (PUBLIC_MAINNET scope)');
+// The account wallet lifecycle and auto-connect are off in engineering certification (deterministic wallets): this journey certifies the public
+// product and is DEFINED only in its own runner profile (`auth-wallets-public`, PUBLIC_MAINNET; scripts/guarded-release-browser.mjs). The default
+// profile neither runs nor skips it, and a public profile missing its scope finds no test and fails (infrastructure-ci review).
+if (process.env.FLOFI_E2E_NETWORK_SCOPE === 'PUBLIC_MAINNET') test('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001: a Google user who skips Add wallets gets both wallets in /app automatically, connected and copyable, without Credentials', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: E2E_APP_ORIGIN });
   await setup(page, { google: 'e2e-beta-ux' });
   const before = await privyStats();

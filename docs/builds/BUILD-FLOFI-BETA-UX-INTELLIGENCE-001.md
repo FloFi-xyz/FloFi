@@ -211,11 +211,20 @@ its `agent_guard.py domain` contract and selected skills. Their reports are advi
 | flofi-lending | 5 findings, highest low | Supply → Borrow reported "no reusable output" → draws are reported first; mismatch note stayed while a draft fixed it → hidden while drafted; zero inherited amount accepted → rejected. Kept as limitations: Borrow/Withdraw outputs are not used to pre-fill the next card (IR declares no `asset-out`); a new Borrow after a native output opens blocked on reserve choice (pre-existing `followOnSelection` behavior). Confirmed: aTokens never treated as spendable, reserve identity exact, execution unchanged. |
 | flofi-channels | 1 finding, low | A run started on `/app` could continue after a client-side navigation into `/approve` → turning the provisioner off cancels the run before its next side effect; the compact approval header ignores the lifecycle. Confirmed: no channel/MCP/Telegram file changed, none imports the changed modules, i18n only adds keys. |
 
+### Batch 4 (HEAD `b7e2769`, runner profile)
+
+| Specialist | Result | Findings and resolution |
+| --- | --- | --- |
+| flofi-infrastructure-ci | 2 findings, highest medium | The latency unit test's "p95" was the slowest of 12 runs including a cold first call → one discarded warm-up, and each run is asserted against its own price delay (the real before/after difference), wall-clock figures printed only; the new journey was a runtime skip in the default profile and its own profile could pass with zero tests → the test is defined only in PUBLIC_MAINNET scope (default profile: 19 tests, no skip; a public run without its scope finds no test and fails). Confirmed: profiles run sequentially per shard/container (no port clash), fresh disposable database per profile, scope isolation, automatic shard placement, no ledger edit needed. `scripts/test_ci_gcp_orchestration.py` pins the profile count, updated 62 → 63 with the same comment convention as earlier builds. |
+
 Not invoked (with reason): flofi-mcp, flofi-developers (no MCP tool schema, developer API or SDK contract changed; confirmed by flofi-channels'
 import check); flofi-liquidity (positions are classified as non-reusable outputs only; no liquidity code changed); flofi-transfer-payments
 (Send only receives inferred drafts through the shared picker); flofi-protocol-integrations (no catalog/RPC/provider adapter changed);
-flofi-admin-analytics, flofi-automations, flofi-data-privacy, flofi-payments-billing, flofi-infrastructure-ci (selected only because
-`coverage.json` changed; no source in their domains changed, no migration, no CI or deployment file changed).
+flofi-admin-analytics, flofi-automations, flofi-data-privacy, flofi-payments-billing (selected only because `coverage.json` changed; no source
+in their domains changed, no migration, no deployment file changed).
+
+`agent_guard.py review` reports each invoked specialist against the HEAD it reviewed; every later commit is a fix of the findings above (or, for
+the last ones, of the infrastructure-ci findings), not new scope.
 
 ## 10. Automated tests and certification
 
@@ -227,9 +236,9 @@ flofi-admin-analytics, flofi-automations, flofi-data-privacy, flofi-payments-bil
 | `python3 scripts/governance_lite.py` | PASS | local |
 | `python3 scripts/agent_guard.py check` | PASS (19 domains, 187 modules) | local |
 | PostgreSQL: `accounts/account-service.pg.test.ts`, `accounts/wallet-service.pg.test.ts` | PASS 48/48 on **PostgreSQL 16.15** loopback (CI requires 18.6: supplementary only) | local |
-| Browser: auth-wallets suite, default (engineering) scope | **19 passed, 1 skipped** (the skip is the new public-scope journey) on build `55917fc` | local, pinned Chromium 1243, PG 16 loopback |
+| Browser: auth-wallets suite, default (engineering) scope | **19 passed** on build `55917fc` (run before the test became scope-defined it reported 19 passed + the new test skipped; it now lists 19 tests, none skipped) | local, pinned Chromium 1243, PG 16 loopback |
 | Browser: new `auth-wallets-public` profile (PUBLIC_MAINNET scope) | **1 passed**: skip Add wallets → `/app` → 2 Privy creations, 0 signatures, both saved, header connected, Copy = full address, reload restores the same wallets | local |
-| `scripts/test_ci_optimization.py` (runner profiles), `scripts/test_governance_lite.py` | 81 + 21 passed | local |
+| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'`, `scripts/test_governance_lite.py` | 336 + 21 passed (after the 62 → 63 profile count) | local |
 | CircleCI certification | runs on push; authoritative | PR checks |
 
 New suites: `state/account-wallet-lifecycle.test.ts` (provisioning policy, liveness, cross-tab lock, bounded steps, account switch, approval
@@ -257,7 +266,7 @@ renamed copy button.
 
 ## 12. PR, tested SHA and deployment readiness
 
-- PR: opened from `claude/beta-ux-intelligence-001` against `main` (link in the PR itself and the session report).
+- PR: [FloFi-xyz/FloFi#249](https://github.com/FloFi-xyz/FloFi/pull/249), from `claude/beta-ux-intelligence-001` against `main`.
 - Tested SHA: full `pnpm check` on `5d775c7`; focused suites, typecheck and lint on `55917fc` (batch-3 fixes); CircleCI runs on the pushed head.
 - Deployment readiness: no migration, no environment variable, no infrastructure change. Vercel (web), Railway `flofi-api` / `flofi-worker`
   and Neon need no action beyond the normal deploy of this code. Do not merge before owner review and CircleCI certification.
@@ -278,7 +287,10 @@ renamed copy button.
   for both chains (mapped to `PRIVY_WALLET_LIMIT`). A failure is recoverable with Try again; real Privy validation on a preview is required.
 - A pre-existing catalog template rewrites "Treasury address" as "Treasury addres s" in Portuguese (also on `main`): owner follow-up.
 - A cold USD price source now omits the USD figure for that estimate instead of delaying the token quote (display-only).
-- The WS03 benchmark uses real timers; its bound has headroom, but the owner may prefer to move it out of the required unit stage.
+- The WS03 benchmark uses real timers; it now asserts each run against its own price delay (≥ 700 ms of headroom) after a warm-up, but the
+  owner may still prefer to move it out of the required unit stage.
+- `scripts/ci-browser-timings.json` has no measurement for `auth-wallets-public` yet (the balancer treats it as a median profile); refresh after
+  a few green certifications, as `docs/engineering/CI.md` describes.
 
 ## 14. Jira workstream references
 
