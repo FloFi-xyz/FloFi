@@ -111,6 +111,18 @@ on-chain evidence; no transaction signed or sent, no production setting changed.
 
 See the [build note](builds/HOTFIX-FLOFI-PRODUCTION-RECOVERY-001.md).
 
+## BUILD-FLOFI-FLIGHT-GUEST-COPY-006 — Email 6 v6 guest invitation (24/11)
+
+**Status: BUILD COMPLETE — LAUNCH BLOCKED. Unit and disposable-PostgreSQL evidence; nothing sent, no production query.**
+- Email 6 (`CREATOR_INVITE`) v5 → v6: Dayane's approved 24/11 copy in five fields (headline, intro, steps 2–3, note), PT and EN.
+  Subject, preheader, step 1, CTA, brief, panels, layout and footer are unchanged.
+- v5 is frozen in `templates-v5.ts` (SHA-256 pinned). Unsent v5 rows are held (`TEMPLATE_VERSION_REVIEW`). SENT, SENDING and UNKNOWN rows
+  are untouched. No automatic send or replay.
+- Guest dispatch needs Dayane's test approval, a TEST redemption, team mainnet confirmation, a verified 15-recipient preview and explicit
+  operator authorization.
+
+See the [build note](builds/BUILD-FLOFI-FLIGHT-GUEST-COPY-006.md).
+
 ## BUILD-FLOFI-FLIGHT-EMAILS-1311-001 — Boarding emails for Friday 13 Nov
 
 **Status: PR #189 — unit, disposable-PostgreSQL and CI evidence; nothing was sent from this work, and production operations are the

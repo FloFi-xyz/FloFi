@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * 13/11 launch operations on real disposable PostgreSQL (loopback only, its own database): moving unsent Email 3 v2 and English 3/4a/4b/5/6
- * rows to v3 and Portuguese in place (`email-launch-upgrade`), and queuing a HELD Email 6 v5 for active creator invites that have none
+ * rows to v3 and Portuguese in place (`email-launch-upgrade`), and queuing a HELD Email 6 (current version, v6) for active creator invites that have none
  * (`creator-requeue-missing`). A FAKE provider in this process proves FloFi's handling only, never delivery by Resend.
  */
 import { randomBytes } from 'node:crypto';
@@ -93,7 +93,7 @@ describe('email-launch-upgrade: unsent Email 3 v2 and English launch emails move
   it('dry-run counts and lists exactly the never-attempted PENDING rows and changes nothing', async () => {
     const all = [...eligible, ...untouchable], before = await snapshot(all);
     const dry = await outbox.upgradeLaunchPending(OPEN);
-    expect(dry).toMatchObject({ dryRun: true, eligible: eligible.length, codeVersions: { GROUP_BOARDING: 3, CREATOR_INVITE: 5, CARD_FOUNDING: 2 } });
+    expect(dry).toMatchObject({ dryRun: true, eligible: eligible.length, codeVersions: { GROUP_BOARDING: 3, CREATOR_INVITE: 6, CARD_FOUNDING: 2 } });
     expect(dry.planned.map(p => p.emailId).sort()).toEqual([...eligible].sort());
     expect(dry.planned.find(p => p.emailId === cardId)).toEqual({ emailId: cardId, template: 'CARD_FOUNDING', from: { version: 2, language: 'EN' }, to: { version: 2, language: 'PT' } });
     expect(dry.skipped).toEqual(expect.arrayContaining([
@@ -202,7 +202,7 @@ describe('email-launch-upgrade never changes a row that may have reached the pro
   });
 });
 
-describe('creator-requeue-missing: a HELD Email 6 v5 for active creator invites with no Email 6, reusing their codes', () => {
+describe('creator-requeue-missing: a HELD Email 6 v6 for active creator invites with no Email 6, reusing their codes', () => {
   const ctx = () => ({ outbox, entryOf: async () => null, revoke: null, sendDue: { disabled: 'TEST' } as const });
   let codes: Record<string, string> = {};
   beforeAll(async () => {
@@ -228,7 +228,7 @@ describe('creator-requeue-missing: a HELD Email 6 v5 for active creator invites 
   it('dry-run reports each invite by status and the guest/waitlist overlap, and creates nothing', async () => {
     const invites = await rows('SELECT * FROM flight_invites ORDER BY code'), emails = await rows('SELECT * FROM flight_emails ORDER BY email_id');
     const dry = await runFlightCommand('creator-requeue-missing', {}, store, OPEN, ctx());
-    expect(dry).toMatchObject({ dryRun: true, version: 5, batch: 'creators-v5', eligible: 4,
+    expect(dry).toMatchObject({ dryRun: true, version: 6, batch: 'creators-v6', eligible: 4,
       invites: { MISSING: 4, EMAIL6_SENT: 1, EMAIL6_QUEUED: 1, REVOKED: 1, SUPPRESSED: 1, EMAIL6_STOPPED: 1, EMAIL6_OPERATOR_CANCELLED: 1, EXPIRED: 1 } });
     expect(await runFlightCommand('creator-requeue-missing', { 'include-operator-cancelled': true }, store, OPEN, ctx())).toMatchObject({ eligible: 5 });
     expect(JSON.stringify(dry)).not.toMatch(/guest-[a-z0-9]+@/); // masked only
@@ -238,7 +238,7 @@ describe('creator-requeue-missing: a HELD Email 6 v5 for active creator invites 
     expect(await outbox.guestWaitlistOverlap(OPEN)).toEqual([{ to: 'g***@flofi-test.dev', groupBoardingEmailId: null, groupBoardingState: null }]);
   });
 
-  it('apply enqueues HELD Portuguese v5 rows once (concurrent runs too), reuses codes, creates no invite, and sends only after release', async () => {
+  it('apply enqueues HELD Portuguese v6 rows once (concurrent runs too), reuses codes, creates no invite, and sends only after release', async () => {
     const inviteCount = (await rows('SELECT count(*)::int AS n FROM flight_invites'))[0]!.n;
     const [a, b] = await Promise.all([outbox.enqueueMissingCreatorInvites(OPEN, { apply: true }), outbox.enqueueMissingCreatorInvites(OPEN, { apply: true })]);
     expect(a.enqueued + b.enqueued).toBe(4);
@@ -246,11 +246,11 @@ describe('creator-requeue-missing: a HELD Email 6 v5 for active creator invites 
     const queued = await rows(`SELECT invite_code, state, status_reason, batch_key, language, template_version, recipient, expires_at FROM flight_emails
       WHERE trigger = 'creator_requeued' ORDER BY recipient`);
     expect(queued.map(r => r.invite_code)).toEqual([codes.missing1, codes.missing2, codes.redeemed, codes.waitlist]);
-    for (const row of queued) expect(row).toMatchObject({ state: 'HELD', status_reason: 'OPERATOR_REVIEW', batch_key: 'creators-v5', language: 'PT', template_version: 5 });
+    for (const row of queued) expect(row).toMatchObject({ state: 'HELD', status_reason: 'OPERATOR_REVIEW', batch_key: 'creators-v6', language: 'PT', template_version: 6 });
     expect(await outbox.enqueueMissingCreatorInvites(OPEN, { apply: true })).toMatchObject({ eligible: 0, enqueued: 0 });
     expect(await outbox.enqueueMissingCreatorInvites(OPEN, { includeOperatorCancelled: true })).toMatchObject({ eligible: 1 }); // only on request
-    // The old held-version path cannot add a second v5 row for the same code: same dedupe key.
-    expect((await rows(`SELECT count(*)::int AS n FROM flight_emails WHERE template = 'CREATOR_INVITE' AND template_version = 5 AND invite_code = $1
+    // The old held-version path cannot add a second v6 row for the same code: same dedupe key.
+    expect((await rows(`SELECT count(*)::int AS n FROM flight_emails WHERE template = 'CREATOR_INVITE' AND template_version = 6 AND invite_code = $1
       AND state <> 'CANCELLED'`, [codes.missing1]))[0]!.n).toBe(1);
     // Nothing automatic: a running worker leaves them held.
     const requeued = (await rows(`SELECT email_id FROM flight_emails WHERE trigger = 'creator_requeued'`)).map(r => r.email_id as string);
@@ -261,7 +261,7 @@ describe('creator-requeue-missing: a HELD Email 6 v5 for active creator invites 
     // A guest who redeems the code before the release is already on board: their Email 6 is cancelled, never sent.
     await t.db.query(`UPDATE flight_invites SET redeemed_at = $1 WHERE code = $2`, [new Date(OPEN + 2500), codes.redeemed]);
     // The operator's release sends exactly the other three, in Portuguese, with their existing codes.
-    expect(await runFlightCommand('email-release', { batch: 'creators-v5' }, store, OPEN + 3000, ctx())).toEqual({ released: 4 });
+    expect(await runFlightCommand('email-release', { batch: 'creators-v6' }, store, OPEN + 3000, ctx())).toEqual({ released: 4 });
     const fake = fakeProvider();
     await delivery(fake.provider, () => OPEN + 4000).cycle();
     const guests = fake.sent.filter(e => requeued.includes(e.idempotencyKey));
@@ -280,7 +280,7 @@ describe('13/11 release: only Email 3 goes out; Email 6 and every other campaign
   it('holds the pending 4a cards, Email 6 and Email 5, then resume sends only Email 3 (the invited guest on the list included) and essential email', async () => {
     await t.db.query(`UPDATE flight_emails SET state = 'CANCELLED', reserved_at = NULL, lease_token = NULL, lease_until = NULL WHERE state IN ('PENDING', 'HELD', 'UNKNOWN', 'SENDING')`);
     await outbox.setPaused(true, 'launch 1311');
-    // The waiting list's Email 3 (one of them an invited guest), two pending 4a cards, an Email 6 v5 still queued, an Email 5, and an
+    // The waiting list's Email 3 (one of them an invited guest), two pending 4a cards, an Email 6 v6 still queued, an Email 5, and an
     // access email a person asked for (ESSENTIAL).
     const listed: string[] = [];
     for (const label of ['a', 'b', 'guest']) {
@@ -307,7 +307,7 @@ describe('13/11 release: only Email 3 goes out; Email 6 and every other campaign
     expect(await rows(`SELECT DISTINCT state FROM flight_emails WHERE email_id = ANY($1::text[])`, [others])).toEqual([{ state: 'PENDING' }]);
     await expect(runFlightCommand('email-hold-campaign', { apply: true }, store, OPEN, ctx)).rejects.toThrow('ARGUMENT_REQUIRED: --keep');
     // An Email 6 attempt of unknown outcome would be retried at resume; a card in flight cannot be held. Apply refuses while one is in flight.
-    const unknownInvite = await legacy('CREATOR_INVITE', 5, 'PT', 'release-unknown@flofi-test.dev');
+    const unknownInvite = await legacy('CREATOR_INVITE', 6, 'PT', 'release-unknown@flofi-test.dev');
     const inFlight = await legacy('CARD_PASSENGER', 2, 'PT', 'release-sending@flofi-test.dev');
     await t.db.query(`UPDATE flight_emails SET state = 'UNKNOWN', attempts = 1, first_attempt_at = $2, reserved_at = $2 WHERE email_id = $1`, [unknownInvite, new Date(OPEN)]);
     await t.db.query(`UPDATE flight_emails SET state = 'SENDING', attempts = 1, first_attempt_at = $2, reserved_at = $2, lease_token = $3, lease_until = $4
