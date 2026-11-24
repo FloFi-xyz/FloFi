@@ -89,14 +89,16 @@ position readers, cloud API `GET /v1/runs` (same read as the Dashboard history),
 | `mcp/account.ts` (new) | `accountView`, `portfolioView`, `positionsView` (explicit allowlist), `historyView`, deployment portfolio port |
 | `mcp/tools.ts` | 5 tools, `conversationState`, `userMessage` block, scopes/timeouts/instructions |
 | `mcp/gateway.ts`, `mcp/runtime.ts`, `server/cloud-api-client.ts` | portfolio port injection; owner `history` read (`listOwnerRuns`, remote runtime only) |
-| `mcp/oauth/server.ts` | `offline_access` in AS `scopes_supported` |
+| `mcp/oauth/server.ts`, `mcp/oauth/consent-page.ts` | `offline_access` in AS `scopes_supported`; `flofi.runs` consent text names history, balances and positions |
+| `mcp/config.ts` (`portfolioLinksFrom`), `components/connections-panel.tsx`, `i18n/pt-authoring.ts`, `mcp/handoff/links.ts` | consented-link cutoff for portfolio reads; Connections consent copy EN/PT |
 | `server/admission-limiter.ts` (new), `server/copilot-service.ts`, `server/defi-positions.ts` | neutral limiter |
 | `channels/core/{approval,conversation,copy,service,types}.ts`, `channels/telegram/{adapter,render}.ts` | actions, APPLIED guards, plain refusals |
 | `components/site/docs-content.ts` | public docs EN/PT (tools table, "Use FloFi from ChatGPT, Claude or Telegram") |
 | `docs/engineering/coverage.json`, `COVERAGE.md` | new sources and suites registered |
 | Tests | `platform/conversation-state.test.ts`, `mcp/account-tools.test.ts`, `channels/telegram/universal-actions{,.pg}.test.ts`; updated `mcp/gateway.test.ts`, `platform/parity.test.ts`, `platform/approvals.pg.test.ts`, `mcp/visual.pg.test.ts`, `mcp/oauth/server.pg.test.ts`, `mcp/gateway.test-harness.ts` |
 
-No migration, dependency, lockfile, fee configuration, network policy, execution engine, signing code or environment variable changed.
+No migration, dependency, lockfile, fee configuration, network policy, execution engine or signing code changed. One **new optional, non-secret
+environment variable** gates balance/position reads: `FLOFI_MCP_PORTFOLIO_LINKS_FROM` (§14); unset, `get_portfolio` fails closed.
 
 ## 6. Channel capability matrix (what the code does; availability is §11)
 
@@ -159,7 +161,27 @@ time. Their reports are advisory; every finding below was checked against the so
 | 10 | Minor (channels) | Steps button missing for planner sequences; buttons could be silently dropped if a label grows. | Steps button for any multi-step proposal; unit test asserts all four actions fit Telegram's keyboard in EN and PT. |
 | 11 | Note (security) | `accountView` said approvals follow wallets across Telegram. | Text corrected: approvals belong to the conversation/connection that made them. |
 
-_Batch 2 (flofi-workflow, flofi-wallet-execution, flofi-data-privacy) follows._
+**Batch 2 — flofi-workflow, flofi-wallet-execution, flofi-data-privacy (on `e612cfa`).**
+
+| # | Severity | Finding (verified) | Resolution |
+| --- | --- | --- | --- |
+| 12 | **Blocking** (workflow) | A cancelled/halted run with a `WALLET_BATCH_OUTCOME_UNKNOWN` group or step (the wallet may have executed the batch) mapped to CANCELLED/final. | Any such code makes an ended run `NEEDS_ATTENTION` (`BATCH_OUTCOME_UNKNOWN`, not final); test. |
+| 13 | Important (wallet-execution, workflow) | `WAITING_FOR_RECONCILIATION` is the run view's fallback (also an unsigned `AWAITING_OWNER` step) and was shown as PENDING_CONFIRMATION; `OWNER_CONFIRMS_BATCH` (wallet already returned a batch id) was AWAITING_SIGNATURE / "confirm in wallet". | In-flight state from the current group/step records (SUBMITTED group → pending confirmation, UNCERTAIN → attention, otherwise UNKNOWN); batch report pending → `SUBMITTED` with "open the signing link"; tests. |
+| 14 | Important (workflow) | Single-flow approvals used only the newest run and a status-only lifecycle. | Every bound run counts (unsettled first, then any confirmed, then partial; cancelled only if all declined); summaries without attempts are `STATUS_UNKNOWN`; `landed` and `terminal` respected; a reader's own lifecycle (Pix) used; RECONCILED_WITH_ATTENTION never stuck pending; tests. |
+| 15 | Important (privacy) | OAuth consent text for `flofi.runs` still described status/evidence only; links made under the old Connections text would expose balances and positions without consent. | Consent text updated; portfolio reads only for links made at or after `FLOFI_MCP_PORTFOLIO_LINKS_FROM` (fail closed when unset); `balancesReadable` per wallet; re-linking renews consent; tests. |
+| 16 | Minor (wallet-execution, workflow) | A claim could land between the cancel's read and its revoke (MCP and Channel Core). | A claimed multi-step handoff is in the signing flow before and after the revoke (locked row and run re-check), in both paths; test. |
+| 17 | Minor (workflow) | LINK checked the conversation's last approval even when a newer pending proposal had none. | LINK checks only the current pending proposal's approval. |
+| 18 | Notes | SINGLE handoffs cannot be signed before APPLIED (verified by wallet-execution: Simulate/Execute gated on `claimed && APPLIED`; apply and revoke are CAS under one row lock). Developer API outputs are unchanged. Telegram STATUS keeps its own wording (no `conversationState`). The privacy policy page does not describe MCP connections (pre-existing; owner/legal decision). | Recorded in §13. |
+
+**Batch 3 — flofi-chat, flofi-infrastructure-ci, flofi-developers (on `e470945`).** No blocking findings; developers found none.
+
+| # | Severity | Finding (verified) | Resolution |
+| --- | --- | --- | --- |
+| 19 | Important (chat) | A correction after the previous proposal reached the signing flow (incl. a goal-plan sequence) produced a new proposal with no indication that it does not replace the earlier one. | Such a proposal carries "This is a new, separate proposal: it does not replace or undo the earlier one" (EN/PT); it still needs a fresh simulation, Review and wallet signature; test. |
+| 20 | Minor (chat) | A Status/Steps tap emptied FloFi's open clarification choices. | STATUS and STEPS keep `state.choices`; test. |
+| 21 | Important (infra) | §5/§14 said no configuration was needed; §16 lacked the env step. | §5, §14 and §16 updated (above). |
+| 22 | Minor (infra) | Solana history should use the Dashboard's owner header; history had no per-account budget; portfolio reads are not aborted with the request. | Solana owners sent as `x-flofi-workflow-owner: solana:…`; 60 history reads/account/hour; abort propagation recorded in §13; test of the read contract. |
+| 23 | Note (chat, infra) | Buttons on older messages act on the current proposal; `/api/mcp` bundle grows by the portfolio readers (trace gate in CI decides). | §13 / CI. |
 
 ## 11. Platform distribution requirements (checked 2026-11-24)
 
@@ -188,13 +210,28 @@ _Filled in after the final gates below._
   in `decideTurn` without this change); typing a fresh command after NEW works.
 - **History** is the newest 25 runs per linked wallet (≤4 wallets) on remote-runtime deployments; older runs are read by id.
 - **No asynchronous MCP notifications** are promised; ChatGPT/Claude read status when asked.
+- `get_portfolio` RPC reads are not aborted when the MCP request ends (they finish in the background within their own time budget).
+- Telegram STATUS keeps its existing wording; it does not show `conversationState`.
+- The public privacy policy page does not yet describe MCP connections (pre-existing); updating legal text is an owner/legal decision.
+- Wallets linked before `FLOFI_MCP_PORTFOLIO_LINKS_FROM` must be re-linked on `/connections` before `get_portfolio` reads them.
 - A Telegram action button on an **older** approval message acts on the conversation's current proposal (as typing the command would): it
   can only show status, keep the step or withdraw the newer, not-yet-applied proposal, and each reply says which.
 - Live ChatGPT/Claude/Telegram/wallet acceptance, CircleCI certification and production verification are listed in §15.
 
 ## 14. Production configuration
 
-None required. The new reads use existing settings: `FLOFI_MCP`, `FLOFI_MCP_OAUTH`, `FLOFI_PUBLIC_ORIGIN`, the network enablement and price
+**One new variable, required only to turn on `get_portfolio`:**
+
+| Variable | Service | Value | Purpose |
+| --- | --- | --- | --- |
+| `FLOFI_MCP_PORTFOLIO_LINKS_FROM` | Vercel project serving `/api/mcp` and `/connections` — **Production scope only** | UTC instant, e.g. `2026-11-25T12:00:00Z` | Balance/position reads use only wallet links created at or after it, i.e. under the Connections text that discloses those reads. Not a secret. |
+
+Provisioning: (1) merge and deploy; (2) confirm the production alias serves the new `/connections` text; (3) set the variable to a UTC instant
+**at or after** that moment (round up: later is safe, earlier would count links made under the old text); (4) redeploy (Vercel applies
+variables per deployment); (5) leave it unset in Preview so Preview stays fail-closed. Railway API and worker need nothing. Users whose
+wallets were linked earlier re-link on `/connections` (one sign-in message) to allow balance reads; `get_account` shows `balancesReadable`.
+
+Everything else uses existing settings: `FLOFI_MCP`, `FLOFI_MCP_OAUTH`, `FLOFI_PUBLIC_ORIGIN`, the network enablement and price
 source the Dashboard portfolio already uses, and the remote cloud API base URL / `API_AUTH_TOKEN` the MCP status reads already use. Telegram
 uses its existing `FLOFI_TELEGRAM*` / `FLOFI_CHANNEL*` settings. If a deployment caches tool lists, reconnect the connector (or refresh the
 app's tool list in ChatGPT workspace settings) to see the new tools.
@@ -212,6 +249,9 @@ app's tool list in ChatGPT workspace settings) to see the new tools.
 
 ## 16. Rollback
 
-Revert the merge commit of this PR and redeploy through the existing pipeline. There is no migration, data or configuration to revert; open
-approvals remain valid (states and secrets are unchanged); clients that cached the new tool list get `-32602` for removed tools until they
-reconnect. Removing `offline_access` from metadata only affects future ChatGPT connector setup.
+1. **Unset `FLOFI_MCP_PORTFOLIO_LINKS_FROM`** in Vercel Production first (portfolio reads fail closed).
+2. Revert the merge commit of this PR (or use Vercel Instant Rollback) and redeploy through the existing pipeline. There is no migration or
+   data to revert; open approvals remain valid (states and secrets are unchanged); clients that cached the new tool list get `-32602` for the
+   removed tools until they reconnect; removing `offline_access` from metadata only affects future ChatGPT connector setup.
+3. When rolling forward again, set the variable to a **new** instant after the new Connections text is live again (links made while the old
+   text was served must not qualify), then redeploy.
