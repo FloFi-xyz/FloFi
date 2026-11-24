@@ -1965,6 +1965,22 @@
     "app.channels.telegram.universal-actions.pg": {
       "path": "apps/reference-dapp/src/channels/telegram/universal-actions.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.components.wallet-address": {
+      "path": "apps/reference-dapp/src/components/wallet-address.test.tsx",
+      "stage": "unit"
+    },
+    "app.domain.workflow-propagation": {
+      "path": "apps/reference-dapp/src/domain/workflow-propagation.test.ts",
+      "stage": "unit"
+    },
+    "app.state.account-wallet-lifecycle": {
+      "path": "apps/reference-dapp/src/state/account-wallet-lifecycle.test.ts",
+      "stage": "unit"
+    },
+    "app.server.build-estimate-latency": {
+      "path": "apps/reference-dapp/src/server/build-estimate-latency.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -4155,7 +4171,8 @@
         "apps/reference-dapp/src/components/simulation-context-panel.tsx",
         "apps/reference-dapp/src/components/copy-value.tsx",
         "apps/reference-dapp/src/components/technical-body.tsx",
-        "apps/reference-dapp/src/components/token-amount-text.tsx"
+        "apps/reference-dapp/src/components/token-amount-text.tsx",
+        "apps/reference-dapp/src/components/wallet-address.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -4196,7 +4213,8 @@
         "app.e2e.simulate-panel-disclosure",
         "app.e2e.dashboard-run-details",
         "app.components.editor-workflow-run-single-card",
-        "app.components.signing-destination"
+        "app.components.signing-destination",
+        "app.components.wallet-address"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -5171,7 +5189,8 @@
         "apps/reference-dapp/src/domain/wallet-activity.ts",
         "apps/reference-dapp/src/domain/defi-positions.ts",
         "apps/reference-dapp/src/domain/editor-stages.ts",
-        "apps/reference-dapp/src/domain/product-areas.ts"
+        "apps/reference-dapp/src/domain/product-areas.ts",
+        "apps/reference-dapp/src/domain/workflow-propagation.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5202,7 +5221,8 @@
         "app.domain.liquidity-position-summary",
         "app.domain.liquidity-position-execute",
         "app.domain.liquidity-position-declined",
-        "app.domain.execution-receipt"
+        "app.domain.execution-receipt",
+        "app.domain.workflow-propagation"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5508,7 +5528,8 @@
         "apps/reference-dapp/src/i18n/pt-ux-guidelines.ts",
         "apps/reference-dapp/src/i18n/pt-ux-refinement.ts",
         "apps/reference-dapp/src/i18n/pt-editor-fidelity.ts",
-        "apps/reference-dapp/src/i18n/pt-global-precision.ts"
+        "apps/reference-dapp/src/i18n/pt-global-precision.ts",
+        "apps/reference-dapp/src/i18n/pt-beta-ux-intelligence.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -7875,7 +7896,8 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.server.build-estimate-latency"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -8337,6 +8359,8 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/state/account-wallet-autoconnect.tsx",
+        "apps/reference-dapp/src/state/account-wallet-lifecycle.ts",
+        "apps/reference-dapp/src/state/account-wallet-provisioner.tsx",
         "apps/reference-dapp/src/state/mode-a-store.tsx",
         "apps/reference-dapp/src/state/mode-b-store.tsx",
         "apps/reference-dapp/src/state/wallet-connection.ts",
@@ -8345,6 +8369,7 @@
       ],
       "suites": [
         "app.state.account-wallet-autoconnect",
+        "app.state.account-wallet-lifecycle",
         "app.state.wallet-review-continuity",
         "app.state.wallet-synchronization",
         "app.wallet.eip1193",
