@@ -140,7 +140,26 @@ the existing handoff/claim/Manifest guarantees; this build adds none and weakens
 
 ## 10. Specialist findings
 
-_Filled in after the specialist reviews below._
+Reviewers were selected by `python3 scripts/agent_guard.py impact --base origin/main` (11 domains) and run read-only, at most three at a
+time. Their reports are advisory; every finding below was checked against the source by the main session before acting on it.
+
+**Batch 1 — flofi-mcp, flofi-channels, flofi-security (on `528d7cc`).**
+
+| # | Severity | Finding (verified) | Resolution |
+| --- | --- | --- | --- |
+| 1 | **Blocking** (MCP + security, independently) | A SEQUENTIAL approval's workflow run starts at the owner's claim (`claimSequential`); user-funded groups can be signed while the handoff still reads CLAIMED and later EXPIRED/REVOKED. `approvalState` trusted the handoff status first, `cancel_approval` could revoke a CLAIMED handoff with a live run and answer "cancelled, nothing signed", and the Telegram guard only recognised APPLIED. | An existing workflow run now decides first for any handoff status; a claimed multi-step approval without a read run is `STATUS_UNKNOWN`; `cancel_approval` refuses `APPROVAL_NOT_CANCELLABLE` (`WORKFLOW_RUN_STARTED`) when a run exists and re-checks after revoking; Channel Core's `endChannelApproval` returns `RUN_STARTED` (no revoke) and every guard uses `inSigningFlow`. Tests: lifecycle unit cases, MCP cancel/list fixtures, Telegram PostgreSQL "claimed multi-step run" journey. |
+| 2 | Important (channels) | LINK after an APPLIED workflow re-proposed it — and with the new guard, only its last step. | LINK proposes nothing for an APPLIED proposal or one with a workflow run; PostgreSQL test. |
+| 3 | Important (MCP, security) | `list_executions` derived the lifecycle from status/hasEvidence only; an in-flight or result-unknown run could read as "waiting for the wallet". | `listOwnerRuns` passes `errorCode`, `needsObservation`, `attentionRequired`; summaries that cannot be told apart from an in-flight request are `STATUS_UNKNOWN`; test. |
+| 4 | Important (MCP) | Instructions said a new approval supersedes a changed workflow's older request (only same-hash PENDING requests are superseded). | Wording corrected; the assistant offers `cancel_approval` for the older request with consent. |
+| 5 | Important (MCP) | `runsTruncated` (no run among the wallet's recent runs) read as "in the signing page". | `STATUS_UNKNOWN` (`RUNS_TRUNCATED`); test. |
+| 6 | Minor (MCP, security) | Wallets beyond the 4-per-call cap were skipped silently; positions for 3–4 wallets competed for the shared 2-slot limiter; no per-account portfolio budget. | `walletsOmitted` + `complete:false`; positions read sequentially and counted in `complete`; 30 portfolio reads per account per hour (`PORTFOLIO_RATE_LIMITED`); tests. |
+| 7 | Minor (MCP) | Refusal families too broad (`TOKEN`), expiry text claimed "nothing was signed", portfolio/history codes read as unsupported network; gateway hard-deadline answers lacked the readable block. | Families narrowed and corrected; deadline answers carry `userMessage`; tests. |
+| 8 | Minor (security, privacy) | Wallet links now expose balances, positions and history, but `/connections` consent text described status/evidence only. | Consent copy (EN/PT) and the link module comment updated. See batch 2 for previously created links. |
+| 9 | Minor (channels) | A button on an older approval message acts on the conversation's current state (withdraws/keeps the newer proposal). | Accepted: only withdrawal or the typed command's effect, each reply says what happened. Recorded in §13. |
+| 10 | Minor (channels) | Steps button missing for planner sequences; buttons could be silently dropped if a label grows. | Steps button for any multi-step proposal; unit test asserts all four actions fit Telegram's keyboard in EN and PT. |
+| 11 | Note (security) | `accountView` said approvals follow wallets across Telegram. | Text corrected: approvals belong to the conversation/connection that made them. |
+
+_Batch 2 (flofi-workflow, flofi-wallet-execution, flofi-data-privacy) follows._
 
 ## 11. Platform distribution requirements (checked 2026-11-24)
 
@@ -169,6 +188,8 @@ _Filled in after the final gates below._
   in `decideTurn` without this change); typing a fresh command after NEW works.
 - **History** is the newest 25 runs per linked wallet (≤4 wallets) on remote-runtime deployments; older runs are read by id.
 - **No asynchronous MCP notifications** are promised; ChatGPT/Claude read status when asked.
+- A Telegram action button on an **older** approval message acts on the conversation's current proposal (as typing the command would): it
+  can only show status, keep the step or withdraw the newer, not-yet-applied proposal, and each reply says which.
 - Live ChatGPT/Claude/Telegram/wallet acceptance, CircleCI certification and production verification are listed in §15.
 
 ## 14. Production configuration
