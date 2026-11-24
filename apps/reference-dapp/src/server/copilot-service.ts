@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createAdmissionLimiter, type AdmissionLimits } from './admission-limiter.ts';
 import { COPILOT_LIMITS, COPILOT_OUTPUT_SCHEMA, CopilotIntentError, hasUnsafeCharacters, parseCopilotOutput, type CopilotIntentV1,
   type CopilotThreadMessage } from '../domain/copilot-intent';
 import { COPILOT_OUTPUT_SCHEMA_V2, COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, parseCopilotOutputV2, type CopilotIntentV2 } from '../domain/copilot-intent-v2';
@@ -209,21 +210,9 @@ export function createReplayTransport(replay: CopilotReplay, keying: 'thread' | 
   };
 }
 
-/** Per-process admission: bounded concurrency and a sliding one-minute window. Not a global quota. */
-export function createCopilotLimiter(limits: { readonly windowMs: number; readonly maxConcurrent: number; readonly maxPerWindow: number } = COPILOT_SERVER_LIMITS,
-  now: () => number = Date.now) {
-  let active = 0;
-  const starts: number[] = [];
-  return {
-    acquire(): (() => void) | null {
-      const time = now();
-      while (starts.length && time - starts[0]! >= limits.windowMs) starts.shift();
-      if (active >= limits.maxConcurrent || starts.length >= limits.maxPerWindow) return null;
-      active += 1; starts.push(time);
-      let released = false;
-      return () => { if (!released) { released = true; active -= 1; } };
-    },
-  };
+/** Per-process admission: bounded concurrency and a sliding one-minute window. Not a global quota (`admission-limiter.ts`). */
+export function createCopilotLimiter(limits: AdmissionLimits = COPILOT_SERVER_LIMITS, now: () => number = Date.now) {
+  return createAdmissionLimiter(limits, now);
 }
 export type CopilotLimiter = ReturnType<typeof createCopilotLimiter>;
 

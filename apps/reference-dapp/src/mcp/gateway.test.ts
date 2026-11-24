@@ -81,9 +81,10 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
     const tools = ((await client().request('tools/list')).result as { tools: { name: string; inputSchema: Record<string, unknown>; annotations: Record<string, unknown> }[] }).tools;
     expect(tools.map(t => t.name).sort()).toEqual([...MCP_TOOL_NAMES].sort());
     // The static credential's surface, pinned: a new tool is a deliberate change of this list. The education and automation tools are read-only.
-    expect([...MCP_TOOL_NAMES].sort()).toEqual(['compose_strategy', 'explain_concept', 'explain_strategy', 'get_automation_status', 'get_capabilities', 'get_evidence',
-      'get_execution_status', 'get_platform_help', 'get_supported_assets', 'get_supported_networks', 'list_automation_types', 'plan_strategy', 'review_strategy',
-      'simulate_strategy', 'validate_strategy']);
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001 adds three owner-scoped reads: get_account, get_portfolio, list_executions.
+    expect([...MCP_TOOL_NAMES].sort()).toEqual(['compose_strategy', 'explain_concept', 'explain_strategy', 'get_account', 'get_automation_status', 'get_capabilities',
+      'get_evidence', 'get_execution_status', 'get_platform_help', 'get_portfolio', 'get_supported_assets', 'get_supported_networks', 'list_automation_types',
+      'list_executions', 'plan_strategy', 'review_strategy', 'simulate_strategy', 'validate_strategy']);
     for (const tool of tools) {
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
       expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
@@ -98,7 +99,7 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
     expect((discover.result as { supportedVersions: string[] }).supportedVersions).toContain('2026-07-28');
     // BUILD-FLOFI-INTELLIGENCE-001 adds plan_strategy (the shared goal planner) to the static credential's strategy tools; the education tools
     // (explain_concept, explain_strategy, get_platform_help) and the read-only automation tools (list_automation_types, get_automation_status) follow.
-    expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(15);
+    expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(18);
     const call = await client().request('tools/call', { name: 'get_supported_networks', arguments: {} }, { modern: true });
     // BUILD-RH-002 adds Robinhood Chain mainnet (`robinhood`); BUILD-SOLANA-TRANSFER-UX-001 its testnet (`robinhood-testnet`, native self-transfer).
     expect((call.result as { structuredContent: { networks: { id: string }[] } }).structuredContent.networks.map(network => network.id)).toContain('robinhood-testnet');

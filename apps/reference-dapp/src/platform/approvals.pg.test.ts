@@ -74,9 +74,11 @@ describe('BUILD-DEVELOPER-001 platform approval service', () => {
     const calls: string[] = [], a = await account(calls);
     const platform = await requestApproval(a.deps(), a.requester, BRIDGE, hashOf(BRIDGE));
     if (!platform.ok) throw new Error(platform.code);
-    // MCP adds two presentation fields of its own: the message, and (BUILD-WORKFLOW-VISUAL-PRESENTATION-001) the visual of the same workflow.
-    const { message, visual, ...mcp } = a.first;
+    // MCP adds presentation fields of its own: the message, (BUILD-WORKFLOW-VISUAL-PRESENTATION-001) the visual of the same workflow and
+    // (BUILD-FLOFI-UNIVERSAL-CHANNELS-001) the conversational state of a new request.
+    const { message, visual, conversationState, ...mcp } = a.first;
     expect(typeof message).toBe('string');
+    expect(conversationState).toMatchObject({ state: 'AWAITING_WALLET_CONNECTION', nextStep: 'OPEN_SIGNING_LINK', completed: false });
     expect(visual).toEqual(JSON.parse(JSON.stringify(workflowVisualModel(composeWorkflowOrRefuse(BRIDGE, platform.value.workflowHash)))));
     expect(comparable({ ok: true, ...platform.value })).toEqual(comparable(mcp));
     expect(platform.value.approvalUrl).toMatch(new RegExp(`^${ORIGIN}/approve#flofi_hs_[A-Za-z0-9_-]{43}$`));

@@ -175,3 +175,28 @@ export async function listCloudRuns(flow: string, principal: string, options: { 
       .map(r => ({ runId: r.runId, flow: r.flow, status: r.status, ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence, updatedAt: r.updatedAt })) };
   } catch (error) { return deadlineEnded(error, signal) ? DEADLINE : { ok: false, code: 'CLOUD_API_UNAVAILABLE' }; }
 }
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: one page of a wallet's runs across every flow (`GET /v1/runs`, the same read the Dashboard history
+ * makes), as `principal`. The API filters by the principal header; any item of another owner is dropped here as well.
+ */
+export async function listOwnerRuns(principal: string, options: { env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; cursor?: string | null;
+  timeoutMs?: number; signal?: AbortSignal } = {}): Promise<FlowResult<{ readonly items: CloudRunSummary[]; readonly next: string | null }>> {
+  const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;
+  if (signal?.aborted) return DEADLINE;
+  if (options.cursor != null && !/^[A-Za-z0-9_-]{1,400}$/.test(options.cursor)) return { ok: false, code: 'CURSOR_INVALID' };
+  let base: URL | null;
+  try { base = cloudApiBaseUrl(env); } catch (error) { return { ok: false, code: (error as Error).message }; }
+  if (!base) return { ok: false, code: 'CLOUD_API_NOT_CONFIGURED' };
+  const target = new URL(`v1/runs?${new URLSearchParams({ limit: '25', ...options.cursor ? { cursor: options.cursor } : {} })}`,
+    base.href.endsWith('/') ? base : new URL(base.href + '/'));
+  try {
+    const response = await transport(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 30_000, signal),
+      headers: { ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WALLET_PRINCIPAL_HEADER]: principal } });
+    const body = await response.json() as { ok?: unknown; value?: { items?: unknown; next?: unknown } };
+    if (!response.ok || body.ok !== true || !Array.isArray(body.value?.items)) return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
+    const next = typeof body.value.next === 'string' && /^[A-Za-z0-9_-]{1,400}$/.test(body.value.next) ? body.value.next : null;
+    return { ok: true, value: { next, items: (body.value.items as CloudRunSummary[]).filter(r => r && typeof r === 'object' && r.ownerAccount === principal
+      && typeof r.runId === 'string' && typeof r.flow === 'string' && typeof r.status === 'string')
+      .map(r => ({ runId: r.runId, flow: r.flow, status: r.status, ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence === true, updatedAt: r.updatedAt })) } };
+  } catch (error) { return deadlineEnded(error, signal) ? DEADLINE : { ok: false, code: 'CLOUD_API_UNAVAILABLE' }; }
+}

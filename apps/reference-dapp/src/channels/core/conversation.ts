@@ -132,6 +132,10 @@ const STEP_COMMANDS: readonly (readonly ['ADD' | 'LIST' | 'REMOVE' | 'MOVE', Reg
   ['REMOVE', /^(?:remove|delete) step ([1-8])$/, 'EN'], ['REMOVE', /^(?:remover|apagar|tirar) (?:a )?etapa ([1-8])$/, 'PT'],
   ['MOVE', /^move step ([1-8]) to ([1-8])$/, 'EN'], ['MOVE', /^mover (?:a )?etapa ([1-8]) para (?:a )?([1-8])$/, 'PT'],
 ];
+/** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the one-tap actions under an approval message → the exact local command words they stand for (no model). */
+export const APPROVAL_ACTIONS: Readonly<Record<string, Readonly<Record<ChannelLanguage, string>>>> = Object.freeze({
+  'act:status': { EN: 'status', PT: 'estado' }, 'act:add': { EN: 'add step', PT: 'adicionar etapa' }, 'act:steps': { EN: 'steps', PT: 'etapas' },
+  'act:cancel': { EN: 'cancel', PT: 'cancelar' } });
 const PORTUGUESE = /\b(?:coloca|quero|faz|fazer|empresta|emprestar|troca|trocar|muda|mudar|na|no|para|com|de|da|do|em|sim|não|nao)\b/i;
 
 // ── The Copilot conversation, persisted ────────────────────────────────────────────────────────────────────────────────
@@ -204,8 +208,10 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   // The user stopped the conversation on the provider's side (e.g. blocked the bot): honoured as STOP, and nothing is sent back.
   if (content.kind === 'PROVIDER_OPT_OUT') return optedOut ? decision('IGNORE', 'IGNORED_OPTED_OUT', []) : decision('OPT_OUT', 'OPTED_OUT_BY_PROVIDER', [], freshState(state.language));
   if (content.kind === 'UNSUPPORTED') return optedOut ? decision('IGNORE', 'IGNORED_OPTED_OUT', []) : decision('REPLY', 'UNSUPPORTED_MESSAGE', [text(channelCopy(state.language).unsupported)]);
+  // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a one-tap action under an approval message is exactly its typed command in the conversation's language.
+  const action = content.kind === 'CHOICE' && Object.hasOwn(APPROVAL_ACTIONS, content.id) ? APPROVAL_ACTIONS[content.id]![state.language] : null;
   // A tapped choice or a bare number answers FloFi's own last question with the label FloFi offered.
-  let raw = content.kind === 'CHOICE' ? state.choices.find(c => c.id === content.id)?.label ?? content.label : content.text;
+  let raw = action ?? (content.kind === 'CHOICE' ? state.choices.find(c => c.id === content.id)?.label ?? content.label : content.text);
   const numbered = /^\s*([1-9])\s*$/.exec(raw);
   if (numbered && state.choices[Number(numbered[1]) - 1]) raw = state.choices[Number(numbered[1]) - 1]!.label;
   const normalized = words(raw), local = COMMANDS.find(([, pattern]) => pattern.test(normalized));

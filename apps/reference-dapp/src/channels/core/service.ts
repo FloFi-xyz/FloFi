@@ -22,7 +22,7 @@ import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
 import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan } from '../../platform/index.ts';
 import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
-import { channelRequester, createChannelApproval, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
+import { channelRequester, createChannelApproval, endChannelApproval, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
 import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
 import { learningCopy } from '../../domain/copilot-learning-copy.ts';
@@ -87,6 +87,15 @@ export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3
 const MAX_EVENT_ATTEMPTS = 3;
 type Payload = { readonly content: TurnContent; readonly sendTo: ChannelAddress };
 const text = (value: string): ChannelReply => ({ text: shorten(value), choices: [], link: null });
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the one-tap actions under an approval message (only for providers that show buttons beside the link). Each
+ * id is answered exactly like its typed command (`conversation.ts` APPROVAL_ACTIONS): status, add a step, the step list, cancel. None authorizes.
+ */
+function approvalActions(language: ChannelLanguage, multiStep: boolean): ChannelReply['choices'] {
+  const a = channelCopy(language).actions;
+  return [{ id: 'act:status', label: a.status }, { id: 'act:add', label: a.add }, ...multiStep ? [{ id: 'act:steps', label: a.steps }] : [],
+    { id: 'act:cancel', label: a.cancel }];
+}
 const PORTUGUESE_SECRET = /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+recupera)|palavras\s+secretas/i;
 
 /**
@@ -281,8 +290,9 @@ export function createChannelService(ctx: ChannelContext) {
         await commit(decision.outcome, [...decision.replies, ...statusReplies(state.language, found)], state); return { address: null, language: state.language };
       }
       case 'CANCEL': {
-        await revokeChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
-        await commit(decision.outcome, [...decision.replies, text(prior.pending ? lm.cancelled : lm.noPending)], state);
+        // An applied request is in the owner's signing flow: never told "cancelled" (the conversation still starts over).
+        const ended = await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
+        await commit(decision.outcome, [...decision.replies, text(ended === 'APPLIED' ? lm.cancelApplied : prior.pending ? lm.cancelled : lm.noPending)], state);
         return { address: null, language: state.language };
       }
       case 'SUBSCRIBE': {
@@ -320,7 +330,11 @@ export function createChannelService(ctx: ChannelContext) {
       }
       // BUILD-CHAT-E2E-001: the step list. A kept step withdraws the shorter workflow's link (it must not run alone and then again).
       case 'ADD_STEP': {
-        await revokeChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
+        // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: steps of a workflow already in the owner's signing flow (it may have run) are never kept for a new one.
+        if (await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now) === 'APPLIED') {
+          await commit('STEP_AFTER_APPLIED', [...decision.replies, text(lm.stepAfterApplied)], { ...state, steps: [], pending: null, approvalId: null });
+          return { address: null, language: state.language };
+        }
         const kept = state.steps?.length ?? 0;
         await commit(decision.outcome, [...decision.replies, text(lm.stepsList(stepLines(state))), text(lm.stepKept(kept))], { ...state, approvalId: null });
         return { address: null, language: state.language };
@@ -330,6 +344,10 @@ export function createChannelService(ctx: ChannelContext) {
         return { address: null, language: state.language };
       }
       case 'WORKFLOW': {
+        if (await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now) === 'APPLIED') {
+          await commit('WORKFLOW_ALREADY_APPLIED', [...decision.replies, text(lm.workflowApplied)], { ...state, steps: [], pending: null, approvalId: null });
+          return { address: null, language: state.language };
+        }
         if (!decision.command) {
           await revokeChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
           await commit(decision.outcome, [...decision.replies, text(lm.stepsList([]))], { ...state, approvalId: null });
@@ -391,25 +409,27 @@ export function createChannelService(ctx: ChannelContext) {
    */
   async function propose(conversationId: string, state: ChannelState, command: Command, aiInterpreted: boolean, notes: readonly string[], now: Date) {
     // BUILD-CHAT-E2E-001: with kept steps, the proposal is the whole step list as ONE canonical workflow (and one approval).
-    const m = channelCopy(state.language), kept = state.steps ?? [], strategy = canonicalWorkflow([...kept, command]);
-    const revoked = await revokeChannelApproval(ctx.platform, conversationId, state.approvalId, now);
-    if (!strategy.ok) return { outcome: 'PROPOSAL_NOT_CANONICAL', replies: [text(m.refused(strategy.code))], state: { ...state, pending: null, approvalId: null },
+    const m = channelCopy(state.language), ended = await endChannelApproval(ctx.platform, conversationId, state.approvalId, now), revoked = ended === 'REVOKED';
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a workflow already in the owner's signing flow may have run; its kept steps are never proposed again.
+    const dropped = ended === 'APPLIED' && (state.steps?.length ?? 0) > 0, kept = dropped ? [] : state.steps ?? [], strategy = canonicalWorkflow([...kept, command]);
+    if (!strategy.ok) return { outcome: 'PROPOSAL_NOT_CANONICAL', replies: [text(m.refused(strategy.code))], state: { ...state, ...dropped ? { steps: [] } : {}, pending: null, approvalId: null },
       handoffId: null, approvalReply: null };
     const approval = await createChannelApproval(ctx.platform, channelRequester(adapter, conversationId, strategy.intendedWallet), strategy, now);
     if (!approval.ok) return { outcome: `APPROVAL_REFUSED`, replies: [text([m.refused(approval.code), ...approval.blockers].join('\n'))],
-      state: { ...state, pending: strategy.command, approvalId: null }, handoffId: null, approvalReply: null };
+      state: { ...state, ...dropped ? { steps: [] } : {}, pending: strategy.command, approvalId: null }, handoffId: null, approvalReply: null };
     const preview = core.simulation ? await previewOf(conversationId, strategy, now) : { kind: 'DISABLED' } as const;
     const specs = isStrategyWorkflow(strategy.spec) ? strategy.spec.steps : [strategy.spec];
     const networks = [...new Set(specs.flatMap(spec => spec.action === 'bridge' ? [spec.sourceNetwork, spec.destinationNetwork] : [(spec as { network: string }).network]))];
     const plan = approval.authorizationPlan;
     const reply: ChannelReply = { text: readyText(state.language, { lines: strategy.steps.map(s => stepSummary(s, state.language)), networks, fundsClass: strategy.fundsClass,
-      notes: [...revoked ? [m.replaced] : [], ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
+      notes: [...revoked ? [m.replaced] : [], ...dropped ? [m.earlierApplied] : [], ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
       intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null, aiInterpreted,
       expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
-    choices: [], link: { label: m.linkLabel, url: approval.approvalUrl }, visual: { model: strategy.visual, language: state.language } };
+    choices: adapter.linkWithChoices ? approvalActions(state.language, kept.length > 0) : [], link: { label: m.linkLabel, url: approval.approvalUrl },
+    visual: { model: strategy.visual, language: state.language } };
     return { outcome: 'APPROVAL_CREATED', replies: [reply], handoffId: approval.approvalId, approvalReply: { reply, handoffId: approval.approvalId },
       state: { ...state, pending: command.type === 'ADD_SEQUENCE' ? command : strategy.command,
-        ...kept.length ? { steps: kept } : {}, approvalId: approval.approvalId,
+        ...kept.length ? { steps: kept } : dropped ? { steps: [] } : {}, approvalId: approval.approvalId,
         lastApprovalId: approval.approvalId } };
   }
 

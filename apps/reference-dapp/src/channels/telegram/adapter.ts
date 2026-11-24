@@ -22,7 +22,7 @@ import { MAX_UPDATE_BYTES, parseUpdate, secretTokenValid, TELEGRAM_CHANNEL } fro
 const photoRejected = (result: SendResult) => !result.ok && result.failure === 'PERMANENT' && result.code === 'PROVIDER_REJECTED';
 export function createTelegramAdapter(botId: string, api: TelegramApi): ChannelAdapter {
   const adapter: ChannelAdapter = { channel: TELEGRAM_CHANNEL, clientId: `telegram:${botId}`, displayName: 'Telegram', windowHours: null,
-    outsideWindow: ['REPLY', 'APPROVAL', 'NOTIFICATION'], deliveryReports: [], confirmsUncertainSends: false, choicesFit: choicesFitKeyboard,
+    outsideWindow: ['REPLY', 'APPROVAL', 'NOTIFICATION'], deliveryReports: [], confirmsUncertainSends: false, choicesFit: choicesFitKeyboard, linkWithChoices: true,
     send: async (to, reply, _correlationId, context) => {
       if (context?.image && captionFits(reply)) {
         const photo = classifySend(await api('sendPhoto', renderSendPhoto(to, reply, context.image), 20_000), to.value);

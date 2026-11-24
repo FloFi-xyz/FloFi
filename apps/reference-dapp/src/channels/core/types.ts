@@ -105,6 +105,11 @@ export interface ChannelAdapter {
   readonly confirmsUncertainSends: boolean;
   /** Whether these choices can be shown as the provider's own buttons; otherwise Channel Core lists them as numbers in the text. */
   readonly choicesFit: (choices: readonly ReplyChoice[]) => boolean;
+  /**
+   * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: whether the provider shows a reply's link AND its choices as buttons of one message (Telegram's inline
+   * keyboard). Only then does Channel Core offer one-tap actions under an approval message; absent or false: the approval message is unchanged.
+   */
+  readonly linkWithChoices?: boolean;
   readonly send: (to: ChannelAddress, reply: ChannelReply, correlationId: string, context: SendContext) => Promise<SendResult>;
 }
 

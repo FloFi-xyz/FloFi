@@ -36,6 +36,7 @@ import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime.ts
 import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, type ToolName } from './tools.ts';
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
 import { deploymentAutomationReader, type AutomationReadPort } from './automations.ts';
+import { deploymentPortfolioPort, type PortfolioReadPort } from './account.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type GatewayLogger = { readonly info: (event: string, fields?: Readonly<Record<string, string | number | boolean | null>>) => void;
@@ -45,6 +46,8 @@ export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime
   readonly betaHost?: McpBetaHost;
   /** Tests: the read-only automation port of `get_automation_status` (default: the deployment's Automations read path). */
   readonly automations?: AutomationReadPort;
+  /** Tests: the read-only portfolio port of `get_portfolio` (default: the deployment's Dashboard portfolio and position reads). */
+  readonly portfolio?: PortfolioReadPort;
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
@@ -228,6 +231,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the route passes `process.env`; a hosted deployment is always Mainnet-only).
   const scope = networkScope({ ...process.env, ...env });
   const automations = options.automations ?? deploymentAutomationReader(env, budget);
+  const portfolio = options.portfolio ?? deploymentPortfolioPort(env);
   const publicStudioIntegrations = async () => {
     if (!env.DATABASE_URL) return [];
     const host = await mcpStateHost(env).catch(() => null);
@@ -235,7 +239,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const { listPublishedStudioIntegrations } = await import('../platform/studio-catalog.ts');
     return listPublishedStudioIntegrations(host.db, host.tenantId);
   };
-  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, publicStudioIntegrations,
+  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, portfolio, publicStudioIntegrations,
     ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;
       logger?.info('mcp.tool', { request_id: budget.requestId, principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }); } }),

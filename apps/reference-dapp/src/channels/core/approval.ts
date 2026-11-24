@@ -66,9 +66,17 @@ export async function createChannelApproval(platform: ChannelPlatform, requester
 }
 /** Withdraws one of this conversation's handoffs that is not yet applied (an applied or ended one is left as it is). */
 export async function revokeChannelApproval(platform: Pick<ChannelPlatform, 'handoffs'>, conversationId: string, approvalId: string | null, now: Date): Promise<boolean> {
-  if (!approvalId) return false;
+  return await endChannelApproval(platform, conversationId, approvalId, now) === 'REVOKED';
+}
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: withdraws the handoff when it is not yet applied and returns its status afterwards (REVOKED, or APPLIED /
+ * an ended status that was left as it is); null when there is none. APPLIED means the proposal is in the owner's signing flow and may have run:
+ * its steps must never be carried into a new proposal, and it is never reported as cancelled.
+ */
+export async function endChannelApproval(platform: Pick<ChannelPlatform, 'handoffs'>, conversationId: string, approvalId: string | null, now: Date) {
+  if (!approvalId) return null;
   const h = await platform.handoffs.revokeForRequester(approvalId, conversationScope(conversationId), now);
-  return h?.status === 'REVOKED';
+  return h?.status ?? null;
 }
 /** One of this conversation's handoffs with its shared run progress, or null when it is not this conversation's. */
 export async function channelApprovalProgress(platform: Pick<ChannelPlatform, 'handoffs' | 'runtime'> & Partial<Pick<ChannelPlatform, 'origin' | 'workflowRuns'>>, conversationId: string,

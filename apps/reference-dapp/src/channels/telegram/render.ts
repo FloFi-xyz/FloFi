@@ -21,10 +21,18 @@ const clip = (value: string, max: number) => value.length <= max ? value : `${va
 export const choicesFitKeyboard = (choices: readonly ReplyChoice[]) => choices.length > 0 && choices.length <= TELEGRAM_LIMITS.buttons
   && choices.every(c => c.label.length >= 1 && c.label.length <= TELEGRAM_LIMITS.buttonText && /^[A-Za-z0-9_.:-]{1,64}$/.test(c.id));
 
-/** The inline keyboard of a reply: its one URL button, or its fitting choices as callback buttons; null when it has neither. */
+/**
+ * The inline keyboard of a reply: its one URL button first (BUILD-FLOFI-UNIVERSAL-CHANNELS-001: followed by its fitting choices — the one-tap
+ * actions under an approval message — two per row), or its fitting choices as callback buttons; null when it has neither.
+ */
 function keyboard(reply: ChannelReply): Record<string, unknown> | null {
-  if (reply.link) return { inline_keyboard: [[{ text: clip(reply.link.label, TELEGRAM_LIMITS.buttonText), url: reply.link.url }]] };
-  if (choicesFitKeyboard(reply.choices)) return { inline_keyboard: reply.choices.map(c => [{ text: c.label, callback_data: c.id }]) };
+  const choices = choicesFitKeyboard(reply.choices) ? reply.choices.map(c => ({ text: c.label, callback_data: c.id })) : [];
+  if (reply.link) {
+    const rows: Record<string, unknown>[][] = [];
+    for (let i = 0; i < choices.length; i += 2) rows.push(choices.slice(i, i + 2));
+    return { inline_keyboard: [[{ text: clip(reply.link.label, TELEGRAM_LIMITS.buttonText), url: reply.link.url }], ...rows] };
+  }
+  if (choices.length) return { inline_keyboard: choices.map(c => [c]) };
   return null;
 }
 export function renderSendMessage(to: ChannelAddress, reply: ChannelReply): Record<string, unknown> {

@@ -8,7 +8,7 @@ import { observationFresh, type PriceFeedAsset, type PriceObservation, type Pric
 import { positionsWalletKey, type PositionAsset, type PositionScan, type PositionWallet } from '../domain/defi-positions';
 import { usdAmount } from '../domain/usd-estimate';
 import { CATALOG_NETWORKS, type CatalogNetworkId } from './catalog-networks';
-import { createCopilotLimiter } from './copilot-service';
+import { createAdmissionLimiter } from './admission-limiter';
 import { isHostedDeployment } from './deployment';
 import { aavePositions, POSITION_EVM_METHODS, uniswapPositions, UNISWAP_POSITION_DEPLOYMENTS, type ValuePositionAsset } from './defi-positions-evm';
 import { orcaPositions } from './defi-positions-solana';
@@ -25,7 +25,7 @@ const registeredAssets: Readonly<Record<CatalogNetworkId, readonly CanonicalAsse
 };
 const SOLANA_SETUP = { protocol: 'Orca Whirlpools', network: ORCA.network, chain: ORCA.chain } as const;
 const CACHE_LIMIT = 200, COMPLETE_TTL_MS = 30_000, PARTIAL_TTL_MS = 5_000, BUDGET_MS = 12_000;
-const limiter = createCopilotLimiter({ windowMs: 60_000, maxConcurrent: 2, maxPerWindow: 16 });
+const limiter = createAdmissionLimiter({ windowMs: 60_000, maxConcurrent: 2, maxPerWindow: 16 });
 type CachedScan = CachedPositionScan;
 /** The shared per-wallet scan cache (server/defi-positions-cache.ts), which position actions reach without importing this module. */
 const cache: Map<string, CachedScan> = positionScanCache;

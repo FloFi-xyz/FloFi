@@ -1949,6 +1949,22 @@
     "reference-reconciler.erc4626-deposit.fork": {
       "path": "packages/reference-reconciler/test/erc4626-deposit.fork.test.ts",
       "stage": "fork"
+    },
+    "app.mcp.account-tools": {
+      "path": "apps/reference-dapp/src/mcp/account-tools.test.ts",
+      "stage": "unit"
+    },
+    "app.platform.conversation-state": {
+      "path": "apps/reference-dapp/src/platform/conversation-state.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.telegram.universal-actions": {
+      "path": "apps/reference-dapp/src/channels/telegram/universal-actions.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.telegram.universal-actions.pg": {
+      "path": "apps/reference-dapp/src/channels/telegram/universal-actions.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -2136,7 +2152,10 @@
     "app.studio.integration-probe",
     "developer-sdk.integration-package",
     "app.components.admin.studio-review",
-    "workflow-contracts.erc4626-deposit"
+    "workflow-contracts.erc4626-deposit",
+    "app.mcp.account-tools",
+    "app.platform.conversation-state",
+    "app.channels.telegram.universal-actions"
   ],
   "modules": [
     {
@@ -3659,7 +3678,9 @@
         "app.channels.telegram.workflow.pg",
         "app.channels.whatsapp.journey.pg",
         "app.channels.whatsapp.learning.pg",
-        "app.platform.intelligence-parity"
+        "app.platform.intelligence-parity",
+        "app.channels.telegram.universal-actions",
+        "app.channels.telegram.universal-actions.pg"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -5624,6 +5645,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/mcp/account.ts",
         "apps/reference-dapp/src/mcp/app/panel.ts",
         "apps/reference-dapp/src/mcp/approval-profile.ts",
         "apps/reference-dapp/src/mcp/automations.ts",
@@ -5669,7 +5691,8 @@
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity",
         "app.mcp.gateway-deadline",
-        "app.mcp.beta-access.pg"
+        "app.mcp.beta-access.pg",
+        "app.mcp.account-tools"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -5806,6 +5829,7 @@
         "apps/reference-dapp/src/platform/approve.ts",
         "apps/reference-dapp/src/platform/capabilities.ts",
         "apps/reference-dapp/src/platform/catalogs.ts",
+        "apps/reference-dapp/src/platform/conversation-state.ts",
         "apps/reference-dapp/src/platform/executions.ts",
         "apps/reference-dapp/src/platform/explain.ts",
         "apps/reference-dapp/src/platform/fixed-window.ts",
@@ -5832,7 +5856,8 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "app.platform.settlement-regression-matrix"
+        "app.platform.settlement-regression-matrix",
+        "app.platform.conversation-state"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -7645,7 +7670,8 @@
         "apps/reference-dapp/src/server/solana-token-amount.ts",
         "apps/reference-dapp/src/server/wallet-activity.ts",
         "apps/reference-dapp/src/server/defi-positions.ts",
-        "apps/reference-dapp/src/server/defi-positions-cache.ts"
+        "apps/reference-dapp/src/server/defi-positions-cache.ts",
+        "apps/reference-dapp/src/server/admission-limiter.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
@@ -9223,6 +9249,7 @@
     "app.studio.integration-store.pg",
     "app.studio.certification-store.pg",
     "cloud-runtime.security-0016-runtime-privileges.pg",
-    "app.backend.database-privileges.pg"
+    "app.backend.database-privileges.pg",
+    "app.channels.telegram.universal-actions.pg"
   ]
 }
