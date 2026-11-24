@@ -58,7 +58,10 @@ describe('secondary product workspaces', () => {
     const html = markup('credentials');
     expect(wallets(html)).toBe(1);
     // Board 13: "MetaMask wallet · EVM · in use on Base Sepolia", the address in mono, a status tag, Save, and ··· for the other actions.
-    expect(html).toContain(`<h3 class="ux-row-name">EVM Default <code class="ux-address" title="${EVM}">0x1234…7890</code></h3><p class="ux-row-meta">MetaMask wallet · EVM · in use on Base Sepolia</p>`);
+    // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS02): the row's address is copyable in place (full address in its tooltip and on Copy).
+    // The heading names the wallet only; the copyable address is beside it, outside the heading (frontend review).
+    expect(html).toContain(`<h3 class="ux-row-name">EVM Default</h3><p class="ux-row-meta"><span class="wallet-address-value ux-address" data-wallet-address="${EVM}" data-ecosystem="evm"><code class="numeric wallet-address" title="${EVM}"><span aria-hidden="true">0x1234…7890</span><span class="sr-only">${EVM}</span></code><button type="button" class="wallet-address-copy" aria-label="Copy EVM Default address"`);
+    expect(html).toContain('<p class="ux-row-meta">MetaMask wallet · EVM · in use on Base Sepolia</p>');
     expect(html).toContain('workspace-wallet-status-active">Connected · not saved</span>');
     expect(html).toContain('<button type="button" class="ux-button" aria-label="Save EVM Default">Save</button>');
     expect(html).toMatch(/aria-haspopup="menu" aria-expanded="false"[^>]*aria-label="More actions for EVM Default"/);
@@ -117,7 +120,7 @@ describe('secondary product workspaces', () => {
     fixture.account = '0x1234567890123456789012345678901234567890'; fixture.chainId = '0x14a34';
     fixture.session = { wallet: { name: 'Phantom', chains: ['solana:devnet'], accounts: [], features: {} }, account: { address: 'So11111111111111111111111111111111111111112', chains: ['solana:devnet'], features: [] }, chain: 'solana:devnet' };
     let html = markup('credentials');
-    const identity = (name: string) => new RegExp(`<h3 class="ux-row-name">${name} <code`);
+    const identity = (name: string) => new RegExp(`<h3 class="ux-row-name">${name}</h3><p class="ux-row-meta"><span class="wallet-address-value`);
     expect(html).toMatch(identity('EVM Default')); expect(html).toMatch(identity('Solana Default'));
     // The provider is shown beneath the identity (HOTFIX-WALLET-SELECTOR), never as the identity itself.
     expect(html).not.toMatch(identity('Phantom')); expect(html).toContain('<p class="ux-row-meta">Phantom wallet · Solana · in use on Solana Devnet</p>');

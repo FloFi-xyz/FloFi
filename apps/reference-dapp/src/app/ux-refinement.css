@@ -194,3 +194,13 @@
 .editor-review-block .review-block-steps li{counter-increment:review-step;position:relative;min-height:52px;padding:12px 0 12px 42px}
 .editor-review-block .review-block-steps li:last-child{border-bottom:0}
 .editor-review-block .review-block-steps li::before{content:counter(review-step);position:absolute;left:0;top:11px;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--blue-soft);color:var(--accent);font-size:13px;font-weight:600}
+/* BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS02): a copyable public wallet address (components/wallet-address.tsx). */
+.wallet-address-value{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%;flex-wrap:wrap}
+.wallet-address-ecosystem{font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--muted);text-transform:uppercase}
+.wallet-address-value .wallet-address{white-space:nowrap}
+.wallet-address-copy{display:inline-grid;place-items:center;min-width:28px;min-height:28px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer}
+.wallet-address-copy:hover{background:var(--surface-raised)}
+.wallet-address-copy:focus-visible{outline:2px solid var(--accent, #2343D9);outline-offset:2px}
+.wallet-address-copy[data-copy-state="copied"]{color:var(--success, #1a7f4b)}
+.wallet-address-copy-failed{flex-basis:100%;font-size:12px;color:var(--muted);word-break:break-all;user-select:all}
+@media (max-width:640px){.wallet-address-copy{min-width:32px;min-height:32px}}

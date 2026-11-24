@@ -410,6 +410,41 @@ test('a wallet whose save never finished is recovered on the next visit, and Cre
   expect((await privyUser({ google: 'e2e-bruno' }))!.wallets).toEqual([address]);
 });
 
+// The account wallet lifecycle and auto-connect are off in engineering certification (deterministic wallets): this journey certifies the public
+// product and is DEFINED only in its own runner profile (`auth-wallets-public`, PUBLIC_MAINNET; scripts/guarded-release-browser.mjs). The default
+// profile neither runs nor skips it, and a public profile missing its scope finds no test and fails (infrastructure-ci review).
+if (process.env.FLOFI_E2E_NETWORK_SCOPE === 'PUBLIC_MAINNET') test('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001: a Google user who skips Add wallets gets both wallets in /app automatically, connected and copyable, without Credentials', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: E2E_APP_ORIGIN });
+  await setup(page, { google: 'e2e-beta-ux' });
+  const before = await privyStats();
+  await googleSignIn(page);
+  await expect(page).toHaveURL('/onboarding/wallets');
+  // The page is hydrated and its provider ready (as the other journeys wait) before the person skips.
+  await expect(card(page, 'evm').getByRole('button', { name: /Create wallet/ })).toBeEnabled();
+  await page.getByRole('button', { name: 'Skip for now', exact: true }).click();
+  await expect(page).toHaveURL(/\/app$/);
+  const header = page.getByRole('group', { name: 'Wallet connection' });
+  // Never "Wallet not connected" while FloFi sets the account's wallets up; then the account's own EVM wallet is connected.
+  await expect(header.locator('[data-wallet-address]')).toHaveAttribute('data-wallet-address', /^0x[0-9a-f]{40}$/, { timeout: 30_000 });
+  await expect(header.getByText('Wallet not connected')).toHaveCount(0);
+  const user = await privyUser({ google: 'e2e-beta-ux' });
+  expect(user!.wallets).toHaveLength(2);
+  expect(await privyStats()).toMatchObject({ creations: before.creations + 2, signatures: before.signatures });
+  const saved = await query<{ ecosystem: string; address: string }>(`SELECT ecosystem, address FROM flofi_account_wallets WHERE provider='privy' AND account_id IN
+    (SELECT account_id FROM flofi_account_identities WHERE kind='GOOGLE' AND subject='e2e-beta-ux') ORDER BY ecosystem`);
+  expect(saved.map(row => row.ecosystem.toLowerCase())).toEqual(['evm', 'solana']);
+  const evm = (await header.locator('[data-wallet-address]').getAttribute('data-wallet-address'))!;
+  expect(saved.map(row => row.address)).toContain(evm);
+  // Copy puts the full public address on the clipboard (never the shortened text).
+  await header.getByRole('button', { name: 'Copy EVM address' }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(evm);
+  await shot(page, 'beta-ux-01-app-wallet-ready');
+  // A reload restores the same wallets: nothing new is created, Credentials was never needed.
+  await page.reload();
+  await expect(header.locator('[data-wallet-address]')).toHaveAttribute('data-wallet-address', evm, { timeout: 30_000 });
+  expect((await privyUser({ google: 'e2e-beta-ux' }))!.wallets).toEqual(user!.wallets);
+});
+
 test('email code sign-in through Privy reaches the existing FloFi account of that address; a wrong code signs nobody in', async ({ page, context }) => {
   // An account from before Privy: its verified email identity, onboarding finished.
   const database = db();

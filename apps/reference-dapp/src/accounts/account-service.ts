@@ -10,7 +10,7 @@
  * nothing. Wallets created in FloFi Wallet (Turnkey) before Privy keep their records unchanged (legacy, export only).
  */
 import { accountWalletId, canonicalAddress, isPrivyWallet, LEGACY_MANAGED_PROVIDER, needsWalletOnboarding, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, writableWalletLabel, type AccountView,
-  type AccountWallet, type IdentityKind } from './account-model.ts';
+  type AccountWallet, type IdentityKind, type SessionMethod } from './account-model.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken } from './account-session.ts';
 import type { AccountStore, IdentityClaim, RetirementBlocker } from './account-store.ts';
@@ -22,7 +22,9 @@ export type SignInOutcome = { readonly session: AccountSessionToken; readonly cr
   /** BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: whether "Add your wallets" is still needed (`needsWalletOnboarding`). Absent: decided by `onboarding`. */
   readonly walletOnboarding?: boolean };
 /** The result of saving the person's Privy wallets: what is saved now, and how many Privy wallets another FloFi account already holds. */
-export type PrivyWalletSync = { readonly wallets: readonly AccountWallet[]; readonly heldElsewhere: number };
+export type PrivyWalletSync = { readonly wallets: readonly AccountWallet[]; readonly heldElsewhere: number;
+  /** BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS01): how this FloFi session signed in (the browser's provisioning policy reads it; never authority). */
+  readonly method: SessionMethod };
 
 const fail = (code: string): never => { throw new Error(code); };
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -98,7 +100,7 @@ export function createAccountService(input: { readonly store: AccountStore; read
       try { await saveEmbedded(session, wallet, null); }
       catch (error) { if (error instanceof Error && error.message === 'ACCOUNT_WALLET_LINKED_ELSEWHERE') heldElsewhere++; else throw error; }
     }
-    return { wallets: await store.wallets(session.accountId), heldElsewhere };
+    return { wallets: await store.wallets(session.accountId), heldElsewhere, method: session.method };
   }
 
   const service = {

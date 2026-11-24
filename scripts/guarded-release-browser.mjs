@@ -173,6 +173,9 @@ const definitions = [
   // BUILD-FLOFI-AUTH-WALLETS-001: FloFi accounts and FloFi Wallet on its own origin (sign-in, encrypted email codes, unlock, create, import,
   // export) against the MOCKED loopback identity and wallet provider (e2e/account-harness.ts) on a disposable PostgreSQL database.
   ['auth-wallets', ['--config', 'playwright.auth-wallets.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS01): the same suite in the public product's scope, where the account wallet lifecycle runs: a Google
+  // user who skips Add wallets gets both wallets in /app, connected and copyable, without Credentials (MOCKED loopback Privy and database).
+  ['auth-wallets-public', ['--config', 'playwright.auth-wallets.config.ts', '--grep', 'BETA-UX-INTELLIGENCE'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_E2E_NETWORK_SCOPE: 'PUBLIC_MAINNET' }],
   // BUILD-FLOFI-FLIGHT-001: /board end to end (beta list, five states, invites, Founding seats, a pass from a real simulation) on the embedded runtime.
   ['flight', ['--config', 'playwright.flight.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'open' }],
   ['flight-team-early-access', ['--config', 'playwright.flight.config.ts', '--grep', 'temporary team access'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta', FLOFI_FLIGHT_TEAM_E2E: 'MOCKED_LOOPBACK_ONLY' }],

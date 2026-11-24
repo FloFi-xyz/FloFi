@@ -56,6 +56,7 @@ import { portugueseLocaleContract } from './pt-locale-contract';
 import { portugueseExecutionContinuity } from './pt-execution-continuity';
 import { portugueseMainnetExec } from './pt-mainnet-exec';
 import { portugueseWalletResolution } from './pt-wallet-resolution';
+import { portugueseBetaUxIntelligence } from './pt-beta-ux-intelligence';
 import { portugueseRound2Requote } from './pt-round2-requote';
 import { portugueseExecutionReliability } from './pt-execution-reliability';
 import { portugueseRound2Frontend } from './pt-round2-frontend';
@@ -347,6 +348,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseApprovedUx,
   ...portugueseMainnetExec,
   ...portugueseWalletResolution,
+  ...portugueseBetaUxIntelligence,
   ...portugueseRound2Requote,
   ...portugueseRound2Frontend,
   // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): the network fee paid from the owner's USDC through Circle.

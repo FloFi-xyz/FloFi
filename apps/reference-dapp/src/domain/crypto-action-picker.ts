@@ -120,7 +120,13 @@ export function followOnSelection(workflow: Workflow, action: CryptoAction, envi
   const sources = new Set([...nodes.flatMap(node => node.dependencies), ...workflow.resourceEdges.map(edge => edge.fromNodeId)]);
   const tails = nodes.filter(node => !sources.has(node.nodeId));
   if (tails.length !== 1) return { issue: 'ambiguous' };
-  const predecessor = tails[0]!;
+  return followOnSelectionFrom(tails[0]!, action, environment);
+}
+/**
+ * BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): the same suggestion for an explicitly named predecessor — a Canvas connection between two existing
+ * cards proposes the consumer's network and spending asset from the step it was just connected to. Same rules as `followOnSelection`.
+ */
+export function followOnSelectionFrom(predecessor: Workflow['nodes'][number], action: CryptoAction, environment?: WalletEnvironment): FollowOnSelection | null {
   const declaration = predecessor.inputs.find(input => input.kind === 'ASSET' && input.name === 'asset-out');
   const output = declaration?.kind === 'ASSET' ? declaration.value : predecessor.expectedOutputs.find(item => item.outputId === 'amount-out')?.asset;
   if (!output) return null;

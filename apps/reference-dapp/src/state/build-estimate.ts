@@ -70,6 +70,24 @@ export function sharedEstimate(scope: string, start: (signal: AbortSignal) => Pr
     joined.result.then(value => { if (finish()) resolve(value); }, error => { if (finish()) reject(error); });
   });
 }
+/**
+ * BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): the live estimate this tab already holds for `nodeId`'s current snapshot (any owner), still
+ * within its own expiry — or null. Never requests anything. Used only to PROPOSE a connected card's amount (an editable draft the person
+ * applies); never a Review, simulation or execution input.
+ */
+export function knownLiveEstimate(workflow: unknown, nodeId: string): BuildEstimate | null {
+  const projected = quoteSnapshot(workflow as SemanticWorkflow, nodeId);
+  if (!projected) return null;
+  const key = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(projected)));
+  for (const scope of [...answered.keys()].reverse()) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(scope); } catch { continue; }
+    if (!Array.isArray(parsed) || parsed[0] !== key || parsed[1] !== nodeId) continue;
+    const estimate = recalled(scope);
+    if (estimate) return estimate;
+  }
+  return null;
+}
 /** Test seam: forget every answered snapshot. */
 export function clearLiveQuoteCache(): void { answered.clear(); inflight.clear(); }
 

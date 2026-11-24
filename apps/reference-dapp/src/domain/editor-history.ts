@@ -11,6 +11,7 @@ import { universalBridgeDetails, universalAssetResolves, universalKeyOfCanvasLab
 import { universalCanvasNetworks } from './canvas-action-setup';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
+import { bridgeFollowOn, terminalStep } from './workflow-propagation';
 import { defaultPoolRange, followOnSelection, lendingAction, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
@@ -46,7 +47,12 @@ export type HistoryAction =
   /** BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a recovered, still-pending Uniswap v3 liquidity run's own workflow. */
   | { readonly type: 'RESTORE_LIQUIDITY_CANVAS'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'COMMAND'; readonly command: Command; readonly context: ReviewContext; readonly position?: { x: number; y: number }; readonly authoringId?: string; readonly authoringAmount?: string }
-  | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string; readonly environment?: WalletEnvironment }
+  | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string; readonly environment?: WalletEnvironment;
+    /** BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): the terminal step's live estimate of what it delivers (decimal), used only when the new card
+     *  spends exactly that output; at execution the step spends min(this cap, the amount actually delivered). */
+    readonly inheritedAmount?: string;
+    /** The terminal step the amount was read from: the amount is dropped unless the reducer follows that same step (swap review). */
+    readonly inheritedFrom?: string }
   /** BUILD-RH-002: the Stocks card — a Robinhood Chain catalog swap from USDG into the first featured Stock Token. */
   | { readonly type: 'START_STOCKS_SETUP'; readonly position: { x: number; y: number } }
   | { readonly type: 'EDIT_POOL_SETUP'; readonly id: string; readonly input: UniswapLiquidityInput }
@@ -132,9 +138,22 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       actionSetup = { id, action: action.action, amount: '0', beneficiary: action.beneficiary! };
     else actionSetup = { id, action: action.action, amount: '0' };
     const suggestion = action.action !== 'bridge' ? followOnSelection(state.editor.workflow, action.action, action.environment) : null;
+    // A positive decimal only (it re-validates as the card's own amount when applied).
+    const tail = terminalStep(state.editor.workflow);
+    const inherited = typeof action.inheritedAmount === 'string' && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(action.inheritedAmount) && !/^0(\.0+)?$/.test(action.inheritedAmount)
+      && tail && 'node' in tail && tail.node.nodeId === action.inheritedFrom ? action.inheritedAmount : null;
     if (suggestion) {
       actionSetup = { ...actionSetup, ...(suggestion.selection ? { cryptoSelection: suggestion.selection } : {}), ...(suggestion.issue ? { followOnIssue: suggestion.issue } : {}) };
       if (actionSetup.action === 'pool' && suggestion.selection) actionSetup = { ...actionSetup, input: { ...actionSetup.input, ...defaultPoolRange(suggestion.selection.network) } };
+      // WS04: a card that spends exactly the previous step's output starts from that step's estimated delivery (Pools keep their two-sided input).
+      // Borrow / Withdraw draw from Aave and never spend an earlier delivery (workflow review): no inherited amount for them either.
+      else if (suggestion.selection && !suggestion.issue && inherited && !['pool', 'borrow', 'withdraw'].includes(actionSetup.action)) actionSetup = { ...actionSetup, amount: inherited };
+    }
+    // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): a Bridge after a Swap (or any step delivering a bridgeable asset) starts on that step's network,
+    // spending its output asset — before, Bridge was the one action that never followed the previous step. Unclear cases keep the defaults.
+    if (action.action === 'bridge' && actionSetup.action === 'bridge') {
+      const follow = bridgeFollowOn(state.editor.workflow);
+      if (follow?.networks) actionSetup = { ...actionSetup, networks: follow.networks, ...(inherited ? { amount: inherited } : {}) };
     }
     return { ...state, actionSetup, setupSerial: state.setupSerial + 1,
       layout: { ...pinnedLayout(state.editor.workflow, state.layout, null), [id]: { ...action.position, actionType: action.action === 'swap' ? 'asset.swap.exact-input' : action.action === 'bridge' ? 'asset.bridge' : action.action } },
@@ -396,6 +415,14 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   if (action.authoringId) delete recipientInputs[action.authoringId];
   if (action.authoringId) delete amountInputs[action.authoringId];
   if (action.authoringId) delete bridgeNetworkInputs[action.authoringId];
+  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (chat review): a command from elsewhere (Chat, an applied proposal) that changes a step supersedes that
+  // card's drafts, including a draft FloFi proposed from a connection: applying the old draft later must never undo what the Chat just committed.
+  // The card's own settings edits (source CANVAS, e.g. slippage) keep its amount draft, as before.
+  const fromElsewhere = !action.authoringId && (action.command as { readonly source?: unknown }).source !== 'CANVAS';
+  const edited = fromElsewhere && 'nodeId' in action.command && typeof action.command.nodeId === 'string' ? action.command.nodeId : null;
+  if (edited && JSON.stringify(state.editor.workflow.nodes.find(node => node.nodeId === edited)) !== JSON.stringify(editor.workflow.nodes.find(node => node.nodeId === edited))) {
+    delete amountInputs[edited]; delete bridgeNetworkInputs[edited]; delete cryptoSelections[edited]; delete recipientInputs[edited];
+  }
   for (const id of Object.keys(amountInputs)) {
     const node = editor.workflow.nodes.find(node => node.nodeId === id);
     if (!node || !canEditCanvasAmount(node, action.context, state.editor.workflow)) delete amountInputs[id];
