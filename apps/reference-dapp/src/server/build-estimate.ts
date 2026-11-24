@@ -38,13 +38,19 @@ function catalogReader(id: CatalogNetworkId, mode: 'live' | 'harness', build: ()
 // BUILD-FIX-UX-001: the deployment's price source, built once per process (its Chainlink feed verification is cached per instance).
 let processPrices: PriceSource | null | undefined;
 const USD_WAIT_MS = 2_500;
+/**
+ * BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS03): once the token quote itself is ready, the most it may still wait for its optional USD figure. The
+ * observation runs alongside the quote (`priceObserver`), so its USD_WAIT_MS budget counts from when it started — before, the 2.5 s wait started
+ * only after the quote returned, and a slow price source added up to 2.5 s to the time to first quote.
+ */
+export const USD_AFTER_QUOTE_MS = 300;
 type QuoteSide = { readonly symbol: string; readonly units: string; readonly decimals: number };
 /**
  * USD equivalents of a MAINNET quote's two sides — each only for an asset the verified price source observes freshly (a stale, failed or
  * slow observation gives none). Bounded, so a price read never delays the token estimate itself.
  */
 type PriceObservation = Awaited<ReturnType<PriceSource['observe']>> | null;
-type Observe = (asset: PriceAsset) => Promise<PriceObservation>;
+type Observe = ((asset: PriceAsset) => Promise<PriceObservation>) & { readonly startedAt?: number };
 /**
  * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: one price observation per asset per request, started as soon as the node names its assets, so the optional
  * USD read runs alongside the quote instead of after it. Display only; a failed or slow observation still gives no USD.
@@ -52,11 +58,11 @@ type Observe = (asset: PriceAsset) => Promise<PriceObservation>;
 function priceObserver(prices: PriceSource | null, now: Date, symbols: readonly (string | null | undefined)[]): Observe | null {
   if (!prices) return null;
   const started = new Map<PriceAsset, Promise<PriceObservation>>();
-  const observe: Observe = asset => {
+  const observe: Observe = Object.assign((asset: PriceAsset) => {
     let pending = started.get(asset);
     if (!pending) { pending = prices.observe(asset, now).catch(() => null); started.set(asset, pending); }
     return pending;
-  };
+  }, { startedAt: Date.now() });
   for (const symbol of symbols) { const asset = symbol ? priceAssetOf(symbol) : null; if (asset && prices.assets.includes(asset)) void observe(asset); }
   return observe;
 }
@@ -66,8 +72,10 @@ async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [Quo
   if (!assets.length) return null;
   const observe = observeAsset ?? ((asset: PriceAsset) => prices.observe(asset, now).catch(() => null));
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // The quote is ready: wait for USD only for what is left of its own budget, and never more than USD_AFTER_QUOTE_MS.
+  const wait = Math.min(USD_AFTER_QUOTE_MS, Math.max(0, (observeAsset?.startedAt ?? Date.now()) + USD_WAIT_MS - Date.now()));
   const observed = await Promise.race([Promise.all(assets.map(async asset => [asset, await observe(asset)] as const)),
-    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), USD_WAIT_MS); })]).finally(() => clearTimeout(timer));
+    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), wait); })]).finally(() => clearTimeout(timer));
   const fresh = new Map((observed ?? []).flatMap(([asset, result]) => result?.ok ? [[asset, result.observation] as const] : []));
   const value = (side: QuoteSide) => { const o = fresh.get(priceAssetOf(side.symbol)!); return o ? usdAmount(side.units, side.decimals, o.priceUsd) : null; };
   const input = value(sides[0]), output = value(sides[1]), first = [...fresh.values()].sort((a, b) => a.observedAt.localeCompare(b.observedAt))[0];
