@@ -442,8 +442,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const ignorePaneClick = useRef(false);
   const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
   const [feedback, setFeedback] = useState('');
-  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04, workflow review): cards whose draft FloFi proposed from a connection. Their draft never applies by
-  // itself (no auto-apply pause): the person presses Enter / Apply. An id leaves the set when its draft is applied or cancelled.
+  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04, workflow review): cards whose draft FloFi proposed from a connection. Their draft never applies on a
+  // timer (no auto-apply pause): only the person's own gesture applies it — Enter, Apply, or leaving the card's field after focusing it. An id
+  // leaves the set when its draft is applied, cancelled or superseded (a Chat commit on that step drops the draft).
   const [proposedDrafts, setProposedDrafts] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => {
     const kept = [...proposedDrafts].filter(id => amountInputs[id] !== undefined || cryptoSelections[id] || bridgeNetworkInputs[id]);
@@ -688,7 +689,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       // A draft that changes the card's network or asset is not yet what runs: no "inherited" claim until it is applied (workflow review).
       const drafted = Boolean(cryptoSelections[id] || bridgeNetworkInputs[id]);
       if (producer && !drafted && canvasSteps.indexOf(producer.nodeId) >= 0) return { step: canvasSteps.indexOf(producer.nodeId) + 1, state: 'inherited', message: PROVENANCE_MESSAGES.inherited };
-      if (producer) return null;
+      if (producer || drafted) return null;
       const graph = stepProvenance(workflow, id);
       if (graph.state !== 'mismatch' || canvasSteps.indexOf(graph.from) < 0) return null;
       return { step: canvasSteps.indexOf(graph.from) + 1, state: 'mismatch', message: PROVENANCE_MESSAGES[graph.reason] };

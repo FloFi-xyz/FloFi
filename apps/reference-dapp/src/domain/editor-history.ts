@@ -140,7 +140,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const suggestion = action.action !== 'bridge' ? followOnSelection(state.editor.workflow, action.action, action.environment) : null;
     // A positive decimal only (it re-validates as the card's own amount when applied).
     const tail = terminalStep(state.editor.workflow);
-    const inherited = typeof action.inheritedAmount === 'string' && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(action.inheritedAmount)
+    const inherited = typeof action.inheritedAmount === 'string' && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(action.inheritedAmount) && !/^0(\.0+)?$/.test(action.inheritedAmount)
       && tail && 'node' in tail && tail.node.nodeId === action.inheritedFrom ? action.inheritedAmount : null;
     if (suggestion) {
       actionSetup = { ...actionSetup, ...(suggestion.selection ? { cryptoSelection: suggestion.selection } : {}), ...(suggestion.issue ? { followOnIssue: suggestion.issue } : {}) };
@@ -415,6 +415,14 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   if (action.authoringId) delete recipientInputs[action.authoringId];
   if (action.authoringId) delete amountInputs[action.authoringId];
   if (action.authoringId) delete bridgeNetworkInputs[action.authoringId];
+  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (chat review): a command from elsewhere (Chat, an applied proposal) that changes a step supersedes that
+  // card's drafts, including a draft FloFi proposed from a connection: applying the old draft later must never undo what the Chat just committed.
+  // The card's own settings edits (source CANVAS, e.g. slippage) keep its amount draft, as before.
+  const fromElsewhere = !action.authoringId && (action.command as { readonly source?: unknown }).source !== 'CANVAS';
+  const edited = fromElsewhere && 'nodeId' in action.command && typeof action.command.nodeId === 'string' ? action.command.nodeId : null;
+  if (edited && JSON.stringify(state.editor.workflow.nodes.find(node => node.nodeId === edited)) !== JSON.stringify(editor.workflow.nodes.find(node => node.nodeId === edited))) {
+    delete amountInputs[edited]; delete bridgeNetworkInputs[edited]; delete cryptoSelections[edited]; delete recipientInputs[edited];
+  }
   for (const id of Object.keys(amountInputs)) {
     const node = editor.workflow.nodes.find(node => node.nodeId === id);
     if (!node || !canEditCanvasAmount(node, action.context, state.editor.workflow)) delete amountInputs[id];

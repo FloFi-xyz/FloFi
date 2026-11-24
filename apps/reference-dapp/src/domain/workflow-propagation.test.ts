@@ -209,3 +209,35 @@ describe('bridge review fixes', () => {
     expect(translate('PT', PROVENANCE_MESSAGES.asset.replaceAll('{0}', '2'))).toContain('etapa 2');
   });
 });
+
+describe('batch 3 review fixes', () => {
+  it('a Chat (or applied proposal) command on a step drops that card\'s drafts, so applying them later cannot undo it', async () => {
+    const { editorHistoryReducer, initialEditorHistory } = await import('./editor-history');
+    const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps', 'bridge 5 USDC from Base to Arbitrum');
+    const bridge = ids(workflow)[1]!;
+    let history: ReturnType<typeof initialEditorHistory> = { ...initialEditorHistory(), editor: { workflow, error: null } };
+    history = editorHistoryReducer(history, { type: 'EDIT_BRIDGE_NETWORKS', id: bridge, patch: { inputAsset: 'WETH', outputAsset: 'WETH' }, context });
+    history = editorHistoryReducer(history, { type: 'EDIT_CANVAS_AMOUNT', id: bridge, amount: '0.03', context });
+    expect(history.amountInputs[bridge]).toBe('0.03');
+    // The same step edited from elsewhere (as the Chat commits it: a COMMAND without the card's authoring id).
+    const { canvasAmountCommand } = await import('./canvas-action-setup');
+    const chat = { ...canvasAmountCommand(history.editor, null, { [bridge]: '10' }, bridge, context), source: 'CHAT' as const };
+    expect('nodeId' in chat && chat.nodeId).toBe(bridge);
+    const after = editorHistoryReducer(history, { type: 'COMMAND', command: chat, context });
+    expect(after.editor.error).toBeNull();
+    expect(after.editor.workflow).not.toBe(history.editor.workflow);
+    expect(after.amountInputs[bridge]).toBeUndefined();
+    expect(after.bridgeNetworkInputs[bridge]).toBeUndefined();
+  });
+  it('Supply → Borrow is reported as a draw, not as "nothing to spend"', () => {
+    const supply = { actionType: 'supply' } as Workflow['nodes'][number], borrow = { actionType: 'borrow' } as Workflow['nodes'][number];
+    expect(pairProvenance(supply, borrow)).toBe('consumer-draws');
+  });
+  it('a zero inherited amount is never used', async () => {
+    const { editorHistoryReducer, initialEditorHistory } = await import('./editor-history');
+    const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps');
+    const next = editorHistoryReducer({ ...initialEditorHistory(), editor: { workflow, error: null } },
+      { type: 'START_ACTION_SETUP', action: 'swap', position: { x: 0, y: 0 }, environment: 'mainnet', inheritedAmount: '0.000', ...(tailOf(workflow) ? { inheritedFrom: tailOf(workflow)! } : {}) });
+    expect(next.actionSetup).toMatchObject({ amount: '0' });
+  });
+});

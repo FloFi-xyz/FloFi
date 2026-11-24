@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { initializeAccountWallets, observePrivySession, provisioningPlan, resetWalletLifecycleForTests, runWalletLifecycle, walletLifecycle, walletSlotState,
+import { cancelWalletLifecycle, initializeAccountWallets, observePrivySession, provisioningPlan, resetWalletLifecycleForTests, runWalletLifecycle, walletLifecycle, walletSlotState,
   markPrivyUnavailable, type LifecycleDeps, type SavedWallet } from './account-wallet-lifecycle';
 import type { SessionMethod } from '../accounts/account-model';
 import type { PrivyEmbedded } from '../accounts/privy-context';
@@ -116,6 +116,18 @@ describe('wallet-execution review fixes', () => {
   });
   it('a page where the provisioner is off (approval, frame) never says "setting up"', () => {
     expect(walletSlotState({ status: 'idle', code: null }, true, true)).toBe('disconnected');
+  });
+});
+
+describe('channels review fix', () => {
+  it('switching the provisioner off (navigating into an approval page) stops a run before it creates anything, and shows nothing', async () => {
+    const w = world();
+    let first = true;
+    const sync = w.deps.sync;
+    w.deps = { ...w.deps, sync: async token => { const result = await sync(token); if (first) { first = false; cancelWalletLifecycle(); } return result; } };
+    await runWalletLifecycle(w.deps);
+    expect(w.createWallet).not.toHaveBeenCalled();
+    expect(walletLifecycle().status).toBe('idle');
   });
 });
 

@@ -141,6 +141,14 @@ export function runWalletLifecycle(deps: LifecycleDeps, force = false): Promise<
   running = { userId, promise };
   return promise;
 }
+/**
+ * The provisioner was switched off on this page (channels review: a client-side navigation into /approve or /mcp/approve keeps the shared
+ * provider tree): a run in flight stops before its next side effect, and nothing is shown or retried there.
+ */
+export function cancelWalletLifecycle(): void {
+  generation++; running = null;
+  if (current.status !== 'idle') set(IDLE);
+}
 /** Tests only: a new page. */
 export function resetWalletLifecycleForTests(): void { current = IDLE; running = null; generation++; listeners.clear(); }
 /** Privy did not load in time (`PRIVY_READY_TIMEOUT_MS`): reported with its recovery instead of an endless "setting up". */

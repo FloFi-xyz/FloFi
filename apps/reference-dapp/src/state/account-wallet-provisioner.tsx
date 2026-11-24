@@ -11,7 +11,7 @@ import { currentFloFiPrivy, useFloFiPrivy, type FloFiPrivy } from '../accounts/p
 import { syncFloFiWallets } from '../wallet/flofi-wallet-sync';
 import { disconnectToLogin } from '../accounts/disconnect';
 import { activeNetworkScope } from '../domain/network-scope';
-import { markPrivyUnavailable, observePrivySession, PRIVY_READY_TIMEOUT_MS, runWalletLifecycle, subscribeWalletLifecycle, walletLifecycle, type LifecycleDeps,
+import { cancelWalletLifecycle, markPrivyUnavailable, observePrivySession, PRIVY_READY_TIMEOUT_MS, runWalletLifecycle, subscribeWalletLifecycle, walletLifecycle, type LifecycleDeps,
   type WalletLifecycle } from './account-wallet-lifecycle';
 
 const framed = () => { try { return typeof window !== 'undefined' && window.top !== window.self; } catch { return true; } };
@@ -35,7 +35,7 @@ export function AccountWalletProvisioner({ disabled = false }: { disabled?: bool
   // Never inside an embedding frame (as `syncFloFiWallets`): a host page must not provision the person's wallets.
   const off = disabled || !privy || activeNetworkScope() === 'ENGINEERING' || framed();
   const ready = privy?.ready ?? false, authenticated = privy?.authenticated ?? false, userId = privy?.userId ?? null;
-  useEffect(() => { if (!off) observePrivySession(privy ? { ready, authenticated, userId } : null); }, [off, privy, ready, authenticated, userId]);
+  useEffect(() => { if (off) cancelWalletLifecycle(); else observePrivySession(privy ? { ready, authenticated, userId } : null); }, [off, privy, ready, authenticated, userId]);
   useEffect(() => {
     if (off || ready) return;
     const timer = setTimeout(markPrivyUnavailable, PRIVY_READY_TIMEOUT_MS);

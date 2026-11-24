@@ -114,7 +114,8 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   // "Wallet not connected"; a failure offers Try again (no Credentials visit needed).
   const lifecycle = useAccountWalletLifecycle(), bootstrap = useProductBootstrap();
   // A ready lifecycle whose auto-connect is still connecting is still "setting up" (no brief false "Wallet not connected").
-  const slot = !accounts ? 'disconnected' : lifecycle.status === 'ready' && lifecycle.provisioned.length && (build009.busy || jupiter.busy) ? 'initializing'
+  // The compact approval header never shows or retries the account wallet lifecycle (channels review).
+  const slot = !accounts || compact ? 'disconnected' : lifecycle.status === 'ready' && lifecycle.provisioned.length && (build009.busy || jupiter.busy) ? 'initializing'
     : walletSlotState(lifecycle, bootstrap.accountPresence?.signedIn ?? null, Boolean(privy && !privy.ready));
   const fork = info?.available ? info : null;
   const solanaAddress = jupiter.session?.account.address;

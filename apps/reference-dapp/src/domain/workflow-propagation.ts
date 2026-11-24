@@ -71,8 +71,9 @@ export function stepProvenance(workflow: Workflow, nodeId: string): StepProvenan
   let first: StepProvenance | null = null;
   for (const parent of parents) {
     const fromIndex = ordered.indexOf(parent), output = reusableOutput(parent);
-    if (output.kind === 'none') { first ??= { state: 'mismatch', from: parent.nodeId, fromIndex, reason: output.reason }; continue; }
+    // A draw is reported as a draw whatever the earlier step delivers (lending review: Supply → Borrow is not "nothing to spend").
     if (draws) { first ??= { state: 'mismatch', from: parent.nodeId, fromIndex, reason: 'consumer-draws' }; continue; }
+    if (output.kind === 'none') { first ??= { state: 'mismatch', from: parent.nodeId, fromIndex, reason: output.reason }; continue; }
     const used = spends.find(input => sameSequenceAsset(input, output.asset));
     if (used) return { state: 'inherited', from: parent.nodeId, fromIndex, asset: output.asset };
     first ??= { state: 'mismatch', from: parent.nodeId, fromIndex, reason: spends.some(input => input.chainId === output.asset.chainId) ? 'asset' : 'network' };
@@ -84,9 +85,9 @@ export function stepProvenance(workflow: Workflow, nodeId: string): StepProvenan
  * delivers, 'mismatch' when it could but spends another asset/network, else why this producer's output cannot fund it.
  */
 export function pairProvenance(producer: Node, consumer: Node): 'inherited' | 'mismatch' | 'no-reusable-output' | 'other-recipient' | 'consumer-draws' {
+  if (consumer.actionType === 'withdraw' || consumer.actionType === 'borrow') return 'consumer-draws';
   const output = reusableOutput(producer);
   if (output.kind === 'none') return output.reason;
-  if (consumer.actionType === 'withdraw' || consumer.actionType === 'borrow') return 'consumer-draws';
   return stepAssets(consumer).inputs.some(input => sameSequenceAsset(input, output.asset)) ? 'inherited' : 'mismatch';
 }
 /** The owner-facing explanation of a provenance (catalog messages; `{0}` is the upstream step number). */
@@ -94,8 +95,9 @@ export const PROVENANCE_MESSAGES: Readonly<Record<Exclude<StepProvenance['state'
   // Never more than the card's own amount (workflow review): the runtime spends min(this amount, what step {0} actually delivered).
   inherited: 'Uses what step {0} delivers, up to this card\'s amount.',
   mismatch: 'Connected to step {0}.',
-  asset: 'Connected to step {0}, but this step spends another asset. Choose the asset step {0} delivers to use its output.',
-  network: 'Connected to step {0}, but this step runs on another network. Choose the network step {0} delivers on to use its output.',
+  // An auto-link (Chat, a card added after a step) is not a link the person drew: the step runs as authored; using the output is an option.
+  asset: 'Runs after step {0} with its own asset. To use what step {0} delivers instead, choose that asset.',
+  network: 'Runs after step {0} on its own network. To use what step {0} delivers instead, choose that network.',
   'no-reusable-output': 'Step {0} does not deliver an asset this step can spend; this step uses its own amount.',
   'other-recipient': 'Step {0} sends its output to another wallet; this step uses its own amount.',
   'consumer-draws': 'This step draws from Aave; it runs after step {0} with its own amount.',
