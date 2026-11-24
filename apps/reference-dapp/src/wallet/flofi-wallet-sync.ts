@@ -51,7 +51,9 @@ function apply(info: FloFiWalletInfo): void {
 export function syncFloFiWallets(options: { readonly force?: boolean } = {}): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
   if (framed()) { apply(null); return Promise.resolve(); }
-  if (inflight) return inflight;
+  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (security review): a forced read that finds an older read in flight runs once more after it, so a
+  // wallet saved meanwhile (just provisioned) is registered instead of being missed by the stale read.
+  if (inflight) return options.force ? inflight.then(() => syncFloFiWallets({ force: true })) : inflight;
   if (!options.force && Date.now() - last < MIN_INTERVAL_MS) return Promise.resolve();
   last = Date.now();
   inflight = floFiWalletInfo().then(result => { if (result.ok) apply(result.value); }, () => undefined).finally(() => { inflight = null; });

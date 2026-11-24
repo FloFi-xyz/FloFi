@@ -32,18 +32,32 @@ export type WalletLifecycle = { readonly status: WalletLifecycleStatus; readonly
   /** Ecosystems this page provisioned for the account (shown once: "Your wallet is ready"). */ readonly provisioned: readonly WalletEcosystem[] };
 export type SavedWallet = { readonly ecosystem: WalletEcosystem; readonly address: string };
 type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
-export type WalletSyncValue = { readonly wallets: readonly SavedWallet[]; readonly method: SessionMethod };
+export type WalletSyncValue = { readonly wallets: readonly SavedWallet[]; readonly method: SessionMethod; readonly heldElsewhere?: number };
 export type LifecycleDeps = {
   readonly privy: { readonly userId: string | null; readonly embedded: readonly PrivyEmbedded[]; getAccessToken(): Promise<string | null>;
     createWallet(ecosystem: WalletEcosystem): Promise<{ readonly address: string }> };
   readonly sync: (token: string) => Promise<Result<WalletSyncValue>>;
   readonly refresh: () => Promise<void>;
+  /** Whether this run still describes the page's current Privy user (security review: checked before every side effect, so a run started for
+   *  one user never creates a wallet under the next user's Privy session). Absent: always live. */
+  readonly live?: () => boolean;
+  /** Serializes runs across this browser's tabs (Web Locks), so two tabs never both see "no wallet" and both create one. Absent: no lock. */
+  readonly exclusive?: <T>(name: string, run: () => Promise<T>) => Promise<T>;
 };
 
 export const PROVISIONED_ECOSYSTEMS: readonly WalletEcosystem[] = Object.freeze(['evm', 'solana']);
 const MANAGED: ReadonlySet<SessionMethod> = new Set<SessionMethod>(['google', 'apple', 'email']);
 /** Codes meaning this browser holds no FloFi account session: the person is signed out, not failing. */
-const SIGNED_OUT: ReadonlySet<string> = new Set(['ACCOUNT_SESSION_REQUIRED', 'FLOFI_WALLET_ACCOUNT_REQUIRED', 'ACCOUNTS_UNAVAILABLE', 'PRIVY_ACCOUNT_NOT_LINKED']);
+// ACCOUNTS_UNAVAILABLE (the account service is down) is a failure with Try again, never the ordinary signed-out state (security review).
+const SIGNED_OUT: ReadonlySet<string> = new Set(['ACCOUNT_SESSION_REQUIRED', 'FLOFI_WALLET_ACCOUNT_REQUIRED', 'PRIVY_ACCOUNT_NOT_LINKED']);
+const STALE = { status: 'signed-out', code: 'PRIVY_SESSION_CHANGED', provisioned: [] } as const;
+/** Bounds for each step (wallet-execution review): a Privy frame or server that never answers ends in `failed` with Try again, never an endless
+ *  "Setting up your wallet…". Creation keeps the onboarding page's own bound (add-wallets.tsx WALLET_OPERATION_TIMEOUT_MS). */
+export const LIFECYCLE_STEP_TIMEOUT_MS = 30_000, LIFECYCLE_CREATE_TIMEOUT_MS = 60_000;
+function bounded<T>(run: Promise<T>, ms: number, code: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([run, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(code)), ms); })]).finally(() => clearTimeout(timer));
+}
 
 /**
  * The ecosystems to provision: only for a managed login, only those where neither Privy (client view) nor the account (server, which already
@@ -59,28 +73,35 @@ export function provisioningPlan(method: SessionMethod, embedded: readonly Privy
  * failure never undoes or hides a ready EVM wallet (the page still refreshes, and the failure is reported for `retry`).
  */
 export async function initializeAccountWallets(deps: LifecycleDeps): Promise<Pick<WalletLifecycle, 'status' | 'code' | 'provisioned'>> {
-  const token = await deps.privy.getAccessToken().catch(() => null);
+  const token = await bounded(deps.privy.getAccessToken(), LIFECYCLE_STEP_TIMEOUT_MS, 'PRIVY_UNAVAILABLE').catch(() => null);
   if (!token) return { status: 'signed-out', code: 'PRIVY_SESSION_REQUIRED', provisioned: [] };
-  const first = await deps.sync(token).catch(() => ({ ok: false as const, code: 'ACCOUNT_WALLET_SAVE_FAILED' }));
+  const first = await bounded(deps.sync(token), LIFECYCLE_STEP_TIMEOUT_MS, 'WALLET_OPERATION_TIMEOUT')
+    .catch(cause => ({ ok: false as const, code: cause instanceof Error && cause.message === 'WALLET_OPERATION_TIMEOUT' ? cause.message : 'ACCOUNT_WALLET_SAVE_FAILED' }));
   if (!first.ok) return SIGNED_OUT.has(first.code) ? { status: 'signed-out', code: first.code, provisioned: [] } : { status: 'failed', code: first.code, provisioned: [] };
+  const live = deps.live ?? (() => true);
   const plan = provisioningPlan(first.value.method, deps.privy.embedded, first.value.wallets);
   const provisioned: WalletEcosystem[] = [];
-  let failure: string | null = null;
-  for (const ecosystem of plan) {
-    try { await deps.privy.createWallet(ecosystem); provisioned.push(ecosystem); }
+  // A wallet of this Privy user is held by another FloFi account: creating would only hit Privy's limit again on every page; say so instead.
+  let failure: string | null = plan.length && (first.value.heldElsewhere ?? 0) > 0 ? 'ACCOUNT_WALLET_LINKED_ELSEWHERE' : null;
+  for (const ecosystem of failure ? [] : plan) {
+    if (!live()) return STALE;
+    try { await bounded(deps.privy.createWallet(ecosystem), LIFECYCLE_CREATE_TIMEOUT_MS, 'WALLET_OPERATION_TIMEOUT'); provisioned.push(ecosystem); }
     catch (cause) {
       const code = cause instanceof Error ? cause.message : 'PRIVY_WALLET_CREATE_FAILED';
       // Privy already holds this person's wallet (an earlier attempt, another tab): the next sync saves it. Never a second wallet.
       if (code !== 'PRIVY_WALLET_LIMIT') failure ??= code;
     }
   }
-  if (plan.length) {
-    const again = await deps.privy.getAccessToken().catch(() => null);
-    const second = again ? await deps.sync(again).catch(() => ({ ok: false as const, code: 'ACCOUNT_WALLET_SAVE_FAILED' })) : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
+  if (!live()) return STALE;
+  if (plan.length && !failure?.startsWith('ACCOUNT_WALLET_LINKED')) {
+    const again = await bounded(deps.privy.getAccessToken(), LIFECYCLE_STEP_TIMEOUT_MS, 'PRIVY_UNAVAILABLE').catch(() => null);
+    const second = again ? await bounded(deps.sync(again), LIFECYCLE_STEP_TIMEOUT_MS, 'WALLET_OPERATION_TIMEOUT').catch(() => ({ ok: false as const, code: 'ACCOUNT_WALLET_SAVE_FAILED' }))
+      : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
     if (!second.ok) failure ??= second.code;
     else for (const ecosystem of plan) if (!second.value.wallets.some(wallet => wallet.ecosystem === ecosystem)) failure ??= 'ACCOUNT_WALLET_SAVE_FAILED';
   }
-  await deps.refresh().catch(() => undefined);
+  if (!live()) return STALE;
+  await bounded(deps.refresh(), LIFECYCLE_STEP_TIMEOUT_MS, 'WALLET_OPERATION_TIMEOUT').catch(() => undefined);
   return failure ? { status: 'failed', code: failure, provisioned } : { status: 'ready', code: null, provisioned };
 }
 
@@ -106,11 +127,15 @@ export function observePrivySession(privy: { readonly ready: boolean; readonly a
 export function runWalletLifecycle(deps: LifecycleDeps, force = false): Promise<void> {
   const userId = deps.privy.userId;
   if (!userId) return Promise.resolve();
-  if (running?.userId === userId) return running.promise;
+  // Try again replaces a run in flight (one that may hang) instead of joining it; its late result is discarded by the generation.
+  if (running?.userId === userId && !force) return running.promise;
   if (!force && current.userId === userId && (current.status === 'ready' || current.status === 'failed' || current.status === 'signed-out')) return Promise.resolve();
   const ticket = ++generation;
   set({ status: 'initializing', code: null, userId, provisioned: [] });
-  const promise = initializeAccountWallets(deps).then(result => {
+  const live = () => ticket === generation && (deps.live?.() ?? true);
+  const run = () => initializeAccountWallets({ ...deps, live });
+  // One run per Privy user across this browser's tabs: a second tab waits, then its fresh sync finds the first tab's wallets and plans nothing.
+  const promise = (deps.exclusive ? deps.exclusive(`flofi-wallet-provision:${userId}`, run) : run()).then(result => {
     if (ticket === generation) set({ ...result, userId });
   }).finally(() => { if (running?.promise === promise) running = null; });
   running = { userId, promise };
@@ -133,6 +158,7 @@ export function walletSlotState(lifecycle: Pick<WalletLifecycle, 'status' | 'cod
   if (lifecycle.status === 'failed') return lifecycle.code === 'PRIVY_UNAVAILABLE' && signedIn !== true ? 'disconnected' : 'failed';
   if (lifecycle.status === 'initializing') return 'initializing';
   // Privy is still loading for a browser the server knows is signed in: the wallet is being restored, not missing.
-  if (privyLoading && signedIn === true && lifecycle.status !== 'signed-out' && lifecycle.status !== 'ready') return 'initializing';
+  // Only a mounted provisioner reports 'authenticating' (never on /approve or inside a frame, where it is off and the lifecycle stays idle).
+  if (privyLoading && signedIn === true && lifecycle.status === 'authenticating') return 'initializing';
   return 'disconnected';
 }

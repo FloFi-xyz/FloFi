@@ -113,7 +113,9 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS01): while FloFi reads, recovers or creates the account's own wallets the slot says so, never
   // "Wallet not connected"; a failure offers Try again (no Credentials visit needed).
   const lifecycle = useAccountWalletLifecycle(), bootstrap = useProductBootstrap();
-  const slot = accounts ? walletSlotState(lifecycle, bootstrap.accountPresence?.signedIn ?? null, Boolean(privy && !privy.ready)) : 'disconnected';
+  // A ready lifecycle whose auto-connect is still connecting is still "setting up" (no brief false "Wallet not connected").
+  const slot = !accounts ? 'disconnected' : lifecycle.status === 'ready' && lifecycle.provisioned.length && (build009.busy || jupiter.busy) ? 'initializing'
+    : walletSlotState(lifecycle, bootstrap.accountPresence?.signedIn ?? null, Boolean(privy && !privy.ready));
   const fork = info?.available ? info : null;
   const solanaAddress = jupiter.session?.account.address;
   const solanaTitle = solanaAddress && jupiter.session
@@ -139,12 +141,15 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
-      {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><WalletAddress address={solanaAddress} ecosystem="solana" label="Your Solana wallet" showEcosystem={false}/></span>
-        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="wallet-status-dot" aria-hidden="true"/><WalletAddress address={build009.account} ecosystem="evm" label="Your EVM wallet" showEcosystem={false}/>
+      {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><WalletAddress address={solanaAddress} ecosystem="solana" label={tr('Your Solana wallet')}/></span>
+        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="wallet-status-dot" aria-hidden="true"/><WalletAddress address={build009.account} ecosystem="evm" label={tr('Your EVM wallet')} showEcosystem={false}/>
           {build009.chainId && <span className="wallet-network">{' · '}{tr(networkName(build009.chainId))}</span>}</span>
           : restoring ? <span className="wallet-connection" role="status">{tr("Restoring wallet…")}</span>
           : slot === 'initializing' ? <span className="wallet-connection" role="status" data-wallet-lifecycle="initializing">{tr("Setting up your wallet…")}</span>
-          : slot === 'failed' ? <><span className="wallet-connection" role="status" data-wallet-lifecycle="failed">{tr("Your wallet couldn't be set up.")}</span><button type="button" onClick={lifecycle.retry}>{tr("Try again")}</button></>
+          : slot === 'failed' ? <><span className="wallet-connection" role="status" data-wallet-lifecycle="failed">{tr(lifecycle.code === 'ACCOUNT_WALLET_LINKED_ELSEWHERE' ? 'Your wallet is linked to another FloFi account.' : "Your wallet couldn't be set up.")}</span>
+            {lifecycle.code !== 'ACCOUNT_WALLET_LINKED_ELSEWHERE' && <button type="button" onClick={lifecycle.retry}>{tr(lifecycle.code === 'PRIVY_ACCOUNT_MISMATCH' ? 'Sign in again' : 'Try again')}</button>}
+            {/* Any other wallet (MetaMask, Phantom) can still be connected: it does not depend on FloFi's own wallets. */}
+            <button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>
             : <><span className="wallet-connection">{tr(solanaActive ? 'Solana wallet not connected' : 'Wallet not connected')}</span><button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>}
       </div>
       {/* BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): Log out is under the gear on every surface again (the drawer keeps its own entry to

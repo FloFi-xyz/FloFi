@@ -6,13 +6,14 @@ export const portugueseBetaUxIntelligence: Readonly<Record<string, string>> = {
   // WS01: wallet lifecycle in the header
   'Setting up your wallet…': 'Preparando a sua carteira…',
   "Your wallet couldn't be set up.": 'Não foi possível preparar a sua carteira.',
+  'Your wallet is linked to another FloFi account.': 'A sua carteira está vinculada a outra conta FloFi.',
   // WS02: public wallet addresses
   '{0} address': 'Endereço {0}',
   'Wallet address': 'Endereço da carteira',
   'Your EVM wallet': 'Sua carteira EVM',
   'Your Solana wallet': 'Sua carteira Solana',
   // WS04: inherited workflow fields
-  'Uses the amount step {0} actually delivers.': 'Usa o valor que a etapa {0} realmente entregar.',
+  'Spends up to its amount from what step {0} actually delivers.': 'Gasta até o próprio valor a partir do que a etapa {0} realmente entregar.',
   'Connected to step {0}.': 'Conectada à etapa {0}.',
   'Connected to step {0}, but this step spends another asset. Choose the asset step {0} delivers to use its output.':
     'Conectada à etapa {0}, mas esta etapa gasta outro ativo. Escolha o ativo que a etapa {0} entrega para usar o resultado dela.',

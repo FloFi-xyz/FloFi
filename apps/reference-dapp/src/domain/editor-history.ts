@@ -142,7 +142,8 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       actionSetup = { ...actionSetup, ...(suggestion.selection ? { cryptoSelection: suggestion.selection } : {}), ...(suggestion.issue ? { followOnIssue: suggestion.issue } : {}) };
       if (actionSetup.action === 'pool' && suggestion.selection) actionSetup = { ...actionSetup, input: { ...actionSetup.input, ...defaultPoolRange(suggestion.selection.network) } };
       // WS04: a card that spends exactly the previous step's output starts from that step's estimated delivery (Pools keep their two-sided input).
-      else if (suggestion.selection && !suggestion.issue && inherited && actionSetup.action !== 'pool') actionSetup = { ...actionSetup, amount: inherited };
+      // Borrow / Withdraw draw from Aave and never spend an earlier delivery (workflow review): no inherited amount for them either.
+      else if (suggestion.selection && !suggestion.issue && inherited && !['pool', 'borrow', 'withdraw'].includes(actionSetup.action)) actionSetup = { ...actionSetup, amount: inherited };
     }
     // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): a Bridge after a Swap (or any step delivering a bridgeable asset) starts on that step's network,
     // spending its output asset — before, Bridge was the one action that never followed the previous step. Unclear cases keep the defaults.

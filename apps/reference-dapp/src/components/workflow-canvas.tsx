@@ -44,7 +44,7 @@ import { universalCanvasPair, universalKeyOfCanvasLabel, universalFeaturedAssets
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
-import { bridgeNetworksFor, inheritedAmount, PROVENANCE_MESSAGES, reusableOutput, stepProvenance, terminalStep } from '../domain/workflow-propagation';
+import { bridgeNetworksFor, inheritedAmount, pairProvenance, PROVENANCE_MESSAGES, reusableOutput, stepProvenance, terminalStep } from '../domain/workflow-propagation';
 import { knownLiveEstimate } from '../state/build-estimate';
 import { counterpartSelection, invertCryptoSelection, cryptoInputOf, followOnSelectionFrom, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, lendingAction, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
 import { actionReviewValue, amountEditNeedsReview, FOLLOW_ON_SELECTION_MESSAGES, keptBridgeRecipient } from '../domain/canvas-action-setup';
@@ -442,6 +442,13 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const ignorePaneClick = useRef(false);
   const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
   const [feedback, setFeedback] = useState('');
+  // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04, workflow review): cards whose draft FloFi proposed from a connection. Their draft never applies by
+  // itself (no auto-apply pause): the person presses Enter / Apply. An id leaves the set when its draft is applied or cancelled.
+  const [proposedDrafts, setProposedDrafts] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    const kept = [...proposedDrafts].filter(id => amountInputs[id] !== undefined || cryptoSelections[id] || bridgeNetworkInputs[id]);
+    if (kept.length !== proposedDrafts.size) setProposedDrafts(new Set(kept));
+  }, [proposedDrafts, amountInputs, cryptoSelections, bridgeNetworkInputs]);
   const [toolboxMode, setToolboxMode] = useState<ToolboxMode>('top');
   const [toolboxReady, setToolboxReady] = useState(false);
   // P0 approved UX (board 04): the rail is icon-only until the viewer expands it; the choice is remembered in this browser (read after mount).
@@ -678,7 +685,10 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     // (`sequence`: it spends what that step actually delivers) or, when connected but not funded, why not and what to change.
     function provenanceOf(id: string): ComposerCardData['provenance'] | null {
       const step = sequence?.steps.find(item => item.nodeId === id), producer = step && step.fundedBy !== null ? sequence!.steps[step.fundedBy] : undefined;
-      if (producer && canvasSteps.indexOf(producer.nodeId) >= 0) return { step: canvasSteps.indexOf(producer.nodeId) + 1, state: 'inherited', message: PROVENANCE_MESSAGES.inherited };
+      // A draft that changes the card's network or asset is not yet what runs: no "inherited" claim until it is applied (workflow review).
+      const drafted = Boolean(cryptoSelections[id] || bridgeNetworkInputs[id]);
+      if (producer && !drafted && canvasSteps.indexOf(producer.nodeId) >= 0) return { step: canvasSteps.indexOf(producer.nodeId) + 1, state: 'inherited', message: PROVENANCE_MESSAGES.inherited };
+      if (producer) return null;
       const graph = stepProvenance(workflow, id);
       if (graph.state !== 'mismatch' || canvasSteps.indexOf(graph.from) < 0) return null;
       return { step: canvasSteps.indexOf(graph.from) + 1, state: 'mismatch', message: PROVENANCE_MESSAGES[graph.reason] };
@@ -874,7 +884,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) && reviewedAmountEdit(node) ? { formId: supplyReviewFormId(node.nodeId) } : {}),
         value: amountInputs[node.nodeId] ?? composerSummary(workflow, node, context).amount.split(' ')[0]!,
         changed: amountInputs[node.nodeId] !== undefined,
-        ...(composerSummary(workflow, node, context).action === 'Stocks' && cryptoSelections[node.nodeId] ? { autoApply: false } : {}),
+        ...((composerSummary(workflow, node, context).action === 'Stocks' && cryptoSelections[node.nodeId]) || proposedDrafts.has(node.nodeId) ? { autoApply: false } : {}),
         canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && (!routerDetails(node) || bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true).valid) && pending?.valid && pending.authoringId === node.nodeId && pending.authoringAmount === actionReviewValue(null, node.nodeId, amountInputs[node.nodeId], bridgeNetworkInputs[node.nodeId], cryptoSelections[node.nodeId], recipientInputs[node.nodeId]) && pending.command.baseRevision === workflow.revision),
         onChange: (value: string) => editCanvasAmount(node.nodeId, value),
         onReview: () => reviewCanvasAmount(node.nodeId), onCancel: () => cancelCanvasAmount(node.nodeId),
@@ -1054,24 +1064,32 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   function proposeInheritance(connected: Workflow, source: string, target: string) {
     const producer = connected.nodes.find(node => node.nodeId === source), consumer = connected.nodes.find(node => node.nodeId === target);
     if (!producer || !consumer) return;
-    const provenance = stepProvenance(connected, target);
-    if (provenance.state !== 'mismatch' || (provenance.reason !== 'asset' && provenance.reason !== 'network')) return;
-    const output = reusableOutput(producer);
+    // The runtime already funds this card from an earlier step (it need not be connected): never propose dropping that funding.
+    if (sequence?.steps.find(item => item.nodeId === target)?.fundedBy != null) return;
+    // This pair only (a consumer may have other parents): what this producer delivers, and whether the consumer already spends exactly it.
+    const output = reusableOutput(producer), pair = pairProvenance(producer, consumer);
+    if (pair !== 'mismatch') { if (pair !== 'inherited') setFeedback(PROVENANCE_MESSAGES[pair].replace('{0}', String(composerActions(connected).findIndex(node => node.nodeId === source) + 1))); return; }
     if (output.kind !== 'asset' || amountInputs[target] !== undefined || cryptoSelections[target] || bridgeNetworkInputs[target]) return;
+    const reason = consumer.chainId === output.asset.chainId ? 'asset' : 'network';
     const amount = inheritedAmount(knownLiveEstimate(connected, source), output.asset.decimals);
+    const propose = () => setProposedDrafts(current => new Set([...current, target]));
     const router = routerDetails(consumer), universal = universalBridgeDetails(consumer);
     if ((router || universal) && canEditCanvasAmount(consumer, context, connected)) {
       const proposal = bridgeNetworksFor(output.asset, bridgeNetworkInputs[target] ?? (universal ? universalCanvasNetworks(universal) : router!));
-      if (!('networks' in proposal)) { setFeedback(PROVENANCE_MESSAGES[provenance.reason]); return; }
+      if (!('networks' in proposal)) { setFeedback(PROVENANCE_MESSAGES[reason]); return; }
+      propose();
       editBridgeNetworks(target, proposal.networks);
-      if (amount) editCanvasAmount(target, amount);
+      // Never the old number in the new asset's units (workflow review): the estimate, or an empty amount the person enters.
+      editCanvasAmount(target, amount ?? '');
       setFeedback('Filled from the connected step: network, asset and amount. Check the card, then apply.');
       return;
     }
     const input = cryptoInputOf(consumer);
-    if (!input || !canSelectCryptoAssets(consumer, connected)) { setFeedback(PROVENANCE_MESSAGES[provenance.reason]); return; }
+    // Pools keep their two-sided input; Borrow / Withdraw draw from Aave and never spend an earlier delivery.
+    if (!input || ['pool', 'borrow', 'withdraw'].includes(input.selection.action) || !canSelectCryptoAssets(consumer, connected)) { setFeedback(PROVENANCE_MESSAGES[reason]); return; }
     const follow = followOnSelectionFrom(producer, input.selection.action, environment);
-    if (!follow?.selection || follow.issue) { setFeedback(PROVENANCE_MESSAGES[provenance.reason]); return; }
+    if (!follow?.selection || follow.issue) { setFeedback(PROVENANCE_MESSAGES[reason]); return; }
+    propose();
     editCryptoSelection(target, follow.selection, wallet.account ?? undefined);
     // Never the old number in the new asset's units: the estimate, or an empty amount the person enters.
     editCanvasAmount(target, amount ?? '');

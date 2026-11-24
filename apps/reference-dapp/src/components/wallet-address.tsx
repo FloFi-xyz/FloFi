@@ -22,13 +22,13 @@ const COPIED_MS = 2_000;
 
 export function WalletAddress({ address, ecosystem, network, label, showEcosystem = true, className }: { address: string; ecosystem?: AddressEcosystem | null;
   /** Shown after the ecosystem when the wallet is on a known network ("Base"). Already translated by the caller or a catalog name. */ network?: string | null;
-  /** What the address is ("Your wallet", a wallet's name): names the copy button. */ label?: string; showEcosystem?: boolean; className?: string }) {
+  /** What the address is, already in the page's language ("Your EVM wallet", a wallet's own name — never translated here): names the copy button. */ label?: string; showEcosystem?: boolean; className?: string }) {
   const { t } = useLocale();
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const kind = ecosystem ?? addressEcosystem(address);
-  const name = label ? t(label) : kind ? t('{0} address', ECOSYSTEM_NAME[kind]) : t('Wallet address');
+  const name = label ? label : kind ? t('{0} address', ECOSYSTEM_NAME[kind]) : t('Wallet address');
   async function copy() {
     if (timer.current) clearTimeout(timer.current);
     try { await navigator.clipboard.writeText(address); setState('copied'); } catch { setState('failed'); }

@@ -37,7 +37,9 @@ const routerNetworks = (networks: CanvasBridgeNetworks): Pick<RouterBridgeInput,
   return { source: networks.source, destination: networks.destination };
 };
 export type CanvasBridgeNetworkInputs = Readonly<Record<string, CanvasBridgeNetworks>>;
-/** Reverse both asset identities with their networks. Input amounts remain authored input; estimates are never promoted to inputs. */
+/** Reverse both asset identities with their networks. Input amounts remain authored input; estimates are never promoted to inputs by an inversion.
+ *  (BUILD-FLOFI-BETA-UX-INTELLIGENCE-001: a card connected after a step may START from that step's estimate as an editable draft the person applies;
+ *  domain/workflow-propagation.ts.) */
 export function invertCanvasBridgeNetworks(networks: CanvasBridgeNetworks): CanvasBridgeNetworks | null {
   const tokens = routerTokensOf(networks);
   const pair = universalCanvasPair(networks), defaults = pair ? universalCanvasInput(pair, '1', networks) : null;

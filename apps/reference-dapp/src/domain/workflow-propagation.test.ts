@@ -10,7 +10,7 @@ import { parseLocalCommand } from './commands';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Workflow } from './initial-workflow';
 import { boundAmount, workflowSequence, type CompletedStep } from './workflow-sequence';
-import { bridgeFollowOn, bridgeNetworksFor, inheritedAmount, reusableOutput, stepProvenance, terminalStep } from './workflow-propagation';
+import { bridgeFollowOn, bridgeNetworksFor, inheritedAmount, pairProvenance, reusableOutput, stepProvenance, terminalStep } from './workflow-propagation';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id,
   assets: baseAssetRegistry });
@@ -147,5 +147,24 @@ describe('Editor: adding a card after a step (editor-history)', () => {
     const next = editorHistoryReducer(initialEditorHistory(), { type: 'START_ACTION_SETUP', action: 'bridge', position: { x: 0, y: 0 } });
     expect(next.actionSetup).toMatchObject({ action: 'bridge', amount: '0' });
     expect((next.actionSetup as { networks?: unknown }).networks).toBeUndefined();
+  });
+});
+
+describe('workflow review fixes', () => {
+  it('pairProvenance judges one producer → consumer pair (a consumer with several parents)', () => {
+    const workflow = author(`send 1 USDC on Base to ${OWNER}`, 'swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 5 USDC from Base to Arbitrum');
+    const [send, swap, bridge] = workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+    expect(pairProvenance(send!, bridge!)).toBe('no-reusable-output');
+    expect(pairProvenance(swap!, bridge!)).toBe('mismatch');
+    const matching = author('swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 0.001 WETH from Base to Arbitrum');
+    const [producer, consumer] = matching.nodes.filter(node => !node.actionType.startsWith('mock-'));
+    expect(pairProvenance(producer!, consumer!)).toBe('inherited');
+  });
+  it('a Borrow added after a swap never takes the swap estimate as its draw amount', async () => {
+    const { editorHistoryReducer, initialEditorHistory } = await import('./editor-history');
+    const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps');
+    const next = editorHistoryReducer({ ...initialEditorHistory(), editor: { workflow, error: null } },
+      { type: 'START_ACTION_SETUP', action: 'borrow', position: { x: 0, y: 0 }, beneficiary: OWNER, environment: 'mainnet', inheritedAmount: '0.03' });
+    expect(next.actionSetup).toMatchObject({ action: 'borrow', amount: '0' });
   });
 });

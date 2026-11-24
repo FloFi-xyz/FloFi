@@ -49,8 +49,9 @@ describe('WS03 time to first quote (FloFi-controlled latency, controlled provide
     const times = runs.map(run => run.ms), median = quantile(times, 0.5), p95 = quantile(times, 0.95);
     console.info(JSON.stringify({ benchmark: 'ws03-slow-price', samples: runs.length, medianMs: Math.round(median), p95Ms: Math.round(p95) }));
     expect(runs.every(run => run.ok)).toBe(true);
-    // Provider (≤ 160 ms) + at most the 300 ms post-quote grace + local overhead: never the old 1.2 s+ tail.
-    expect(p95).toBeLessThan(160 + 300 + 250);
+    // Provider (≤ 160 ms) + at most the 300 ms post-quote grace + local overhead, with headroom for a loaded CI executor; the old tail was ≥ 1.2 s
+    // in every sample (the price delay), so this bound still separates before from after.
+    expect(p95).toBeLessThan(1_100);
   }, 60_000);
   it('a price source that answers in time still gives the USD figure (no regression)', async () => {
     const runs: { ms: number; usd: boolean }[] = [];

@@ -107,7 +107,10 @@ describe('product shell rendering', () => {
     expect(html).toMatch(/class="header-wallet" role="group" aria-label="Wallet connection">[\s\S]*?<\/div><div class="header-settings-control"><button type="button" class="header-settings"/);
     expect(html.replace(/<[^>]*>/g, '')).toContain(connected ? '0x1111…1111' : 'Wallet not connected');
     if (connected) {
-      expect(html).toContain('<span class="numeric wallet-address">0x1111…1111</span>');
+      // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS02): the short address stays the visible text; the full address is its tooltip, is read to screen
+      // readers and is what Copy copies.
+      expect(html).toContain('<code class="numeric wallet-address" title="0x1111111111111111111111111111111111111111"><span aria-hidden="true">0x1111…1111</span><span class="sr-only">0x1111111111111111111111111111111111111111</span></code>');
+      expect(html).toContain('aria-label="Copy Your EVM wallet"');
       expect(html).not.toContain('EVM Default:');
       // P0 approved UX (board 03b): the wallet identity names its network ("0x90f5…d303 · Base").
       expect(html).toContain('<span class="wallet-network"> · Base Sepolia</span>');
@@ -160,7 +163,7 @@ describe('product shell rendering', () => {
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
     expect(html).toContain('<span class="header-wallet-provider" title="Rabby Wallet">');
     expect(html).toContain('<span class="sr-only">Rabby Wallet</span>');
-    expect(html).toMatch(/class="build009-wallet-info wallet-connection"[^>]*title="Rabby Wallet · 0x1111111111111111111111111111111111111111 · Base Sepolia"><span class="wallet-status-dot" aria-hidden="true"><\/span><span class="numeric wallet-address">0x1111…1111<\/span>/);
+    expect(html).toMatch(/class="build009-wallet-info wallet-connection"[^>]*title="Rabby Wallet · 0x1111111111111111111111111111111111111111 · Base Sepolia"><span class="wallet-status-dot" aria-hidden="true"><\/span><span class="wallet-address-value" data-wallet-address="0x1111111111111111111111111111111111111111" data-ecosystem="evm"><code class="numeric wallet-address" title="0x1111111111111111111111111111111111111111"><span aria-hidden="true">0x1111…1111<\/span>/);
     expect(html).not.toContain('EVM Default:');
     expect(wallet.connect).not.toHaveBeenCalled();
     Object.assign(wallet, { provider: undefined });
@@ -189,7 +192,7 @@ describe('product shell rendering', () => {
     wallet.account = '0x1111111111111111111111111111111111111111'; wallet.chainId = '0x2105';
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
     expect(html).not.toContain('Workflow network:');
-    expect(html).toContain('<span class="numeric wallet-address">0x1111…1111</span>');
+    expect(html).toContain('<span aria-hidden="true">0x1111…1111</span>');
   });
 
   // P0 approved UX (board 03b): the top bar keeps the brand, the wallet and Settings; Dashboard, Chat (New workflow) and the Editor are reached

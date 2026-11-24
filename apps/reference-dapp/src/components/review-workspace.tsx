@@ -97,7 +97,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
       <aside className="review-confirmation panel" aria-label={tr("Final confirmation")}>
         <div className={`review-validity simulation-validity simulation-tone-${preparing ? 'neutral' : review.canApprove || review.status === 'approved' ? 'ready' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(preparing ? 'Preparing authorization…' : review.label)}</strong><p>{tr(preparing ? 'Checking the workflow and authorization limits before continuing.' : review.message)}</p></div>
         <section className="review-section" aria-label={tr("Wallet authorization")}><h2>{tr("Wallet authorization")}</h2><dl className="simulation-summary-values">
-          <div><dt>{tr("Wallet")}</dt><dd className="review-wallet-address" title={wallet.account ?? undefined}>{wallet.account ? <WalletAddress address={wallet.account} label="Wallet"/> : tr('Connect your wallet')}</dd></div>
+          <div><dt>{tr("Wallet")}</dt><dd className="review-wallet-address" title={wallet.account ?? undefined}>{wallet.account ? <WalletAddress address={wallet.account} label={tr('Wallet')}/> : tr('Connect your wallet')}</dd></div>
           <div><dt>{tr("Environment")}</dt><dd>{tr(wallet.environment === 'unknown' ? 'Unknown network' : walletEnvironmentLabel(wallet.environment))}</dd></div>
           <div><dt>{tr("Network")}</dt><dd>{wallet.chain ? <span className="simulation-summary-network"><NetworkBrandIcon network={shellChainLabel(wallet.chain).replace(/ \(\d+\)$/, '')}/>{tr(shellChainLabel(wallet.chain))}</span> : '—'}</dd></div>
         </dl></section>

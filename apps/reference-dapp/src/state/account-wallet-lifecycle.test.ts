@@ -89,6 +89,63 @@ describe('initializeAccountWallets', () => {
   });
 });
 
+describe('wallet-execution review fixes', () => {
+  it('a creation that never answers ends in failed (bounded), never an endless "setting up"', async () => {
+    vi.useFakeTimers();
+    try {
+      const w = world({ create: () => new Promise(() => undefined) });
+      const run = initializeAccountWallets(w.deps);
+      await vi.advanceTimersByTimeAsync(130_000);
+      expect(await run).toMatchObject({ status: 'failed', code: 'WALLET_OPERATION_TIMEOUT' });
+    } finally { vi.useRealTimers(); }
+  });
+  it('Try again replaces a hung run instead of joining it', async () => {
+    const hung = world();
+    hung.deps = { ...hung.deps, sync: () => new Promise(() => undefined) };
+    void runWalletLifecycle(hung.deps);
+    expect(walletLifecycle().status).toBe('initializing');
+    const fresh = world();
+    await runWalletLifecycle(fresh.deps, true);
+    expect(walletLifecycle()).toMatchObject({ status: 'ready', userId: 'did:privy:one' });
+  });
+  it('a Privy wallet held by another FloFi account is reported once, with nothing created', async () => {
+    const w = world();
+    w.deps = { ...w.deps, sync: async () => ({ ok: true, value: { wallets: [], method: 'email', heldElsewhere: 1 } }) };
+    expect(await initializeAccountWallets(w.deps)).toMatchObject({ status: 'failed', code: 'ACCOUNT_WALLET_LINKED_ELSEWHERE' });
+    expect(w.createWallet).not.toHaveBeenCalled();
+  });
+  it('a page where the provisioner is off (approval, frame) never says "setting up"', () => {
+    expect(walletSlotState({ status: 'idle', code: null }, true, true)).toBe('disconnected');
+  });
+});
+
+describe('security review fixes', () => {
+  it('a Privy user switch after the first sync stops the run before any wallet is created under the next session', async () => {
+    const w = world();
+    let first = true;
+    const sync = w.deps.sync;
+    w.deps = { ...w.deps, sync: async token => { const result = await sync(token); if (first) { first = false; observePrivySession({ ready: true, authenticated: true, userId: 'did:privy:other' }); } return result; } };
+    await runWalletLifecycle(w.deps);
+    expect(w.createWallet).not.toHaveBeenCalled();
+    expect(w.refresh).not.toHaveBeenCalled();
+    expect(walletLifecycle().userId).toBeNull();
+  });
+  it('a run whose own liveness check fails creates nothing', async () => {
+    const w = world();
+    expect(await initializeAccountWallets({ ...w.deps, live: () => false })).toMatchObject({ status: 'signed-out', code: 'PRIVY_SESSION_CHANGED' });
+    expect(w.createWallet).not.toHaveBeenCalled();
+  });
+  it('runs under the per-user cross-tab lock', async () => {
+    const w = world(), names: string[] = [];
+    await runWalletLifecycle({ ...w.deps, exclusive: async (name, run) => { names.push(name); return run(); } });
+    expect(names).toEqual(['flofi-wallet-provision:did:privy:one']);
+  });
+  it('an account-service outage is a failure with Try again, not the signed-out state', async () => {
+    const w = world();
+    expect(await initializeAccountWallets({ ...w.deps, sync: async () => ({ ok: false, code: 'ACCOUNTS_UNAVAILABLE' }) })).toMatchObject({ status: 'failed', code: 'ACCOUNTS_UNAVAILABLE' });
+  });
+});
+
 describe('page lifecycle', () => {
   it('runs once per Privy user; concurrent callers join; Try again re-runs', async () => {
     const w = world();
@@ -130,7 +187,6 @@ describe('page lifecycle', () => {
 describe('walletSlotState (no false "Wallet not connected")', () => {
   it('initializing while reading or provisioning, and while Privy loads for a signed-in browser', () => {
     expect(walletSlotState({ status: 'initializing', code: null }, true, false)).toBe('initializing');
-    expect(walletSlotState({ status: 'idle', code: null }, true, true)).toBe('initializing');
     expect(walletSlotState({ status: 'authenticating', code: null }, true, true)).toBe('initializing');
   });
   it('disconnected only when truly disconnected', () => {

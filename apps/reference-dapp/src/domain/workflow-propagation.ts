@@ -77,9 +77,20 @@ export function stepProvenance(workflow: Workflow, nodeId: string): StepProvenan
   }
   return first ?? { state: 'independent' };
 }
+/**
+ * One producer → consumer pair only (a consumer may have several parents): 'inherited' when the consumer spends exactly what this producer
+ * delivers, 'mismatch' when it could but spends another asset/network, else why this producer's output cannot fund it.
+ */
+export function pairProvenance(producer: Node, consumer: Node): 'inherited' | 'mismatch' | 'no-reusable-output' | 'other-recipient' | 'consumer-draws' {
+  const output = reusableOutput(producer);
+  if (output.kind === 'none') return output.reason;
+  if (consumer.actionType === 'withdraw' || consumer.actionType === 'borrow') return 'consumer-draws';
+  return stepAssets(consumer).inputs.some(input => sameSequenceAsset(input, output.asset)) ? 'inherited' : 'mismatch';
+}
 /** The owner-facing explanation of a provenance (catalog messages; `{0}` is the upstream step number). */
 export const PROVENANCE_MESSAGES: Readonly<Record<Exclude<StepProvenance['state'], 'independent'> | Extract<StepProvenance, { state: 'mismatch' }>['reason'], string>> = Object.freeze({
-  inherited: 'Uses the amount step {0} actually delivers.',
+  // Never more than the card's own amount (workflow review): the runtime spends min(this amount, what step {0} actually delivered).
+  inherited: 'Spends up to its amount from what step {0} actually delivers.',
   mismatch: 'Connected to step {0}.',
   asset: 'Connected to step {0}, but this step spends another asset. Choose the asset step {0} delivers to use its output.',
   network: 'Connected to step {0}, but this step runs on another network. Choose the network step {0} delivers on to use its output.',
