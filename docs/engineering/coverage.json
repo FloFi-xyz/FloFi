@@ -5308,6 +5308,7 @@
         "apps/reference-dapp/src/flight/email/templates-v2.ts",
         "apps/reference-dapp/src/flight/email/templates-v3.ts",
         "apps/reference-dapp/src/flight/email/templates-v4.ts",
+        "apps/reference-dapp/src/flight/email/templates-v5.ts",
         "apps/reference-dapp/src/flight/email/templates.ts",
         "apps/reference-dapp/src/flight/host.ts",
         "apps/reference-dapp/src/flight/http.ts",

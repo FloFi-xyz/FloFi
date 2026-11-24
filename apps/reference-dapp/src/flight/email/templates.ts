@@ -17,6 +17,7 @@ import { renderEmail as renderEmailV1 } from './templates-v1.ts';
 import { renderEmail as renderEmailV2 } from './templates-v2.ts';
 import { renderEmail as renderEmailV3 } from './templates-v3.ts';
 import { renderEmail as renderEmailV4 } from './templates-v4.ts';
+import { renderEmail as renderEmailV5 } from './templates-v5.ts';
 
 /** Approved Email 6 destination, shared by both locales; historical renderers keep their supplied URL. */
 export const FLIGHT_CREATOR_BRIEF_URL = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
@@ -25,7 +26,7 @@ export type EmailTemplate = 'EARLY_LIST' | 'LIST_CONFIRMATION' | 'EVE' | 'GROUP_
 export type EmailLanguage = 'EN' | 'PT';
 /** The version of each template. Bump it whenever its text or layout changes; every outbox row records the version it was enqueued with. */
 export const TEMPLATE_VERSIONS: Readonly<Record<EmailTemplate, number>> = Object.freeze({
-  EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 3, ACCESS_REQUESTED: 2, CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 5,
+  EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 3, ACCESS_REQUESTED: 2, CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 6,
 });
 /**
  * Boarding moved to Friday 13 Nov, 09:00 BRT (canvas "Flight FloFi · E-mails de embarque (13/11)"): every recipient of emails 3, 4a, 4b, 5
@@ -38,11 +39,11 @@ export const LAUNCH_LANGUAGE: Readonly<Partial<Record<EmailTemplate, EmailLangua
 /**
  * Rows enqueued before the 13/11 change that an operator may move in place to the current version and the launch language, while they
  * are still unsent (never attempted, reserved or leased): template → the versions it may come from. Email 3 v2 → v3 is the approved 13/11
- * launch copy (v3 was never deployed before it carried that copy: no v3 row was ever attempted with other text); 4a, 4b, 5 and 6 keep their current version and change language only. Email 6 v1–v4 are never moved: their copy changed, so they
+ * launch copy (v3 was never deployed before it carried that copy: no v3 row was ever attempted with other text); 4a, 4b, 5 and 6 keep their current version and change language only. Email 6 v1–v5 are never moved: their copy changed, so they
  * are held for review and replaced with new ids (`supersedeCreatorTemplates`).
  */
 export const LAUNCH_UPGRADABLE_FROM: Readonly<Partial<Record<EmailTemplate, readonly number[]>>> = Object.freeze({
-  GROUP_BOARDING: [2, 3], CARD_FOUNDING: [2], CARD_PASSENGER: [2], NEXT_FLIGHT: [2], CREATOR_INVITE: [5],
+  GROUP_BOARDING: [2, 3], CARD_FOUNDING: [2], CARD_PASSENGER: [2], NEXT_FLIGHT: [2], CREATOR_INVITE: [6],
 });
 /** The language an email is enqueued in: the launch language of its template, else the recipient's stored locale. */
 export const emailLanguage = (template: EmailTemplate, stored: EmailLanguage): EmailLanguage => LAUNCH_LANGUAGE[template] ?? stored;
@@ -65,6 +66,7 @@ export const TEMPLATE_DEVIATIONS: readonly string[] = Object.freeze([
   'Email 6 v4 follows Dayane’s approved invited-guest copy (BUILD-FLOFI-FLIGHT-EMAIL6-CONSOLE-FIX-001); v1–v3 remain historical renderers.',
   'Emails 4a and 4b show the real card image (the 1200 × 630 card picture) in place of the drawn card block.',
   'Email 6 v5 and Email 3 v3 follow the 13/11 boarding canvas: no weekday in Email 6 (preheader, step 1), its Boarding panel reads OPEN (PT: ABERTO, like the Email 3 Gate panel), and Email 3 v3 carries the team-approved launch copy (preheader, two opening paragraphs, "what you can try today" checked against the mainnet capability matrix, small-amounts reminder, feedback request). ACCESS_REQUESTED keeps its v2 copy. The English copy mirrors the Portuguese change.',
+  'Email 6 v6 follows Dayane\'s approved guest copy of 24/11 (canvas Convite dos convidados)',
   'Boarding recovery (BUILD-FLOFI-IDENTITY-RECOVERY-UX-001): a request for a link and a code from an address that already boarded is answered, as an essential ACCESS_REQUESTED email (trigger access_recovery), with the sign-in method of the account that holds the pass, never a link or code. New copy: needs the team\'s confirmation.',
   'Version 2 follows BUILD-FLOFI-FLIGHT-LAUNCH-ADMIN-001: linked-wallet return access in Email 3, @ in Email 4a, official card after the first route in Email 6, Portuguese interface labels and boarding-card footers. Portuguese copy follows section 04 of the supplied Flight FloFi.html; unsupported route-limit and automatic-sign-in promises remain omitted.',
 ]);
@@ -355,19 +357,19 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
       if (!/^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/.test(input.code) || input.briefUrl !== FLIGHT_CREATOR_BRIEF_URL) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
       const subject = PT ? 'Seu convite para o beta da FloFi ✈️' : 'Your invite to the FloFi beta ✈️';
       const preheader = PT ? 'Seu código e como embarcar.' : 'Your code, and how to board.';
-      const headline = PT ? 'Obrigada por embarcar com a gente.' : 'Thanks for coming aboard.';
-      const intro = PT ? 'Você está entre as primeiras pessoas a usar a FloFi fora do nosso time. Ainda estamos no começo: é uma primeira versão, e queremos aprender com o seu uso. Comece com valores pequenos, porque é mainnet, com dinheiro de verdade.'
-        : "You're one of the first people to use FloFi outside our team. It's still early: this is a first version, and we want to learn from how you use it. Please start with small amounts, since it runs on mainnet with real funds.";
+      // Email 6 v6: Dayane's approved guest copy of 24/11 (canvas "Flight FloFi · Convite dos convidados", Board 02): headline, intro, steps 2–3, note.
+      const headline = PT ? 'Abrimos o acesso para o seu grupo.' : 'We opened access for your group.';
+      const intro = PT ? 'Obrigada por topar testar. Você está entre as primeiras pessoas a usar a FloFi fora do nosso time. Estamos construindo a FloFi agora e queremos fazer isso junto com quem usa DeFi de verdade. Comece com valores pequenos, porque é mainnet, com dinheiro de verdade.'
+        : "Thanks for agreeing to test. You're one of the first people to use FloFi outside our team. We're building FloFi right now and want to do it with people who really use DeFi. Please start with small amounts, since it runs on mainnet with real funds.";
       const steps = PT ? [
         'Entra em flofi.xyz/board, toca em "I have an invite code" e digita o seu código e o seu e-mail.',
-        'Conecta a sua carteira, escreve o que quer fazer, confere a simulação e assina só o que fizer sentido pra você.',
-        'Conta pra nós como foi: onde travou, o que demorou, o que te deixou em dúvida antes de assinar. Pode responder este e-mail ou mandar mensagem pra Dayane no WhatsApp ou no Telegram.']
+        'Conecta a sua carteira e faz a sua missão: qual operação você faz toda semana em DeFi e que mais te cansa? Faz ela na FloFi. Confere a simulação e assina só o que fizer sentido para você.',
+        'Conta para nós como foi: o que você esperava encontrar, onde travou e o que faria você usar a FloFi toda semana. Pode responder este e-mail ou chamar a Dayane no WhatsApp ou no Telegram. Se quiser, ela faz uma call de 20 min e acompanha o seu teste.']
         : ['Go to flofi.xyz/board, tap "I have an invite code" and enter your code and email.',
-          'Connect your wallet, write what you want to do, check the simulation and sign only what makes sense to you.',
-          'Tell us how it went: where you got stuck, what was slow, what made you hesitate before signing. Reply to this email or message Dayane on WhatsApp or Telegram.'];
+          'Connect your wallet and take on your mission: which DeFi operation do you do every week that tires you out the most? Do it on FloFi. Check the simulation and sign only what makes sense to you.',
+          "Tell us how it went: what you expected to find, where you got stuck and what would make you use FloFi every week. Reply to this email or message Dayane on WhatsApp or Telegram. If you like, she'll join a 20-minute call while you test."];
       const cta = PT ? 'Ler o brief do convidado' : 'Read the guest brief';
-      const note = PT ? 'Depois da sua primeira rota, o seu cartão de embarque chega por e-mail. Se você curtir e quiser compartilhar, ajuda muito, mas fica totalmente a seu critério. O seu código é pessoal e funciona uma vez só.'
-        : 'After your first route, your boarding card arrives by email. If you enjoy it and feel like sharing, it really helps us, but it is entirely up to you. Your code is personal and works once.';
+      const note = PT ? 'O seu código é pessoal e funciona uma vez só.' : 'Your code is personal and works once.';
       const why = PT ? reason.invited : "You're getting this because the FloFi team invited you to the closed beta.";
       // Sent at boarding time with access already open: the panel says so instead of repeating a date.
       const boarding = PT ? 'ABERTO' : 'OPEN';
@@ -434,6 +436,7 @@ export function renderEmailForVersion(input: TemplateInput, ctx: EmailContext, v
     if (version === 2) return renderEmailV2(input, legacy);
     if (input.template === 'CREATOR_INVITE' && version === 3) return renderEmailV3(input, ctx);
     if (input.template === 'CREATOR_INVITE' && version === 4) return renderEmailV4(input, ctx);
+    if (input.template === 'CREATOR_INVITE' && version === 5) return renderEmailV5(input, ctx);
     if (version === TEMPLATE_VERSIONS[input.template]) return renderEmail(input, ctx);
   }
   throw new Error('EMAIL_TEMPLATE_VERSION_UNSUPPORTED');

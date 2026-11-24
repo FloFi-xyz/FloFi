@@ -4,13 +4,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmailDelivery, FLIGHT_CREATOR_BRIEF_URL, type DeliveryDeps } from './delivery';
 import { FLIGHT_DEFAULT_CALENDAR } from '../campaign';
-import { emailLanguage, LAUNCH_LANGUAGE, LAUNCH_UPGRADABLE_FROM, renderAccessRecovery, renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
+import { emailLanguage, escapeHtml, LAUNCH_LANGUAGE, LAUNCH_UPGRADABLE_FROM, renderAccessRecovery, renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
 import { ACCESS_RECOVERY_VERSION } from '../access';
 /** The approved boarding-recovery copy (EN and PT text), frozen at ACCESS_RECOVERY_VERSION. */
 const RECOVERY_COPY_SHA256 = 'be66e9bbcf477eafaa84f3ca010f3ee9ab97d50c2ab4f1c916273d2061e6486e';
 import { renderEmail as renderEmailV2 } from './templates-v2';
 import { renderEmail as renderEmailV3 } from './templates-v3';
 import { renderEmail as renderEmailV4 } from './templates-v4';
+import { renderEmail as renderEmailV5 } from './templates-v5';
 import type { EmailRow } from './outbox';
 
 const context = (language: 'EN' | 'PT'): EmailContext => ({ language, recipient: 'boarding@flofi-test.dev', origin: 'https://flofi.xyz',
@@ -47,14 +48,14 @@ describe('Flight launch email copy and immutable queued versions', () => {
       expect(renderEmailForVersion(input, context(language), 2)).toEqual(current);
       expect(renderEmailForVersion(input, context(language), 1)).toEqual(renderEmailForVersion(input, context(language), 1));
     }
-    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(5);
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(6);
     expect(TEMPLATE_VERSIONS.EARLY_LIST).toBe(1);
   });
   it('freezes the deployed v3 renderer and leaves every unrelated template unchanged', () => {
     expect(createHash('sha256').update(readFileSync(new URL('./templates-v3.ts', import.meta.url))).digest('hex'))
       .toBe('af3a3425bc18700e502da188b9a0d08e978ade2ca831bdadab08fde1803390a5');
     expect(TEMPLATE_VERSIONS).toEqual({ EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 3, ACCESS_REQUESTED: 2,
-      CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 5 });
+      CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 6 });
     for (const language of ['EN', 'PT'] as const) {
       for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) {
         if (input.template === 'GROUP_BOARDING') expect(renderEmailV4(input, context(language))).toEqual(renderEmailV3(input, context(language)));
@@ -81,6 +82,18 @@ describe('Flight launch email copy and immutable queued versions', () => {
     // Queued Email 3 v2 rows keep the frozen v2 renderer (byte-identical to v4's Email 3).
     expect(renderEmailForVersion(inputs[2]!, context('PT'), 2)).toEqual(renderEmailV2(inputs[2] as Parameters<typeof renderEmailV2>[0], { ...context('PT'),
       calendar: { ...context('PT').calendar, creatorsOpenAt: Date.parse('2026-11-11T14:00:00-03:00') } }));
+  });
+  it('freezes the deployed v5 renderer: only Email 6 (v6) changes for the 24/11 guest invitation', () => {
+    expect(createHash('sha256').update(readFileSync(new URL('./templates-v5.ts', import.meta.url))).digest('hex'))
+      .toBe('e3a71d555ab8f2dba0ec177998cb8d5a50edc75fef39f2bb5cc271daae0fdea5');
+    for (const language of ['EN', 'PT'] as const) for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) {
+      const current = renderEmail(input, context(language)), frozen = renderEmailV5(input, context(language));
+      if (input.template === 'CREATOR_INVITE') {
+        expect(current).not.toEqual(frozen);
+        expect(renderEmailForVersion(input, context(language), 5)).toEqual(frozen);
+        expect(renderEmailForVersion(input, context(language), 6)).toEqual(current);
+      } else expect(current).toEqual(frozen);
+    }
   });
   it('renders the approved 13/11 Email 3 v3 copy in HTML and plain text, block by block; never in the requested access email', () => {
     const copy = {
@@ -144,8 +157,8 @@ describe('Flight launch email copy and immutable queued versions', () => {
   });
   it('enqueues emails 3, 4a, 4b, 5 and 6 in Portuguese for the 13/11 launch; every other email keeps the stored locale', () => {
     expect(LAUNCH_LANGUAGE).toEqual({ GROUP_BOARDING: 'PT', CARD_FOUNDING: 'PT', CARD_PASSENGER: 'PT', NEXT_FLIGHT: 'PT', CREATOR_INVITE: 'PT' });
-    // In-place moves of unsent rows: only to the current version, never from a retired Email 6 copy (v1–v4 are held and superseded).
-    expect(LAUNCH_UPGRADABLE_FROM).toEqual({ GROUP_BOARDING: [2, 3], CARD_FOUNDING: [2], CARD_PASSENGER: [2], NEXT_FLIGHT: [2], CREATOR_INVITE: [5] });
+    // In-place moves of unsent rows: only to the current version, never from a retired Email 6 copy (v1–v5 are held and superseded).
+    expect(LAUNCH_UPGRADABLE_FROM).toEqual({ GROUP_BOARDING: [2, 3], CARD_FOUNDING: [2], CARD_PASSENGER: [2], NEXT_FLIGHT: [2], CREATOR_INVITE: [6] });
     expect(Object.keys(LAUNCH_UPGRADABLE_FROM).sort()).toEqual(Object.keys(LAUNCH_LANGUAGE).sort());
     for (const [template, from] of Object.entries(LAUNCH_UPGRADABLE_FROM))
       expect(Math.max(...from!)).toBe(TEMPLATE_VERSIONS[template as keyof typeof TEMPLATE_VERSIONS]);
@@ -223,8 +236,8 @@ describe('Flight launch email copy and immutable queued versions', () => {
       recipient: 'creator@flofi-test.dev', language: 'PT', trigger: 'CREATOR_INVITE', batchKey: null, entryId: null, passId: null,
       inviteCode: 'FLF-7Q2K-9XMB', state: 'SENDING', attempts: 1, leaseToken: null, createdAt: '2026-11-10T12:00:00Z', firstAttemptAt: null };
     const at = FLIGHT_DEFAULT_CALENDAR.boardingOpensAt - 60_000;
-    for (const version of [1, 2, 3, 4, 99]) await expect(delivery.render({ ...row, templateVersion: version }, at)).rejects.toThrow('TEMPLATE_VERSION_REVIEW');
-    const updated = await delivery.render({ ...row, templateVersion: 5 }, at);
+    for (const version of [1, 2, 3, 4, 5, 99]) await expect(delivery.render({ ...row, templateVersion: version }, at)).rejects.toThrow('TEMPLATE_VERSION_REVIEW');
+    const updated = await delivery.render({ ...row, templateVersion: 6 }, at);
     expect(updated.kind).toBe('SEND');
     if (updated.kind !== 'SEND') throw Error('EXPECTED_RENDERED_EMAIL');
     expect(updated.email.html).toContain(FLIGHT_CREATOR_BRIEF_URL);
@@ -232,12 +245,12 @@ describe('Flight launch email copy and immutable queued versions', () => {
     expect(updated.email.headers?.['List-Unsubscribe']).toMatch(/^<https:\/\/flofi\.xyz\/api\/board\/unsubscribe\?t=.+>$/);
     expect(updated.email.headers?.['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
     expect(updated.email.text).not.toMatch(/\bTEST\b|quarta-feira|voo de teste/);
-    expect(await delivery.render({ ...row, templateVersion: 5 }, at)).toEqual(updated);
+    expect(await delivery.render({ ...row, templateVersion: 6 }, at)).toEqual(updated);
     expect(send).not.toHaveBeenCalled(); // Rendering itself cannot send or resend a campaign.
   });
 });
 
-// Approved guest copy: independent expectations for both MIME alternatives.
+// Approved v5 guest copy (13/11), now historical: independent expectations for both MIME alternatives of the frozen v5 renderer.
 const approved = {
   EN: {
     subject: 'Your invite to the FloFi beta ✈️', preheader: 'Your code, and how to board.', headline: 'Thanks for coming aboard.',
@@ -262,7 +275,63 @@ const approved = {
 };
 const brief = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
 const decode = (html: string) => html.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-describe('Email 6 approved guest copy v5 (render only; no enqueue or provider)', () => {
+// Dayane's approved guest copy of 24/11 (canvas "Flight FloFi · Convite dos convidados", Board 02): only headline, intro, steps 2–3 and note change.
+const approvedV6 = {
+  PT: { headline: 'Abrimos o acesso para o seu grupo.',
+    intro: 'Obrigada por topar testar. Você está entre as primeiras pessoas a usar a FloFi fora do nosso time. Estamos construindo a FloFi agora e queremos fazer isso junto com quem usa DeFi de verdade. Comece com valores pequenos, porque é mainnet, com dinheiro de verdade.',
+    steps: ['Conecta a sua carteira e faz a sua missão: qual operação você faz toda semana em DeFi e que mais te cansa? Faz ela na FloFi. Confere a simulação e assina só o que fizer sentido para você.',
+      'Conta para nós como foi: o que você esperava encontrar, onde travou e o que faria você usar a FloFi toda semana. Pode responder este e-mail ou chamar a Dayane no WhatsApp ou no Telegram. Se quiser, ela faz uma call de 20 min e acompanha o seu teste.'],
+    note: 'O seu código é pessoal e funciona uma vez só.' },
+  EN: { headline: 'We opened access for your group.',
+    intro: "Thanks for agreeing to test. You're one of the first people to use FloFi outside our team. We're building FloFi right now and want to do it with people who really use DeFi. Please start with small amounts, since it runs on mainnet with real funds.",
+    steps: ['Connect your wallet and take on your mission: which DeFi operation do you do every week that tires you out the most? Do it on FloFi. Check the simulation and sign only what makes sense to you.',
+      "Tell us how it went: what you expected to find, where you got stuck and what would make you use FloFi every week. Reply to this email or message Dayane on WhatsApp or Telegram. If you like, she'll join a 20-minute call while you test."],
+    note: 'Your code is personal and works once.' },
+} as const;
+describe('Email 6 approved guest copy v6 (render only; no enqueue or provider)', () => {
+  for (const language of ['PT', 'EN'] as const) it(`renders the exact ${language} v6 copy and keeps every other v5 element`, () => {
+    const v5 = approved[language], v6 = approvedV6[language], code = language === 'PT' ? 'FLF-7Q2K-9XMB' : 'FLF-ABCD-EFGH';
+    const rendered = renderEmail({ template: 'CREATOR_INVITE', code, briefUrl: brief }, context(language));
+    expect(renderEmailForVersion({ template: 'CREATOR_INVITE', code, briefUrl: brief }, context(language), 6)).toEqual(rendered);
+    // Unchanged: subject, preheader, step 1, CTA and its single destination, both panels, reason, risk, privacy and unsubscribe.
+    expect(rendered.subject).toBe(v5.subject);
+    expect(rendered.preheader).toBe(v5.preheader);
+    const htmlText = decode(rendered.html.replace(/<[^>]+>/g, ''));
+    const steps: readonly string[] = [v5.steps[0]!, ...v6.steps];
+    for (const text of [v5.preheader, v6.headline, v6.intro, ...steps, v5.cta, v6.note, v5.reason, v5.risk]) {
+      expect(htmlText).toContain(text);
+      expect(rendered.text).toContain(text);
+    }
+    expect(rendered.html).toContain(`>${escapeHtml(v6.headline)}</h1>`);
+    expect(rendered.html).toContain(`>${escapeHtml(v6.intro)}</p>`);
+    for (const [index, step] of steps.entries()) {
+      expect(rendered.text).toContain(`${index + 1}. ${step}`);
+      expect(rendered.html).toContain(`>${escapeHtml(step)}</td>`);
+      expect(htmlText.indexOf(step)).toBeLessThan(index === 2 ? htmlText.indexOf(v5.cta) : htmlText.indexOf(steps[index + 1]!));
+    }
+    expect(rendered.html).toContain(`>${escapeHtml(v6.note)}</`);
+    expect(rendered.html.match(/background:#F5F8FB/g)).toHaveLength(1);
+    expect(rendered.html).toContain(`aria-label="${code}"`);
+    expect(rendered.html).toContain(`aria-label="${v5.boarding}"`);
+    expect(rendered.text).toContain(`${v5.codeLabel} = ${code}`);
+    expect(rendered.text).toContain(`${v5.boardingLabel} = ${v5.boarding}`);
+    expect(rendered.html.match(new RegExp(`href="${brief}"`, 'g'))).toHaveLength(1);
+    expect(rendered.text).toContain(`${v5.cta}: ${brief}`);
+    expect(rendered.html.indexOf(escapeHtml(v6.note))).toBeGreaterThan(rendered.html.indexOf(brief));
+    for (const part of [rendered.html, rendered.text]) {
+      expect(part).toContain('https://flofi.xyz/privacy');
+      expect(part).toContain(context(language).unsubscribeUrl);
+      // The retired v5 sentences are gone.
+      for (const old of [v5.headline, v5.intro, v5.steps[1]!, v5.steps[2]!, v5.note]) expect(decode(part)).not.toContain(old);
+    }
+    expect(rendered.text).not.toMatch(/<[^>]+>|&(?:quot|amp|lt|gt|#39);/);
+    // Same layout as v5: the HTML differs from the frozen v5 renderer only inside the five approved fields.
+    const frozen = renderEmailV5({ template: 'CREATOR_INVITE', code, briefUrl: brief }, context(language));
+    const blank = (html: string, texts: readonly string[]) => texts.reduce((all, text) => all.split(escapeHtml(text)).join('§'), html);
+    expect(blank(rendered.html, [v6.headline, v6.intro, ...v6.steps, v6.note])).toBe(blank(frozen.html, [v5.headline, v5.intro, v5.steps[1]!, v5.steps[2]!, v5.note]));
+  });
+});
+describe('Email 6 approved guest copy v5, historical (render only; no enqueue or provider)', () => {
   for (const language of ['PT', 'EN'] as const) it(`renders the exact ${language} copy, one panel and CTA in HTML and plain text`, () => {
     const copy = approved[language], code = language === 'PT' ? 'FLF-7Q2K-9XMB' : 'FLF-ABCD-EFGH';
     const rendered = renderEmailForVersion({ template: 'CREATOR_INVITE', code, briefUrl: brief }, context(language), 5);

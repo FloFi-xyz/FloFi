@@ -141,9 +141,11 @@ describe('the seven emails', () => {
     expect(creator.text).toContain('Go to flofi.xyz/board, tap');
     expect(creator.text).toContain('Boarding = OPEN');
     expect(creator.text).toContain('FLF-7Q2K-9XMB');
-    expect(creator.text).not.toMatch(/TEST|Wednesday|Thursday|test flight|early boarding/i);
+    // v6 copy says "test" on purpose ("agreeing to test"); the retired TEST-flight label stays forbidden as an uppercase word.
+    expect(creator.text).not.toMatch(/\bTEST\b/);
+    expect(creator.text).not.toMatch(/Wednesday|Thursday|test flight|early boarding/i);
     expect(creator.preheader).toBe('Your code, and how to board.');
-    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(5);
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(6);
   });
   it('shows the card’s real seat, route and image in 4a/4b, the three invites only in 4a, and escapes the handle', () => {
     const founding = renderEmail(inputs[4]!, ctx('EN')), passenger = renderEmail(inputs[5]!, ctx('EN'));
