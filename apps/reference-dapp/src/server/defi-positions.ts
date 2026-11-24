@@ -172,7 +172,10 @@ async function readPositions(owner: PositionWallet): Promise<readonly PositionSc
   return attachPrices(scans, prices, new Date());
 }
 
-/** Only the dashboard's owner-checked route calls this. Short, bounded, wallet-scoped cache, including inflight deduplication. */
+/**
+ * Callers check ownership first: the Dashboard's owner-checked route, and (BUILD-FLOFI-UNIVERSAL-CHANNELS-001) MCP `get_portfolio` for wallets an
+ * OAuth account linked after `/connections` disclosed position reads. Short, bounded, wallet-scoped cache, including inflight deduplication.
+ */
 export function readWalletPositions(owner: PositionWallet): Promise<readonly PositionScan[]> {
   const key = positionsWalletKey(owner), now = Date.now(), existing = cache.get(key);
   if (existing && existing.expires > now) return existing.read;

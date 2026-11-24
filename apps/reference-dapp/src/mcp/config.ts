@@ -33,12 +33,28 @@ export type McpWalletOwner = { readonly namespace: 'eip155' | 'solana'; readonly
  * account nor a link is wallet ownership.
  */
 export type McpOAuthPrincipal = { readonly kind: 'mcp-oauth'; readonly id: string; readonly tenantId: string; readonly accountId: string; readonly clientId: string;
-  readonly clientName: string; readonly scopes: readonly McpScope[]; readonly wallets: readonly string[]; readonly owners?: readonly McpWalletOwner[] };
+  readonly clientName: string; readonly scopes: readonly McpScope[]; readonly wallets: readonly string[]; readonly owners?: readonly McpWalletOwner[];
+  /**
+   * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the linked wallets whose owner agreed to balance and position reads — links made on `/connections` at or after
+   * FLOFI_MCP_PORTFOLIO_LINKS_FROM, when that page discloses those reads (`portfolioLinksFrom`). Absent or empty: no portfolio read for anyone.
+   */
+  readonly portfolioOwners?: readonly McpWalletOwner[] };
 export type McpPrincipal = McpCredentialPrincipal | McpOAuthPrincipal;
 /**
  * The wallets a principal may read owner-scoped records as, namespace included: an OAuth account's linked wallets (EVM or Solana, filled by the
  * gateway for `flofi.runs`), or a static credential's operator-granted wallets (EVM only, `WALLET`). Never an address from a request.
  */
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: links made before `/connections` disclosed balance and position reads were consented for run status and
+ * evidence only, so portfolio reads use links created at or after FLOFI_MCP_PORTFOLIO_LINKS_FROM (an ISO-8601 instant the operator sets once the
+ * deployment showing the new consent text is live). Unset or invalid: fail closed — no link qualifies and get_portfolio is unavailable.
+ */
+export function portfolioLinksFrom(env: Env): Date | null {
+  const raw = env.FLOFI_MCP_PORTFOLIO_LINKS_FROM?.trim();
+  if (!raw || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/.test(raw)) return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
 export const principalOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principal.kind === 'mcp-oauth' ? principal.owners ?? []
   : principal.wallets.map(address => ({ namespace: 'eip155' as const, address }));
 /** What a static credential may call: everything read-only of BUILD-MCP-001, never an approval request (it has no account). */

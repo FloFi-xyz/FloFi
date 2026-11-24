@@ -63,9 +63,19 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
       .toMatchObject({ state: 'PARTIALLY_EXECUTED', final: true });
     expect(workflowRunState({ state: 'RUNNING', nextAction: 'OWNER_SIGNS_STEP', halted: null, resumable: false, steps: [{ state: 'RECONCILED' }, { state: 'AWAITING_OWNER' }] }))
       .toMatchObject({ state: 'AWAITING_SIGNATURE', reason: 'NEXT_STEP' });
-    expect(workflowRunState({ state: 'RUNNING', nextAction: 'WAITING_FOR_RECONCILIATION', halted: null, resumable: false }).state).toBe('PENDING_CONFIRMATION');
+    // WAITING_FOR_RECONCILIATION is the view's fallback, not proof of a submission: the current group's / step's records decide.
+    const waiting = { state: 'RUNNING', nextAction: 'WAITING_FOR_RECONCILIATION', halted: null, resumable: false, currentStep: 1 } as const;
+    expect(workflowRunState({ ...waiting, steps: [{ index: 0, state: 'RECONCILED' }, { index: 1, state: 'AWAITING_OWNER' }] }))
+      .toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'STEP_IN_SIGNING_FLOW' });
+    expect(workflowRunState({ ...waiting, steps: [{ index: 0, state: 'RECONCILED' }, { index: 1, state: 'UNCERTAIN' }] }).state).toBe('NEEDS_ATTENTION');
+    expect(workflowRunState({ ...waiting, groups: [{ state: 'RECONCILED', steps: [0, 0] }, { state: 'SUBMITTED', steps: [1, 2] }] }).state).toBe('PENDING_CONFIRMATION');
+    expect(workflowRunState({ ...waiting, groups: [{ state: 'AUTHORIZED', steps: [0, 2] }] })).toMatchObject({ state: 'SUBMITTED', reason: 'GROUP_AUTHORIZED' });
+    expect(workflowRunState(waiting).state).toBe('STATUS_UNKNOWN');
+    // A wallet batch already reported by the wallet may have executed: never "sign again".
+    expect(workflowRunState({ state: 'RUNNING', nextAction: 'OWNER_CONFIRMS_BATCH', halted: null, resumable: false }))
+      .toMatchObject({ state: 'SUBMITTED', reason: 'WALLET_BATCH_REPORT_PENDING', nextStep: 'OPEN_SIGNING_LINK' });
     // A claimed multi-step proposal whose run was not read here may have signed steps: unknown, never "awaiting".
-    expect(approvalState({ status: 'APPLIED', executionPlan: 'SEQUENTIAL', workflowRun: null })).toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'READ_GET_APPROVAL_STATUS' });
+    expect(approvalState({ status: 'APPLIED', executionPlan: 'SEQUENTIAL', workflowRun: null })).toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'WORKFLOW_RUN_NOT_READ' });
   });
 
   it('a multi-step run decides whatever the handoff reads (its run starts at the claim and can sign while CLAIMED, then EXPIRED or REVOKED)', () => {
@@ -82,6 +92,37 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
     expect(approvalState({ status: 'PENDING', executionPlan: 'SEQUENTIAL', claimed: false }).state).toBe('AWAITING_WALLET_CONNECTION');
     // Only recent runs examined and none found: unknown, never "in the signing page".
     expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [], runsTruncated: true })).toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'RUNS_TRUNCATED' });
+  });
+
+  it('a wallet batch FloFi never heard back about may have executed: never cancelled, halted-final or "not run"', () => {
+    for (const state of ['CANCELLED', 'HALTED', 'EXPIRED', 'FAILED']) {
+      const s = workflowRunState({ state, nextAction: 'NONE', halted: state === 'HALTED' ? 'STOPPED' : null, resumable: false,
+        groups: [{ state: 'SKIPPED', steps: [0, 1], code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] });
+      expect(s, state).toMatchObject({ state: 'NEEDS_ATTENTION', reason: 'BATCH_OUTCOME_UNKNOWN', final: false, completed: false });
+    }
+    expect(workflowRunState({ state: 'CANCELLED', nextAction: 'NONE', halted: null, resumable: false, steps: [{ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] }).state)
+      .toBe('NEEDS_ATTENTION');
+  });
+
+  it('every run of a single-flow approval counts; summaries without attempts never invite a second signature', () => {
+    const at = (h: number) => `2026-11-24T${String(h).padStart(2, '0')}:00:00.000Z`;
+    // An earlier reconciled run is never hidden by a later declined one.
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'RECONCILED', reconciled: true, evidenceOutcome: 'RECONCILED', updatedAt: at(9) },
+      { status: 'REJECTED', reconciled: false, updatedAt: at(10) }] }).state).toBe('CONFIRMED');
+    // Not started / awaiting the wallet from a summary: a request may be in flight.
+    for (const status of ['SIMULATED', 'AUTHORIZED', 'PREPARED']) expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status, reconciled: false }] }).state, status)
+      .toBe('STATUS_UNKNOWN');
+    // Declined after an earlier action landed (e.g. an ERC-20 approval): never "cancelled".
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'REJECTED', reconciled: false, landed: 'APPROVAL_CONFIRMED' }] }))
+      .toMatchObject({ state: 'NEEDS_ATTENTION', reason: 'EARLIER_ACTION_CONFIRMED' });
+    // A failure FloFi still observes is not final.
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'FAILED', reconciled: false, terminal: false }] }).state).toBe('STATUS_UNKNOWN');
+    // A reader's own full-fact lifecycle (Pix) is used as computed.
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'PAYMENT_PENDING', reconciled: false,
+      lifecycle: { status: 'SETTLEMENT_PENDING', final: false, completed: false } }] })).toMatchObject({ state: 'PENDING_CONFIRMATION', reason: 'DESTINATION_SETTLEMENT_PENDING' });
+    // Reconciled with an attention item whose strict check cannot pass: attention, never "pending" forever.
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [{ status: 'RECONCILED', reconciled: false, errorCode: 'X_MISMATCH_NOTE', evidenceOutcome: 'RECONCILED' }] }).state)
+      .not.toBe('CONFIRMED');
   });
 
   it('plain-language refusals never expose the code and exist in EN and PT', () => {

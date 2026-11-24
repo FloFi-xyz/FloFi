@@ -65,7 +65,7 @@ import { CONCEPT_IDS, CONCEPT_LEVELS, CONCEPT_PROTOCOLS } from '../domain/intell
 import { matchPlatformTopic, platformAnswer, platformGuide, type PlatformTopic } from '../domain/intelligence/platform-guide';
 import { explainConcept, explainWorkflow } from '../platform/explain.ts';
 import { AUTOMATION_MANAGEMENT, AUTOMATION_RULE_ID, automationStatus, automationTypes, type AutomationReadPort } from './automations.ts';
-import { accountView, historyView, linkedOwners, omittedOwners, portfolioView, positionsView, type PortfolioReadPort } from './account.ts';
+import { accountView, historyView, linkedOwners, MAX_ACCOUNT_WALLETS, omittedOwners, portfolioOwners, portfolioView, positionsView, type PortfolioReadPort } from './account.ts';
 import { approvalState, authoringState, conversationState, executionState, simulationState, userFacingError, validationState } from '../platform/conversation-state.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
@@ -667,11 +667,15 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     if (principal.kind === 'mcp-oauth' && state && !await state.oauth.allow(`portfolio:account:${principal.accountId}`, PORTFOLIO_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
       return failWith('PORTFOLIO_RATE_LIMITED');
     // Balances of every wallet in parallel; positions one wallet after another (the shared position limiter admits two scans at a time).
-    const balances = await Promise.all(linkedOwners(principal).map(wallet => port.balances(wallet).then(value => ({ ok: true as const, value }),
+    const readable = portfolioOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
+    // Linked before the Connections page disclosed balance reads: the owner re-links the wallet there to allow them (nothing is read meanwhile).
+    if (!readable.length) return failWith('PORTFOLIO_RELINK_REQUIRED', { linkWalletUrl: `${origin}/connections`,
+      next: 'The person opens FloFi Connections, links the wallet again (sign-in message only) and agrees to balance and position reads; then ask again.' });
+    const balances = await Promise.all(readable.map(wallet => port.balances(wallet).then(value => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, code: error instanceof Error && CODE.test(error.message) ? error.message : 'PORTFOLIO_READ_FAILED' }))));
     const wallets: Output[] = [];
     let positionsComplete = true;
-    for (const [index, wallet] of linkedOwners(principal).entries()) {
+    for (const [index, wallet] of readable.entries()) {
       const read = balances[index]!;
       if (!read.ok) { wallets.push({ read: false, wallet: { namespace: wallet.namespace, address: wallet.address }, code: read.code }); continue; }
       let positions: unknown = null;
@@ -682,7 +686,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       }
       wallets.push({ read: true, ...portfolioView(wallet, read.value), positions });
     }
-    const omitted = omittedOwners(principal), complete = wallets.every(w => w.read) && positionsComplete && omitted === 0;
+    const omitted = principalOwners(principal).length - readable.length, complete = wallets.every(w => w.read) && positionsComplete && omitted === 0;
     return { ok: true, readOnly: true, wallets, complete, authority: AUTHORITY, ...omitted ? { walletsOmitted: omitted } : {},
       ...complete ? {} : { note: 'Some balances, positions or wallets could not be read now; they are UNKNOWN (not zero). Try again.' },
       notes: ['Balances are public chain state at observedAt. Before any action FloFi re-reads balances and simulates again in the signing page.'] };
@@ -810,7 +814,8 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     const h = await owned(args.approvalId);
     // A multi-step proposal's run starts at the claim and may already have signed steps while the handoff reads CLAIMED: never cancellable here.
     const runOf = async () => h.plan.kind === 'SEQUENTIAL' ? await state.workflowRuns.byHandoff(h.handoffId) : null;
-    if (await runOf()) return failWith('APPROVAL_NOT_CANCELLABLE', { status: h.status, reason: 'WORKFLOW_RUN_STARTED',
+    // Claimed is enough: the run is created right after the claim commits, so a claimed multi-step request is treated as started.
+    if ((h.plan.kind === 'SEQUENTIAL' && h.claimed !== null) || await runOf()) return failWith('APPROVAL_NOT_CANCELLABLE', { status: h.status, reason: 'WORKFLOW_RUN_STARTED',
       conversationState: conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS'),
       next: 'This workflow is already in the owner\'s signing flow. They can reject the wallet prompt or stop it in the FloFi signing page; read get_approval_status.' });
     if (h.status === 'APPLIED') return failWith('APPROVAL_NOT_CANCELLABLE', { status: h.status, conversationState: conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS'),
@@ -820,7 +825,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     const ended = await state.handoffs.revokeForRequester(h.handoffId, requesterScope(requester), new Date());
     if (!ended) return failWith('APPROVAL_NOT_FOUND');
     // Re-read after the store's lock: a request applied (or a run claimed) in the meantime is reported as it is, never as cancelled.
-    const raced = ended.status === 'APPLIED' || await runOf() !== null;
+    const raced = ended.status === 'APPLIED' || (ended.plan.kind === 'SEQUENTIAL' && ended.claimed !== null) || await runOf() !== null;
     return { ok: true, approvalId: ended.handoffId, status: ended.status, cancelled: ended.status === 'REVOKED' && !raced, authority: AUTHORITY,
       conversationState: raced ? conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS') : approvalState({ status: ended.status }),
       message: ended.status === 'REVOKED' && !raced ? 'The approval request was cancelled. Its link no longer works; nothing was signed or sent from it.'

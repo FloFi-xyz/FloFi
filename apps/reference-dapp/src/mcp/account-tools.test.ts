@@ -19,7 +19,8 @@ import type { McpState } from './oauth/state';
 import type { McpRuntime } from './runtime';
 
 const A = '0x' + 'a'.repeat(40), B = '0x' + 'b'.repeat(40), S = 'So11111111111111111111111111111111111111112';
-const env = { FLOFI_MCP: 'enabled', ...oauthEnv() };
+// Links made at or after this instant were made under the Connections text that discloses balance and position reads.
+const env = { FLOFI_MCP: 'enabled', ...oauthEnv(), FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-01-01T00:00:00Z' };
 const config = readOAuthConfig(env) as OAuthConfig;
 const accounts = { X: 'mcpacct_' + 'x'.repeat(26), Y: 'mcpacct_' + 'y'.repeat(26), Z: 'mcpacct_' + 'z'.repeat(26), W: 'mcpacct_' + 'w'.repeat(26) };
 const tokens = { X: newCredential('access'), Y: newCredential('access'), Z: newCredential('access'), W: newCredential('access') };
@@ -144,6 +145,20 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
     for (const item of out.items) expect((item.conversationState as { state: string }).state, String(item.executionId)).not.toBe('AWAITING_SIGNATURE');
   });
 
+  it('balances and positions are read only for links made after the Connections page disclosed them (fail closed when unconfigured)', async () => {
+    for (const cutoff of [undefined, 'not-a-date', '2999-01-01T00:00:00Z']) {
+      const { port: p, calls } = port(), configured = { ...env, FLOFI_MCP_PORTFOLIO_LINKS_FROM: cutoff as unknown as string };
+      if (cutoff === undefined) delete (configured as Record<string, unknown>).FLOFI_MCP_PORTFOLIO_LINKS_FROM;
+      const client = session({ env: configured, token: tokens.X, state: state(handoffs([])), portfolio: p });
+      expect((await client.callTool('get_portfolio', {})).output, String(cutoff)).toMatchObject({ ok: false, code: 'PORTFOLIO_RELINK_REQUIRED',
+        linkWalletUrl: `${config.origin}/connections` });
+      expect(calls, String(cutoff)).toEqual([]);
+      expect(((await client.callTool('get_account', {})).output.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([false, false]);
+    }
+    const account = (await session({ env, token: tokens.X, state: state(handoffs([])) }).callTool('get_account', {})).output;
+    expect((account.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([true, true]);
+  });
+
   it('get_portfolio and list_executions accept no wallet or address argument', async () => {
     const client = session({ env, token: tokens.X, state: state(handoffs([])), portfolio: port().port });
     for (const [tool, args] of [['get_portfolio', { wallet: B }], ['list_executions', { wallet: B }], ['list_executions', { owner: B }]] as const) {
@@ -216,10 +231,11 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 approval requests', () => {
     expect((await x.callTool('cancel_approval', { approvalId: apr('c') })).output).toMatchObject({ ok: true, cancelled: true });
   });
 
-  it('a run claimed between the read and the cancel is reported as it is, never as cancelled', async () => {
-    const store = handoffs([handoff(apr('a'), accounts.X, 'CLAIMED', true)]);
+  it('a multi-step claim that lands between the read and the cancel is reported as it is, never as cancelled', async () => {
+    const store = handoffs([handoff(apr('a'), accounts.X, 'PENDING', true)]);
     const runs: Record<string, unknown> = {};
-    store.revokeForRequester.mockImplementationOnce(async () => { runs[apr('a')] = { runId: 'wfr_late' }; return { ...store.records[0]!, status: 'REVOKED' as const }; });
+    // The store's locked row shows the claim (its run is created right after it commits).
+    store.revokeForRequester.mockImplementationOnce(async () => ({ ...store.records[0]!, claimed: { namespace: 'eip155' as const, address: A }, status: 'REVOKED' as const }));
     expect((await session({ env, token: tokens.X, state: state(store, undefined, { runs }) }).callTool('cancel_approval', { approvalId: apr('a') })).output)
       .toMatchObject({ ok: true, cancelled: false, conversationState: { state: 'STATUS_UNKNOWN' } });
   });

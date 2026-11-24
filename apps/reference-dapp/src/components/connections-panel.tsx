@@ -4,8 +4,9 @@ import { useLocale } from '../i18n/locale';
 
 /**
  * BUILD-MCP-002: wallet links and approval requests of the FloFi account in this browser. Linking needs this browser's account,
- * a wallet proven here and an explicit click; it only lets the account's MCP connections read that wallet's run status and
- * evidence (scope flofi.runs). It is never ownership and never authorizes a transaction.
+ * a wallet proven here and an explicit click; it only lets the account's MCP connections read that wallet's runs (status, evidence and
+ * history), automation status and — BUILD-FLOFI-UNIVERSAL-CHANNELS-001, as the text below discloses — balances and DeFi positions (scope
+ * flofi.runs). It is never ownership and never authorizes a transaction.
  */
 import { useEffect, useState } from 'react';
 import { connectionsView, linkProvenWallet, revokeWalletLink, withdrawApproval, type ConnectionsView } from '../app/connections-action';

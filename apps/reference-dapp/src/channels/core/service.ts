@@ -321,7 +321,8 @@ export function createChannelService(ctx: ChannelContext) {
         }
         // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a proposal already APPLIED in the owner's signing flow may have run; a fresh link would propose it (or
         // part of it) again. Nothing is proposed: running it again takes a new, explicit request.
-        if (last?.handoff.status === 'APPLIED' || last?.progress.workflowRun || inSigningFlow(await endChannelApproval(ctx.platform, conversationId, state.approvalId, now))) {
+        const current = last && state.approvalId === last.handoff.handoffId ? last : null;
+        if (current?.handoff.status === 'APPLIED' || current?.progress.workflowRun || inSigningFlow(await endChannelApproval(ctx.platform, conversationId, state.approvalId, now))) {
           await commit('LINK_ALREADY_APPLIED', [...decision.replies, text(lm.linkApplied)], { ...state, steps: [], pending: null, approvalId: null });
           return { address: null, language: state.language };
         }

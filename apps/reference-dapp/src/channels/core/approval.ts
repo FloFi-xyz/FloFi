@@ -84,7 +84,12 @@ export async function endChannelApproval(platform: Pick<ChannelPlatform, 'handof
   // A multi-step proposal's run starts at the owner's claim and can sign steps while its handoff still reads CLAIMED: once a run exists the
   // proposal is in the signing flow — never withdrawn from here and never carried into a new proposal.
   if (platform.workflowRuns && await platform.workflowRuns.byHandoff(approvalId)) return 'RUN_STARTED';
+  // Claimed is enough for a multi-step proposal: its run is created right after the claim commits (never revoked from here).
+  const current = await platform.handoffs.forRequester(approvalId, conversationScope(conversationId), now);
+  if (current?.plan.kind === 'SEQUENTIAL' && current.claimed !== null && (current.status === 'CLAIMED' || current.status === 'APPLIED')) return 'RUN_STARTED';
   const h = await platform.handoffs.revokeForRequester(approvalId, conversationScope(conversationId), now);
+  // A claim that landed between the read and the revoke (the store's locked row says so, or its run now exists) is in the signing flow too.
+  if (h?.plan.kind === 'SEQUENTIAL' && (h.claimed !== null || (platform.workflowRuns && await platform.workflowRuns.byHandoff(approvalId)))) return 'RUN_STARTED';
   return h?.status ?? null;
 }
 /** One of this conversation's handoffs with its shared run progress, or null when it is not this conversation's. */

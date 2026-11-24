@@ -74,7 +74,8 @@ export function executionState(lifecycle: CanonicalLifecycle, options: { readonl
     SETTLEMENT_PENDING: () => conversationState('PENDING_CONFIRMATION', 'DESTINATION_SETTLEMENT_PENDING'),
     // Completion needs the evidence check where the caller has one: a reconciled label without it is still pending.
     RECONCILED: () => options.reconciled === false ? conversationState('PENDING_CONFIRMATION', 'NOT_RECONCILED_YET') : conversationState('CONFIRMED'),
-    RECONCILED_WITH_ATTENTION: () => options.reconciled === false ? conversationState('PENDING_CONFIRMATION', 'NOT_RECONCILED_YET')
+    // Reconciled with a recorded attention item: the strict evidence check (no error code) may never pass, so it is never left "pending".
+    RECONCILED_WITH_ATTENTION: () => options.reconciled === false ? conversationState('NEEDS_ATTENTION', 'RECONCILED_WITH_ATTENTION')
       : conversationState('CONFIRMED', 'RECONCILED_WITH_ATTENTION'),
     PARTIALLY_COMPLETED: () => conversationState('PARTIALLY_EXECUTED', null, { final: lifecycle.final }),
     REVERTED: () => conversationState('FAILED', 'REVERTED'),
@@ -86,15 +87,36 @@ export function executionState(lifecycle: CanonicalLifecycle, options: { readonl
 }
 
 export type ApprovalRunFacts = { readonly status: string; readonly reconciled: boolean; readonly errorCode?: string | null; readonly evidenceOutcome?: string | null;
-  readonly updatedAt?: string };
+  readonly updatedAt?: string; readonly terminal?: boolean; readonly landed?: string | null;
+  /** A run's own canonical lifecycle when its reader computed it from the full facts (Pix); otherwise it is derived from the summary. */
+  readonly lifecycle?: CanonicalLifecycle };
 export type WorkflowRunFacts = { readonly state: string; readonly nextAction: string; readonly halted: 'PARTIAL' | 'NOTHING_SENT' | 'STOPPED' | null; readonly resumable: boolean;
-  readonly steps?: readonly { readonly state: string }[] };
+  readonly currentStep?: number; readonly steps?: readonly { readonly index?: number; readonly state: string; readonly code?: string | null }[];
+  readonly groups?: readonly { readonly state: string; readonly steps: readonly [number, number]; readonly code?: string | null }[] };
+/** A wallet batch handed to the owner's wallet that FloFi never heard back about: it may have executed (`workflow-runs/state-machine.ts`). */
+const BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+/**
+ * What is in flight in a RUNNING multi-step run once the owner has nothing to sign (`WAITING_FOR_RECONCILIATION` is the view's fallback, not proof
+ * of a submission): the current group's and step's own records decide; a step loaded for the owner but not proven submitted is UNKNOWN.
+ */
+function inFlightState(run: WorkflowRunFacts): ConversationState {
+  const current = run.currentStep ?? -1;
+  const step = (run.steps ?? []).find((s, i) => (s.index ?? i) === current);
+  const group = (run.groups ?? []).find(g => g.steps[0] <= current && current <= g.steps[1]);
+  if (group?.state === 'UNCERTAIN' || step?.state === 'UNCERTAIN') return conversationState('NEEDS_ATTENTION', 'OUTCOME_NOT_PROVEN');
+  if (group?.state === 'SUBMITTED') return conversationState('PENDING_CONFIRMATION');
+  if (group?.state === 'AUTHORIZED') return conversationState('SUBMITTED', 'GROUP_AUTHORIZED');
+  return conversationState('STATUS_UNKNOWN', 'STEP_IN_SIGNING_FLOW');
+}
 export type ApprovalFacts = { readonly status: string; readonly runs?: readonly ApprovalRunFacts[]; readonly runsVisible?: boolean; readonly runsComplete?: boolean;
   readonly runsTruncated?: boolean; readonly workflowRun?: WorkflowRunFacts | null; readonly executionPlan?: string; readonly claimed?: boolean };
 
 /** A multi-step workflow run (`workflow-runs/service.ts` RunView) in the conversational vocabulary. */
 export function workflowRunState(run: WorkflowRunFacts): ConversationState {
   const reconciledSteps = (run.steps ?? []).some(step => step.state === 'RECONCILED');
+  // An ended or stopped run that handed a batch to the wallet and never heard back: it may have executed — never "cancelled" or "not run".
+  if (run.state !== 'COMPLETED' && ((run.groups ?? []).some(g => g.code === BATCH_OUTCOME_UNKNOWN) || (run.steps ?? []).some(s => s.code === BATCH_OUTCOME_UNKNOWN)))
+    return conversationState('NEEDS_ATTENTION', 'BATCH_OUTCOME_UNKNOWN', { final: false, nextStep: 'OWNER_DECIDES_IN_SIGNING_PAGE' });
   switch (run.state) {
     case 'COMPLETED': return conversationState('CONFIRMED');
     case 'CANCELLED': return reconciledSteps ? conversationState('PARTIALLY_EXECUTED', 'CANCELLED_AFTER_PARTIAL', { final: true }) : conversationState('CANCELLED');
@@ -107,14 +129,16 @@ export function workflowRunState(run: WorkflowRunFacts): ConversationState {
       return conversationState('NEEDS_ATTENTION', run.halted === 'NOTHING_SENT' ? 'HALTED_NOTHING_SENT' : 'HALTED');
     case 'PENDING': return conversationState('AWAITING_SIGNATURE', 'OWNER_CHOOSES_MODE');
     case 'RUNNING':
-      if (run.nextAction === 'WAITING_FOR_RECONCILIATION') return conversationState('PENDING_CONFIRMATION');
       if (run.nextAction === 'OWNER_DECIDES') return conversationState('NEEDS_ATTENTION', 'OWNER_DECIDES');
-      return reconciledSteps ? conversationState('AWAITING_SIGNATURE', 'NEXT_STEP') : conversationState('AWAITING_SIGNATURE');
+      // The wallet already returned a batch id: it may have executed; the owner reopens FloFi so the wallet reports it. Never "sign again".
+      if (run.nextAction === 'OWNER_CONFIRMS_BATCH') return conversationState('SUBMITTED', 'WALLET_BATCH_REPORT_PENDING', { nextStep: 'OPEN_SIGNING_LINK' });
+      if (run.nextAction === 'OWNER_SIGNS_STEP' || run.nextAction === 'OWNER_SIGNS_GROUP')
+        return reconciledSteps ? conversationState('AWAITING_SIGNATURE', 'NEXT_STEP') : conversationState('AWAITING_SIGNATURE');
+      return inFlightState(run);
     default: return conversationState('STATUS_UNKNOWN', 'UNRECOGNIZED_RUN_STATE');
   }
 }
 
-const latest = (runs: readonly ApprovalRunFacts[]) => [...runs].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))[0];
 /**
  * An approval request (durable handoff) and, when the owner shares them, the runs started from it. Runs are authoritative over the
  * handoff once they exist; a run read that failed, or runs the owner did not share, are STATUS_UNKNOWN, never "not started".
@@ -124,7 +148,7 @@ export function approvalState(approval: ApprovalFacts): ConversationState {
   // window, EXPIRED/REVOKED): once a run exists it decides, whatever the handoff says.
   if (approval.workflowRun) return workflowRunState(approval.workflowRun);
   // A claimed multi-step proposal whose run was not read here may have signed steps: never "awaiting", "expired" or "cancelled".
-  if (approval.executionPlan === 'SEQUENTIAL' && approval.status !== 'PENDING' && approval.claimed !== false) return conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS');
+  if (approval.executionPlan === 'SEQUENTIAL' && approval.status !== 'PENDING' && approval.claimed !== false) return conversationState('STATUS_UNKNOWN', 'WORKFLOW_RUN_NOT_READ');
   switch (approval.status) {
     case 'PENDING': return conversationState('AWAITING_WALLET_CONNECTION');
     case 'CLAIMED': return conversationState('AWAITING_SIGNATURE', 'WALLET_PROVEN');
@@ -137,12 +161,28 @@ export function approvalState(approval: ApprovalFacts): ConversationState {
   }
   if (approval.runsComplete === false) return conversationState('STATUS_UNKNOWN', 'RUNS_READ_FAILED');
   if (approval.runsVisible === false) return conversationState('STATUS_UNKNOWN', 'NOT_SHARED');
-  const run = latest(approval.runs ?? []);
+  const runs = approval.runs ?? [];
   // Only the wallet's most recent runs were examined: a run of this approval may be among older ones.
-  if (!run && approval.runsTruncated) return conversationState('STATUS_UNKNOWN', 'RUNS_TRUNCATED');
-  if (!run) return conversationState('AWAITING_SIGNATURE', 'IN_SIGNING_PAGE');
-  const lifecycle = canonicalRunLifecycle({ status: run.status, errorCode: run.errorCode ?? null, hasEvidence: run.evidenceOutcome != null });
-  return executionState(lifecycle, { reconciled: run.reconciled });
+  if (!runs.length && approval.runsTruncated) return conversationState('STATUS_UNKNOWN', 'RUNS_TRUNCATED');
+  if (!runs.length) return conversationState('AWAITING_SIGNATURE', 'IN_SIGNING_PAGE');
+  // Every run bound to the approval counts (an earlier reconciled run is never hidden by a later declined one). Anything not settled decides
+  // first, then any confirmed run, then any partial one; "cancelled" only when every run was declined.
+  const states = [...runs].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')).map(runState);
+  return states.find(s => s.state === 'NEEDS_ATTENTION' || s.state === 'STATUS_UNKNOWN') ?? states.find(s => !s.final)
+    ?? states.find(s => s.state === 'CONFIRMED') ?? states.find(s => s.state === 'PARTIALLY_EXECUTED') ?? states[0]!;
+}
+/**
+ * One run of a single-flow approval. Its summary carries no attempts: a run that still reads as not started or awaiting the wallet may already
+ * have a request in flight (UNKNOWN), a declined or failed run with an earlier action confirmed onchain (`landed`) is never "cancelled", and a
+ * final outcome that FloFi still observes (`terminal` false) is not final yet.
+ */
+function runState(run: ApprovalRunFacts): ConversationState {
+  const lifecycle = run.lifecycle ?? canonicalRunLifecycle({ status: run.status, errorCode: run.errorCode ?? null, hasEvidence: run.evidenceOutcome != null });
+  if (!run.lifecycle && (lifecycle.status === 'NOT_STARTED' || lifecycle.status === 'AUTHORIZATION_PENDING')) return conversationState('STATUS_UNKNOWN', 'READ_EXECUTION_STATUS');
+  const state = executionState(lifecycle, { reconciled: run.reconciled });
+  if (run.landed && (state.state === 'CANCELLED' || state.state === 'FAILED')) return conversationState('NEEDS_ATTENTION', 'EARLIER_ACTION_CONFIRMED');
+  if (run.terminal === false && state.final && !state.completed) return conversationState('STATUS_UNKNOWN', 'OBSERVATION_PENDING');
+  return state;
 }
 
 // ── Plain-language explanations of refusals ────────────────────────────────────────────────────────────────────────────────────

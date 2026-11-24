@@ -26,7 +26,7 @@ import { mcpBetaIdentity, mcpBetaWallets, type McpBetaHost } from './beta-access
 import { mcpStateHost } from './oauth/runtime.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
-import { authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
+import { portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { PANEL_URI } from './app/panel.ts';
 import { readHandoffPolicy } from './execution.ts';
 import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from './oauth/config.ts';
@@ -223,8 +223,12 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const productIdentity = betaIdentity;
     const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
     // `owners` keeps each link's namespace (a Solana wallet owns its automations as `solana`); `wallets` stays the address list runs are read by.
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: balance/position reads only for links made once `/connections` disclosed them (fail closed when unset).
+    const portfolioFrom = portfolioLinksFrom(env);
     principal = Object.freeze({ ...principal, wallets: Object.freeze(eligible.map(l => l.address)),
-      owners: Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address }))) });
+      owners: Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address }))),
+      portfolioOwners: Object.freeze(portfolioFrom ? eligible.filter(e => links.some(l => l.namespace === e.namespace && l.address === e.address
+        && l.createdAt.getTime() >= portfolioFrom.getTime())).map(l => Object.freeze({ namespace: l.namespace, address: l.address })) : []) });
   }
   // Every runtime call of this request is bounded by its budget (an injected runtime too).
   const runtime = options.runtime ? boundedRuntime(options.runtime, budget) : deploymentRuntime(env, budget), active = principal;

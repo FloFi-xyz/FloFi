@@ -41,6 +41,9 @@ export function deploymentPortfolioPort(env: Env = process.env): PortfolioReadPo
 const label = (wallet: McpWalletOwner) => { try { return shortAddress(wallet.address); } catch { return `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}`; } };
 /** The linked wallets a call reads: the account's own links only (never an address a request names), at most MAX_ACCOUNT_WALLETS. */
 export const linkedOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principalOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
+/** The linked wallets whose balances and positions may be read (links made after `/connections` disclosed those reads); OAuth accounts only. */
+export const portfolioOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principal.kind === 'mcp-oauth' ? principal.portfolioOwners ?? [] : [];
+const sameWallet = (a: McpWalletOwner, b: McpWalletOwner) => a.namespace === b.namespace && a.address === b.address;
 /** How many linked wallets a call did not read (beyond MAX_ACCOUNT_WALLETS): a call that skipped any is never complete. */
 export const omittedOwners = (principal: McpPrincipal): number => Math.max(0, principalOwners(principal).length - MAX_ACCOUNT_WALLETS);
 
@@ -49,7 +52,9 @@ export function accountView(principal: McpPrincipal, origin: string) {
   return {
     authenticated: true, kind: principal.kind === 'mcp-oauth' ? 'FLOFI_ACCOUNT_VIA_OAUTH' : 'DEVELOPER_CREDENTIAL',
     ...principal.kind === 'mcp-oauth' ? { client: principal.clientName } : {}, scopes: [...principalScopes(principal)],
-    wallets: owners.map(o => ({ namespace: o.namespace, network: o.namespace === 'eip155' ? 'EVM' : 'SOLANA', address: o.address, label: label(o) })),
+    wallets: owners.map(o => ({ namespace: o.namespace, network: o.namespace === 'eip155' ? 'EVM' : 'SOLANA', address: o.address, label: label(o),
+      // Balances and positions are read only for a link made after the Connections page asked for that; re-linking there renews consent.
+      balancesReadable: portfolioOwners(principal).some(p => sameWallet(p, o)) })),
     walletCount: owners.length,
     identity: 'The account is identified by the wallets linked to it on FloFi, each proven by that wallet\'s own sign-in message — never by an e-mail, ' +
       'username or app metadata. Runs, evidence and execution history follow these wallets across the FloFi web app, ChatGPT and Claude. Approval requests ' +
