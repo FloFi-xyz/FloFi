@@ -90,7 +90,7 @@ export type ApprovalRunFacts = { readonly status: string; readonly reconciled: b
 export type WorkflowRunFacts = { readonly state: string; readonly nextAction: string; readonly halted: 'PARTIAL' | 'NOTHING_SENT' | 'STOPPED' | null; readonly resumable: boolean;
   readonly steps?: readonly { readonly state: string }[] };
 export type ApprovalFacts = { readonly status: string; readonly runs?: readonly ApprovalRunFacts[]; readonly runsVisible?: boolean; readonly runsComplete?: boolean;
-  readonly workflowRun?: WorkflowRunFacts | null; readonly executionPlan?: string };
+  readonly runsTruncated?: boolean; readonly workflowRun?: WorkflowRunFacts | null; readonly executionPlan?: string; readonly claimed?: boolean };
 
 /** A multi-step workflow run (`workflow-runs/service.ts` RunView) in the conversational vocabulary. */
 export function workflowRunState(run: WorkflowRunFacts): ConversationState {
@@ -120,6 +120,11 @@ const latest = (runs: readonly ApprovalRunFacts[]) => [...runs].sort((a, b) => (
  * handoff once they exist; a run read that failed, or runs the owner did not share, are STATUS_UNKNOWN, never "not started".
  */
 export function approvalState(approval: ApprovalFacts): ConversationState {
+  // A multi-step workflow's run starts when the owner claims it and can sign steps while the handoff still reads CLAIMED (or, after the claim
+  // window, EXPIRED/REVOKED): once a run exists it decides, whatever the handoff says.
+  if (approval.workflowRun) return workflowRunState(approval.workflowRun);
+  // A claimed multi-step proposal whose run was not read here may have signed steps: never "awaiting", "expired" or "cancelled".
+  if (approval.executionPlan === 'SEQUENTIAL' && approval.status !== 'PENDING' && approval.claimed !== false) return conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS');
   switch (approval.status) {
     case 'PENDING': return conversationState('AWAITING_WALLET_CONNECTION');
     case 'CLAIMED': return conversationState('AWAITING_SIGNATURE', 'WALLET_PROVEN');
@@ -130,11 +135,11 @@ export function approvalState(approval: ApprovalFacts): ConversationState {
     case 'APPLIED': break;
     default: return conversationState('STATUS_UNKNOWN', 'UNRECOGNIZED_APPROVAL_STATE');
   }
-  if (approval.workflowRun) return workflowRunState(approval.workflowRun);
-  if (approval.executionPlan === 'SEQUENTIAL') return conversationState('AWAITING_SIGNATURE', 'OWNER_CHOOSES_MODE');
   if (approval.runsComplete === false) return conversationState('STATUS_UNKNOWN', 'RUNS_READ_FAILED');
   if (approval.runsVisible === false) return conversationState('STATUS_UNKNOWN', 'NOT_SHARED');
   const run = latest(approval.runs ?? []);
+  // Only the wallet's most recent runs were examined: a run of this approval may be among older ones.
+  if (!run && approval.runsTruncated) return conversationState('STATUS_UNKNOWN', 'RUNS_TRUNCATED');
   if (!run) return conversationState('AWAITING_SIGNATURE', 'IN_SIGNING_PAGE');
   const lifecycle = canonicalRunLifecycle({ status: run.status, errorCode: run.errorCode ?? null, hasEvidence: run.evidenceOutcome != null });
   return executionState(lifecycle, { reconciled: run.reconciled });
@@ -158,15 +163,17 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
     PT: 'Há muitas solicitações agora. Aguarde um momento e tente de novo.' }],
   [/WALLET_LINK_REQUIRED|WALLET_NOT_LINKED/, { EN: 'Link your wallet to FloFi first: open the FloFi link, connect your wallet and confirm its sign-in message. That message moves no funds.',
     PT: 'Vincule primeiro a sua carteira ao FloFi: abra o link do FloFi, conecte a carteira e confirme a mensagem de acesso. Essa mensagem não movimenta fundos.' }],
-  [/(?:INSUFFICIENT_SCOPE|UNAUTHORIZED|TOKEN|OAUTH)/, { EN: 'FloFi needs you to reconnect and grant access again in this app.',
+  [/(?:^PORTFOLIO_|^HISTORY_|POSITION_SCAN)/, { EN: 'FloFi cannot read balances, positions or history here right now. Try again in a few minutes.',
+    PT: 'O FloFi não consegue ler saldos, posições ou histórico aqui agora. Tente de novo em alguns minutos.' }],
+  [/(?:INSUFFICIENT_SCOPE|MCP_UNAUTHORIZED|^OAUTH_|INVALID_GRANT|ACCESS_TOKEN)/, { EN: 'FloFi needs you to reconnect and grant access again in this app.',
     PT: 'O FloFi precisa que você se reconecte e conceda o acesso de novo neste app.' }],
   [/^BETA_|ACCESS_DENIED|NOT_ELIGIBLE/, { EN: 'Your FloFi account does not have access to this yet.', PT: 'A sua conta FloFi ainda não tem acesso a isto.' }],
   [/INSUFFICIENT_(?:BALANCE|FUNDS)/, { EN: 'The wallet balance is too low for this amount. Choose a smaller amount or add funds.',
     PT: 'O saldo da carteira é insuficiente para esse valor. Escolha um valor menor ou adicione fundos.' }],
   [/INSUFFICIENT_GAS|GAS_BALANCE/, { EN: 'The wallet does not have enough of the network\'s native token to pay the network fee.',
     PT: 'A carteira não tem o token nativo da rede suficiente para pagar a taxa da rede.' }],
-  [/(?:_EXPIRED$|^EXPIRED|QUOTE_STALE)/, { EN: 'This request expired. Ask FloFi for a fresh quote and review; nothing was signed.',
-    PT: 'Esta solicitação expirou. Peça ao FloFi uma nova cotação e revisão; nada foi assinado.' }],
+  [/(?:_EXPIRED$|^EXPIRED|QUOTE_STALE)/, { EN: 'This request expired. Check its status before asking FloFi for a fresh quote and review.',
+    PT: 'Esta solicitação expirou. Consulte o status antes de pedir ao FloFi uma nova cotação e revisão.' }],
   [/(?:REVOKED|SUPERSEDED)/, { EN: 'This request was cancelled or replaced by a newer one.', PT: 'Esta solicitação foi cancelada ou substituída por uma mais recente.' }],
   [/(?:STALE|HASH_MISMATCH|WORKFLOW_CHANGED)/, { EN: 'The workflow or market conditions changed. Review it again before signing.',
     PT: 'O fluxo ou as condições de mercado mudaram. Revise-o de novo antes de assinar.' }],

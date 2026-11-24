@@ -1466,7 +1466,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.approval"
           ],
           [
-           "request_user_approval, get_approval_status; as ferramentas de sessão de aprovação são só do app"
+           "request_user_approval, get_approval_status, list_approvals e cancel_approval (retira um pedido ainda não carregado na assinatura); as ferramentas de sessão de aprovação são só do app"
           ]
          ],
          [
@@ -1474,7 +1474,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.runs"
           ],
           [
-           "get_execution_status, get_evidence e get_automation_status (somente leitura) para carteiras vinculadas no FloFi; automações só são criadas ou alteradas pelo dono no app FloFi"
+           "get_account, get_portfolio, list_executions, get_execution_status, get_evidence e get_automation_status (somente leitura) apenas para carteiras vinculadas no FloFi; automações só são criadas ou alteradas pelo dono no app FloFi"
           ]
          ]
         ]
@@ -1522,6 +1522,43 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          "Consulte o ",
          {"link": "guia do operador do MCP", "href": "https://github.com/FloFi-xyz/FloFi/blob/main/docs/deploy/MCP.md"},
          " para configurar a implantação e conectar o cliente."
+        ]
+       }
+      ]
+     },
+     {
+      "id": "use-from-chat",
+      "title": "Use o FloFi pelo ChatGPT, Claude ou Telegram",
+      "blocks": [
+       {
+        "kind": "steps",
+        "items": [
+         [
+          "ChatGPT: onde o seu plano oferece o modo Desenvolvedor (a OpenAI cita workspaces Business e Enterprise/Edu na web; pode ser preciso que um admin o ative), crie um app com o endpoint MCP https://flofi.xyz/api/mcp e entre com o OAuth do FloFi. O FloFi não está no diretório de apps do ChatGPT."
+         ],
+         [
+          "Claude: adicione um conector personalizado (Configurações → Conectores) com o mesmo endpoint e conclua o OAuth do FloFi; o plano Free permite um conector personalizado. O FloFi não está no diretório de conectores do Claude."
+         ],
+         [
+          "Telegram: abra o @FloFiAppBot em conversa privada e envie /start. Grupos são ignorados; nada financeiro aparece neles."
+         ],
+         [
+          "Vincule uma carteira uma vez: o resultado get_account do assistente traz a página Conexões do FloFi. Conecte ali a sua carteira existente e confirme a mensagem de acesso; ela não movimenta fundos. Portfólio e histórico leem só carteiras vinculadas."
+         ],
+         [
+          "Peça com as suas palavras. O FloFi monta, confere e simula o fluxo e envia um único link de aprovação. Abra-o, conecte a mesma carteira, confira a simulação nova e confirme na carteira. Nada mais assina por você."
+         ],
+         [
+          "Acompanhe pela mesma conversa: pergunte “concluiu?” (ChatGPT/Claude leem get_approval_status) ou toque em Ver status no Telegram. Só CONFIRMED significa reconciliado; um status pendente ou desconhecido nunca é dado como concluído."
+         ]
+        ]
+       },
+       {
+        "kind": "note",
+        "tone": "info",
+        "title": "Taxas, cancelamento e revogação de acesso",
+        "text": [
+         "A mesma política de taxas do FloFi vale em todos os canais e aparece na página de assinatura antes de você confirmar; os canais não cobram taxa extra. Cancele um pedido antes de ele ser carregado para assinatura (cancel_approval, ou Cancelar pedido no Telegram); depois disso, rejeite o pedido na carteira. Remova uma carteira vinculada ou retire pedidos na página Conexões, desconecte o conector no ChatGPT ou Claude e envie PARAR ao bot do Telegram."
         ]
        }
       ]
@@ -3487,7 +3524,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.approval"
           ],
           [
-           "request_user_approval, get_approval_status; approval-session tools are app-only"
+           "request_user_approval, get_approval_status, list_approvals and cancel_approval (withdraws a request not yet loaded for signing); approval-session tools are app-only"
           ]
          ],
          [
@@ -3495,7 +3532,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.runs"
           ],
           [
-           "get_execution_status, get_evidence and get_automation_status (read-only) for wallets linked on FloFi; automations are created or changed only by their owner in the FloFi app"
+           "get_account, get_portfolio, list_executions, get_execution_status, get_evidence and get_automation_status (read-only), only for wallets linked on FloFi; automations are created or changed only by their owner in the FloFi app"
           ]
          ]
         ]
@@ -3543,6 +3580,43 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
          "See the ",
          {"link": "MCP operator guide", "href": "https://github.com/FloFi-xyz/FloFi/blob/main/docs/deploy/MCP.md"},
          " for deployment settings and connection steps."
+        ]
+       }
+      ]
+     },
+     {
+      "id": "use-from-chat",
+      "title": "Use FloFi from ChatGPT, Claude or Telegram",
+      "blocks": [
+       {
+        "kind": "steps",
+        "items": [
+         [
+          "ChatGPT: where your plan offers Developer mode (OpenAI lists Business and Enterprise/Edu workspaces on the web; an admin may need to enable it), create an app with the MCP endpoint https://flofi.xyz/api/mcp and sign in with FloFi OAuth. FloFi is not listed in the ChatGPT app directory."
+         ],
+         [
+          "Claude: add a custom connector (Settings → Connectors) with the same endpoint and complete FloFi OAuth; Free plans allow one custom connector. FloFi is not listed in Claude’s connector directory."
+         ],
+         [
+          "Telegram: open @FloFiAppBot in a private chat and send /start. Groups are ignored; nothing financial is shown there."
+         ],
+         [
+          "Link a wallet once: the assistant’s get_account result gives the FloFi Connections page. Connect your existing wallet there and confirm its sign-in message; it moves no funds. Portfolio and history read only linked wallets."
+         ],
+         [
+          "Ask in your own words. FloFi composes, checks and previews the workflow, then sends one approval link. Open it, connect the same wallet, check the fresh simulation and confirm in your wallet. Nothing else signs for you."
+         ],
+         [
+          "Track it from the same chat: ask “did it complete?” (ChatGPT/Claude read get_approval_status) or tap Check status in Telegram. Only CONFIRMED means reconciled; a pending or unknown status is never reported as done."
+         ]
+        ]
+       },
+       {
+        "kind": "note",
+        "tone": "info",
+        "title": "Fees, cancelling and revoking access",
+        "text": [
+         "The same FloFi fee policy applies in every channel and is shown in the signing page before you confirm; channels add no fee. Cancel a request before it is loaded for signing (cancel_approval, or Cancel request in Telegram); after that, reject the wallet prompt. Remove a linked wallet or withdraw requests on the Connections page, disconnect the connector in ChatGPT or Claude, and send STOP to the Telegram bot."
         ]
        }
       ]

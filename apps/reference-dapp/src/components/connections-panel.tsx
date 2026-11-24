@@ -32,7 +32,7 @@ function ConnectionsContent() {
     <p className="eyebrow">{tr("CONNECTIONS")}</p><h2>{tr("Your FloFi account")}</h2>
     <p>{tr("Account ")}<code>{view.account}</code>{tr(" (pseudonymous; no email, no wallet by default).")}</p>
     <h3>{tr("Linked wallets")}</h3>
-    <p className="muted">{tr("A linked wallet lets your connected assistants read the status and evidence of that wallet's FloFi runs and the read-only status of its automations. It never lets anyone sign, move funds or change an automation. Links expire after ")}{tr(view.linkDays)}{tr(" days.")}</p>
+    <p className="muted">{tr("A linked wallet lets your connected assistants read that wallet's balances and DeFi positions, the history, status and evidence of its FloFi runs and the read-only status of its automations. It never lets anyone sign, move funds or change an automation. Links expire after ")}{tr(view.linkDays)}{tr(" days.")}</p>
     {view.links.length === 0 ? <p className="muted">{tr("No linked wallet.")}</p> : <ul className="approval-explanation">{view.links.map(link => <li key={link.linkId}>
       {tr(link.namespace === 'solana' ? 'Solana' : 'Ethereum')} <code>{link.address}</code>{tr(" · until ")}{tr(new Date(link.expiresAt).toLocaleDateString())}{tr(' ')}
       <button type="button" className="quiet" onClick={() => void revokeWalletLink(link.linkId).then(apply)}>{tr("Remove link")}</button></li>)}</ul>}

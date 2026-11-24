@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { APPROVAL_ACTIONS, decideTurn, freshState, parseState, type ChannelState, type TurnDecision } from '../core/conversation.ts';
 import { channelCopy } from '../core/copy.ts';
 import { createTelegramAdapter } from './adapter.ts';
-import { renderSendMessage } from './render.ts';
+import { choicesFitKeyboard, renderSendMessage } from './render.ts';
 
 const LINK = 'https://flofi.test/approve#flofi_chs_' + 'a'.repeat(43), to = { kind: 'chat', value: '900000001' };
 const SWAP = 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps';
@@ -33,7 +33,12 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 Telegram one-tap actions', () => {
     // A link alone is exactly as before.
     expect(renderSendMessage(to, { text: 'x', choices: [], link: { label: 'Authorize', url: LINK } })).toMatchObject({ reply_markup: { inline_keyboard: [[{ text: 'Authorize', url: LINK }]] } });
     expect(createTelegramAdapter('1', async () => ({ ok: true, result: {} }) as never).linkWithChoices).toBe(true);
-    for (const language of ['EN', 'PT'] as const) for (const label of Object.values(channelCopy(language).actions)) expect(label.length).toBeLessThanOrEqual(64);
+    // All four actions (status, add, steps, cancel) still fit Telegram's callback keyboard in both languages, so none is silently dropped.
+    for (const language of ['EN', 'PT'] as const) {
+      const all = Object.keys(APPROVAL_ACTIONS).map(id => ({ id, label: channelCopy(language).actions[id.slice(4) as keyof ReturnType<typeof channelCopy>['actions']] }));
+      expect(all.every(c => typeof c.label === 'string'), language).toBe(true);
+      expect(choicesFitKeyboard(all), language).toBe(true);
+    }
   });
 
   for (const language of ['EN', 'PT'] as const) it(`each action is its typed command (${language})`, async () => {

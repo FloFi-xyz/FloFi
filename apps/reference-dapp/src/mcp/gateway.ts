@@ -33,7 +33,7 @@ import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from
 import { credentialDigest, credentialOf } from './oauth/crypto.ts';
 import { mcpState, type McpState } from './oauth/state.ts';
 import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime.ts';
-import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, type ToolName } from './tools.ts';
+import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, userMessageContent, type ToolName } from './tools.ts';
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
 import { deploymentAutomationReader, type AutomationReadPort } from './automations.ts';
 import { deploymentPortfolioPort, type PortfolioReadPort } from './account.ts';
@@ -122,7 +122,8 @@ function deadlineResponse(body: string | null, budget: RequestBudget): Response 
   // guidance (an approval request's outcome UNKNOWN, no automatic retry) instead of a bare protocol error; other methods keep the JSON-RPC error.
   const answers = requests.map(({ id, tool, call }) => {
     const body = timeoutResult(tool ?? 'get_supported_networks', 'MCP_REQUEST_TIMEOUT', budget.requestId);
-    return call ? { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body, isError: true } }
+    return call ? { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(body) }, userMessageContent('MCP_REQUEST_TIMEOUT')], structuredContent: body,
+      isError: true } }
       : { jsonrpc: '2.0', id, error: { code: -32001, message: 'FloFi MCP request timed out', data: body } };
   });
   return Response.json(batch ? answers : answers[0], { status: 200, headers: HEADERS });

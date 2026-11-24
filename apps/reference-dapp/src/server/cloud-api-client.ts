@@ -179,8 +179,9 @@ export async function listCloudRuns(flow: string, principal: string, options: { 
  * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: one page of a wallet's runs across every flow (`GET /v1/runs`, the same read the Dashboard history
  * makes), as `principal`. The API filters by the principal header; any item of another owner is dropped here as well.
  */
+export type OwnerRunSummary = CloudRunSummary & { readonly errorCode?: string | null; readonly needsObservation?: boolean; readonly attentionRequired?: boolean };
 export async function listOwnerRuns(principal: string, options: { env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; cursor?: string | null;
-  timeoutMs?: number; signal?: AbortSignal } = {}): Promise<FlowResult<{ readonly items: CloudRunSummary[]; readonly next: string | null }>> {
+  timeoutMs?: number; signal?: AbortSignal } = {}): Promise<FlowResult<{ readonly items: OwnerRunSummary[]; readonly next: string | null }>> {
   const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;
   if (signal?.aborted) return DEADLINE;
   if (options.cursor != null && !/^[A-Za-z0-9_-]{1,400}$/.test(options.cursor)) return { ok: false, code: 'CURSOR_INVALID' };
@@ -195,8 +196,10 @@ export async function listOwnerRuns(principal: string, options: { env?: Readonly
     const body = await response.json() as { ok?: unknown; value?: { items?: unknown; next?: unknown } };
     if (!response.ok || body.ok !== true || !Array.isArray(body.value?.items)) return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
     const next = typeof body.value.next === 'string' && /^[A-Za-z0-9_-]{1,400}$/.test(body.value.next) ? body.value.next : null;
-    return { ok: true, value: { next, items: (body.value.items as CloudRunSummary[]).filter(r => r && typeof r === 'object' && r.ownerAccount === principal
+    return { ok: true, value: { next, items: (body.value.items as (CloudRunSummary & Record<string, unknown>)[]).filter(r => r && typeof r === 'object' && r.ownerAccount === principal
       && typeof r.runId === 'string' && typeof r.flow === 'string' && typeof r.status === 'string')
-      .map(r => ({ runId: r.runId, flow: r.flow, status: r.status, ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence === true, updatedAt: r.updatedAt })) } };
+      .map(r => ({ runId: r.runId, flow: r.flow, status: r.status, ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence === true, updatedAt: r.updatedAt,
+        errorCode: typeof r.errorCode === 'string' && /^[A-Z][A-Z0-9_]{1,80}$/.test(r.errorCode) ? r.errorCode : null,
+        needsObservation: r.needsObservation === true, attentionRequired: r.attentionRequired === true })) } };
   } catch (error) { return deadlineEnded(error, signal) ? DEADLINE : { ok: false, code: 'CLOUD_API_UNAVAILABLE' }; }
 }

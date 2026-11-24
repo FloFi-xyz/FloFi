@@ -3,7 +3,8 @@
  * BUILD-MCP-002: wallet links (`mcp_wallet_links`). A link lets a pseudonymous FloFi account read — through MCP, with the
  * `flofi.runs` scope — the runs of a wallet whose owner proved control of it on FloFi and explicitly agreed, in a browser that also
  * holds that account. It is revocable, expires (30 days), tenant-scoped and capped. A link is never ownership and never financial
- * authority: it only widens what `get_execution_status` and `get_evidence` may show. A wallet address or an execution id alone
+ * authority: it only widens what `get_execution_status`, `get_evidence` and (BUILD-FLOFI-UNIVERSAL-CHANNELS-001, disclosed on `/connections`) the
+ * read-only `get_account`, `get_portfolio` and `list_executions` may show. A wallet address or an execution id alone
  * grants nothing.
  */
 import type { Database, Row } from '@defi-workflow-engine/cloud-runtime';

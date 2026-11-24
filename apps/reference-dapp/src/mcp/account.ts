@@ -15,7 +15,7 @@
 import { canonicalRunLifecycle } from '../domain/canonical-execution-status.ts';
 import type { PositionScan } from '../domain/defi-positions.ts';
 import { shortAddress, type WalletPortfolio } from '../domain/wallet-portfolio.ts';
-import { executionState } from '../platform/conversation-state.ts';
+import { conversationState, executionState } from '../platform/conversation-state.ts';
 import { principalOwners, principalScopes, type McpPrincipal, type McpWalletOwner } from './config.ts';
 import type { McpRuntime } from './runtime.ts';
 
@@ -41,6 +41,8 @@ export function deploymentPortfolioPort(env: Env = process.env): PortfolioReadPo
 const label = (wallet: McpWalletOwner) => { try { return shortAddress(wallet.address); } catch { return `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}`; } };
 /** The linked wallets a call reads: the account's own links only (never an address a request names), at most MAX_ACCOUNT_WALLETS. */
 export const linkedOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principalOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
+/** How many linked wallets a call did not read (beyond MAX_ACCOUNT_WALLETS): a call that skipped any is never complete. */
+export const omittedOwners = (principal: McpPrincipal): number => Math.max(0, principalOwners(principal).length - MAX_ACCOUNT_WALLETS);
 
 export function accountView(principal: McpPrincipal, origin: string) {
   const owners = principalOwners(principal), linkUrl = `${origin}/connections`;
@@ -50,7 +52,8 @@ export function accountView(principal: McpPrincipal, origin: string) {
     wallets: owners.map(o => ({ namespace: o.namespace, network: o.namespace === 'eip155' ? 'EVM' : 'SOLANA', address: o.address, label: label(o) })),
     walletCount: owners.length,
     identity: 'The account is identified by the wallets linked to it on FloFi, each proven by that wallet\'s own sign-in message — never by an e-mail, ' +
-      'username or app metadata. Saved state, history and approvals follow these wallets across ChatGPT, Claude, Telegram and the FloFi web app.',
+      'username or app metadata. Runs, evidence and execution history follow these wallets across the FloFi web app, ChatGPT and Claude. Approval requests ' +
+      'belong to the conversation or connection that made them (list_approvals: this connection\'s), and are claimed only by the wallet proven on FloFi.',
     ...principal.kind === 'mcp-oauth' ? { linkWallet: { url: linkUrl, how: 'Open this FloFi page, sign in with the same FloFi connection, connect the wallet and confirm ' +
       'its sign-in message. That message moves no funds and grants no spending authority. The same page removes a link or withdraws an open approval request.' } } : {},
     nextSteps: owners.length ? ['get_portfolio for balances and positions of these wallets', 'list_executions for their recent runs']
@@ -88,9 +91,13 @@ export async function historyView(runtime: McpRuntime, owners: readonly McpWalle
   const items = pages.flatMap(p => p.page.ok ? p.page.value.items.map(run => ({ wallet: label(p.owner), run })) : [])
     .sort((a, b) => String(b.run.updatedAt).localeCompare(String(a.run.updatedAt))).slice(0, 25)
     .map(({ wallet, run }) => {
-      const lifecycle = canonicalRunLifecycle({ status: run.status, hasEvidence: run.hasEvidence });
+      const lifecycle = canonicalRunLifecycle({ status: run.status, hasEvidence: run.hasEvidence, errorCode: run.errorCode ?? null,
+        needsObservation: run.needsObservation === true, attentionRequired: run.attentionRequired === true });
+      // A summary carries no attempts: "not started / waiting for the wallet" cannot be told apart from an in-flight request here.
+      const state = lifecycle.status === 'NOT_STARTED' || lifecycle.status === 'AUTHORIZATION_PENDING'
+        ? conversationState('STATUS_UNKNOWN', 'READ_GET_EXECUTION_STATUS') : executionState(lifecycle);
       return { executionId: run.runId, flow: run.flow, status: run.status, wallet, updatedAt: run.updatedAt, hasEvidence: run.hasEvidence, lifecycle,
-        conversationState: executionState(lifecycle) };
+        conversationState: state };
     });
   const more = pages.some(p => p.page.ok && p.page.value.next !== null);
   return { available: true as const, items, complete: failed.length === 0, ...failed.length ? { unreadWallets: failed.map(p => label(p.owner)),

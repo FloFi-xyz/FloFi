@@ -67,7 +67,9 @@ export function authorizationServerMetadata(config: OAuthConfig) {
     revocation_endpoint: `${config.origin}/oauth/revoke`, ...config.dcr.enabled ? { registration_endpoint: `${config.origin}/oauth/register` } : {},
     response_types_supported: ['code'], response_modes_supported: ['query'], grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'], revocation_endpoint_auth_methods_supported: ['none'],
-    scopes_supported: [...MCP_SCOPES], client_id_metadata_document_supported: true, authorization_response_iss_parameter_supported: true };
+    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: `offline_access` is advertised because hosts (ChatGPT) look for it before relying on refresh tokens;
+    // FloFi already accepts it and always issues a rotating refresh token, so it grants nothing new. The MCP resource's own scopes are unchanged.
+    scopes_supported: [...MCP_SCOPES, 'offline_access'], client_id_metadata_document_supported: true, authorization_response_iss_parameter_supported: true };
 }
 
 /** Parameters of a query string or form; a repeated parameter is an error (RFC 6749 §3.1). */

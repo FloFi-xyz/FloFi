@@ -22,7 +22,7 @@ import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
 import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan } from '../../platform/index.ts';
 import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
-import { channelRequester, createChannelApproval, endChannelApproval, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
+import { channelRequester, createChannelApproval, endChannelApproval, inSigningFlow, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
 import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
 import { learningCopy } from '../../domain/copilot-learning-copy.ts';
@@ -292,7 +292,7 @@ export function createChannelService(ctx: ChannelContext) {
       case 'CANCEL': {
         // An applied request is in the owner's signing flow: never told "cancelled" (the conversation still starts over).
         const ended = await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
-        await commit(decision.outcome, [...decision.replies, text(ended === 'APPLIED' ? lm.cancelApplied : prior.pending ? lm.cancelled : lm.noPending)], state);
+        await commit(decision.outcome, [...decision.replies, text(inSigningFlow(ended) ? lm.cancelApplied : prior.pending ? lm.cancelled : lm.noPending)], state);
         return { address: null, language: state.language };
       }
       case 'SUBSCRIBE': {
@@ -319,6 +319,12 @@ export function createChannelService(ctx: ChannelContext) {
           await commit('LINK_RUN_OPEN', [...decision.replies, text(lm.runOpen(continuationUrl(core.origin, last.handoff.handoffId)))], state);
           return { address: null, language: state.language };
         }
+        // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a proposal already APPLIED in the owner's signing flow may have run; a fresh link would propose it (or
+        // part of it) again. Nothing is proposed: running it again takes a new, explicit request.
+        if (last?.handoff.status === 'APPLIED' || last?.progress.workflowRun || inSigningFlow(await endChannelApproval(ctx.platform, conversationId, state.approvalId, now))) {
+          await commit('LINK_ALREADY_APPLIED', [...decision.replies, text(lm.linkApplied)], { ...state, steps: [], pending: null, approvalId: null });
+          return { address: null, language: state.language };
+        }
         const proposed = await propose(conversationId, state, state.pending, false, [], now);
         await commit(proposed.outcome, [...decision.replies, ...proposed.replies], proposed.state, { handoffId: proposed.handoffId, approvalReply: proposed.approvalReply });
         return { address: null, language: state.language };
@@ -331,7 +337,7 @@ export function createChannelService(ctx: ChannelContext) {
       // BUILD-CHAT-E2E-001: the step list. A kept step withdraws the shorter workflow's link (it must not run alone and then again).
       case 'ADD_STEP': {
         // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: steps of a workflow already in the owner's signing flow (it may have run) are never kept for a new one.
-        if (await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now) === 'APPLIED') {
+        if (inSigningFlow(await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now))) {
           await commit('STEP_AFTER_APPLIED', [...decision.replies, text(lm.stepAfterApplied)], { ...state, steps: [], pending: null, approvalId: null });
           return { address: null, language: state.language };
         }
@@ -344,7 +350,7 @@ export function createChannelService(ctx: ChannelContext) {
         return { address: null, language: state.language };
       }
       case 'WORKFLOW': {
-        if (await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now) === 'APPLIED') {
+        if (inSigningFlow(await endChannelApproval(ctx.platform, conversationId, prior.approvalId, now))) {
           await commit('WORKFLOW_ALREADY_APPLIED', [...decision.replies, text(lm.workflowApplied)], { ...state, steps: [], pending: null, approvalId: null });
           return { address: null, language: state.language };
         }
@@ -411,7 +417,7 @@ export function createChannelService(ctx: ChannelContext) {
     // BUILD-CHAT-E2E-001: with kept steps, the proposal is the whole step list as ONE canonical workflow (and one approval).
     const m = channelCopy(state.language), ended = await endChannelApproval(ctx.platform, conversationId, state.approvalId, now), revoked = ended === 'REVOKED';
     // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: a workflow already in the owner's signing flow may have run; its kept steps are never proposed again.
-    const dropped = ended === 'APPLIED' && (state.steps?.length ?? 0) > 0, kept = dropped ? [] : state.steps ?? [], strategy = canonicalWorkflow([...kept, command]);
+    const dropped = inSigningFlow(ended) && (state.steps?.length ?? 0) > 0, kept = dropped ? [] : state.steps ?? [], strategy = canonicalWorkflow([...kept, command]);
     if (!strategy.ok) return { outcome: 'PROPOSAL_NOT_CANONICAL', replies: [text(m.refused(strategy.code))], state: { ...state, ...dropped ? { steps: [] } : {}, pending: null, approvalId: null },
       handoffId: null, approvalReply: null };
     const approval = await createChannelApproval(ctx.platform, channelRequester(adapter, conversationId, strategy.intendedWallet), strategy, now);
@@ -425,7 +431,7 @@ export function createChannelService(ctx: ChannelContext) {
       notes: [...revoked ? [m.replaced] : [], ...dropped ? [m.earlierApplied] : [], ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
       intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null, aiInterpreted,
       expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
-    choices: adapter.linkWithChoices ? approvalActions(state.language, kept.length > 0) : [], link: { label: m.linkLabel, url: approval.approvalUrl },
+    choices: adapter.linkWithChoices ? approvalActions(state.language, specs.length > 1) : [], link: { label: m.linkLabel, url: approval.approvalUrl },
     visual: { model: strategy.visual, language: state.language } };
     return { outcome: 'APPROVAL_CREATED', replies: [reply], handoffId: approval.approvalId, approvalReply: { reply, handoffId: approval.approvalId },
       state: { ...state, pending: command.type === 'ADD_SEQUENCE' ? command : strategy.command,

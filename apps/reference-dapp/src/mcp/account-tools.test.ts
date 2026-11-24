@@ -21,10 +21,12 @@ import type { McpRuntime } from './runtime';
 const A = '0x' + 'a'.repeat(40), B = '0x' + 'b'.repeat(40), S = 'So11111111111111111111111111111111111111112';
 const env = { FLOFI_MCP: 'enabled', ...oauthEnv() };
 const config = readOAuthConfig(env) as OAuthConfig;
-const accounts = { X: 'mcpacct_' + 'x'.repeat(26), Y: 'mcpacct_' + 'y'.repeat(26), Z: 'mcpacct_' + 'z'.repeat(26) };
-const tokens = { X: newCredential('access'), Y: newCredential('access'), Z: newCredential('access') };
+const accounts = { X: 'mcpacct_' + 'x'.repeat(26), Y: 'mcpacct_' + 'y'.repeat(26), Z: 'mcpacct_' + 'z'.repeat(26), W: 'mcpacct_' + 'w'.repeat(26) };
+const tokens = { X: newCredential('access'), Y: newCredential('access'), Z: newCredential('access'), W: newCredential('access') };
 const links: Record<string, McpWalletOwner[]> = { [accounts.X]: [{ namespace: 'eip155', address: A }, { namespace: 'solana', address: S }],
-  [accounts.Y]: [{ namespace: 'eip155', address: B }], [accounts.Z]: [] };
+  [accounts.Y]: [{ namespace: 'eip155', address: B }], [accounts.Z]: [],
+  // An account with more linked wallets than one call reads.
+  [accounts.W]: [1, 2, 3, 4, 5].map(i => ({ namespace: 'eip155' as const, address: '0x' + String(i).repeat(40) }))};
 const apr = (c: string) => 'apr_' + c.repeat(26);
 
 /** An in-memory handoff store with the requester scoping the PostgreSQL store enforces (another requester's id is not found). */
@@ -45,21 +47,22 @@ function handoffs(records: HandoffRecord[]) {
     }),
   };
 }
-const handoff = (id: string, account: string, status: HandoffStatus): HandoffRecord => ({ handoffId: id, requesterKind: 'MCP_ACCOUNT', requesterRef: account, requesterContext: {},
+const handoff = (id: string, account: string, status: HandoffStatus, sequential = false): HandoffRecord => ({ handoffId: id, requesterKind: 'MCP_ACCOUNT', requesterRef: account, requesterContext: {},
   accountId: account, grantId: 'grt_x', clientId: 'https://claude.ai/client', clientName: 'Claude', strategy: {}, workflowHash: '0x' + '1'.repeat(64), engineVersion: 'v1',
-  networkEnvironment: 'PUBLIC_MAINNET', fundsClass: 'REAL_FUNDS', plan: { kind: 'SINGLE', steps: [], networks: ['base'] } as unknown as HandoffRecord['plan'], status,
-  claimed: null, shareStatus: false, runIds: [], expiresAt: new Date(Date.now() + 600_000), claimExpiresAt: null, claimedAt: null, appliedAt: null, endedAt: null,
+  networkEnvironment: 'PUBLIC_MAINNET', fundsClass: 'REAL_FUNDS', plan: { kind: sequential ? 'SEQUENTIAL' : 'SINGLE', steps: [], networks: ['base'] } as unknown as HandoffRecord['plan'],
+  status, claimed: status === 'PENDING' ? null : { namespace: 'eip155', address: A }, shareStatus: false, runIds: [], expiresAt: new Date(Date.now() + 600_000), claimExpiresAt: null, claimedAt: null, appliedAt: null, endedAt: null,
   createdAt: new Date('2026-11-24T10:00:00Z'), signingExpiresAt: null });
 
-function state(store: ReturnType<typeof handoffs>, scopes: readonly McpScope[] = ['flofi.strategy', 'flofi.runs', 'flofi.approval']) {
+function state(store: ReturnType<typeof handoffs>, scopes: readonly McpScope[] = ['flofi.strategy', 'flofi.runs', 'flofi.approval'],
+  options: { runs?: Record<string, unknown>; allow?: (bucket: string) => boolean } = {}) {
   return {
     oauth: { authenticate: async (digest: Buffer) => {
       const who = (Object.keys(tokens) as (keyof typeof tokens)[]).find(k => credentialDigest(config.keys.token, tokens[k]).equals(digest));
       return who ? { accountId: accounts[who], grantId: 'grt_' + who.toLowerCase().repeat(26), clientId: 'https://claude.ai/client', clientName: 'Claude', scopes,
         resource: config.resource, familyId: 'fam_' + 'a'.repeat(26), expiresAt: new Date(Date.now() + 3_600_000) } : null;
-    }, allow: async () => true },
+    }, allow: async (bucket: string) => options.allow?.(bucket) ?? true },
     links: { active: vi.fn(async (account: string) => (links[account] ?? []).map((l, i) => ({ linkId: `lnk_${i}`, ...l, createdAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000) }))) },
-    handoffs: store, workflowRuns: {},
+    handoffs: store, workflowRuns: { byHandoff: vi.fn(async (id: string) => options.runs?.[id] ?? null) },
   } as unknown as McpState;
 }
 
@@ -101,7 +104,8 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
   it('get_portfolio reads exactly the linked wallets; an unread network is UNAVAILABLE, a failed wallet INCOMPLETE, never zero', async () => {
     const { port: p, calls } = port({ [S]: 'PORTFOLIO_SOLANA_ADDRESS_INVALID' });
     const out = (await session({ env, token: tokens.X, state: state(handoffs([])), portfolio: p }).callTool('get_portfolio', {})).output as Record<string, unknown>;
-    expect(calls.sort()).toEqual([`balances:eip155:${A}`, `balances:solana:${S}`, `positions:eip155:${A}`, `positions:solana:${S}`].sort());
+    // Positions are read one wallet after another, and not for a wallet whose balances could not be read.
+    expect(calls.sort()).toEqual([`balances:eip155:${A}`, `balances:solana:${S}`, `positions:eip155:${A}`].sort());
     expect(out).toMatchObject({ ok: true, readOnly: true, complete: false, note: expect.stringMatching(/UNKNOWN \(not zero\)/) });
     const [evm, sol] = out.wallets as Record<string, unknown>[];
     expect(evm).toMatchObject({ read: true, wallet: { address: A }, pricedTotalUsd: '1.50', holdings: [{ symbol: 'USDC', units: '1500000', valueUsd: '1.50' }],
@@ -116,6 +120,28 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
     expect(refused.output).toMatchObject({ ok: false, code: 'MCP_WALLET_LINK_REQUIRED', linkWalletUrl: `${config.origin}/connections` });
     expect(refused.texts.at(-1)).toMatch(/^userMessage \(EN\): Link your wallet to FloFi first[\s\S]*userMessage \(PT\): Vincule/);
     expect(z.calls).toEqual([]);
+  });
+
+  it('wallets beyond the per-call cap are reported omitted, never a complete answer; portfolio reads have an hourly account budget', async () => {
+    const { port: p, calls } = port();
+    const out = (await session({ env, token: tokens.W, state: state(handoffs([])), portfolio: p }).callTool('get_portfolio', { positions: false })).output;
+    expect(out).toMatchObject({ ok: true, complete: false, walletsOmitted: 1 });
+    expect(calls).toHaveLength(4);
+    const pages = Object.fromEntries([1, 2, 3, 4].map(i => ['0x' + String(i).repeat(40), { ok: true, value: { next: null, items: [] } }]));
+    expect((await session({ env, token: tokens.W, state: state(handoffs([])), runtime: runtime(pages) }).callTool('list_executions', {})).output)
+      .toMatchObject({ ok: true, complete: false, walletsOmitted: 1 });
+    const limited = await session({ env, token: tokens.X, state: state(handoffs([]), undefined, { allow: bucket => !bucket.startsWith('portfolio:') }), portfolio: port().port })
+      .callTool('get_portfolio', {});
+    expect(limited.output).toEqual({ ok: false, code: 'PORTFOLIO_RATE_LIMITED' });
+  });
+
+  it('list_executions never presents a summary it cannot tell apart from an in-flight request as waiting for the wallet', async () => {
+    const pages = { [A]: { ok: true, value: { next: null, items: [
+      { runId: 'run-x', flow: 'base-swap', status: 'AUTHORIZED', ownerAccount: A, hasEvidence: false, updatedAt: '2026-11-24T09:00:00.000Z', errorCode: 'PAYMENT_WALLET_RESULT_UNKNOWN' },
+      { runId: 'run-y', flow: 'base-swap', status: 'SIMULATED', ownerAccount: A, hasEvidence: false, updatedAt: '2026-11-24T08:00:00.000Z' }] } },
+      [S]: { ok: true, value: { next: null, items: [] } } };
+    const out = (await session({ env, token: tokens.X, state: state(handoffs([])), runtime: runtime(pages) }).callTool('list_executions', {})).output as { items: Record<string, unknown>[] };
+    for (const item of out.items) expect((item.conversationState as { state: string }).state, String(item.executionId)).not.toBe('AWAITING_SIGNATURE');
   });
 
   it('get_portfolio and list_executions accept no wallet or address argument', async () => {
@@ -175,6 +201,27 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 approval requests', () => {
     store.revokeForRequester.mockImplementationOnce(async () => ({ ...store.records[0]!, status: 'APPLIED' as const }));
     expect((await session({ env, token: tokens.X, state: state(store) }).callTool('cancel_approval', { approvalId: apr('a') })).output)
       .toMatchObject({ ok: true, cancelled: false, status: 'APPLIED', conversationState: { state: 'STATUS_UNKNOWN' } });
+  });
+
+  it('a multi-step request whose run started at the claim is never cancellable here and never listed as awaiting, expired or cancelled', async () => {
+    const store = handoffs([handoff(apr('a'), accounts.X, 'CLAIMED', true), handoff(apr('b'), accounts.X, 'EXPIRED', true), handoff(apr('c'), accounts.X, 'PENDING', true)]);
+    const x = session({ env, token: tokens.X, state: state(store, undefined, { runs: { [apr('a')]: { runId: 'wfr_a' }, [apr('b')]: { runId: 'wfr_b' } } }) });
+    const listed = (await x.callTool('list_approvals', {})).output as { approvals: { approvalId: string; conversationState: { state: string } }[] };
+    expect(listed.approvals.map(a => [a.approvalId, a.conversationState.state])).toEqual([[apr('a'), 'STATUS_UNKNOWN'], [apr('b'), 'STATUS_UNKNOWN'],
+      [apr('c'), 'AWAITING_WALLET_CONNECTION']]);
+    const refused = await x.callTool('cancel_approval', { approvalId: apr('a') });
+    expect(refused.output).toMatchObject({ ok: false, code: 'APPROVAL_NOT_CANCELLABLE', reason: 'WORKFLOW_RUN_STARTED' });
+    expect(store.records.find(h => h.handoffId === apr('a'))!.status).toBe('CLAIMED');
+    // Not claimed yet: nothing could have been signed, so it is cancellable.
+    expect((await x.callTool('cancel_approval', { approvalId: apr('c') })).output).toMatchObject({ ok: true, cancelled: true });
+  });
+
+  it('a run claimed between the read and the cancel is reported as it is, never as cancelled', async () => {
+    const store = handoffs([handoff(apr('a'), accounts.X, 'CLAIMED', true)]);
+    const runs: Record<string, unknown> = {};
+    store.revokeForRequester.mockImplementationOnce(async () => { runs[apr('a')] = { runId: 'wfr_late' }; return { ...store.records[0]!, status: 'REVOKED' as const }; });
+    expect((await session({ env, token: tokens.X, state: state(store, undefined, { runs }) }).callTool('cancel_approval', { approvalId: apr('a') })).output)
+      .toMatchObject({ ok: true, cancelled: false, conversationState: { state: 'STATUS_UNKNOWN' } });
   });
 
   it('the account tools need the scopes they declare (no approval scope: no approval tools)', async () => {

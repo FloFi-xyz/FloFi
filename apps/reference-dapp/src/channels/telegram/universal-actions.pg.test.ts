@@ -38,9 +38,11 @@ async function deployment() {
     await applyApproval(await surface(), secretOf(link), [evm(OWNER)], claimed.workflow);
     return claimed.view.approvalId;
   };
+  /** The owner proves their wallet and claims the proposal only (a multi-step run starts here; the handoff still reads CLAIMED). */
+  const ownerClaims = async (link: string) => (await claimApproval(await surface(), secretOf(link), [evm(OWNER)], true)).view.approvalId;
   const handoffs = async () => (await t.db.query(`SELECT handoff_id, status, strategy FROM mcp_handoffs WHERE tenant_id = $1 ORDER BY created_at`, [tenantId]))
     .rows as { handoff_id: string; status: string; strategy: unknown }[];
-  return { api, say: (text: string) => post(textUpdate(text)), tap: (data: string) => post(callbackUpdate(data)), ownerApplies, handoffs };
+  return { api, say: (text: string) => post(textUpdate(text)), tap: (data: string) => post(callbackUpdate(data)), ownerApplies, ownerClaims, handoffs };
 }
 type Keyboard = { inline_keyboard: { text: string; url?: string; callback_data?: string }[][] };
 const keyboardOf = (call: { params: Record<string, unknown> }) => {
@@ -103,6 +105,31 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 Telegram approval actions (PostgreS
     await d.ownerApplies(d.api.lastLink()!);
     await d.say('remove step 1');
     expect(d.api.texts().at(-1)).toMatch(/already in your FloFi signing flow, so it cannot be edited here/);
+    expect((await d.handoffs()).map(h => h.status)).toEqual(['APPLIED']);
+  });
+
+  it('a claimed multi-step workflow whose run started is in the signing flow even while its handoff reads CLAIMED: never withdrawn or carried forward', async () => {
+    const d = await deployment();
+    await d.say(SWAP);
+    await d.say('add step');
+    await d.say(BRIDGE('5'));
+    await d.ownerClaims(d.api.lastLink()!);
+    expect((await d.handoffs()).map(h => h.status)).toEqual(['REVOKED', 'CLAIMED']);
+    await d.tap('act:add');
+    expect(d.api.texts().at(-1)).toMatch(/already in your FloFi signing flow, so it may have run/);
+    await d.say('swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
+    const all = await d.handoffs();
+    // The claimed workflow keeps its state (its run continues for the owner); the new request is only the new swap.
+    expect(all.map(h => h.status)).toEqual(['REVOKED', 'CLAIMED', 'PENDING']);
+    expect(actions(all.at(-1)!.strategy)).toEqual(['"action":"swap"']);
+  });
+
+  it('LINK never re-proposes a proposal already APPLIED in the signing flow', async () => {
+    const d = await deployment();
+    await d.say(SWAP);
+    await d.ownerApplies(d.api.lastLink()!);
+    await d.say('link');
+    expect(d.api.texts().at(-1)).toMatch(/A new link would propose it again, so none was sent/);
     expect((await d.handoffs()).map(h => h.status)).toEqual(['APPLIED']);
   });
 });

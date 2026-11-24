@@ -65,7 +65,7 @@ import { CONCEPT_IDS, CONCEPT_LEVELS, CONCEPT_PROTOCOLS } from '../domain/intell
 import { matchPlatformTopic, platformAnswer, platformGuide, type PlatformTopic } from '../domain/intelligence/platform-guide';
 import { explainConcept, explainWorkflow } from '../platform/explain.ts';
 import { AUTOMATION_MANAGEMENT, AUTOMATION_RULE_ID, automationStatus, automationTypes, type AutomationReadPort } from './automations.ts';
-import { accountView, historyView, linkedOwners, portfolioView, positionsView, type PortfolioReadPort } from './account.ts';
+import { accountView, historyView, linkedOwners, omittedOwners, portfolioView, positionsView, type PortfolioReadPort } from './account.ts';
 import { approvalState, authoringState, conversationState, executionState, simulationState, userFacingError, validationState } from '../platform/conversation-state.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
@@ -95,8 +95,8 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'Account questions: get_account (linked wallets; a new wallet is linked only on the FloFi Connections link it returns), get_portfolio (balances and ' +
   'positions of linked wallets) and list_executions (their history). To continue after the person says they signed or asks whether it completed, read ' +
   'get_approval_status (list_approvals finds earlier requests); report only its conversationState — CONFIRMED is the only completed state, and STATUS_UNKNOWN or ' +
-  'NEEDS_ATTENTION is never "not run". To change a step before signing, compose again and request a new approval (it supersedes the older one); cancel_approval ' +
-  'withdraws a request only when the person asks. Steps already confirmed are never repeated. When a tool fails, tell the person its userMessage, not the code.';
+  'NEEDS_ATTENTION is never "not run". To change a step before signing, compose again and request a new approval; a changed workflow does not replace the older ' +
+  'request, so offer cancel_approval for the older one (only with the person\'s consent). Steps already confirmed are never repeated. When a tool fails, tell the person its userMessage, not the code.';
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
 export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
   'never move a request to a mainnet on your own — ask the user which mainnet and amount they want.';
@@ -301,7 +301,7 @@ export function timeoutResult(tool: ToolName, code: string, requestId: string | 
  * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: what a person can read about a failed tool call, as a second text block (EN and PT). The structured
  * error (`ok`, `code`, extras) stays exactly as clients already parse it; the code is for clients, the message is for the person.
  */
-const userMessageContent = (code: string): Content => {
+export const userMessageContent = (code: string): Content => {
   const plain = userFacingError(code);
   return { type: 'text', text: `userMessage (EN): ${plain.EN}\nuserMessage (PT): ${plain.PT}` };
 };
@@ -334,6 +334,8 @@ const canRequestApproval = (ctx: ToolContext) => ctx.principal.kind === 'mcp-oau
 
 /** BUILD-MCP-002: an OAuth account's hourly simulation budget (on top of the platform's shared per-instance concurrency cap). */
 export const SIMULATIONS_PER_ACCOUNT_HOUR = 30;
+/** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an OAuth account's hourly portfolio reads (each one reads several public networks and protocol positions). */
+export const PORTFOLIO_READS_PER_ACCOUNT_HOUR = 30;
 
 export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   const scope = ctx.scope ?? networkScope(), Schemas = SCHEMAS[scope];
@@ -660,19 +662,29 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     if (!principalOwners(ctx.principal).length) return linkRequired();
     const port = ctx.portfolio;
     if (!port) return failWith('PORTFOLIO_NOT_AVAILABLE');
-    const wallets = await Promise.all(linkedOwners(ctx.principal).map(async wallet => {
-      try {
-        const [balances, positions] = await Promise.all([port.balances(wallet),
-          args.positions === false || !port.positions ? Promise.resolve(null) : port.positions(wallet).then(positionsView, (error: unknown) =>
-            ({ unavailable: error instanceof Error && CODE.test(error.message) ? error.message : 'POSITION_SCAN_UNAVAILABLE' }))]);
-        return { read: true, ...portfolioView(wallet, balances), positions };
-      } catch (error) {
-        return { read: false, wallet: { namespace: wallet.namespace, address: wallet.address }, code: error instanceof Error && CODE.test(error.message) ? error.message : 'PORTFOLIO_READ_FAILED' };
+    // An OAuth account's hourly portfolio budget: each call reads public chains and shares the per-process position limiter with the Dashboard.
+    const principal = ctx.principal, state = ctx.state;
+    if (principal.kind === 'mcp-oauth' && state && !await state.oauth.allow(`portfolio:account:${principal.accountId}`, PORTFOLIO_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
+      return failWith('PORTFOLIO_RATE_LIMITED');
+    // Balances of every wallet in parallel; positions one wallet after another (the shared position limiter admits two scans at a time).
+    const balances = await Promise.all(linkedOwners(principal).map(wallet => port.balances(wallet).then(value => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, code: error instanceof Error && CODE.test(error.message) ? error.message : 'PORTFOLIO_READ_FAILED' }))));
+    const wallets: Output[] = [];
+    let positionsComplete = true;
+    for (const [index, wallet] of linkedOwners(principal).entries()) {
+      const read = balances[index]!;
+      if (!read.ok) { wallets.push({ read: false, wallet: { namespace: wallet.namespace, address: wallet.address }, code: read.code }); continue; }
+      let positions: unknown = null;
+      if (args.positions !== false && port.positions) {
+        positions = await port.positions(wallet).then(positionsView, (error: unknown) =>
+          ({ unavailable: error instanceof Error && CODE.test(error.message) ? error.message : 'POSITION_SCAN_UNAVAILABLE' }));
+        if (!Array.isArray(positions) || positions.some(scan => scan.status !== 'COMPLETE' && scan.status !== 'UNSUPPORTED')) positionsComplete = false;
       }
-    }));
-    const complete = wallets.every(w => w.read);
-    return { ok: true, readOnly: true, wallets, complete, authority: AUTHORITY,
-      ...complete ? {} : { note: 'Some wallets could not be read now; their balances are UNKNOWN (not zero). Try again.' },
+      wallets.push({ read: true, ...portfolioView(wallet, read.value), positions });
+    }
+    const omitted = omittedOwners(principal), complete = wallets.every(w => w.read) && positionsComplete && omitted === 0;
+    return { ok: true, readOnly: true, wallets, complete, authority: AUTHORITY, ...omitted ? { walletsOmitted: omitted } : {},
+      ...complete ? {} : { note: 'Some balances, positions or wallets could not be read now; they are UNKNOWN (not zero). Try again.' },
       notes: ['Balances are public chain state at observedAt. Before any action FloFi re-reads balances and simulates again in the signing page.'] };
   });
 
@@ -683,7 +695,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     if (!principalOwners(ctx.principal).length) return linkRequired();
     const history = await historyView(ctx.runtime, linkedOwners(ctx.principal));
     if (!history.available) return failWith('HISTORY_NOT_AVAILABLE');
-    return { ok: true, ...history, accessBasis: accessBasis(ctx), authority: AUTHORITY };
+    const omitted = omittedOwners(ctx.principal);
+    return { ok: true, ...history, ...omitted ? { complete: false, walletsOmitted: omitted } : {}, accessBasis: accessBasis(ctx), authority: AUTHORITY };
   });
 
   if (ctx.principal.kind === 'mcp-oauth' && ctx.state && ctx.oauth) {
@@ -707,8 +720,12 @@ const ApprovalSchemas = {
   byId: Type.Object({ approvalId: ApprovalId }, strict),
   list: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: 'How many of the most recent approval requests (default 10).' })) }, strict),
 };
-/** An approval as a list shows it, without reading its runs: an APPLIED one is UNKNOWN there (get_approval_status reads its runs). */
-const listedState = (status: string) => status === 'APPLIED' ? conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS') : approvalState({ status });
+/**
+ * An approval as a list shows it, without reading its runs: an APPLIED one, and a claimed multi-step one (its run starts at the claim and can sign
+ * steps while the handoff still reads CLAIMED or later EXPIRED), is UNKNOWN there — get_approval_status reads the runs.
+ */
+const listedState = (view: { readonly status: string; readonly executionPlan: string; readonly claimed: boolean }) => view.status === 'APPLIED'
+  ? conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS') : approvalState(view);
 /** BUILD-MCP-002: the bridge to the owner's own wallet in FloFi. Every result carries authority NONE. */
 function registerApprovalTools(ctx: ToolContext, register: Register) {
   const oauth = ctx.oauth!, state = ctx.state!, principal = ctx.principal as McpOAuthPrincipal;
@@ -782,7 +799,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'It authorizes nothing and never reveals the claiming wallet.', ApprovalSchemas.list, { ...pure, idempotentHint: false }, async args => {
     const records = await state.handoffs.listForRequester(requesterScope(requester), new Date(), args.limit ?? 10);
     return { ok: true, approvals: records.map(h => { const status = approvalStatus(h); return { ...status, createdAt: h.createdAt.toISOString(),
-      conversationState: listedState(status.status) }; }), authority: AUTHORITY };
+      conversationState: listedState(status) }; }), authority: AUTHORITY };
   });
 
   register('cancel_approval', 'Cancel an approval request', 'Withdraw one of this account\'s approval requests before its proposal is in the owner\'s signing flow ' +
@@ -791,16 +808,22 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'signs, sends and refunds nothing. Only call it when the person asks to cancel.', ApprovalSchemas.byId,
   { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }, async args => {
     const h = await owned(args.approvalId);
+    // A multi-step proposal's run starts at the claim and may already have signed steps while the handoff reads CLAIMED: never cancellable here.
+    const runOf = async () => h.plan.kind === 'SEQUENTIAL' ? await state.workflowRuns.byHandoff(h.handoffId) : null;
+    if (await runOf()) return failWith('APPROVAL_NOT_CANCELLABLE', { status: h.status, reason: 'WORKFLOW_RUN_STARTED',
+      conversationState: conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS'),
+      next: 'This workflow is already in the owner\'s signing flow. They can reject the wallet prompt or stop it in the FloFi signing page; read get_approval_status.' });
     if (h.status === 'APPLIED') return failWith('APPROVAL_NOT_CANCELLABLE', { status: h.status, conversationState: conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS'),
       next: 'The proposal is already in the owner\'s signing flow. They can reject the wallet prompt or stop it in the FloFi signing page; read get_approval_status for its state.' });
     if (h.status !== 'PENDING' && h.status !== 'CLAIMED') return { ok: true, approvalId: h.handoffId, status: h.status, cancelled: false, alreadyEnded: true,
       conversationState: approvalState({ status: h.status }), authority: AUTHORITY };
     const ended = await state.handoffs.revokeForRequester(h.handoffId, requesterScope(requester), new Date());
     if (!ended) return failWith('APPROVAL_NOT_FOUND');
-    // Re-read under the store's lock: a request applied in the meantime is reported as it is, never as cancelled.
-    return { ok: true, approvalId: ended.handoffId, status: ended.status, cancelled: ended.status === 'REVOKED', authority: AUTHORITY,
-      conversationState: ended.status === 'APPLIED' ? conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS') : approvalState({ status: ended.status }),
-      message: ended.status === 'REVOKED' ? 'The approval request was cancelled. Its link no longer works; nothing was signed or sent from it.'
-        : 'The request was not cancelled: it changed state first. Read get_approval_status.' };
+    // Re-read after the store's lock: a request applied (or a run claimed) in the meantime is reported as it is, never as cancelled.
+    const raced = ended.status === 'APPLIED' || await runOf() !== null;
+    return { ok: true, approvalId: ended.handoffId, status: ended.status, cancelled: ended.status === 'REVOKED' && !raced, authority: AUTHORITY,
+      conversationState: raced ? conversationState('STATUS_UNKNOWN', 'READ_GET_APPROVAL_STATUS') : approvalState({ status: ended.status }),
+      message: ended.status === 'REVOKED' && !raced ? 'The approval request was cancelled. Its link no longer works; nothing was signed or sent from it.'
+        : 'The request was not cancelled as asked: it reached the owner\'s signing flow first. Read get_approval_status.' };
   });
 }

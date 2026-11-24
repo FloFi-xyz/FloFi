@@ -64,7 +64,24 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
     expect(workflowRunState({ state: 'RUNNING', nextAction: 'OWNER_SIGNS_STEP', halted: null, resumable: false, steps: [{ state: 'RECONCILED' }, { state: 'AWAITING_OWNER' }] }))
       .toMatchObject({ state: 'AWAITING_SIGNATURE', reason: 'NEXT_STEP' });
     expect(workflowRunState({ state: 'RUNNING', nextAction: 'WAITING_FOR_RECONCILIATION', halted: null, resumable: false }).state).toBe('PENDING_CONFIRMATION');
-    expect(approvalState({ status: 'APPLIED', executionPlan: 'SEQUENTIAL', workflowRun: null }).state).toBe('AWAITING_SIGNATURE');
+    // A claimed multi-step proposal whose run was not read here may have signed steps: unknown, never "awaiting".
+    expect(approvalState({ status: 'APPLIED', executionPlan: 'SEQUENTIAL', workflowRun: null })).toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'READ_GET_APPROVAL_STATUS' });
+  });
+
+  it('a multi-step run decides whatever the handoff reads (its run starts at the claim and can sign while CLAIMED, then EXPIRED or REVOKED)', () => {
+    const running = { state: 'RUNNING', nextAction: 'OWNER_SIGNS_GROUP', halted: null, resumable: false, steps: [{ state: 'RECONCILED' }, { state: 'AWAITING_OWNER' }] };
+    for (const status of ['CLAIMED', 'EXPIRED', 'REVOKED', 'SUPERSEDED', 'STALE'])
+      expect(approvalState({ status, executionPlan: 'SEQUENTIAL', claimed: true, workflowRun: running }), status).toMatchObject({ state: 'AWAITING_SIGNATURE', reason: 'NEXT_STEP' });
+    expect(approvalState({ status: 'EXPIRED', executionPlan: 'SEQUENTIAL', claimed: true, workflowRun: { ...running, state: 'COMPLETED', nextAction: 'NONE' } }).state).toBe('CONFIRMED');
+    expect(approvalState({ status: 'REVOKED', executionPlan: 'SEQUENTIAL', claimed: true, workflowRun: { ...running, state: 'HALTED', halted: 'PARTIAL', resumable: false } }))
+      .toMatchObject({ state: 'PARTIALLY_EXECUTED', final: true });
+    // Claimed, run not read: unknown — never EXPIRED / CANCELLED / awaiting.
+    for (const status of ['CLAIMED', 'EXPIRED', 'REVOKED']) expect(approvalState({ status, executionPlan: 'SEQUENTIAL', claimed: true }).state, status).toBe('STATUS_UNKNOWN');
+    // Never claimed: nothing could have been signed.
+    expect(approvalState({ status: 'EXPIRED', executionPlan: 'SEQUENTIAL', claimed: false }).state).toBe('EXPIRED');
+    expect(approvalState({ status: 'PENDING', executionPlan: 'SEQUENTIAL', claimed: false }).state).toBe('AWAITING_WALLET_CONNECTION');
+    // Only recent runs examined and none found: unknown, never "in the signing page".
+    expect(approvalState({ status: 'APPLIED', runsVisible: true, runs: [], runsTruncated: true })).toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'RUNS_TRUNCATED' });
   });
 
   it('plain-language refusals never expose the code and exist in EN and PT', () => {
@@ -83,6 +100,12 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
     expect(userFacingError('CLOUD_API_PREVIEW_UNAVAILABLE').EN).toBe('The current quote is temporarily unavailable. You can try again without rebuilding your workflow.');
     expect(userFacingError('MCP_HANDOFF_LIMIT').EN).toContain('open approval requests');
     expect(userFacingError('SOMETHING_ELSE').EN).toContain('did not sign or send anything');
+    // Narrow families: provider/catalog codes that merely contain TOKEN are not "reconnect"; expiry never claims that nothing was signed.
+    expect(userFacingError('BASE_TOKEN_LIST_UNAVAILABLE').EN).not.toMatch(/reconnect/);
+    expect(userFacingError('KORA_FEE_TOKEN_UNSUPPORTED').EN).not.toMatch(/reconnect/);
+    expect(userFacingError('APPROVAL_EXPIRED').EN).not.toMatch(/nothing was signed/i);
+    expect(userFacingError('PORTFOLIO_NOT_AVAILABLE').EN).toMatch(/balances, positions or history/);
+    expect(userFacingError('MCP_CLOUD_RUNTIME_REQUIRED').EN).not.toMatch(/missing or invalid/);
   });
 
   it('final and completed are consistent for every state', () => {
