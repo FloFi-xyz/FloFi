@@ -223,9 +223,9 @@ MOCKED/fixture doubles.
 
 | Gate | Result |
 | --- | --- |
-| `pnpm check` (typecheck 17 tasks, lint, build 9 tasks, schema export check, unit suite) on `7750124` | **Passed**: 777 files / 10,027 tests; 2 files / 2 tests skipped (existing owner-fixture gates, not passes) |
+| `pnpm check` (typecheck 17 tasks, lint, build 9 tasks, schema export check, unit suite) on `dfb46ea` (final code) | **Passed**: 777 files / 10,028 tests; 2 files / 2 tests skipped (existing owner-fixture gates, not passes) |
 | `pnpm test:postgres` on `7750124` | 147 files / 1,016 tests passed; **6 failed, all PostgreSQL-version artifacts unrelated to this diff** (no file under `packages/` or `apps/reference-dapp/backend/` changed): `backend/database-privileges.pg.test.ts` ×5 (`unrecognized privilege type: "MAINTAIN"` — a PostgreSQL 17+ privilege — and cascaded grant failures) and `packages/cloud-runtime/test/forward-compatibility.pg.test.ts` ×1 (PostgreSQL 18 NOT NULL constraint catalogue). Neither these tests nor any code they exercise is touched by this build; they were not re-run on unmodified `main` locally. They must pass on CI's PostgreSQL 18.6. |
-| Focused suites (channels, MCP, platform, workflow runs, incl. PostgreSQL) at the final code | 899 passed, 3 skipped (existing) |
+| Focused suites incl. PostgreSQL after the last fixes (channels, MCP, platform) | 732 passed, 3 skipped (existing); earlier run incl. workflow runs: 899 passed |
 | New suites | `platform/conversation-state.test.ts` (10), `mcp/account-tools.test.ts` (14), `channels/telegram/universal-actions.test.ts` (5), `channels/telegram/universal-actions.pg.test.ts` (7) — all pass |
 | Browser: `playwright.docs.config.ts` (`e2e/site.spec.ts`) against the local production build on loopback | **20/20 passed**, incl. Docs in both languages and no horizontal overflow at 320/390 px on `/docs/mcp-integrations` |
 | `python3 scripts/governance_lite.py`; governance self-tests (21); `test_ci_*` (336); `git diff --check` | Passed |
