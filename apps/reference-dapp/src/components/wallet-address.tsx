@@ -22,28 +22,32 @@ const COPIED_MS = 2_000;
 
 export function WalletAddress({ address, ecosystem, network, label, showEcosystem = true, className }: { address: string; ecosystem?: AddressEcosystem | null;
   /** Shown after the ecosystem when the wallet is on a known network ("Base"). Already translated by the caller or a catalog name. */ network?: string | null;
-  /** What the address is, already in the page's language ("Your EVM wallet", a wallet's own name — never translated here): names the copy button. */ label?: string; showEcosystem?: boolean; className?: string }) {
+  /** The wallet's own name ("Work wallet"), when the row has one: the button reads "Copy Work wallet address" (the name itself is never translated).
+   *  Without it the button names the address by its ecosystem ("Copy EVM address"). */ label?: string; showEcosystem?: boolean; className?: string }) {
   const { t } = useLocale();
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const kind = ecosystem ?? addressEcosystem(address);
-  const name = label ? label : kind ? t('{0} address', ECOSYSTEM_NAME[kind]) : t('Wallet address');
+  // Exact catalog messages (frontend review): no broad "{0} address" template that could rewrite a user's own name in Portuguese.
+  const button = label ? t('Copy {0} address', label) : kind === 'evm' ? t('Copy EVM address') : kind === 'solana' ? t('Copy Solana address') : t('Copy address');
+  const copied = label ? t('{0} address copied.', label) : kind === 'evm' ? t('EVM address copied.') : kind === 'solana' ? t('Solana address copied.') : t('Address copied.');
   async function copy() {
     if (timer.current) clearTimeout(timer.current);
-    try { await navigator.clipboard.writeText(address); setState('copied'); } catch { setState('failed'); }
-    timer.current = setTimeout(() => setState('idle'), COPIED_MS);
+    try { await navigator.clipboard.writeText(address); setState('copied'); timer.current = setTimeout(() => setState('idle'), COPIED_MS); }
+    // A failure keeps the selectable full address until the next attempt (frontend review: no time limit on the manual-copy fallback).
+    catch { setState('failed'); }
   }
   return <span className={`wallet-address-value${className ? ` ${className}` : ''}`} data-wallet-address={address} data-ecosystem={kind ?? undefined}>
     {showEcosystem && kind && <span className="wallet-address-ecosystem">{ECOSYSTEM_NAME[kind]}{network ? ` · ${network}` : ''}</span>}
     <code className="numeric wallet-address" title={address}><span aria-hidden="true">{shortWalletAddress(address)}</span><span className="sr-only">{address}</span></code>
-    <button type="button" className="wallet-address-copy" aria-label={t('Copy {0}', name)} title={t(state === 'copied' ? 'Copied' : 'Copy address')} data-copy-state={state}
+    <button type="button" className="wallet-address-copy" aria-label={button} title={t(state === 'copied' ? 'Copied' : 'Copy address')} data-copy-state={state}
       onClick={() => void copy()}>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {state === 'copied' ? <path d="M5 12.5l4.5 4.5L19 7.5"/> : <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></>}
       </svg>
     </button>
-    <span className="sr-only" role="status" aria-live="polite">{state === 'copied' ? t('{0} copied.', name) : state === 'failed' ? `${t('Copy unavailable.')} ${address}` : ''}</span>
+    <span className="sr-only" role="status" aria-live="polite">{state === 'copied' ? copied : state === 'failed' ? `${t('Copy unavailable.')} ${address}` : ''}</span>
     {state === 'failed' && <span className="wallet-address-copy-failed" aria-hidden="true">{t('Copy unavailable.')} <span className="numeric">{address}</span></span>}
   </span>;
 }

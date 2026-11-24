@@ -18,6 +18,11 @@ describe('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 WS02 WalletAddress', () => {
     expect(shortWalletAddress(EVM)).toBe('0x5290…9EE7');
     expect(html).toContain('aria-label="Copy EVM address"');
   });
+  it('a Portuguese user name ending in "address" is never rewritten by a catalog template', async () => {
+    const { translate } = await import('../i18n/translate');
+    // This build adds no "{0} address" template (frontend review). Other, pre-existing catalog templates are out of this build's scope.
+    expect(translate('PT', 'Treasury address')).not.toMatch(/^Endereço/);
+  });
   it('names the ecosystem (and network) so EVM and Solana addresses are never confused', () => {
     expect(render({ address: EVM, network: 'Base' })).toContain('<span class="wallet-address-ecosystem">EVM · Base</span>');
     expect(render({ address: SOL })).toContain('<span class="wallet-address-ecosystem">Solana</span>');
@@ -28,9 +33,10 @@ describe('BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 WS02 WalletAddress', () => {
   });
   it('reads in Portuguese', () => {
     const html = render({ address: SOL }, 'PT');
-    expect(html).toContain('aria-label="Copiar Endereço Solana"');
+    expect(html).toContain('aria-label="Copiar endereço Solana"');
   });
-  it('a caller-named wallet names the copy button', () => {
-    expect(render({ address: EVM, label: 'Your EVM wallet', showEcosystem: false })).toContain('aria-label="Copy Your EVM wallet"');
+  it('a wallet with its own name names the copy button by that name, untranslated', () => {
+    expect(render({ address: EVM, label: 'Work wallet', showEcosystem: false })).toContain('aria-label="Copy Work wallet address"');
+    expect(render({ address: EVM, label: 'Work wallet', showEcosystem: false }, 'PT')).toContain('aria-label="Copiar endereço de Work wallet"');
   });
 });

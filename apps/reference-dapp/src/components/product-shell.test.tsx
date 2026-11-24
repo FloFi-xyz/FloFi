@@ -110,7 +110,7 @@ describe('product shell rendering', () => {
       // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS02): the short address stays the visible text; the full address is its tooltip, is read to screen
       // readers and is what Copy copies.
       expect(html).toContain('<code class="numeric wallet-address" title="0x1111111111111111111111111111111111111111"><span aria-hidden="true">0x1111…1111</span><span class="sr-only">0x1111111111111111111111111111111111111111</span></code>');
-      expect(html).toContain('aria-label="Copy Your EVM wallet"');
+      expect(html).toContain('aria-label="Copy EVM address"');
       expect(html).not.toContain('EVM Default:');
       // P0 approved UX (board 03b): the wallet identity names its network ("0x90f5…d303 · Base").
       expect(html).toContain('<span class="wallet-network"> · Base Sepolia</span>');

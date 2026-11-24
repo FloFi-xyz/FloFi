@@ -4,16 +4,15 @@
  */
 export const portugueseBetaUxIntelligence: Readonly<Record<string, string>> = {
   // WS01: wallet lifecycle in the header
-  'Setting up your wallet…': 'Preparando a sua carteira…',
-  "Your wallet couldn't be set up.": 'Não foi possível preparar a sua carteira.',
-  'Your wallet is linked to another FloFi account.': 'A sua carteira está vinculada a outra conta FloFi.',
+  'Setting up your wallet…': 'Preparando sua carteira…',
+  "Your wallet couldn't be set up.": 'Não foi possível preparar sua carteira.',
   // WS02: public wallet addresses
-  '{0} address': 'Endereço {0}',
-  'Wallet address': 'Endereço da carteira',
-  'Your EVM wallet': 'Sua carteira EVM',
-  'Your Solana wallet': 'Sua carteira Solana',
+  'Copy EVM address': 'Copiar endereço EVM',
+  'Copy Solana address': 'Copiar endereço Solana',
+  'EVM address copied.': 'Endereço EVM copiado.',
+  'Solana address copied.': 'Endereço Solana copiado.',
   // WS04: inherited workflow fields
-  'Spends up to its amount from what step {0} actually delivers.': 'Gasta até o próprio valor a partir do que a etapa {0} realmente entregar.',
+  "Uses what step {0} delivers, up to this card's amount.": 'Usa o que a etapa {0} entregar, até o valor deste cartão.',
   'Connected to step {0}.': 'Conectada à etapa {0}.',
   'Connected to step {0}, but this step spends another asset. Choose the asset step {0} delivers to use its output.':
     'Conectada à etapa {0}, mas esta etapa gasta outro ativo. Escolha o ativo que a etapa {0} entrega para usar o resultado dela.',
@@ -25,6 +24,8 @@ export const portugueseBetaUxIntelligence: Readonly<Record<string, string>> = {
     'A etapa {0} envia o resultado para outra carteira; esta etapa usa o próprio valor.',
   'This step draws from Aave; it runs after step {0} with its own amount.':
     'Esta etapa retira da Aave; ela roda depois da etapa {0} com o próprio valor.',
-  'Filled from the connected step: network, asset and amount. Check the card, then apply.':
-    'Preenchido a partir da etapa conectada: rede, ativo e valor. Confira o card e aplique.',
+  'Filled from step {0}: network, asset and amount. Check the card, then apply.':
+    'Preenchido a partir da etapa {0}: rede, ativo e valor. Confira o cartão e aplique.',
+  'Filled the network and asset from step {0}. Enter the amount, then apply.':
+    'Rede e ativo preenchidos a partir da etapa {0}. Informe o valor e aplique.',
 };

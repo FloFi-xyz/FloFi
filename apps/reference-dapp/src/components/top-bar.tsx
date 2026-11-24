@@ -141,12 +141,12 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
-      {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><WalletAddress address={solanaAddress} ecosystem="solana" label={tr('Your Solana wallet')}/></span>
-        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="wallet-status-dot" aria-hidden="true"/><WalletAddress address={build009.account} ecosystem="evm" label={tr('Your EVM wallet')} showEcosystem={false}/>
+      {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><WalletAddress address={solanaAddress} ecosystem="solana"/></span>
+        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="wallet-status-dot" aria-hidden="true"/><WalletAddress address={build009.account} ecosystem="evm" showEcosystem={false}/>
           {build009.chainId && <span className="wallet-network">{' · '}{tr(networkName(build009.chainId))}</span>}</span>
           : restoring ? <span className="wallet-connection" role="status">{tr("Restoring wallet…")}</span>
           : slot === 'initializing' ? <span className="wallet-connection" role="status" data-wallet-lifecycle="initializing">{tr("Setting up your wallet…")}</span>
-          : slot === 'failed' ? <><span className="wallet-connection" role="status" data-wallet-lifecycle="failed">{tr(lifecycle.code === 'ACCOUNT_WALLET_LINKED_ELSEWHERE' ? 'Your wallet is linked to another FloFi account.' : "Your wallet couldn't be set up.")}</span>
+          : slot === 'failed' ? <><span className="wallet-connection" role="status" data-wallet-lifecycle="failed">{tr(lifecycle.code === 'ACCOUNT_WALLET_LINKED_ELSEWHERE' ? 'That wallet already belongs to another FloFi account. Nothing was merged or moved.' : "Your wallet couldn't be set up.")}</span>
             {lifecycle.code !== 'ACCOUNT_WALLET_LINKED_ELSEWHERE' && <button type="button" onClick={lifecycle.retry}>{tr(lifecycle.code === 'PRIVY_ACCOUNT_MISMATCH' ? 'Sign in again' : 'Try again')}</button>}
             {/* Any other wallet (MetaMask, Phantom) can still be connected: it does not depend on FloFi's own wallets. */}
             <button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>

@@ -980,10 +980,11 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
       // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): the previous step's live estimate (already shown on its card) starts the new card's amount
       // when the new card spends exactly that output; the person can change it, and execution spends min(it, what actually settles).
-      const tail = terminalStep(workflow);
-      const estimate = tail && 'node' in tail && tail.output.kind === 'asset' ? knownLiveEstimate(workflow, tail.node.nodeId) : null;
-      const inherited = tail && 'node' in tail && tail.output.kind === 'asset' ? inheritedAmount(estimate, tail.output.asset.decimals) : null;
-      const id = startActionSetup(action, position, wallet.account ?? undefined, environment, inherited ?? undefined);
+      // Not while the previous card shows an unapplied draft (its visible estimate is the draft's, not the committed step's).
+      const tail = terminalStep(workflow), source = tail && 'node' in tail && tail.output.kind === 'asset' && !hasCanvasDraft({ amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs }, tail.node.nodeId) ? tail : null;
+      const estimate = source && source.output.kind === 'asset' ? knownLiveEstimate(workflow, source.node.nodeId) : null;
+      const inherited = source && source.output.kind === 'asset' ? inheritedAmount(estimate, source.output.asset.decimals, source.output.asset.address === null) : null;
+      const id = startActionSetup(action, position, wallet.account ?? undefined, environment, inherited ?? undefined, source?.node.nodeId);
       selectNodes([id], id); setFeedback(''); setLastAdded(action); return;
     }
     let command;
@@ -1068,32 +1069,36 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     if (sequence?.steps.find(item => item.nodeId === target)?.fundedBy != null) return;
     // This pair only (a consumer may have other parents): what this producer delivers, and whether the consumer already spends exactly it.
     const output = reusableOutput(producer), pair = pairProvenance(producer, consumer);
-    if (pair !== 'mismatch') { if (pair !== 'inherited') setFeedback(PROVENANCE_MESSAGES[pair].replace('{0}', String(composerActions(connected).findIndex(node => node.nodeId === source) + 1))); return; }
+    // Every message names the step (frontend review): the English sentence with its number, which the catalog's template turns into Portuguese.
+    const step = String(composerActions(connected).findIndex(node => node.nodeId === source) + 1);
+    const say = (message: string) => setFeedback(message.replaceAll('{0}', step));
+    if (pair !== 'mismatch') { if (pair !== 'inherited') say(PROVENANCE_MESSAGES[pair]); return; }
     if (output.kind !== 'asset' || amountInputs[target] !== undefined || cryptoSelections[target] || bridgeNetworkInputs[target]) return;
     const reason = consumer.chainId === output.asset.chainId ? 'asset' : 'network';
-    const amount = inheritedAmount(knownLiveEstimate(connected, source), output.asset.decimals);
+    const producerDrafted = hasCanvasDraft({ amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs }, source);
+    const amount = producerDrafted ? null : inheritedAmount(knownLiveEstimate(connected, source), output.asset.decimals, output.asset.address === null);
     const propose = () => setProposedDrafts(current => new Set([...current, target]));
     const router = routerDetails(consumer), universal = universalBridgeDetails(consumer);
     if ((router || universal) && canEditCanvasAmount(consumer, context, connected)) {
       const proposal = bridgeNetworksFor(output.asset, bridgeNetworkInputs[target] ?? (universal ? universalCanvasNetworks(universal) : router!));
-      if (!('networks' in proposal)) { setFeedback(PROVENANCE_MESSAGES[reason]); return; }
+      if (!('networks' in proposal)) { say(PROVENANCE_MESSAGES[reason]); return; }
       propose();
       editBridgeNetworks(target, proposal.networks);
       // Never the old number in the new asset's units (workflow review): the estimate, or an empty amount the person enters.
       editCanvasAmount(target, amount ?? '');
-      setFeedback('Filled from the connected step: network, asset and amount. Check the card, then apply.');
+      say(amount ? 'Filled from step {0}: network, asset and amount. Check the card, then apply.' : 'Filled the network and asset from step {0}. Enter the amount, then apply.');
       return;
     }
     const input = cryptoInputOf(consumer);
     // Pools keep their two-sided input; Borrow / Withdraw draw from Aave and never spend an earlier delivery.
-    if (!input || ['pool', 'borrow', 'withdraw'].includes(input.selection.action) || !canSelectCryptoAssets(consumer, connected)) { setFeedback(PROVENANCE_MESSAGES[reason]); return; }
+    if (!input || ['pool', 'borrow', 'withdraw'].includes(input.selection.action) || !canSelectCryptoAssets(consumer, connected)) { say(PROVENANCE_MESSAGES[reason]); return; }
     const follow = followOnSelectionFrom(producer, input.selection.action, environment);
-    if (!follow?.selection || follow.issue) { setFeedback(PROVENANCE_MESSAGES[reason]); return; }
+    if (!follow?.selection || follow.issue) { say(PROVENANCE_MESSAGES[reason]); return; }
     propose();
     editCryptoSelection(target, follow.selection, wallet.account ?? undefined);
     // Never the old number in the new asset's units: the estimate, or an empty amount the person enters.
     editCanvasAmount(target, amount ?? '');
-    setFeedback('Filled from the connected step: network, asset and amount. Check the card, then apply.');
+    say(amount ? 'Filled from step {0}: network, asset and amount. Check the card, then apply.' : 'Filled the network and asset from step {0}. Enter the amount, then apply.');
   }
   /**
    * BUILD-FIX-UX-001: a drag released on a step's card (not exactly on its small input) still names that step. React Flow already handled

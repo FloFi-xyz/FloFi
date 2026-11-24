@@ -163,7 +163,9 @@ function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnec
     <div className="ux-row">
       <span className="ux-row-icon workspace-network-icon"><img src={icon} width="28" height="28" alt=""/></span>
       <div className="ux-row-main">
-        <h3 className="ux-row-name">{entry.label} <WalletAddress className="ux-address" address={entry.address} ecosystem={entry.ecosystem} label={entry.label} showEcosystem={false}/></h3>
+        {/* Frontend review: the heading names the wallet only; its copyable address sits beside it, outside the heading. */}
+        <h3 className="ux-row-name">{entry.label}</h3>
+        <p className="ux-row-meta"><WalletAddress className="ux-address" address={entry.address} ecosystem={entry.ecosystem} label={entry.label} showEcosystem={false}/></p>
         <p className="ux-row-meta">{facts.join(' · ')}</p>
         {entry.designation === 'privy' && <p className="ux-row-meta workspace-wallet-signing" data-managed-signing="privy">{tr('Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.')}</p>}
         {entry.designation === 'legacy' && <p className="ux-row-meta workspace-wallet-signing" data-managed-signing="legacy">{tr(accountMessage('LEGACY_WALLET_EXPORT_ONLY'))}</p>}

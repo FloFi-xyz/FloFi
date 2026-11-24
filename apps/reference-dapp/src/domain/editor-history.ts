@@ -11,7 +11,7 @@ import { universalBridgeDetails, universalAssetResolves, universalKeyOfCanvasLab
 import { universalCanvasNetworks } from './canvas-action-setup';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
-import { bridgeFollowOn } from './workflow-propagation';
+import { bridgeFollowOn, terminalStep } from './workflow-propagation';
 import { defaultPoolRange, followOnSelection, lendingAction, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
@@ -50,7 +50,9 @@ export type HistoryAction =
   | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string; readonly environment?: WalletEnvironment;
     /** BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS04): the terminal step's live estimate of what it delivers (decimal), used only when the new card
      *  spends exactly that output; at execution the step spends min(this cap, the amount actually delivered). */
-    readonly inheritedAmount?: string }
+    readonly inheritedAmount?: string;
+    /** The terminal step the amount was read from: the amount is dropped unless the reducer follows that same step (swap review). */
+    readonly inheritedFrom?: string }
   /** BUILD-RH-002: the Stocks card — a Robinhood Chain catalog swap from USDG into the first featured Stock Token. */
   | { readonly type: 'START_STOCKS_SETUP'; readonly position: { x: number; y: number } }
   | { readonly type: 'EDIT_POOL_SETUP'; readonly id: string; readonly input: UniswapLiquidityInput }
@@ -137,7 +139,9 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     else actionSetup = { id, action: action.action, amount: '0' };
     const suggestion = action.action !== 'bridge' ? followOnSelection(state.editor.workflow, action.action, action.environment) : null;
     // A positive decimal only (it re-validates as the card's own amount when applied).
-    const inherited = typeof action.inheritedAmount === 'string' && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(action.inheritedAmount) ? action.inheritedAmount : null;
+    const tail = terminalStep(state.editor.workflow);
+    const inherited = typeof action.inheritedAmount === 'string' && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(action.inheritedAmount)
+      && tail && 'node' in tail && tail.node.nodeId === action.inheritedFrom ? action.inheritedAmount : null;
     if (suggestion) {
       actionSetup = { ...actionSetup, ...(suggestion.selection ? { cryptoSelection: suggestion.selection } : {}), ...(suggestion.issue ? { followOnIssue: suggestion.issue } : {}) };
       if (actionSetup.action === 'pool' && suggestion.selection) actionSetup = { ...actionSetup, input: { ...actionSetup.input, ...defaultPoolRange(suggestion.selection.network) } };

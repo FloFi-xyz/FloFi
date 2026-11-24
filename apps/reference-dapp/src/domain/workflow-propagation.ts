@@ -25,7 +25,9 @@ import { UNIVERSAL_NETWORKS, universalNetworkOfChain } from '@defi-workflow-engi
 import type { Workflow } from './initial-workflow';
 import { sameSequenceAsset, sequenceOrder, stepAssets, type SequenceAsset } from './workflow-sequence';
 import { CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasBridgeNetworks } from './canvas-action-setup';
-import { resolveUniversalAsset, UNIVERSAL_CANVAS_LABEL, universalKeyOfCanvasLabel } from './universal-bridge-authoring';
+import { defaultUniversalOutput, resolveUniversalAsset, UNIVERSAL_CANVAS_LABEL, universalKeyOfCanvasLabel } from './universal-bridge-authoring';
+/** The Bridge picker's destination preference (Base first), used when a seeded destination must be chosen. */
+const DESTINATION_ORDER: readonly string[] = ['Base', 'Arbitrum', 'Ethereum', 'Robinhood Chain', 'Solana'];
 
 type Node = Workflow['nodes'][number];
 const financial = (node: { readonly actionType: string }) => !node.actionType.startsWith('mock-');
@@ -90,7 +92,7 @@ export function pairProvenance(producer: Node, consumer: Node): 'inherited' | 'm
 /** The owner-facing explanation of a provenance (catalog messages; `{0}` is the upstream step number). */
 export const PROVENANCE_MESSAGES: Readonly<Record<Exclude<StepProvenance['state'], 'independent'> | Extract<StepProvenance, { state: 'mismatch' }>['reason'], string>> = Object.freeze({
   // Never more than the card's own amount (workflow review): the runtime spends min(this amount, what step {0} actually delivered).
-  inherited: 'Spends up to its amount from what step {0} actually delivers.',
+  inherited: 'Uses what step {0} delivers, up to this card\'s amount.',
   mismatch: 'Connected to step {0}.',
   asset: 'Connected to step {0}, but this step spends another asset. Choose the asset step {0} delivers to use its output.',
   network: 'Connected to step {0}, but this step runs on another network. Choose the network step {0} delivers on to use its output.',
@@ -114,12 +116,18 @@ export function bridgeNetworksFor(output: SequenceAsset, current?: CanvasBridgeN
     try { symbolSame = JSON.stringify(resolveUniversalAsset(network.key, resolved.symbol).asset) === JSON.stringify(resolved.asset); } catch { symbolSame = false; }
     reference = symbolSame ? resolved.symbol : explicit;
   } catch { return { issue: 'asset' }; }
-  // The destination stays the person's choice; a destination equal to the new source is moved to another network (never a same-network bridge).
+  // The destination stays the person's choice when it is a mainnet bridge network other than the new source; otherwise the picker's own order
+  // (Base first), same ecosystem first, never a test network (bridge review).
   const destinations = CANVAS_BRIDGE_NETWORK_OPTIONS.destination as readonly string[];
-  const keep = current && current.destination !== source && destinations.includes(current.destination) ? current.destination : null;
-  const destination = (keep ?? destinations.find(label => label !== source && universalKeyOfCanvasLabel(label) !== null && UNIVERSAL_NETWORKS[universalKeyOfCanvasLabel(label)!].ecosystem === network.ecosystem)
-    ?? destinations.find(label => label !== source)!) as CanvasBridgeNetworks['destination'];
-  return { networks: { source: source as CanvasBridgeNetworks['source'], destination, inputAsset: reference } };
+  const universal = (label: string) => destinations.includes(label) && label !== source ? universalKeyOfCanvasLabel(label) : null;
+  const keep = current && universal(current.destination) ? current.destination : null;
+  const ordered = DESTINATION_ORDER.filter(label => universal(label));
+  const destination = keep ?? ordered.find(label => UNIVERSAL_NETWORKS[universalKeyOfCanvasLabel(label)!].ecosystem === network.ecosystem) ?? ordered[0];
+  if (!destination) return { issue: 'network' };
+  // The received asset is named too (bridge review): the card shows and Apply authors the same pair; none means no default route for this asset.
+  let outputAsset: string;
+  try { outputAsset = defaultUniversalOutput(network.key, reference, universalKeyOfCanvasLabel(destination)!); } catch { return { issue: 'asset' }; }
+  return { networks: { source: source as CanvasBridgeNetworks['source'], destination: destination as CanvasBridgeNetworks['destination'], inputAsset: reference, outputAsset } };
 }
 
 /** The unique terminal step of the draft (the one a newly added card follows), with what it delivers; null when there is no step. */
@@ -146,8 +154,9 @@ export function bridgeFollowOn(workflow: Workflow): { readonly networks?: Canvas
  * (`expected`, in the delivered asset's units), only while that estimate is for exactly this asset; null otherwise (the person enters the cap).
  * At execution the step spends min(this cap, the amount actually delivered).
  */
-export function inheritedAmount(estimate: { readonly expected: string } | null | undefined, decimals: number): string | null {
-  if (!estimate || typeof estimate.expected !== 'string') return null;
+export function inheritedAmount(estimate: { readonly expected: string } | null | undefined, decimals: number, native = false): string | null {
+  // A native coin (ETH, SOL) also pays the next step's network fee: its whole expected delivery is never proposed (swap review); the person enters it.
+  if (native || !estimate || typeof estimate.expected !== 'string') return null;
   const value = estimate.expected.trim();
   if (!/^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(value) || /^0(\.0+)?$/.test(value)) return null;
   const [whole, fraction = ''] = value.split('.');

@@ -26,6 +26,7 @@ function authorIn(on: ReviewContext, ...sentences: string[]): Workflow {
 }
 const author = (...sentences: string[]) => authorIn(context, ...sentences);
 const lint = (workflow: Workflow) => lintWorkflow(workflow, context);
+const tailOf = (workflow: Workflow) => { const tail = terminalStep(workflow); return tail && 'node' in tail ? tail.node.nodeId : undefined; };
 const ids = (workflow: Workflow) => workflow.nodes.filter(node => !node.actionType.startsWith('mock-')).map(node => node.nodeId);
 
 describe('outputs by action', () => {
@@ -44,12 +45,14 @@ describe('Swap → Bridge (the reported journey)', () => {
     const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps');
     const follow = bridgeFollowOn(workflow)!;
     expect(follow.issue).toBeUndefined();
-    expect(follow.networks).toMatchObject({ source: 'Base', inputAsset: 'WETH' });
-    expect(follow.networks!.destination).not.toBe('Base');
+    // Base first in the picker's order, same ecosystem: Arbitrum; the received asset is named (WETH → WETH), so the card and Apply agree.
+    expect(follow.networks).toEqual({ source: 'Base', destination: 'Arbitrum', inputAsset: 'WETH', outputAsset: 'WETH' });
   });
   it('an existing destination choice is kept unless it equals the new source', () => {
     const asset = { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 };
-    expect(bridgeNetworksFor(asset, { source: 'Arbitrum', destination: 'Ethereum' })).toMatchObject({ networks: { source: 'Base', destination: 'Ethereum' } });
+    expect(bridgeNetworksFor(asset, { source: 'Arbitrum', destination: 'Ethereum' })).toMatchObject({ networks: { source: 'Base', destination: 'Ethereum', outputAsset: 'WETH' } });
+    // A test-network destination is never kept on a mainnet route (bridge review).
+    expect(bridgeNetworksFor(asset, { source: 'Base Sepolia', destination: 'Arbitrum Sepolia' } as never)).toMatchObject({ networks: { destination: 'Arbitrum' } });
     const moved = bridgeNetworksFor(asset, { source: 'Arbitrum', destination: 'Base' });
     expect('networks' in moved && moved.networks.destination).not.toBe('Base');
   });
@@ -110,6 +113,8 @@ describe('inherited amount (composition-time estimate, capped by settlement at e
     expect(inheritedAmount({ expected: '0' }, 6)).toBeNull();
     expect(inheritedAmount({ expected: '-1' }, 6)).toBeNull();
     expect(inheritedAmount(null, 6)).toBeNull();
+    // A native output (ETH, SOL) also pays the next step's fee: never its whole expected delivery (swap review).
+    expect(inheritedAmount({ expected: '0.03' }, 18, true)).toBeNull();
   });
 });
 
@@ -123,7 +128,7 @@ describe('Editor: adding a card after a step (editor-history)', () => {
   it('a Bridge added after a Base WETH swap starts on Base spending WETH, with the swap\'s estimated output as its amount', async () => {
     const { editorHistoryReducer, bridgeSetupNetworks } = await load();
     const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps');
-    const next = editorHistoryReducer(await historyWith(workflow), { type: 'START_ACTION_SETUP', action: 'bridge', position: { x: 0, y: 0 }, environment: 'mainnet', inheritedAmount: '0.030125' });
+    const next = editorHistoryReducer(await historyWith(workflow), { type: 'START_ACTION_SETUP', action: 'bridge', position: { x: 0, y: 0 }, environment: 'mainnet', inheritedAmount: '0.030125', ...(tailOf(workflow) ? { inheritedFrom: tailOf(workflow)! } : {}) });
     const setup = next.actionSetup!;
     expect(setup.action).toBe('bridge');
     if (setup.action !== 'bridge') return;
@@ -133,8 +138,11 @@ describe('Editor: adding a card after a step (editor-history)', () => {
   it('a Swap added after a Base swap inherits the network, the WETH it spends, and the estimated amount', async () => {
     const { editorHistoryReducer } = await load();
     const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps');
-    const next = editorHistoryReducer(await historyWith(workflow), { type: 'START_ACTION_SETUP', action: 'swap', position: { x: 0, y: 0 }, environment: 'mainnet', inheritedAmount: '0.03' });
+    const next = editorHistoryReducer(await historyWith(workflow), { type: 'START_ACTION_SETUP', action: 'swap', position: { x: 0, y: 0 }, environment: 'mainnet', inheritedAmount: '0.03', ...(tailOf(workflow) ? { inheritedFrom: tailOf(workflow)! } : {}) });
     expect(next.actionSetup).toMatchObject({ action: 'swap', amount: '0.03', cryptoSelection: { network: 'Base', from: 'WETH' } });
+    // An amount read from another step than the one followed is dropped (swap review).
+    const other = editorHistoryReducer(await historyWith(workflow), { type: 'START_ACTION_SETUP', action: 'swap', position: { x: 0, y: 0 }, environment: 'mainnet', inheritedAmount: '0.03', inheritedFrom: 'node-999' });
+    expect(other.actionSetup).toMatchObject({ amount: '0' });
   });
   it('without an estimate the amount stays for the person to enter; a malformed estimate is ignored', async () => {
     const { editorHistoryReducer } = await load();
@@ -164,7 +172,40 @@ describe('workflow review fixes', () => {
     const { editorHistoryReducer, initialEditorHistory } = await import('./editor-history');
     const workflow = author('swap 100 USDC to WETH on Base slippage 100 bps');
     const next = editorHistoryReducer({ ...initialEditorHistory(), editor: { workflow, error: null } },
-      { type: 'START_ACTION_SETUP', action: 'borrow', position: { x: 0, y: 0 }, beneficiary: OWNER, environment: 'mainnet', inheritedAmount: '0.03' });
+      { type: 'START_ACTION_SETUP', action: 'borrow', position: { x: 0, y: 0 }, beneficiary: OWNER, environment: 'mainnet', inheritedAmount: '0.03', ...(tailOf(workflow) ? { inheritedFrom: tailOf(workflow)! } : {}) });
     expect(next.actionSetup).toMatchObject({ action: 'borrow', amount: '0' });
+  });
+});
+
+describe('bridge review fixes', () => {
+  it('seeded Bridge networks always name both assets, and the Canvas summary, inversion and command agree', async () => {
+    const { setupSummary, invertCanvasBridgeNetworks, bridgePairLabel } = await import('./canvas-action-setup');
+    const usdc = { chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6 };
+    const seeded = bridgeNetworksFor(usdc);
+    expect(seeded).toEqual({ networks: { source: 'Base', destination: 'Arbitrum', inputAsset: 'USDC', outputAsset: 'USDC' } });
+    for (const asset of [usdc, { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 }]) {
+      const result = bridgeNetworksFor(asset);
+      if (!('networks' in result)) throw new Error('expected networks');
+      expect(() => setupSummary({ id: 'action-setup-1', action: 'bridge', amount: '1', networks: result.networks }, context)).not.toThrow();
+      expect(() => invertCanvasBridgeNetworks(result.networks)).not.toThrow();
+      expect(bridgePairLabel(result.networks)).toBe(`${result.networks.inputAsset} → ${result.networks.outputAsset}`);
+    }
+  });
+  it('an Arbitrum output defaults to Base (the picker order), never to Robinhood Chain', () => {
+    const result = bridgeNetworksFor({ chainId: 'eip155:42161', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 });
+    expect(result).toMatchObject({ networks: { source: 'Arbitrum', destination: 'Base' } });
+  });
+  it('an asset with no default route on any destination is an issue (the card keeps its own defaults), never a half-seeded pair', () => {
+    const explicit = bridgeNetworksFor({ chainId: 'eip155:8453', address: '0x1111111111111111111111111111111111111111', decimals: 18 });
+    expect('issue' in explicit).toBe(true);
+  });
+  it('every provenance and connection message has its Portuguese text', async () => {
+    const { PROVENANCE_MESSAGES } = await import('./workflow-propagation');
+    const { portuguese } = await import('../i18n/pt');
+    for (const message of [...Object.values(PROVENANCE_MESSAGES), 'Filled from step {0}: network, asset and amount. Check the card, then apply.',
+      'Filled the network and asset from step {0}. Enter the amount, then apply.']) expect(portuguese[message], message).toBeTruthy();
+    const { translate } = await import('../i18n/translate');
+    expect(translate('PT', PROVENANCE_MESSAGES.asset.replaceAll('{0}', '2'))).not.toContain('{0}');
+    expect(translate('PT', PROVENANCE_MESSAGES.asset.replaceAll('{0}', '2'))).toContain('etapa 2');
   });
 });
