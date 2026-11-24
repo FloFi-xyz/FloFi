@@ -51,7 +51,9 @@ export function floFiPrivyConfig(config: Pick<PrivyBrowserConfig, 'apple'>): Pri
       // Named catalog wallets make Privy fetch WalletConnect's explorer even with WalletConnect disabled.
       // Detected entries retain installed EVM/Solana wallets; Coinbase uses its existing separate relay.
       walletList: [...PRIVY_WALLET_LIST] },
-    // Wallets are created only when the person clicks Create wallet; Privy's confirmation screens are always shown.
+    // Privy never creates a wallet on its own at login. BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS01): FloFi provisions the account's missing embedded
+    // wallets itself, after its server confirmed the account (managed logins only, one per ecosystem; state/account-wallet-lifecycle.ts), or the
+    // person clicks Create wallet. Creating authorizes nothing; Privy's confirmation screens are always shown for every signature.
     embeddedWallets: { ethereum: { createOnLogin: 'off' }, solana: { createOnLogin: 'off' }, showWalletUIs: true },
     externalWallets: { walletConnect: { enabled: false }, solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) } },
     supportedChains: chains, defaultChain: chains[0]!,
