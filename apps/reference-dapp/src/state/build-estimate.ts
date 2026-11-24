@@ -6,7 +6,7 @@ import { BUILD_ESTIMATE_STREAM, estimateMatchesNode, requestBuildEstimate, type 
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { createJourney, reportJourney } from '../domain/journey-metrics';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
-import type { UsdEstimate } from '../domain/usd-estimate';
+import { isUsdEstimate, type UsdEstimate } from '../domain/usd-estimate';
 
 /**
  * UX-007: the card's live quote. `calculating` from the first edit of a quotable snapshot until its own answer; `unavailable` when the
@@ -54,7 +54,8 @@ async function readEstimate(response: Response): Promise<BuildEstimateResult> {
   try {
     const result = await line() as BuildEstimateResult | null;
     if (result?.ok && result.estimate) {
-      const enrichment = line().then(value => value as UsdEstimate | null, () => null).finally(() => reader.cancel().catch(() => undefined));
+      // Display only, but still checked: a second line that is not a well-formed USD estimate is dropped (the token amount stays as it is).
+      const enrichment = line().then(value => isUsdEstimate(value) ? value : null, () => null).finally(() => reader.cancel().catch(() => undefined));
       pendingUsd.set(result.estimate, enrichment);
       handedOff = true;
       return result;

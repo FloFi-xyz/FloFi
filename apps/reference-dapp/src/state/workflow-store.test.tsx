@@ -84,6 +84,23 @@ describe('P0 hotfix (execution continuity): WorkflowProvider', () => {
     expect(store.sequence!.completed).toHaveLength(2);
     expect(JSON.stringify(store.runtimeWorkflow)).toBe(executed);
   });
+  it('BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: a producer whose delivery is not independently proven blocks its dependent step', () => {
+    const workflow = author('workflow-stable-unproven', 'swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 2 USDC from Base to Arbitrum');
+    persistEditor({ setItem: (key, value) => storage.set(key, value) }, workflow);
+    render(true);
+    // A reconciled universal run without RELAY_EVM_TOKEN_V1 reports no provable amount (deliveredByRecord → null).
+    store.completeSequenceStep(0, { received: null, runKey: 'xuni-0123456789abcdef0123456789abcdef', kind: 'universal', owner: OWNER }); render(true);
+    expect(store.sequence).toMatchObject({ cursor: 1, finished: false, bound: null, fundingIssue: 'DELIVERY_NOT_PROVEN' });
+    // Never "nothing delivered" (which would read as a zero balance) and never silently the authored cap as a bound amount.
+    expect(store.sequence!.fundingIssue).not.toBe('NOTHING_DELIVERED');
+  });
+  it('a proven zero delivery stays NOTHING_DELIVERED, distinct from an unproven one', () => {
+    const workflow = author('workflow-stable-zero', 'swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 2 USDC from Base to Arbitrum');
+    persistEditor({ setItem: (key, value) => storage.set(key, value) }, workflow);
+    render(true);
+    store.completeSequenceStep(0, { received: '0', runKey: 'arbsw-0123456789abcdef', kind: 'public', owner: OWNER }); render(true);
+    expect(store.sequence).toMatchObject({ cursor: 1, fundingIssue: 'NOTHING_DELIVERED' });
+  });
 });
 
 /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the staged choice of MANAGE_LIQUIDITY_POSITION (chat or Dashboard), and what clears it. */

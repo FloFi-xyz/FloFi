@@ -41,11 +41,15 @@ async function estimate(request: Request) {
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(encoder.encode(JSON.stringify({ ...result, estimate: { ...result.estimate, correlationId } }) + '\n'));
-          void pendingUsd.then(value => {
+          // The optional USD line never holds the stream open: a failed USD read (or a client that already left) still ends it.
+          const finish = (value: UsdEstimate | null) => {
             if (cancelled) return;
-            if (value && !request.signal.aborted) controller.enqueue(encoder.encode(JSON.stringify(value) + '\n'));
-            controller.close();
-          });
+            try {
+              if (value && !request.signal.aborted) controller.enqueue(encoder.encode(JSON.stringify(value) + '\n'));
+              controller.close();
+            } catch { /* the client already closed the stream */ }
+          };
+          void pendingUsd.then(finish, () => finish(null));
         },
         cancel() { cancelled = true; },
       }), { headers: { 'content-type': BUILD_ESTIMATE_STREAM, 'cache-control': 'no-store', 'x-quote-correlation-id': correlationId } });

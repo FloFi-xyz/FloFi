@@ -82,9 +82,14 @@ export async function proveCompletions(stored: readonly StoredCompletion[], work
     if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) break;
     const received = deliveredByRecord(item.kind, record, step.output), owner = ownerByRecord(item.kind, record);
     const funds = sequence.steps.some(later => later.funding.some(funding => funding.fundedBy === index));
-    if ((item.received !== null && received !== item.received) || (funds && received === null)) {
-      if (item.kind === 'universal') return { proven, unreadable: true };
-      break;
+    const mismatch = item.received !== null && received !== item.received;
+    if (mismatch || (funds && received === null)) {
+      // BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: a universal bridge its own record proves completed has executed, even when the delivered
+      // amount is not independently proven (an ERC-20 delivery without RELAY_EVM_TOKEN_V1 — including a pointer an earlier client stored with
+      // an amount it no longer proves). It is restored as completed with no provable amount, so the dependent step shows DELIVERY_NOT_PROVEN
+      // and the bridge is never offered again. Only two proven amounts that disagree stay unverified (retry; never a new step).
+      if (item.kind === 'universal' && mismatch && received !== null) return { proven, unreadable: true };
+      if (item.kind !== 'universal') break;
     }
     proven.push({ nodeId: item.nodeId, node: item.node, received, runKey: item.runKey, kind: item.kind, ...owner ? { owner } : {}, allocations: fundingAllocations(step, proven) });
   }

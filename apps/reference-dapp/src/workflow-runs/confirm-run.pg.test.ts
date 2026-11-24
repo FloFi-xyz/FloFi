@@ -453,7 +453,7 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
     } finally { await t.drop(); }
   });
 
-  it('BUILD-CROSSCHAIN-UNIVERSAL-001: Swap → Bridge → Swap with bindings resolves each received amount in confirm mode', async () => {
+  it.each(['proven', 'unproven'] as const)('BUILD-CROSSCHAIN-UNIVERSAL-001: Swap → Bridge → Swap with bindings resolves each received amount in confirm mode (%s Relay ERC-20 delivery)', async proof => {
     const t = await createTestDatabase();
     try {
       // Solana swap → universal bridge → Base swap. Flows mocked; policy allows the two mainnets for handoff.
@@ -474,7 +474,6 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
         bindings: [{ step: 1, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' }, { step: 2, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' }] });
       const run = await runOf(h, approval.approvalId);
       const solUsdc = `${composed.bindings[0]!.asset.chainId}/token:${composed.bindings[0]!.asset.address}`;
-      const baseUsdc = `${composed.bindings[1]!.asset.chainId}/erc20:${composed.bindings[1]!.asset.address}`;
       // Step 0 (Jupiter): delivers Solana USDC below the bridge cap.
       h.flows.ownerExecutes('jupiter-swap', h.sol.address, claimed.workflow, 'RECONCILED',
         { received: [{ asset: solUsdc, amount: '40' + '0'.repeat(6) }] }); // 40 USDC
@@ -485,10 +484,26 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
       expect(bridgeStep).toMatchObject({ state: 'AWAITING_OWNER', flow: 'crosschain-universal',
         bound: { used: '40000000', received: '40000000' }, strategy: { action: 'bridge', amount: '40' } });
       await applyApproval(h.surface, approval.secret, [h.evm, h.sol], bridgeLoad.workflow, h.d.now()).catch(() => undefined);
-      // Step 1 (universal bridge): delivers Base USDC below the destination swap cap.
-      h.flows.ownerExecutes('crosschain-universal', h.sol.address, bridgeLoad.workflow, 'RECONCILED',
-        { received: [{ asset: baseUsdc, amount: '39' + '0'.repeat(6) }] }); // 39 USDC on Base
+      // Step 1 (universal bridge): delivers 39 USDC on Base, below the destination swap cap. BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: the
+      // flow's own reconciled record is read by the real universal parser; an ERC-20 delivery funds a later step only with the Relay order
+      // proof (RELAY_EVM_TOKEN_V1) the destination verifier now persists. Without it the run never funds the destination swap.
+      const bridgeRun = h.flows.ownerExecutes('crosschain-universal', h.sol.address, bridgeLoad.workflow, 'RECONCILED');
+      const baseChain = composed.bindings[1]!.asset.chainId, solChain = composed.bindings[0]!.asset.chainId;
+      bridgeRun.recordExtras = { format: 'flofi.universal-bridge-run.v1', verdict: 'RECONCILED', received: '39000000',
+        destination: { chainId: baseChain, transactionHash: '0x' + '39'.repeat(32), final: true, amount: '39000000',
+          ...proof === 'proven' ? { orderProof: 'RELAY_EVM_TOKEN_V1' } : { orderBound: true } },
+        review: { workflow: bridgeLoad.workflow, recipient: h.evm.address, route: { sourceChain: solChain, destinationChain: baseChain, inputAmount: '40000000',
+          inputToken: { chainId: solChain, kind: 'TOKEN', address: composed.bindings[0]!.asset.address },
+          outputToken: { chainId: baseChain, kind: 'TOKEN', address: composed.bindings[1]!.asset.address } } } };
       await h.drain(run.runId);
+      if (proof === 'unproven') {
+        // Fail closed: the bridge is final but proves no amount a later step may spend, so the destination swap is never funded or offered.
+        expect((await h.store.steps(run.runId)).map(step => [step.state, step.bound?.used ?? null, step.outcome?.received ?? null])).toEqual([
+          ['RECONCILED', null, [{ asset: solUsdc, amount: '40000000' }]], ['RECONCILED', '40000000', []], ['BLOCKED', null, null]]);
+        expect((await progressOf(h, approval.approvalId)).workflowRun).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' });
+        expect((await continued(h, approval.approvalId)).command).toBeNull();
+        return;
+      }
       const destSwap = await continued(h, approval.approvalId);
       expect(destSwap.view.workflowRun!.step).toEqual({ index: 2, count: 3 });
       const swapStep = (await h.store.steps(run.runId))[2]!;

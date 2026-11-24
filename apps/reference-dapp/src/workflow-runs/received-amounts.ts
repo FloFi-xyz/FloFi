@@ -70,6 +70,10 @@ export function amountsFromOwnerRecord(record: unknown): OwnerAmounts {
   // A universal-router record always carries its verdict: anything but RECONCILED (pending, divergent, failed, refunded) delivered nothing a
   // step may count, and must not fall through to an older record shape below that would read its destination amount without a verdict.
   if (typeof record.received === 'string' && isObject(record.review) && isObject(record.review.route) && record.verdict !== 'RECONCILED') return { spent: [], received: [] };
+  // BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003 (flofi-workflow review): a universal record is recognised by its own format too, so one
+  // whose delivered amount is not proven (`received: null`) never falls through to the Router shape below, which would count its
+  // destination amount without a verdict or an order proof.
+  if (record.format === 'flofi.universal-bridge-run.v1' && (record.verdict !== 'RECONCILED' || !units(record.received))) return { spent: [], received: [] };
   if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)) {
     const route = record.review.route, out = isObject(route.outputToken) ? route.outputToken : null, inn = isObject(route.inputToken) ? route.inputToken : null;
     const received: FlowAmount[] = [];

@@ -318,6 +318,43 @@ describe('direct destination executor settlement', () => {
     expect((await restarted.observe(confirmed.id)).evidence?.bundleHash).toBe(verified.evidence?.bundleHash);
   });
 
+  it('incident replay: a RECOVERY_REQUIRED run with a persisted FILLED hint reconciles in one ordinary observation once its final direct payout binds', async () => {
+    // Shape of production run xuni-02c5…d970 (Base → Ethereum native; registered Ethereum executor; type 0x2; data === order id; 22,280 gas; no
+    // logs; already final). The earlier verifier could not bind it; here that phase is emulated by an unsigned (type-less) transaction, which the
+    // verifier refuses as ORDER_NOT_BOUND, and the later deploy by the canonical type-2 transaction. No deposit is resubmitted, no state forced.
+    const c = await setup(), source = c.chainOf('base'), destination = c.chainOf('ethereum');
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.ethereum.chain,
+      inputAsset: native('base'), outputAsset: native('ethereum'), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const confirmed = await executeEvm(c, source, (await reviewed(c, w, EVM_OWNER)).id, w);
+    const route = confirmed.review.route, amount = BigInt(route.expectedOutput);
+    const executor = UNIVERSAL_ROUTER_DEPLOYMENT.evm[route.destinationChain]!.relaySettlement!.executors.find(address => address !== route.order.solver)!;
+    const hash = destination.deliver({ recipient: EVM_OWNER, token: null, amount, orderId: route.order.orderId, sender: executor });
+    const tx = destination.state.txs.get(hash)!;
+    delete (tx as { type?: string }).type;
+    destination.state.receipts.get(hash)!.gasUsed = '0x5708';
+    destination.state.traces.delete(hash); destination.state.callTraces.delete(hash);
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ error: 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND', verdict: 'PENDING', evidence: null,
+      destination: null, lastHint: { status: 'FILLED' } });
+    c.tick(3_601_000);
+    const stuck = await c.service.observe(confirmed.id);
+    expect(stuck).toMatchObject({ phase: 'RECOVERY_REQUIRED', verdict: 'PENDING', evidence: null });
+    expect(universalNeedsObservation(stuck)).toBe(true);
+    // Later: the delivery is past the safety depth before the first observation that can bind it, and the provider no longer answers.
+    tx.type = '0x2';
+    for (let i = 0; i < 3; i++) { source.mine(); destination.mine(); }
+    c.relayMock.setStatus(route.quote.id, { status: 'unknown' });
+    const restarted = c.restart();
+    const reconciled = await restarted.observe(confirmed.id);
+    expect(reconciled).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', received: amount.toString(),
+      destination: { transactionHash: hash, orderBound: true, final: true }, evidence: { received: amount.toString() } });
+    // Native delivery: never an ERC-20 order proof.
+    expect(reconciled.destination).not.toHaveProperty('orderProof');
+    expect(reconciled.attempts.map(attempt => attempt.transactionHash)).toEqual(confirmed.attempts.map(attempt => attempt.transactionHash));
+    expect(universalNeedsObservation(reconciled)).toBe(false);
+    expect((await c.restart().observe(confirmed.id)).evidence?.bundleHash).toBe(reconciled.evidence?.bundleHash);
+  });
+
   it.each([
     ['type 0x4', { type: '0x4' }, 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
     ['gas above the direct cap', { gasUsed: '0x5a00' }, 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
