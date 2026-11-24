@@ -7,7 +7,7 @@ import type { Locator, Page } from '@playwright/test';
 const STORAGE = 'flofi.credentials.v1';
 /** P0 approved UX (board 13): each wallet is a row of the Wallets list. */
 const cards = (page: Page) => page.locator('section[aria-labelledby="credentials-wallets"] .ux-wallet-row');
-/** Board 13: a wallet row's actions (copy, rename, export, disconnect, remove) are items of its "More actions for …" menu. */
+/** Board 13: a wallet row's "More actions for …" menu includes rename, copy, export, disconnect and remove. */
 async function walletAction(row: Locator, label: string, action: string) {
   await row.getByRole('button', { name: `More actions for ${label}`, exact: true }).click();
   await row.getByRole('menuitem', { name: action, exact: true }).click();
@@ -77,11 +77,18 @@ for (const theme of ['light', 'dark'] as const) {
     await walletAction(rabby, 'Rabby Wallet', 'Rename Rabby Wallet');
     await rabby.getByRole('textbox', { name: 'Wallet name' }).fill('Trading'); await page.keyboard.press('Enter');
     const trading = page.getByRole('article', { name: 'Trading, Ethereum' });
-    // Board 13: the row's name heading also shows the short address.
-    await expect(trading.getByRole('heading', { name: /^Trading 0x/ })).toBeVisible();
-    await expect(page.getByRole('status')).toHaveText('Wallet renamed.');
+    await expect(trading.getByRole('heading', { name: 'Trading', exact: true })).toBeVisible();
+    await expect(trading.locator('code')).toBeVisible();
+    await expect(trading.locator('code')).toHaveAttribute('title', WALLET_ACCOUNTS.rabby);
+    const notice = page.getByRole('status').and(page.locator('.credentials > .workspace-notice'));
+    await expect(notice).toHaveText('Wallet renamed.');
+    await trading.getByRole('button', { name: 'Copy Trading address', exact: true }).click();
+    await expect(trading.getByRole('status')).toHaveText('Trading address copied.');
+    const copiedAddresses = () => page.evaluate(() => (window as unknown as { copiedAddresses: string[] }).copiedAddresses);
+    expect(await copiedAddresses()).toEqual([WALLET_ACCOUNTS.rabby]);
     await walletAction(trading, 'Trading', 'Copy Trading address');
-    expect(await page.evaluate(() => (window as unknown as { copiedAddresses: string[] }).copiedAddresses)).toEqual([WALLET_ACCOUNTS.rabby]);
+    await expect(notice).toHaveText('Address copied.');
+    expect(await copiedAddresses()).toEqual([WALLET_ACCOUNTS.rabby, WALLET_ACCOUNTS.rabby]);
     await expect(page.getByRole('button', { name: /reveal|private key|seed/i })).toHaveCount(0);
 
     // Removing the active EVM wallet removes FloFi's reference and ends the session; other credentials stay.
@@ -90,7 +97,7 @@ for (const theme of ['light', 'dark'] as const) {
     await trading.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(cards(page)).toHaveCount(2);
     await expect(page.locator('.build009-wallet-info')).toHaveCount(0);
-    await expect(page.getByRole('status')).toContainText('removed from FloFi. Your wallet and its funds are unchanged.');
+    await expect(notice).toHaveText('Trading removed from FloFi. Your wallet and its funds are unchanged.');
     expect(JSON.parse(await stored(page)).wallets).toHaveLength(2);
     expect(errors).toEqual([]);
   });

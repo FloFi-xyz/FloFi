@@ -50,6 +50,8 @@ async function expandRecordedWorkflows(library: Locator, language: 'EN' | 'PT' =
   }
 }
 const ok = <T,>(result: FlowResult): T => { if (!result.ok) throw Error(result.code); return result.value as T; };
+const workflowSaved = (page: Page) => page.getByRole('main', { name: 'Workflow workspace', exact: true })
+  .getByRole('status').filter({ hasText: /^Workflow saved\.$/ });
 /** Existing owner runtime creates the durable execution fixtures; the only sends go to the MOCKED loopback chain. */
 let fixtureNonce = 3n;
 async function executeFixture(workflow: SemanticWorkflow, owner: TestWallet) {
@@ -145,7 +147,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await proveConnectedEvmWallet(page, page.locator('body'), A.address);
   await expect(page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
   await chooseWorkflowMenuItem(page, 'Save workflow');
-  await expect(page.getByRole('status')).toContainText('Workflow saved.');
+  await expect(workflowSaved(page)).toBeVisible();
   const workflow = await savedCanonical(A.address);
   expect(workflow.nodes.some(n => n.actionType === 'asset.bridge' && n.chainId === 'eip155:84532')).toBe(true);
   // P0 approved UX (board 11): a saved workflow is a row named by its (untranslated) name, opened by its row's Open.
@@ -245,7 +247,7 @@ test('an owned execution record opens while every Server Action of the page is s
   await chooseWorkflowMenuItem(page, 'Save workflow');
   await proveConnectedEvmWallet(page, page.locator('body'), A.address);
   await chooseWorkflowMenuItem(page, 'Save workflow');
-  await expect(page.getByRole('status')).toContainText('Workflow saved.');
+  await expect(workflowSaved(page)).toBeVisible();
   const runId = await executeFixture(await savedCanonical(A.address), A);
   const held: string[] = [];
   await page.route('**/*', async route => {

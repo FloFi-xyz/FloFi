@@ -251,10 +251,24 @@ Canvas summary/inversion/label agreement, settled-vs-estimated binding, Chat-com
 
 The account wallet lifecycle (and the pre-existing auto-connect) are off in engineering certification, which is the browser suites' default scope.
 The new journey therefore runs in a dedicated runner profile, `auth-wallets-public` (`scripts/guarded-release-browser.mjs`, PUBLIC_MAINNET scope,
-same MOCKED loopback harnesses), and is skipped with that reason in the default `auth-wallets` run. This is the existing precedent for
+same MOCKED loopback harnesses). Playwright defines the test only for that scope. This follows the existing precedent for
 public-scope journeys (`copilot-pool-dialogue`, `solana-mainnet-network`). First attempts failed for test reasons, fixed in the test: a click
 before hydration (now waits for the page's readiness, as the other journeys do), the engineering scope (now its own profile), and the
 renamed copy button.
+
+### 10c. CircleCI browser follow-up
+
+[Pipeline 600](https://app.circleci.com/workflow/badf2b25-43f9-4791-adbb-495c2068a3be) on `0a9350df` passed 11 jobs and failed browser shards 2 and 8.
+The workflow acceptance tests now select the save confirmation in the Workflow workspace. The Credentials tests check the heading and address
+separately, use both copy controls, and check the workspace's rename and removal messages. The Canvas test checks the proposed network and
+asset, the empty draft amount, and the single committed revision. The two swap-authoring screenshots changed only around the new header Copy
+control. The first uses CircleCI's render, which matched the pinned Chromium render locally pixel for pixel. The second uses the local render,
+with the same header change.
+
+Local follow-up checks passed `pnpm check` (10,087 unit tests passed, two skipped), governance and CI script tests (21 and 336 passed), the
+account and wallet suites (48 passed on PostgreSQL 18.6), the workflow acceptance profile (six passed), the three affected shard 2 specs
+with strict screenshot comparisons (16 passed), and the offline fork gate. CircleCI's final `certification` job for the PR head records
+the certification verdict.
 
 ## 11. Security considerations
 

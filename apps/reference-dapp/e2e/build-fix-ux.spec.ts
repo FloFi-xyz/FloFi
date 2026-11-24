@@ -101,7 +101,8 @@ test('a connection starts from near the output, is released anywhere on the next
   await expect(page.locator('.build-flow-surface .react-flow__edge[data-id="node-002-node-003"]')).toBeVisible();
   await expect.poll(() => dependencies(page, 'node-003')).toEqual(['node-002']);
   expect((await ir(page)).revision).toBe(start.revision + 1);
-  await expect(feedback(page)).toHaveCount(0);
+  await expect(feedback(page)).toHaveText('Filled the network and asset from step 1. Enter the amount, then apply.');
+  await expect(node(page, 'node-003').getByRole('textbox', { name: 'Source amount (WETH)', exact: true })).toHaveValue('');
   const linked = await readWorkflowIr(page);
   // A cycle is refused with a reason and nothing changes; the same link again never duplicates the edge.
   await drag(page, await center(output(page, 'node-003')), await center(node(page, 'node-002').locator('.composer-action-title')));
