@@ -270,6 +270,8 @@ describe('Privy wallets are saved only for the account’s own Privy user', () =
     users.set(did(24), [google('g-24'), embedded(EVM_1), embedded(EVM_2, { imported: true }), embedded(SOL_1, { solana: true })]);
     const synced = await service().syncPrivyWallets(session, tokenOf(did(24)));
     expect(synced.heldElsewhere).toBe(1);
+    // BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS01): the browser's provisioning policy reads this session's own sign-in method.
+    expect(synced.method).toBe(session.method);
     expect(synced.wallets.map(wallet => `${wallet.ecosystem}:${wallet.origin}`).sort()).toEqual(['evm:generated', 'solana:generated']);
     await expect(service().syncPrivyWallets(session, tokenOf(did(23)))).rejects.toThrow();
   });
