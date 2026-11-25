@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReviewContext } from './context.js';
 import { validateAuthoringWorkflow } from './validation.js';
-import { BRIDGE_ACTION } from '@defi-workflow-engine/workflow-contracts';
+import { BRIDGE_ACTION, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, ELEVATED_SLIPPAGE_WARNING_BPS } from '@defi-workflow-engine/workflow-contracts';
 
 export interface ReviewFinding {
   readonly code: string;
@@ -34,8 +34,9 @@ export function lintWorkflow(input: unknown, context: ReviewContext): ReviewResu
     if (slippage.length !== 1) findings.push({ code: 'SLIPPAGE_REQUIRED_ONCE', severity: 'BLOCK', nodeId: node.nodeId, field: 'userConstraints', message: 'Set one explicit slippage limit.' });
     else if (slippage[0]?.kind === 'MAXIMUM_SLIPPAGE_BPS') {
       const bps = slippage[0].maximumBps;
-      if (bps === 0 || bps > 100 && bps <= 300) findings.push({ code: bps === 0 ? 'ZERO_SLIPPAGE' : 'ELEVATED_SLIPPAGE', severity: 'WARNING', nodeId: node.nodeId, field: 'slippage', message: 'Review the prototype slippage limit.' });
-      if (bps > 300) findings.push({ code: 'SLIPPAGE_ABOVE_REVIEW_LIMIT', severity: 'BLOCK', nodeId: node.nodeId, field: 'slippage', message: 'Above the BUILD-003A review limit.' });
+      const maximumBps = !bridgeSwap && !composition && node.adapterConstraints.protocols.join() === 'uniswap' ? DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS : 300;
+      if (bps === 0 || bps > ELEVATED_SLIPPAGE_WARNING_BPS && bps <= maximumBps) findings.push({ code: bps === 0 ? 'ZERO_SLIPPAGE' : 'ELEVATED_SLIPPAGE', severity: 'WARNING', nodeId: node.nodeId, field: 'slippage', message: 'Review the prototype slippage limit.' });
+      if (bps > maximumBps) findings.push({ code: 'SLIPPAGE_ABOVE_REVIEW_LIMIT', severity: 'BLOCK', nodeId: node.nodeId, field: 'slippage', message: 'Above the applicable slippage limit.' });
     }
     findings.push(bridgeSwap ? { code: 'DESTINATION_QUOTE_REQUIRED', severity: 'BLOCK', nodeId: node.nodeId, field: 'expectedOutputs',
       message: 'Reconcile Arbitrum USDC first, then quote the received amount and review a fresh MOCKED destination Manifest.' } : composition ? { code: 'COMPOSITION_FORK_REVIEW_REQUIRED', severity: 'BLOCK', nodeId: node.nodeId, field: 'expectedOutputs',

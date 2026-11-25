@@ -42,7 +42,7 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
     state.builds++; state.queries.push({ ...query });
     const input = solanaTokenByMint(query.inputMint ?? ''), output = solanaTokenByMint(query.outputMint ?? ''), owner = query.taker ?? '';
     if (!input || !output) return { error: 'No routes found' };
-    const amount = BigInt(query.amount ?? '0'), slippage = Number(query.slippageBps ?? '50');
+    const amount = BigInt(query.amount ?? '0'), slippage = query.slippageBps === 'rtse' ? 125 : Number(query.slippageBps ?? '50');
     const out = amount * PRICE[input.symbol]! * 10n ** BigInt(output.decimals) / (PRICE[output.symbol]! * 10n ** BigInt(input.decimals));
     const min = out * BigInt(10_000 - slippage) / 10_000n;
     const inAccount = ata(owner, input.mint), outAccount = ata(owner, output.mint);

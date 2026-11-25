@@ -344,11 +344,15 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   await openFirstActionSettings(page);
   const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Max price difference (%)', { exact: true });
   await expect(field).toHaveValue('1'); await expect(inspector).toContainText('Applied limit: 1%');
+  await inspector.getByRole('button', { name: 'Manual 5%', exact: true }).click();
+  await expect(field).toHaveValue('5');
+  await expect(inspector).toContainText('Above 3%, the price can move substantially against you');
+  expect(await slippageOf(page)).toBe(100);
   // Invalid values are refused with a reason and never silently reverted or applied.
   // Board 16: the limit is typed in percent; 0.125% has no whole basis-point value and is refused, never rounded.
-  for (const bad of ['0', '3.01', 'abc', '0.125']) {
+  for (const bad of ['0', '5.01', 'abc', '0.125']) {
     await field.fill(bad); await field.press('Enter');
-    await expect(inspector.getByRole('alert')).toContainText(/Enter (a max price difference from 0\.01% to 3%|the max price difference as a percentage)/);
+    await expect(inspector.getByRole('alert')).toContainText(/Enter (a max price difference from 0\.01% to 5%|the max price difference as a percentage)/);
     await expect(field).toHaveValue(bad); await expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(await slippageOf(page)).toBe(100);
   }

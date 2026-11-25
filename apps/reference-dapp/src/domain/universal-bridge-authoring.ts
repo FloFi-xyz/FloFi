@@ -31,7 +31,7 @@ export const UNIVERSAL_BRIDGE_ROUTING: Readonly<Record<UniversalBridgeRouting, {
 export const UNIVERSAL_BRIDGE_ROUTING_LABEL: Readonly<Record<UniversalBridgeRouting, string>> = Object.freeze({
   BEST: 'Automatic: the executable route with the highest guaranteed minimum', RELAY: 'Relay only', LIFI: 'LI.FI only (quotes; execution not available yet)',
   MAYAN: 'Mayan only (quotes; execution not available yet)', ACROSS: 'Across only (certified Router pairs)' });
-/** BUILD-FLOFI-PRODUCT-UX-001: the shared product default (1%, `slippage-policy.ts`), within the universal router's 300 bps limit. */
+/** The shared 1% authoring default. */
 export const UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE = DEFAULT_SLIPPAGE;
 export const UNIVERSAL_BRIDGE_NETWORKS: readonly { readonly key: UniversalNetworkKey; readonly label: string }[] = Object.freeze(
   (Object.keys(UNIVERSAL_NETWORKS) as UniversalNetworkKey[]).map(key => Object.freeze({ key, label: UNIVERSAL_NETWORKS[key].name })));

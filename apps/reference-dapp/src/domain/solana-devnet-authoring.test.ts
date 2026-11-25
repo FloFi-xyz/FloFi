@@ -46,7 +46,8 @@ describe('Solana Devnet swap chat/canvas authoring', () => {
   it('validates Devnet amounts, slippage and pairs, and keeps commands strict', () => {
     expect(() => createSolanaSwapNode('n', { ...canvasInput, to: 'devUSDC' })).toThrow('INVALID_ASSET_PAIR');
     expect(() => createSolanaSwapNode('n', { ...canvasInput, from: 'USDC' })).toThrow('SOLANA_MINT_UNSUPPORTED');
-    expect(() => createSolanaSwapNode('n', { ...canvasInput, slippage: '301' })).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
+    expect(solanaSwapDetails(createSolanaSwapNode('n', { ...canvasInput, slippage: '500' }))?.slippage).toBe('500');
+    expect(() => createSolanaSwapNode('n', { ...canvasInput, slippage: '501' })).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
     expect(() => createSolanaSwapNode('n', { ...canvasInput, amount: '1000.000001' })).toThrow('AMOUNT_OUT_OF_RANGE');
     expect(() => createSolanaSwapNode('n', { ...canvasInput, amount: '0.0000001' })).toThrow('AMOUNT_PRECISION');
     expect(createSolanaSwapNode('n', { ...canvasInput, from: 'SOL', to: 'devUSDC', amount: '0.000000001' }).inputs[0]).toMatchObject({ value: { amount: '1' } });

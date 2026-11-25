@@ -54,10 +54,10 @@ const vmOf = (slug: string) => slug === 'solana' ? 'solana-vm' as const : 'ether
 const WRAPPED_NATIVE: ReadonlyMap<string, string> = new Map([BASE_BASE_ASSETS, ARBITRUM_BASE_ASSETS, ETHEREUM_BASE_ASSETS, ROBINHOOD_BASE_ASSETS]
   .flatMap(catalog => catalog.assets.filter(asset => asset.assetClass === 'WRAPPED_NATIVE' && asset.address).map(asset => [`${asset.chain}:${asset.address!.toLowerCase()}`, asset.symbol] as const)));
 /** The quote body FloFi sends: exact input, FloFi's slippage, refunds to the owner, no app fee, no deposit-address flow. */
-export function relayQuoteBody(r: UniversalQuoteRequest): Record<string, unknown> {
+export function relayQuoteBody(r: UniversalQuoteRequest, recommendSlippage = false): Record<string, unknown> {
   return { user: r.owner, recipient: r.recipient, originChainId: r.source.providers.relay.chainId, destinationChainId: r.destination.providers.relay.chainId,
     originCurrency: relayCurrency(r.source, r.inputToken), destinationCurrency: relayCurrency(r.destination, r.outputToken), amount: r.amount, tradeType: 'EXACT_INPUT',
-    refundTo: r.owner, slippageTolerance: String(r.slippageBps), useDepositAddress: false };
+    refundTo: r.owner, ...!recommendSlippage ? { slippageTolerance: String(r.slippageBps) } : {}, useDepositAddress: false };
 }
 /** Relay's "no route" answers, mapped to stable codes (the provider message is kept only as a bounded note). */
 export function relayRefusal(message: string): string {

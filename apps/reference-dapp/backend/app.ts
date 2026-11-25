@@ -13,7 +13,7 @@ import { UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow } from '@defi-workflow-
 import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName, type FlowService, type Rpc } from './flows.ts';
-import { jupiterQuotePreview, PREVIEW_METHODS, previewStorage, type PreviewPurpose } from './preview.ts';
+import { jupiterQuotePreview, jupiterSlippagePreview, PREVIEW_METHODS, previewStorage, type PreviewPurpose } from './preview.ts';
 import { measureQuoteRpc } from '../src/server/public-testnet-rpc.ts';
 import { assertRunOwnership, normalizePrincipal, WALLET_PRINCIPAL_HEADER } from '../src/server/run-ownership.ts';
 import type { UniversalRecord } from '../src/server/universal-router/service.ts';
@@ -323,14 +323,15 @@ export function createBackend(options: BackendOptions) {
   }
   async function computePreview(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION',
     callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<FlowResult> {
-    if (purpose !== 'SIMULATION' && purpose !== 'QUOTE') return { ok: false, code: 'ARGUMENTS_INVALID' };
+    if (purpose !== 'SIMULATION' && purpose !== 'QUOTE' && purpose !== 'SLIPPAGE') return { ok: false, code: 'ARGUMENTS_INVALID' };
+    if (purpose === 'SLIPPAGE' && flow !== 'jupiter-swap') return { ok: false, code: 'PREVIEW_SLIPPAGE_NOT_AVAILABLE' };
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
     if (purpose === 'QUOTE' && flow !== 'jupiter-swap' && !definition.quote) return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     if (!method) return { ok: false, code: 'PREVIEW_NOT_AVAILABLE' };
-    const jupiterMarket = purpose === 'QUOTE' && flow === 'jupiter-swap';
+    const jupiterMarket = purpose !== 'SIMULATION' && flow === 'jupiter-swap';
     const validate = definition.methods[method]!.validate;
     const valid = jupiterMarket
-      ? (args.length === 1 || args.length === 2 && normalizePrincipal(args[1]) !== null) && validate([args[0], UNIVERSAL_QUOTE_SUBJECTS.SOLANA])
+      ? (args.length === 1 || purpose === 'QUOTE' && args.length === 2 && normalizePrincipal(args[1]) !== null) && validate([args[0], UNIVERSAL_QUOTE_SUBJECTS.SOLANA])
       : validate(args) && (purpose !== 'QUOTE' || !definition.quote || args.length === 1);
     if (!valid) throw new HttpError(400, 'ARGUMENTS_INVALID');
     const mode = flowMode(flow, env);
@@ -369,6 +370,7 @@ export function createBackend(options: BackendOptions) {
           const deps = previewTransport(depsFor(flow, true), abandoned.signal);
           const compute = async (): Promise<FlowResult> => {
             if (purpose === 'SIMULATION') return { ok: true, value: await definition.create(previewStorage(), deps, {}).call(method, args) };
+            if (purpose === 'SLIPPAGE') return { ok: true, value: await jupiterSlippagePreview(args[0], deps.http) };
             const quote = definition.quote;
             if (quote) return { ok: true, value: await measureQuoteRpc(() => quote(args[0] as SemanticWorkflow, deps),
               metrics => logger.info('flow.quote_rpc', { flow, ...metrics })) };
@@ -608,7 +610,7 @@ export function createBackend(options: BackendOptions) {
       if (!isFlowName(flow)) throw new HttpError(404, 'FLOW_NOT_FOUND');
       const body = request.body as { args?: unknown; purpose?: unknown } | null;
       if (!body || typeof body !== 'object' || !Array.isArray(body.args) || Object.keys(body).some(key => !['args', 'purpose'].includes(key)) ||
-        body.purpose !== undefined && body.purpose !== 'SIMULATION' && body.purpose !== 'QUOTE') throw new HttpError(400, 'ARGUMENTS_INVALID');
+        body.purpose !== undefined && body.purpose !== 'SIMULATION' && body.purpose !== 'QUOTE' && body.purpose !== 'SLIPPAGE') throw new HttpError(400, 'ARGUMENTS_INVALID');
       // P0 catalog reliability: the caller's remaining budget (the BFF sends its own attempt timeout) bounds the preview; a disconnect abandons it.
       const budget = request.headers[PREVIEW_DEADLINE_HEADER];
       const deadlineMs = typeof budget === 'string' && /^[1-9][0-9]{2,5}$/.test(budget) ? Number(budget) : undefined;

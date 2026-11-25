@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
-import { bpsToPercent, percentToBps } from '../domain/slippage-policy';
+import { ELEVATED_SLIPPAGE_WARNING_BPS } from '@defi-workflow-engine/workflow-contracts';
+import { bpsToPercent, percentToBps, priceDifferenceLabel } from '../domain/slippage-policy';
+import { useLocale } from '../i18n/locale';
 
 /** What a percent that has no whole basis-point value becomes: every slippage validator refuses it (nothing is rounded). */
 export const INVALID_PRICE_DIFFERENCE = 'invalid';
@@ -22,4 +24,26 @@ export function PriceDifferenceInput({ bps, onBpsChange, ...props }: { bps: stri
     const value = event.target.value, next = priceDifferenceBps(value);
     setText(value); sent.current = next; onBpsChange(next);
   }}/>;
+}
+
+/** Apply a concrete draft value. The workflow always stores the same numeric limit the person sees. */
+export function SlippageChoices({ bps, maximumBps, onBpsChange, autoBps, onRequestAuto, onApplyAuto, autoPending }: {
+  bps: string; maximumBps: number; onBpsChange(bps: string): void; autoBps?: number | null;
+  onRequestAuto?: () => void; onApplyAuto?: (bps: string) => void; autoPending?: boolean;
+}) {
+  const { t } = useLocale();
+  const recommendation = autoBps != null && Number.isSafeInteger(autoBps) && autoBps >= 1 && autoBps <= maximumBps ? autoBps : null;
+  return <>
+    <div className="row" role="group" aria-label={t('Max price difference options')}>
+      {recommendation !== null && <button type="button" onClick={() => (onApplyAuto ?? onBpsChange)(String(recommendation))}>
+        {t('Use Auto ({0})', priceDifferenceLabel(recommendation))}</button>}
+      {recommendation === null && onRequestAuto && <button type="button" onClick={onRequestAuto} disabled={autoPending}>
+        {t(autoPending ? 'Checking route…' : 'Auto slippage')}</button>}
+      {[100, 250, 500].filter(preset => preset <= maximumBps).map(preset => <button key={preset} type="button"
+        onClick={() => onBpsChange(String(preset))} aria-pressed={Number(bps) === preset}>
+        {t('Manual {0}', priceDifferenceLabel(preset))}</button>)}
+    </div>
+    {Number(bps) > ELEVATED_SLIPPAGE_WARNING_BPS && Number(bps) <= maximumBps && <p className="muted" role="status">
+      {t('Above 3%, the price can move substantially against you before the operation stops.')}</p>}
+  </>;
 }

@@ -8,6 +8,7 @@
  */
 import { canonicalJson } from './canonical.js';
 import type { SemanticWorkflow } from './semantic-workflow.js';
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from './swap.js';
 
 type Node = SemanticWorkflow['nodes'][number];
 export const CATALOG_SWAP_ACTION = 'asset.swap.exact-input';
@@ -19,7 +20,7 @@ const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', BASE_WETH = '0x4
  * `createSwapNode`) so every existing Base swap keeps its IR and hash; only other catalog pairs are catalog swaps. Public amounts are constrained by their integer encoding and live provider state.
  */
 export const CATALOG_SWAP_REFERENCE_PAIRS: Readonly<Record<string, readonly [string, string]>> = Object.freeze({ 'eip155:8453': Object.freeze([BASE_USDC, BASE_WETH] as const) });
-export const CATALOG_SWAP_MAXIMUM_SLIPPAGE_BPS = 300;
+export const CATALOG_SWAP_MAXIMUM_SLIPPAGE_BPS = DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS;
 /**
  * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: each catalog network's native currency is ETH, and its WETH9 is the deployment the network's SwapRouter02
  * reports as `WETH9()` (verified read-only on all four networks; see scripts/verify-native-eth.mjs). Native ETH is its own asset — the IR's

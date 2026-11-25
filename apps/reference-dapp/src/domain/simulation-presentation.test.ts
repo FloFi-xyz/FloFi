@@ -99,6 +99,12 @@ describe('simulation financial presentation', () => {
       expect(result.steps[0]?.result).toBeNull(); expect(result.fees).toEqual([]); expect(result.status).not.toBe('ready');
     }
   });
+  it('shows an on-chain Solana revert distinctly from an unsent simulation refusal', () => {
+    const record = { provenance: 'PUBLIC_MAINNET', verdict: 'DIVERGENT', review: { workflow: swap, expiresAt: expiry },
+      attempt: { state: 'REVERTED' }, error: 'JUPITER_SWAP_FAILED' };
+    expect(project(snapshot('solana-swap', { record }))).toMatchObject({ status: 'blocked', message: 'The swap failed on chain. Only the network fee was charged.' });
+    expect(project(snapshot('solana-swap', { error: 'JUPITER_WRAPPED_SOL_ACCOUNT_PRESENT' }))).toMatchObject({ status: 'blocked', message: expect.stringContaining('Unwrap it in your wallet') });
+  });
   it('shows a composed lending result per step and uses the recorded workflow fee ceiling once', () => {
     const workflow = editorReducer(initialEditor(), canvasAddCommand('lending', 0, '0x1111111111111111111111111111111111111111', '100'), context).workflow;
     const source = snapshot('lending', { record: { provenance: 'PUBLIC_TESTNET', status: 'SIMULATED', error: null, reviews: [{

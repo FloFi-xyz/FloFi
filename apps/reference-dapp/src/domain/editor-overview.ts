@@ -30,6 +30,7 @@ export const UNREVIEWED_DETAIL = 'This step could not be reviewed. Check its set
 const FINDING_DETAIL: Readonly<Record<string, string>> = {
   'Review the prototype slippage limit.': 'Check this step’s slippage limit.',
   'Above the BUILD-003A review limit.': 'The slippage limit is above what FloFi accepts for review.',
+  'Above the applicable slippage limit.': 'The slippage limit is above what FloFi accepts for review.',
   'Set one explicit slippage limit.': 'Set one slippage limit for this step.',
 };
 /** Board 16: a step's check in plain words, never the internal limit names the review engine uses ("BUILD-003A"). */

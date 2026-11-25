@@ -393,10 +393,12 @@ describe('P0 universal composition: representative workflows, their groups and t
       expect(p.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.downgrades]), why).toEqual([['EVM_OWNER_STEP', 0, 0, [code]], ['EVM_WALLET_BATCH', 1, 1, []]]);
       expect(p.interactions, why).toMatchObject({ upfront: 0, whenDue: 2, atLeast: true, single: false });
     }
-    // Base's USDC ⇄ WETH reference swap accepts up to 5% slippage; a batch signs at most 3% (every catalog swap refuses more when composed).
-    expect(planned([swap('base', 'USDC', 'WETH', '5', { slippageBps: 400 }), send('base', 'USDC', '1')]).groups.map(g => [g.strategy, g.downgrades]))
-      .toEqual([['EVM_OWNER_STEP', ['WORKFLOW_SLIPPAGE_UNSUPPORTED']], ['EVM_WALLET_BATCH', []]]);
-    expect(compose(workflow([swap('arbitrum-one', 'USDC', 'WETH', '5', { slippageBps: 301 })]))).toEqual({ ok: false, code: 'CATALOG_SWAP_SLIPPAGE_INVALID' });
+    // An exact 5% limit uses the direct owner-wallet path. Grouped EVM calls retain their 3% limit.
+    for (const network of ['base', 'arbitrum-one'] as const) {
+      expect(planned([swap(network, 'USDC', 'WETH', '5', { slippageBps: 500 }), send(network, 'USDC', '1')]).groups.map(g => [g.strategy, g.downgrades]))
+        .toEqual([['EVM_OWNER_STEP', ['WORKFLOW_SLIPPAGE_UNSUPPORTED']], ['EVM_WALLET_BATCH', []]]);
+    }
+    expect(compose(workflow([swap('arbitrum-one', 'USDC', 'WETH', '5', { slippageBps: 501 })]))).toEqual({ ok: false, code: 'CATALOG_SWAP_SLIPPAGE_INVALID' });
     // A chain the deployment did not opt in: every step through its own flow, each a group of its own.
     const off = planned([swap('arbitrum-one', 'USDC', 'WETH', '3'), after], { ...FACTS, chains: FACTS.chains.filter(c => c !== 'eip155:42161') });
     expect(off.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.downgrades])).toEqual([['EVM_OWNER_STEP', 0, 0, ['USER_FUNDED_CHAIN_DISABLED']],

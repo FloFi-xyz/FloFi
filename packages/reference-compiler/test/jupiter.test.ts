@@ -6,7 +6,7 @@ import { JUPITER_SOLANA_MAINNET as profile, SOLANA_MAINNET_TOKENS as T, type Sol
 import { associatedTokenAddress, base58Decode, base58Encode, compileMessageV0, findProgramAddress, fromBase64, parseMessageV0, serializeMessageV0,
   toBase64, parseTransaction, serializeTransaction } from '../src/solana.js';
 import { assertJupiterReview, assertMessageRoundTrip, decodeJupiterSwap, inspectJupiterInstructions, jupiterInstructions, jupiterIntent,
-  parseJupiterBuild, simulateJupiterSwap, verifySignedJupiterTransaction, type JupiterIntent } from '../src/jupiter.js';
+  parseJupiterBuild, readJupiterSlippageRecommendation, simulateJupiterSwap, verifySignedJupiterTransaction, type JupiterIntent } from '../src/jupiter.js';
 import { createMockedSolanaJupiter, createMockedSolanaWallet } from '../src/jupiter-mock.js';
 
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as { response: Record<string, unknown> };
@@ -61,6 +61,19 @@ describe('Jupiter quote parsing (PUBLIC_READ_ONLY recorded responses)', () => {
     expect(parseMessageV0(bytes).header[0]).toBe(1);
   });
   const response = () => clone(fixture('jupiter-build-usdc-sol.json').response);
+  it('checks RTSE recommendation, minimum and instruction against the requested pair and exact input', async () => {
+    const mock = createMockedSolanaJupiter();
+    await expect(readJupiterSlippageRecommendation(usdcSol, mock.http, 'now')).resolves.toMatchObject({ slippageBps: 125, inAmount: usdcSol.amount });
+    expect(mock.state.queries.map(query => query.slippageBps)).toEqual(['rtse']);
+    const proposed = (patch: Record<string, unknown>) => readJupiterSlippageRecommendation(usdcSol, async () => ({ ...response(), ...patch }), 'now');
+    await expect(proposed({ slippageBps: 301 })).rejects.toThrow('JUPITER_RTSE_OUT_OF_RANGE');
+    await expect(proposed({ slippageBps: '50' })).rejects.toThrow('JUPITER_RTSE_OUT_OF_RANGE');
+    await expect(proposed({ slippageBps: 51 })).rejects.toThrow('JUPITER_RTSE_INVALID');
+    await expect(proposed({ inAmount: '10000001' })).rejects.toThrow('JUPITER_INPUT_AMOUNT_MISMATCH');
+    await expect(proposed({ otherAmountThreshold: '1' })).rejects.toThrow('JUPITER_MINIMUM_OUTPUT_INVALID');
+    expect(jupiterIntent(solanaWorkflow('USDC', 'SOL', '1000000', 500), usdcSol.owner).slippageBps).toBe(500);
+    expect(() => jupiterIntent(solanaWorkflow('USDC', 'SOL', '1000000', 501), usdcSol.owner)).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
+  });
   const parse = (r: Record<string, unknown>, intent = usdcSol) => inspectJupiterInstructions(parseJupiterBuild(r, intent, 'now'), intent);
   it.each([
     ['wrong input mint', (r: Record<string, unknown>) => { r.inputMint = T.USDT.mint; }, 'JUPITER_INPUT_MINT_MISMATCH'],

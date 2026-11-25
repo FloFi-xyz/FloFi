@@ -14,7 +14,7 @@
  * addresses; without a connected wallet, fixed public quote subjects are used (no key exists for either), and the Review always
  * re-quotes for the real owner and recipient.
  */
-import { UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type UniversalNetwork, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
+import { UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS, type UniversalNetwork, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import { providerHttpError, providerRefusalCode, type UniversalHttp, type UniversalHttpOptions } from './http.ts';
@@ -26,9 +26,10 @@ export type DiscoveryCandidate = {
   readonly provider: UniversalRoutingProvider; readonly bridge: string; readonly status: DiscoveryStatus;
   readonly executableBy: 'UNIVERSAL_ROUTER' | 'CERTIFIED_ROUTER' | null;
   readonly expectedOutput: string | null; readonly minimumOutput: string | null; readonly estimatedDurationSeconds: number | null;
-  readonly fees: readonly DiscoveryFee[]; readonly reason: string | null; readonly quoteId: string | null; readonly expiresAt?: string };
+  readonly fees: readonly DiscoveryFee[]; readonly reason: string | null; readonly quoteId: string | null; readonly expiresAt?: string;
+  readonly recommendedSlippageBps?: number };
 export type DiscoveryRequest = { readonly source: UniversalNetwork; readonly destination: UniversalNetwork; readonly inputToken: UniversalToken; readonly outputToken: UniversalToken;
-  readonly amount: string; readonly slippageBps: number; readonly owner?: string; readonly recipient?: string; readonly inputTokenProgram?: string | null };
+  readonly amount: string; readonly slippageBps: number; readonly recommendSlippage?: true; readonly owner?: string; readonly recipient?: string; readonly inputTokenProgram?: string | null };
 export type DiscoveryResult = { readonly format: 'flofi.universal-discovery.v1'; readonly sourceChain: string; readonly destinationChain: string;
   readonly inputToken: UniversalToken; readonly outputToken: UniversalToken; readonly amount: string; readonly observedAt: string;
   readonly quoteSubjects: 'OWNER' | 'PUBLIC_QUOTE_SUBJECT'; readonly candidates: readonly DiscoveryCandidate[];
@@ -62,18 +63,23 @@ const sameAddress = (network: UniversalNetwork, a: unknown, b: string) => typeof
 const tokenKey = (n: UniversalNetwork, t: UniversalToken, native: string) => t.kind === 'NATIVE' ? native : t.address!;
 
 // --- Relay -------------------------------------------------------------------------------------------------------------
-async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuoteRequest, headers: Record<string, string> | undefined, o: UniversalHttpOptions): Promise<DiscoveryCandidate> {
+async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuoteRequest, headers: Record<string, string> | undefined, o: UniversalHttpOptions,
+  recommendSlippage: boolean): Promise<DiscoveryCandidate> {
   let raw: unknown;
-  try { raw = await http.post(`${api}/quote/v2`, relayQuoteBody(r), headers, o); } catch (cause) { return failed('relay', 'relay-depository', cause); }
+  try { raw = await http.post(`${api}/quote/v2`, relayQuoteBody(r, recommendSlippage), headers, o); } catch (cause) { return failed('relay', 'relay-depository', cause); }
   const refused = providerHttpError(raw);
   if (refused) {
     const code = [401, 403, 408, 425, 429].includes(refused.status) || refused.status >= 500 ? providerRefusalCode('RELAY', refused) : relayRefusal(refused.message);
     return candidate('relay', 'relay-depository', refusalStatus(code), { reason: code });
   }
   try {
-    const route = normalizeRelayQuote(raw, r);
+    // Relay computes its tolerance when the request omits slippageTolerance. Accept only the explicit numeric value from a verified quote.
+    const tolerance = isObject(raw) && isObject(raw.details) && isObject(raw.details.slippageTolerance) ? raw.details.slippageTolerance.total : null;
+    const bps = typeof tolerance === 'string' && /^[1-9][0-9]{0,2}$/.test(tolerance) ? Number(tolerance) : null;
+    if (recommendSlippage && (bps === null || bps > UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS)) throw new Error('RELAY_RECOMMENDED_SLIPPAGE_INVALID');
+    const route = normalizeRelayQuote(raw, recommendSlippage && bps !== null ? { ...r, slippageBps: bps } : r);
     return candidate('relay', 'relay-depository', 'EXECUTABLE', { executableBy: 'UNIVERSAL_ROUTER', expectedOutput: route.expectedOutput, minimumOutput: route.minimumOutput,
-      expiresAt: route.quote.expiresAt,
+      expiresAt: route.quote.expiresAt, ...recommendSlippage ? { recommendedSlippageBps: route.slippageBps } : {},
       estimatedDurationSeconds: route.quote.estimatedDurationSeconds, quoteId: route.quote.id,
       fees: route.fees.map(f => ({ label: f.label, amount: f.amount, symbol: f.symbol, decimals: f.decimals, included: f.included, chainId: f.chainId })) });
   } catch (cause) {
@@ -231,7 +237,7 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
       const closed = new Promise<void>(resolve => { settle = resolve; });
       settleOnAbort = () => settle();
       const deadline = setTimeout(() => settle(), window.deadlineMs);
-      const ask = (p: UniversalRoutingProvider): Promise<DiscoveryCandidate[]> => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders, o).then(c => [c])
+      const ask = (p: UniversalRoutingProvider): Promise<DiscoveryCandidate[]> => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders, o, r.recommendSlippage === true).then(c => [c])
         : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, lifiHeaders, o) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion, o)
           : discoverAcross(config.http, apis.across, r, owner, recipient, o).then(c => [c]);
       let open = true;

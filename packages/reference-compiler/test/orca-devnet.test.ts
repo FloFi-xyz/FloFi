@@ -58,7 +58,7 @@ describe('canonical swap on Solana Devnet', () => {
     ['wrong token', workflow('SOL', '1000', 50, { output: { chainId: chain, address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 } }), 'SOLANA_MINT_UNSUPPORTED'],
     ['wrong decimals', workflow('SOL', '1000', 50, { output: { ...asset('devUSDC'), decimals: 9 } }), 'SOLANA_MINT_UNSUPPORTED'],
     ['Jupiter on Devnet', workflow('SOL', '1000', 50, { protocols: ['jupiter'] }), 'SOLANA_SWAP_PROVIDER_UNSUPPORTED'],
-    ['excessive slippage', workflow('SOL', '1000', 301), 'SOLANA_SLIPPAGE_OUT_OF_RANGE'],
+    ['excessive slippage', workflow('SOL', '1000', 501), 'SOLANA_SLIPPAGE_OUT_OF_RANGE'],
   ])('rejects %s', (_name, wf, code) => expect(() => orcaDevnetIntent(wf, owner)).toThrow(code));
 });
 

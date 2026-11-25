@@ -18,6 +18,7 @@
  * network. BUILD-RH-002: a side's token is generic (`token`, `symbol`, `decimals`) because a route may map assets across chains
  * (Base or Arbitrum USDC → Robinhood USDG); `l1DataFee` says whether the source chain's receipts carry an OP Stack `l1Fee`.
  */
+import { ROUTER_MAXIMUM_SLIPPAGE_BPS, ROUTER_TESTNET_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { ETHEREUM_MAINNET } from './ethereum-chain.js';
 import { ARBITRUM_ONE } from './arbitrum-chain.js';
 export type RouterProfile = {
@@ -60,7 +61,7 @@ export const CROSSCHAIN_ROUTER_BASE_ARBITRUM: RouterProfile = Object.freeze({
   reviewTtlSeconds: 180,
   /** A bridge deposit is never prepared closer than this to the SpokePool's quote-time limit or the fill deadline. */
   depositSafetyMarginSeconds: 300,
-  defaultSlippageBps: 50, maximumSlippageBps: 300,
+  defaultSlippageBps: 50, maximumSlippageBps: ROUTER_MAXIMUM_SLIPPAGE_BPS,
   /** Source and destination blocks must be at or below their chain's `safe` head before success is final. */
   finality: 'safe',
   /** Destination log scan window per observation (Arbitrum blocks are ≈ 0.25 s). */
@@ -102,7 +103,7 @@ export const CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA: RouterProfile = Ob
     lifi: Object.freeze({ api: 'https://li.quest/v1', integrator: 'flofi', docs: 'https://docs.li.fi/api-reference/get-a-quote-for-a-token-transfer' }),
     across: Object.freeze({ api: 'https://testnet.across.to/api', docs: 'https://docs.across.to/reference/testnet-environment' }),
   }),
-  reviewTtlSeconds: 180, depositSafetyMarginSeconds: 300, defaultSlippageBps: 50, maximumSlippageBps: 300, finality: 'safe', destinationScanBlocks: 2_000,
+  reviewTtlSeconds: 180, depositSafetyMarginSeconds: 300, defaultSlippageBps: 50, maximumSlippageBps: ROUTER_TESTNET_MAXIMUM_SLIPPAGE_BPS, finality: 'safe', destinationScanBlocks: 2_000,
 });
 /**
  * BUILD-RH-002: Robinhood Chain (4663) in and out through the same router, underlying Across, real funds. Across routes Base and
@@ -146,7 +147,7 @@ function routeBetween(id: string, from: Side, to: Side): RouterProfile {
     source: SIDES[from], destination: destinationOf(SIDES[to]),
     codeSha256: Object.freeze({ baseSpokePool: PINS[from].spokePool, baseLifiDiamond: PINS[from].lifiDiamond, baseLifiFeeForwarder: PINS[from].lifiFeeForwarder,
       baseUsdc: PINS[from].token, arbitrumSpokePool: PINS[to].spokePool, arbitrumUsdc: PINS[to].token }),
-    providers: CROSSCHAIN_ROUTER_BASE_ARBITRUM.providers, reviewTtlSeconds: 180, depositSafetyMarginSeconds: 300, defaultSlippageBps: 50, maximumSlippageBps: 300,
+    providers: CROSSCHAIN_ROUTER_BASE_ARBITRUM.providers, reviewTtlSeconds: 180, depositSafetyMarginSeconds: 300, defaultSlippageBps: 50, maximumSlippageBps: ROUTER_MAXIMUM_SLIPPAGE_BPS,
     finality: 'safe', destinationScanBlocks: 2_000 });
 }
 export const CROSSCHAIN_ROUTER_BASE_ROBINHOOD = routeBetween('base-usdc-to-robinhood-usdg', 'base', 'robinhood');

@@ -34,6 +34,12 @@ describe('BUILD-MCP-001 read-only flow previews', () => {
     expect(harness.state.sent).toEqual([]);
     const value = (quote as { value: Record<string, unknown> }).value;
     for (const key of ['id', 'review', 'authorization', 'attempt', 'unsignedTransaction']) expect(value).not.toHaveProperty(key);
+    const rtse = await call({ args: [workflow], purpose: 'SLIPPAGE' });
+    expect(rtse).toMatchObject({ ok: true, value: { format: 'flofi.jupiter-rtse.v1', workflowHash: value.workflowHash, slippageBps: 125, expiresAt: expect.any(String) } });
+    expect(Object.keys((rtse as { value: Record<string, unknown> }).value).sort()).toEqual(['expiresAt', 'format', 'slippageBps', 'workflowHash']);
+    expect(harness.state.queries.at(-1)).toMatchObject({ slippageBps: 'rtse', amount: '1000000' });
+    expect(harness.state.queries.at(-1)?.taker).not.toBe(owner);
+    await expect(call({ args, purpose: 'SLIPPAGE' })).rejects.toMatchObject({ status: 400, message: 'ARGUMENTS_INVALID' });
     const evm = '0x' + 'a'.repeat(40);
     for (const legacyArgs of [[workflow], [workflow, evm]]) {
       expect(await call({ args: legacyArgs, purpose: 'QUOTE' })).toMatchObject({ ok: true, value: { amount: '1000000' } });
@@ -70,6 +76,7 @@ describe('BUILD-MCP-001 read-only flow previews', () => {
     expect(await call('crosschain-router-testnet', { args: [], extra: 1 })).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('jupiter-swap', { args: [], purpose: 'EXECUTE' })).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('crosschain-router-testnet', { args: [{ workflowId: 'w', nodes: [] }], purpose: 'QUOTE' })).toEqual({ ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' });
+    expect(await call('base-swap', { args: [], purpose: 'SLIPPAGE' })).toEqual({ ok: false, code: 'PREVIEW_SLIPPAGE_NOT_AVAILABLE' });
     expect(await call('base-swap', { args: [], purpose: 'QUOTE' })).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('jupiter-swap', { args: [{}, 'invalid-owner'], purpose: 'QUOTE' })).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('crosschain-router-testnet', null)).toBe('HTTP_400_ARGUMENTS_INVALID');

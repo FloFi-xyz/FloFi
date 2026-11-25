@@ -48,7 +48,8 @@ describe('BUILD-ROUTER-001 canonical router node', () => {
     expect(() => createRouterBridgeNode('n', { ...fields, amount: '0' })).toThrow('ROUTER_AMOUNT_OUT_OF_RANGE');
     expect(readRouterBridgeNode(createRouterBridgeNode('n', { ...fields, amount: '100000001' })).amount).toBe('100000001');
     expect(readRouterBridgeNode(createRouterBridgeNode('n', { ...fields, amount: '1' })).amount).toBe('1');
-    expect(() => createRouterBridgeNode('n', { ...fields, slippageBps: 301 })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
+    expect(readRouterBridgeNode(createRouterBridgeNode('n', { ...fields, slippageBps: 500 })).slippageBps).toBe(500);
+    expect(() => createRouterBridgeNode('n', { ...fields, slippageBps: 501 })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
     expect(() => createRouterBridgeNode('n', { ...fields, recipient: '0x' + '0'.repeat(40) })).toThrow('ROUTER_RECIPIENT_INVALID');
     expect(() => createRouterBridgeNode('n', { ...fields, recipient: '0x' + 'A'.repeat(40) })).toThrow('ROUTER_RECIPIENT_INVALID');
     for (const providers of [[], ['lifi', 'lifi'], ['stargate'], ['lifi', 'across', 'relay']])
@@ -70,6 +71,12 @@ describe('BUILD-ROUTER-001 canonical router node', () => {
 });
 
 describe('BUILD-ROUTER-001 canonical route and commitment', () => {
+  it('binds the exact mainnet slippage limit to the route commitment', () => {
+    const atLimit = { ...route(), slippageBps: 500 };
+    expect(canonicalizeRoute(atLimit).slippageBps).toBe(500);
+    expect(routeCommitment(atLimit)).not.toBe(routeCommitment(route()));
+    expect(() => canonicalizeRoute({ ...atLimit, slippageBps: 501 })).toThrow('ROUTE_SLIPPAGE_INVALID');
+  });
   it('canonicalization is deterministic: key order, fee order and object identity cannot change the commitment', () => {
     const a = route(), b = route();
     const reordered = Object.fromEntries(Object.entries(b).reverse()) as unknown as CanonicalRoute;

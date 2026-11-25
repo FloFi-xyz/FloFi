@@ -52,9 +52,18 @@ describe('BUILD-ROUTER-001 Guided Chat / Canvas authoring', () => {
     expect(commandIsValid({ type: 'ADD_ROUTER_BRIDGE', input: { ...canvasInput, amount: '1000' }, source: 'CANVAS', baseRevision: 0 })).toBe(true);
     expect(() => createRouterNode('n', { ...canvasInput, destination: 'Optimism' as 'Arbitrum' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
     expect(() => createRouterNode('n', { ...canvasInput, recipient: '0x123' })).toThrow('ROUTER_RECIPIENT_INVALID');
-    expect(() => createRouterNode('n', { ...canvasInput, slippage: '301' })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
+    expect(() => createRouterNode('n', { ...canvasInput, slippage: '501' })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
     expect(() => createRouterNode('n', { ...canvasInput, routing: 'STARGATE' as 'AUTO' })).toThrow('ROUTER_PROVIDER_POLICY_INVALID');
     expect(parseRouterChat('bridge 5 USDC from Base to Optimism')).toBeNull();
+  });
+  it('accepts explicit 2.5% and 5% mainnet limits while keeping the testnet maximum', () => {
+    for (const slippage of ['250', '500']) {
+      const input = parseRouterChat(`bridge 1 USDC from Base to Arbitrum slippage ${slippage} bps`)!;
+      expect(readRouterBridgeNode(createRouterNode('n', input)).slippageBps).toBe(Number(slippage));
+    }
+    const testnet = parseRouterChat('bridge 1 USDC from Base Sepolia to Arbitrum Sepolia')!;
+    expect(readRouterBridgeNode(createRouterNode('n', { ...testnet, slippage: '300' })).slippageBps).toBe(300);
+    expect(() => createRouterNode('n', { ...testnet, slippage: '301' })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
   });
 });
 

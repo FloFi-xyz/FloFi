@@ -4,6 +4,10 @@ import type { Asset } from './common.js';
 
 /** The one canonical exact-input swap action. Chain and provider never change its semantic shape. */
 export const EXACT_INPUT_SWAP_ACTION = 'asset.swap.exact-input';
+/** Owner-authorized maximum for supported direct swaps. Composite runtimes can impose a tighter limit. */
+export const DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS = 500;
+/** CTO decision (2026-11-25): a manual limit above 3% is allowed up to the protocol's maximum, and always shown with a warning. */
+export const ELEVATED_SLIPPAGE_WARNING_BPS = 300;
 export type ExactInputSwapNode = SemanticWorkflow['nodes'][number];
 export type TokenAsset = Extract<Asset, { address: string }>;
 export type ExactInputSwapFields = {

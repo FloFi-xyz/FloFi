@@ -13,6 +13,7 @@
  * Mainnet: real funds. Quotes, simulation and Review need `GRYLOO_ROBINHOOD_MAINNET=live`; owner execution additionally needs
  * the explicit real-funds opt-in `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`. Flofi never signs or sends.
  */
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { ROBINHOOD_CHAIN_MAINNET } from './robinhood-chain.js';
 import type { UniswapPoolProfile, UniswapPoolToken } from './uniswap-liquidity-profiles.js';
 import { catalogLiquidityMaximumUnits, catalogLiquidityPool, uniswapV3PoolAddress, type UniswapCatalogLiquidity } from './uniswap-v3-catalog.js';
@@ -47,7 +48,7 @@ export const UNISWAP_V3_ROBINHOOD = Object.freeze({
   /** ERC-1967 beacon slot (`bytes32(uint256(keccak256('eip1967.proxy.beacon')) - 1)`). */
   beaconSlot: '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50',
   /** A Review authorizes wallet requests for at most this long. */
-  reviewTtlSeconds: 60, defaultSlippageBps: 50, maximumSlippageBps: 300,
+  reviewTtlSeconds: 60, defaultSlippageBps: 100, maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS,
   /** Arbitrum Nitro receipts: the network cost is gasUsed × effectiveGasPrice (gasUsed includes L1 data gas); no l1Fee field. */
   l1DataFee: false,
 });

@@ -13,6 +13,7 @@
  * Mainnet: real funds. Quotes, simulation and Review need `GRYLOO_BASE_MAINNET=live`; owner execution additionally needs the explicit
  * real-funds opt-in `GRYLOO_BASE_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`. Flofi never signs or sends.
  */
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { BASE_MAINNET } from './base-chain.js';
 import type { UniswapPoolProfile, UniswapPoolToken } from './uniswap-liquidity-profiles.js';
 import { catalogLiquidityPool, type UniswapCatalogLiquidity } from './uniswap-v3-catalog.js';
@@ -44,7 +45,7 @@ export const UNISWAP_V3_BASE = Object.freeze({
     weth: '667c900c2c6da80d452501a9c6332e046384a0c438c3334ce6f71c86dd7b8735',
   }),
   /** A Review authorizes wallet requests for at most this long. */
-  reviewTtlSeconds: 60, defaultSlippageBps: 50, maximumSlippageBps: 300,
+  reviewTtlSeconds: 60, defaultSlippageBps: 100, maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS,
   /** OP Stack receipts carry a separate `l1Fee`; the owner's cost is gasUsed × effectiveGasPrice + l1Fee. */
   l1DataFee: true, gasPriceOracle: BASE_MAINNET.gasPriceOracle,
 });

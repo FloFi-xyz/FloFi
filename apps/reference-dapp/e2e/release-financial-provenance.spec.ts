@@ -55,6 +55,26 @@ if (profile === 'jupiter' || profile === 'solana-devnet') test(`${profile} MOCKE
   expect(await (devnet ? devnetControl({ action: 'sent' }) : jupiterControl({ action: 'sent' }))).toBe(0);
 });
 
+if (profile === 'jupiter') test('Jupiter Auto recommends a bounded tolerance without changing the draft or opening the wallet', async ({ page }) => {
+  const wallet = await resetJupiterHarness(); await installSolanaWallet(page, wallet);
+  await authorSolanaSwap(page, 'canvas');
+  const card = page.locator('.react-flow__node[data-id="node-002"]');
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Action settings', exact: true });
+  const field = settings.getByLabel('Max price difference (%)', { exact: true });
+  await expect(field).toHaveValue('1');
+  await settings.getByRole('button', { name: 'Auto slippage', exact: true }).click();
+  const recommendation = settings.getByRole('button', { name: 'Use Auto (1.25%)', exact: true });
+  await expect(recommendation).toBeVisible();
+  await expect(field).toHaveValue('1');
+  await recommendation.click();
+  await expect(field).toHaveValue('1.25');
+  await expect(settings).toContainText('Applied limit: 1%');
+  await settings.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  await expect(settings).toContainText('Applied limit: 1.25%');
+  expect(await signRequests(page)).toBe(0); expect(await jupiterControl({ action: 'sent' })).toBe(0);
+});
+
 if (profile === 'solana-liquidity') test('MOCKED Orca liquidity retains exact ticks and contribution without creating financial authority', async ({ page }) => {
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
   await chat(page, 'Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');

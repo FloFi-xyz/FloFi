@@ -32,5 +32,6 @@ export const portugueseBuilderCanvas: Readonly<Record<string, string>> = {
   // The workflow review's slippage findings, now shown as a card's "Needs attention" detail (the engine's text is unchanged).
   'Review the prototype slippage limit.': 'Revise o limite de desvio de preço.',
   'Above the BUILD-003A review limit.': 'Acima do limite de desvio aceito para revisão.',
+  'Above the applicable slippage limit.': 'Acima do limite de desvio aceito para revisão.',
   'Set one explicit slippage limit.': 'Defina um limite de desvio de preço explícito.',
 };

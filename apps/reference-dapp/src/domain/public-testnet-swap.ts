@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { isCatalogSwapNode } from '@defi-workflow-engine/workflow-contracts';
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, isCatalogSwapNode } from '@defi-workflow-engine/workflow-contracts';
 import { UNISWAP_V3_ETHEREUM as mainnet, UNISWAP_V3_ARBITRUM as arbitrum, UNISWAP_V3_BASE as base, UNISWAP_V3_ETHEREUM_SEPOLIA as ethereum, UNISWAP_V3_ROBINHOOD as robinhood } from '@defi-workflow-engine/action-registry';
 /** Pinned Base Sepolia Uniswap v3 profile; verified again against public chain state before use. */
 export const BASE_SEPOLIA = Object.freeze({
@@ -12,7 +12,7 @@ export const BASE_SEPOLIA = Object.freeze({
   weth: '0x4200000000000000000000000000000000000006',
   pool: '0x94bfc0574ff48e92ce43d495376c477b1d0eeec0', fee: 500,
   /** OP Stack receipts carry a separate L1 data fee (`l1Fee`) that is part of the owner's cost. */
-  l1DataFee: true, kind: 'PAIR', environment: 'PUBLIC_TESTNET',
+  l1DataFee: true, kind: 'PAIR', environment: 'PUBLIC_TESTNET', maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS,
 });
 /** BUILD-ETHEREUM-001: the Ethereum Sepolia USDC/WETH 0.3% profile; every identity is re-verified against chain state before use. */
 export const ETHEREUM_SEPOLIA_SWAP = Object.freeze({
@@ -21,7 +21,7 @@ export const ETHEREUM_SEPOLIA_SWAP = Object.freeze({
   factory: ethereum.factory, router: ethereum.router, quoter: ethereum.quoter, usdc: ethereum.usdc, weth: ethereum.weth,
   pool: ethereum.pool, fee: ethereum.fee,
   /** Ethereum L1: the network cost is gasUsed × effectiveGasPrice; a receipt l1Fee would be unexplained. */
-  l1DataFee: false, kind: 'PAIR', environment: 'PUBLIC_TESTNET',
+  l1DataFee: false, kind: 'PAIR', environment: 'PUBLIC_TESTNET', maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS,
 });
 /**
  * BUILD-RH-002: Robinhood Chain mainnet (real funds) over the official asset catalog. Any catalog pair (Stock Tokens, USDG,
@@ -33,7 +33,7 @@ export const ROBINHOOD_MAINNET_SWAP = Object.freeze({
   rpcUrl: robinhood.rpc, explorer: `${robinhood.explorer}/tx/`,
   factory: robinhood.factory, router: robinhood.router, quoter: robinhood.quoter, weth: robinhood.weth,
   poolInitCodeHash: robinhood.poolInitCodeHash, feeTiers: robinhood.feeTiers, codeSha256: robinhood.codeSha256,
-  stockTokenBeacon: robinhood.stockTokenBeacon, beaconSlot: robinhood.beaconSlot, reviewTtlSeconds: robinhood.reviewTtlSeconds,
+  stockTokenBeacon: robinhood.stockTokenBeacon, beaconSlot: robinhood.beaconSlot, reviewTtlSeconds: robinhood.reviewTtlSeconds, maximumSlippageBps: robinhood.maximumSlippageBps,
   /** Arbitrum Nitro: gasUsed already includes L1 data gas; a receipt never carries `l1Fee`. */
   l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
   /** Run namespace of this catalog network; the code-pinned tokens by address; only pinned assets and Stock Tokens exist here. */
@@ -51,7 +51,7 @@ export const BASE_MAINNET_SWAP = Object.freeze({
   chainId: 8453, chainHex: '0x2105', chainRef: 'eip155:8453', network: base.network,
   rpcUrl: base.rpc, explorer: `${base.explorer}/tx/`,
   factory: base.factory, router: base.router, quoter: base.quoter, weth: base.weth, usdc: base.usdc,
-  poolInitCodeHash: base.poolInitCodeHash, feeTiers: base.feeTiers, codeSha256: base.codeSha256, reviewTtlSeconds: base.reviewTtlSeconds,
+  poolInitCodeHash: base.poolInitCodeHash, feeTiers: base.feeTiers, codeSha256: base.codeSha256, reviewTtlSeconds: base.reviewTtlSeconds, maximumSlippageBps: base.maximumSlippageBps,
   /** OP Stack: receipts carry a separate `l1Fee`, bounded through the GasPriceOracle before the wallet is asked. */
   l1DataFee: true, gasPriceOracle: base.gasPriceOracle, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'bas', pinnedTokens: { [base.weth]: 'weth', [base.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: [base.usdc, base.weth],
@@ -63,7 +63,8 @@ export const ARBITRUM_MAINNET_SWAP = Object.freeze({
   chainId: arbitrum.chainId, chainHex: arbitrum.chainHex, chainRef: arbitrum.chain, network: arbitrum.network,
   rpcUrl: arbitrum.rpc, explorer: `${arbitrum.explorer}tx/`, factory: arbitrum.factory, router: arbitrum.router, quoter: arbitrum.quoter,
   weth: arbitrum.weth, usdc: arbitrum.usdc, poolInitCodeHash: arbitrum.poolInitCodeHash, feeTiers: arbitrum.feeTiers,
-  codeSha256: arbitrum.codeSha256, reviewTtlSeconds: arbitrum.reviewTtlSeconds, l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
+  codeSha256: arbitrum.codeSha256, reviewTtlSeconds: arbitrum.reviewTtlSeconds, maximumSlippageBps: arbitrum.maximumSlippageBps,
+  l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'ars', pinnedTokens: { [arbitrum.weth]: 'weth', [arbitrum.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: null,
   ownerBoundReview: true, wethEvents: 'MINT_BURN',
 } as const);
@@ -71,7 +72,8 @@ export const ETHEREUM_MAINNET_SWAP = Object.freeze({
   chainId: mainnet.chainId, chainHex: mainnet.chainHex, chainRef: mainnet.chain, network: mainnet.network,
   rpcUrl: mainnet.rpc, explorer: `${mainnet.explorer}/tx/`, factory: mainnet.factory, router: mainnet.router, quoter: mainnet.quoter,
   weth: mainnet.weth, usdc: mainnet.usdc, poolInitCodeHash: mainnet.poolInitCodeHash, feeTiers: mainnet.feeTiers,
-  codeSha256: mainnet.codeSha256, reviewTtlSeconds: mainnet.reviewTtlSeconds, l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
+  codeSha256: mainnet.codeSha256, reviewTtlSeconds: mainnet.reviewTtlSeconds, maximumSlippageBps: mainnet.maximumSlippageBps,
+  l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'ets', pinnedTokens: { [mainnet.weth]: 'weth', [mainnet.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: null,
   ownerBoundReview: true, wethEvents: 'WETH9',
 } as const);

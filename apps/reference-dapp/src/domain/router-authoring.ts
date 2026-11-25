@@ -28,7 +28,7 @@ export type RouterBridgeInput = { source: RouterSource; destination: RouterDesti
 export const ROUTER_ROUTING: Readonly<Record<RouterRouting, readonly RoutingProvider[]>> = Object.freeze({ AUTO: ['lifi', 'across'], LIFI: ['lifi'], ACROSS: ['across'] });
 export const ROUTER_ROUTING_LABEL: Readonly<Record<RouterRouting, string>> = Object.freeze({
   AUTO: 'Automatic: LI.FI first, Across direct if LI.FI has no reconcilable route', LIFI: 'LI.FI only', ACROSS: 'Across direct only' });
-/** BUILD-FLOFI-PRODUCT-UX-001: the shared product default (1%, `slippage-policy.ts`) within the Router profiles' own 300 bps limit. */
+/** The shared 1% authoring default within the Router profile's limit. */
 export const ROUTER_DEFAULT_SLIPPAGE = String(defaultSlippageWithin(CROSSCHAIN_ROUTER_BASE_ARBITRUM.maximumSlippageBps));
 const pairOf = (id: string) => ROUTER_PAIRS.find(pair => pair.id === id)!;
 type RouterOption = { source: RouterSource; destination: RouterDestination; sourceLabel: string; destinationLabel: string; pair: (typeof ROUTER_PAIRS)[number];

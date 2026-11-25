@@ -116,7 +116,7 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
 test('chat-committed and blocked review snapshots show unquoted unavailable state', async ({ page }) => {
   await openBuilder(page);
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once and says what it added; nothing is quoted, approved or signed.
-  await commit(page, 'swap 0.125 WETH to USDC on Base slippage 301 bps');
+  await commit(page, 'swap 0.125 WETH to USDC on Base slippage 501 bps');
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 0.125 WETH');
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('WETH → USDC');
   // This profile has no cloud runtime: the card's debounced quote read ends in a specific configuration diagnosis. Both screenshots wait for

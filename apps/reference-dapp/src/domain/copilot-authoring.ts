@@ -29,7 +29,7 @@ import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName
 import { routerNetworksOf } from './router-authoring';
 import { checkRecipient } from './recipient-address';
 import { defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, universalChatSentence, UNIVERSAL_CANVAS_LABEL, universalCanvasPair, type UniversalBridgeRouting } from './universal-bridge-authoring';
-import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, isSolanaPublicKey, UNIVERSAL_NETWORKS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironment, type LexiconEntry } from './copilot-lexicon';
 import { fiatCandidates, fiatReference, lookupAsset } from './intelligence/asset-resolution';
 import { activeNetworkScope, TEST_NETWORK_NOT_AVAILABLE } from './network-scope';
@@ -190,10 +190,11 @@ const NATIVE_ETH_NAMED = { test: (text: string) => NATIVE_ETH_WORDS.test(text) |
  * after a trade verb ("trocar (a) solana", "swap solana"), before "por/for/to/into <token>", or after the exchange preposition "por/for" — and the
  * Solana network anywhere else ("na Solana", "on Solana"). One word never grounds both: a coin-position "solana" is removed before networks are read.
  */
-const SOLANA_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_VERBS}\s+(?:(?:o|a|os|as|my|meu|meus|minha|minhas|the|all|todo|toda|tudo|some|um|uma)\s+)?))solana\b`
+const SOLANA_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_VERBS}\s+(?:(?:o|a|os|as|my|meu|meus|minha|minhas|the|all|todo|toda|tudo|some|um|uma)\s+)?))solana\b(?!\s+(?:devnet|network|rede|chain|mainnet)\b)`
   + String.raw`|(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)`
   + String.raw`\bsolana(?=\s+(?:por|for|to|into|em|pra|para)\s+(?:usdc|usdt|eth|weth|wbtc|btc|jup|bonk)\b)`
-  + String.raw`|(?<=\b(?:por|for)\s+(?:(?:o|a|the)\s+)?)solana\b(?!\s+(?:network|rede|chain|mainnet)\b)`;
+  + String.raw`|(?<=\b(?:por|for)\s+(?:(?:o|a|the)\s+)?)solana\b(?!\s+(?:devnet|network|rede|chain|mainnet)\b)`
+  + String.raw`|(?<=\b(?:to|into|em|para|pra)\s+(?:(?:o|a|the)\s+)?)solana(?=\s+(?:on|in|at|na|no|em)\s+(?:(?:the|a|o)\s+)?(?:solana|base|arbitrum|ethereum|robinhood)\b)`;
 const SOLANA_AS_COIN = new RegExp(SOLANA_AS_COIN_SOURCE, 'i');
 const SOLANA_AS_COIN_ALL = new RegExp(SOLANA_AS_COIN_SOURCE, 'gi');
 /** WETH as people write it ("weth", "w-eth", "wrapped ether"): removed before native ETH is looked for (its catalog name "Ether" is inside it). */
@@ -271,22 +272,23 @@ const percentToBps = (value: string): string | null => {
 };
 /**
  * Basis points written as such ("50 bps", "slippage 50") or as a percentage ("0.5%"), only when the user mentions slippage at all.
- * BUILD-P1 (`strict`, liquidity): only a number written as bps or next to a slippage word ("slippage 1%", "0.5% max slippage"): a position's range
- * band ("±5%") or a deposit amount ("500 USDC") never grounds a slippage the interpreter reported.
+ * In strict mode only a number written as bps or next to a slippage phrase ("slippage 1%", "0.5% max slippage") counts. A range
+ * band ("±5%") or token amount ("500 USDC") never grounds a slippage limit.
  */
 export function groundedBps(text: string, value: string, strict = false): boolean {
-  if (!/slippage|slip|bps|basis\s+points?|pontos?\s+base|deslizamento|toler|%/i.test(text)) return false;
   if (strict) return slippageWritten(text, value);
+  if (!/slippage|slip|bps|basis\s+points?|pontos?\s+base|deslizamento|toler|%/i.test(text)) return false;
   return numbersIn(text).some(reading => !reading.negative && (reading.value === value || (reading.percent && percentToBps(reading.value) === value)));
 }
-const SLIPPAGE_WORD = String.raw`(?:slippage|slip|deslizamento|derrapagem|toler(?:ance|[aâ]ncia))`;
+const SLIPPAGE_WORD = String.raw`(?:slippage|slip|deslizamento|derrapagem|toler(?:ance|[aâ]ncia)|max(?:imum)?\s+price\s+difference|diferen[çc]a\s+m[aá]xima\s+de\s+pre[çc]o)`;
 /** What may stand between a slippage word and its value: "slippage of up to 0.5%", "max slippage: 50 bps", "deslizamento de até 0,5%". */
 const SLIPPAGE_GAP = String.raw`(?:\s*(?:(?:of|de|do|da|at|em|is|é|max(?:imum)?|m[aá]xim[oa]|up to|até|at most|no m[aá]ximo|tolerance|toler[aâ]ncia)(?![\p{L}])|[:=]))*\s*`;
 const BPS_UNIT = String.raw`(?:bps|bp|basis\s+points?|pontos?\s+(?:de\s+)?base)`;
+const UNSIGNED_SLIPPAGE = String.raw`(?<![\d.,])(?<![-−]\s*)\d+(?:[.,]\d+)?`;
 const SLIPPAGE_FORMS = [
-  new RegExp(String.raw`${SLIPPAGE_WORD}${SLIPPAGE_GAP}(\d+(?:[.,]\d+)?)\s*(%|${BPS_UNIT})?`, 'giu'),
-  new RegExp(String.raw`(\d+(?:[.,]\d+)?)\s*(%|${BPS_UNIT})?\s*(?:(?:of|de)\s+)?(?:(?:max(?:imum)?|m[aá]xim[oa])\s+)?(?:de\s+)?${SLIPPAGE_WORD}`, 'giu'),
-  new RegExp(String.raw`(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(${BPS_UNIT})(?![\p{L}])`, 'giu'),
+  new RegExp(String.raw`${SLIPPAGE_WORD}${SLIPPAGE_GAP}(${UNSIGNED_SLIPPAGE})\s*(%|${BPS_UNIT})?`, 'giu'),
+  new RegExp(String.raw`(${UNSIGNED_SLIPPAGE})\s*(%|${BPS_UNIT})?\s*(?:(?:of|de)\s+)?(?:(?:max(?:imum)?|m[aá]xim[oa])\s+)?(?:de\s+)?${SLIPPAGE_WORD}`, 'giu'),
+  new RegExp(String.raw`(${UNSIGNED_SLIPPAGE})\s*(${BPS_UNIT})(?![\p{L}])`, 'giu'),
 ];
 function slippageWritten(text: string, value: string): boolean {
   // A range band ("±5%", "5% around the price") is never the slippage.
@@ -299,7 +301,7 @@ function slippageWritten(text: string, value: string): boolean {
   // A percentage or bps written shortly after a slippage word ("set the slippage to 2%", "change the slippage from 1% to 2%"); a bare number counts
   // only right after the word (above), so a deposit amount nearby never does.
   return [...own.matchAll(new RegExp(SLIPPAGE_WORD, 'giu'))].some(word => [...own.slice(word.index, word.index + word[0].length + 40)
-    .matchAll(new RegExp(String.raw`(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(%|${BPS_UNIT})`, 'giu'))].some(match => bps(match[1]!, match[2] === '%' ? '%' : undefined) === value));
+    .matchAll(new RegExp(String.raw`(${UNSIGNED_SLIPPAGE})\s*(%|${BPS_UNIT})`, 'giu'))].some(match => bps(match[1]!, match[2] === '%' ? '%' : undefined) === value));
 }
 export function groundedAddress(text: string, address: string): boolean {
   if (!address.startsWith('0x')) return [...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => match[0] === address);
@@ -524,7 +526,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
     const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ANY', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ANY', notes);
     if (input.asset.id === output.asset.id) reject('INVALID_ASSET_PAIR', m.differentTokens);
     const amount = amountOf(a.amount, g, 'swap');
-    const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes);
+    const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, true);
     const from = input.asset.symbol, to = output.asset.symbol, label = COPILOT_NETWORK_LABEL[network];
     if (from === 'ETH' || to === 'ETH') notes.push([from, to].includes('WETH') ? m.wrapNote : m.nativeEthNote);
     if (network === 'BASE' && [from, to].every(symbol => symbol === 'USDC' || symbol === 'WETH'))
@@ -534,7 +536,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   }
   const input = needAsset(a.inputAsset, g, 'swap', 'inputAsset'), output = needAsset(a.outputAsset, g, 'swap', 'outputAsset');
   const amount = amountOf(a.amount, g, 'swap');
-  const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes);
+  const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, true);
   if (FAMILY[network] === 'base' || FAMILY[network] === 'ethereum') {
     const evm = (written: string) => { const asset = written.toUpperCase(); return asset === 'USDC' ? 'USDC' : asset === 'WETH' || asset === 'ETH' ? 'WETH' : refuse(m.evmSwapTokens); };
     const from = evm(input), to = evm(output);
@@ -672,7 +674,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
     notes.push(m.universalDefaultOutputNote(outputAsset, dstName));
   }
   const amount = amountOf(a.amount, g, 'bridge');
-  const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes, UNIVERSAL_MAXIMUM_SLIPPAGE_BPS);
+  const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS);
   const routingNamed = g.carried.has('routing');
   if (a.routing && a.routing !== 'AUTO' && a.routing !== 'BEST' && !routingNamed &&
     !(a.routing === 'LIFI' ? /li\.?\s?fi/i : new RegExp(`\\b${a.routing}\\b`, 'i')).test(text)) ask([], m.whichRouting, m.routingOptions);
@@ -694,8 +696,6 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   notes.push(m.universalFundsNote(route));
   return { sentence: universalChatSentence({ source: src, destination: dst, inputAsset: asset, outputAsset, amount, recipient, slippage, routing }), expect: 'ADD_UNIVERSAL_BRIDGE', notes };
 }
-const UNIVERSAL_MAXIMUM_SLIPPAGE_BPS = 300;
-
 function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   if (g.policy.catalog && g.explicitAssets !== false) a = groundExplicitAssets(a, g.latest ?? g.text, g.lexicon, g.receiving === true) as CopilotBridgeAction;
   if (g.policy.catalog && a.outputAsset && a.destinationNetwork && a.destinationNetwork !== 'OTHER' && !g.carried.has('outputAsset')) {

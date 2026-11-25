@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { UNIVERSAL_NETWORKS, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { createUniversalDiscovery } from './discovery.ts';
 import type { UniversalHttp } from './http.ts';
+import { parseDiscoveryRequest } from './requests.ts';
 
 /** Live provider answers recorded read-only on 2026-10-25 (random addresses). */
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../testdata/universal/${name}.json`, import.meta.url), 'utf8')) as { request?: Record<string, string>; response: unknown };
@@ -21,6 +22,36 @@ function http(routes: Record<string, unknown | (() => never)>): UniversalHttp {
 }
 const relay = fixture('relay-sol-base'), deadline = (relay.response as { protocol: { v2: { orderData: { output: { deadline: number } } } } }).protocol.v2.orderData.output.deadline;
 const now = () => new Date((deadline - 7 * 86_400 + 30) * 1000);
+
+describe('Relay Auto slippage uses the verified route', () => {
+  const request = { source: 'solana', destination: 'base', inputToken: SOL_USDC, outputToken: BASE_USDC, amount: '20000000', slippageBps: 100,
+    owner: relay.request!.user, recipient: relay.request!.recipient, providers: ['relay'], recommendSlippage: true };
+
+  it('omits the request limit and exposes the recommendation from the verified quote', async () => {
+    const post = vi.fn(async () => relay.response);
+    const d = createUniversalDiscovery({ now, http: { post, get: vi.fn() } });
+    const r = parseDiscoveryRequest(request), result = await d.discover(r, r.providers);
+    expect(post.mock.calls).toHaveLength(1);
+    expect(post).toHaveBeenCalledWith(expect.stringContaining('/quote/v2'), expect.not.objectContaining({ slippageTolerance: expect.anything() }), undefined, expect.anything());
+    expect(result.candidates).toMatchObject([{ provider: 'relay', status: 'EXECUTABLE', recommendedSlippageBps: 200, minimumOutput: '19574715' }]);
+  });
+
+  it.each([null, '0', '50', '501', '1.5', 200])('offers no recommendation if the metadata or its checked floor is invalid (%s)', async total => {
+    const raw = structuredClone(relay.response) as { details: { slippageTolerance: { total: unknown } } };
+    raw.details.slippageTolerance.total = total;
+    const d = createUniversalDiscovery({ now, http: http({ 'api.relay.link': raw }) });
+    const r = parseDiscoveryRequest(request), result = await d.discover(r, r.providers);
+    expect(result.candidates[0]?.recommendedSlippageBps).toBeUndefined();
+    expect(result.recommended).toBeNull();
+  });
+
+  it('keeps the exact Manual bounds and refuses automatic requests for comparison providers', () => {
+    const { recommendSlippage, ...manual } = request;
+    for (const slippageBps of [250, 500]) expect(parseDiscoveryRequest({ ...manual, slippageBps })).toMatchObject({ slippageBps });
+    expect(() => parseDiscoveryRequest({ ...manual, slippageBps: 501 })).toThrow('UNIVERSAL_REQUEST_SLIPPAGE_INVALID');
+    expect(() => parseDiscoveryRequest({ ...manual, recommendSlippage, providers: ['lifi'] })).toThrow('UNIVERSAL_REQUEST_SLIPPAGE_INVALID');
+  });
+});
 
 describe('BUILD-CROSSCHAIN-UNIVERSAL-001 route discovery', () => {
   it('Solana USDC → Base USDC: Relay executable (recommended), LI.FI and Mayan live quotes with their reasons, Across has no Solana route', async () => {

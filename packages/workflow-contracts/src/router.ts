@@ -12,9 +12,9 @@ import { canonicalJson } from './canonical.js';
 import { BRIDGE_ACTION } from './bridge.js';
 import type { SemanticWorkflow } from './semantic-workflow.js';
 
-export { ROUTER_ADAPTER, ROUTER_CAPABILITY, ROUTING_PROVIDERS, RECONCILABLE_PROTOCOLS, ROUTER_PAIRS, ROUTER_MAXIMUM_SLIPPAGE_BPS, routerPair } from './router-pairs.js';
+export { ROUTER_ADAPTER, ROUTER_CAPABILITY, ROUTING_PROVIDERS, RECONCILABLE_PROTOCOLS, ROUTER_PAIRS, ROUTER_MAXIMUM_SLIPPAGE_BPS, ROUTER_TESTNET_MAXIMUM_SLIPPAGE_BPS, routerPair } from './router-pairs.js';
 export type { RoutingProvider, UnderlyingProtocol, RouterToken, RouterPair } from './router-pairs.js';
-import { ROUTER_ADAPTER, ROUTER_CAPABILITY, ROUTING_PROVIDERS, RECONCILABLE_PROTOCOLS, ROUTER_MAXIMUM_SLIPPAGE_BPS, routerPair, type RoutingProvider, type UnderlyingProtocol, type RouterToken } from './router-pairs.js';
+import { ROUTER_ADAPTER, ROUTER_CAPABILITY, ROUTING_PROVIDERS, RECONCILABLE_PROTOCOLS, routerMaximumSlippageBps, routerPair, type RoutingProvider, type UnderlyingProtocol, type RouterToken } from './router-pairs.js';
 
 const ADDRESS = /^0x[0-9a-f]{40}$/, UNITS = /^(0|[1-9][0-9]{0,77})$/, HASH = /^0x[0-9a-f]{64}$/, HEX = /^0x(?:[0-9a-f]{2})*$/;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -43,7 +43,7 @@ export function createRouterBridgeNode(nodeId: string, fields: RouterBridgeField
   if (!pair) fail('ROUTER_PAIR_UNSUPPORTED');
   if (!UNITS.test(fields.amount) || BigInt(fields.amount) < BigInt(pair!.minimumAmount) || BigInt(fields.amount) > BigInt(pair!.maximumAmount))
     fail('ROUTER_AMOUNT_OUT_OF_RANGE');
-  if (!Number.isSafeInteger(fields.slippageBps) || fields.slippageBps < 1 || fields.slippageBps > ROUTER_MAXIMUM_SLIPPAGE_BPS) fail('ROUTER_SLIPPAGE_OUT_OF_RANGE');
+  if (!Number.isSafeInteger(fields.slippageBps) || fields.slippageBps < 1 || fields.slippageBps > routerMaximumSlippageBps(pair!)) fail('ROUTER_SLIPPAGE_OUT_OF_RANGE');
   if (fields.recipient !== 'CONNECTED_OWNER' && (!ADDRESS.test(fields.recipient) || fields.recipient === ZERO)) fail('ROUTER_RECIPIENT_INVALID');
   const providers = validateRouterProviders(fields.providers);
   const source = { chainId: pair!.source.chainId, address: pair!.source.address, decimals: pair!.source.decimals };
@@ -149,7 +149,7 @@ export function canonicalizeRoute(route: CanonicalRoute): CanonicalRoute {
     fail('ROUTE_AMOUNT_INVALID');
   if (!(ROUTING_PROVIDERS as readonly string[]).includes(route.routingProvider)) fail('ROUTE_PROVIDER_INVALID');
   if (!(RECONCILABLE_PROTOCOLS as readonly string[]).includes(route.underlyingProtocol)) fail('ROUTE_PROTOCOL_NOT_RECONCILABLE');
-  if (!Number.isSafeInteger(route.slippageBps) || route.slippageBps < 1 || route.slippageBps > ROUTER_MAXIMUM_SLIPPAGE_BPS) fail('ROUTE_SLIPPAGE_INVALID');
+  if (!Number.isSafeInteger(route.slippageBps) || route.slippageBps < 1 || route.slippageBps > routerMaximumSlippageBps(pair!)) fail('ROUTE_SLIPPAGE_INVALID');
   if (!Array.isArray(route.steps) || route.steps.length < 1 || route.steps.length > 8) fail('ROUTE_STEPS_INVALID');
   const steps = route.steps.map(s => {
     if (!s || !['FEE_COLLECTION', 'BRIDGE'].includes(s.kind) || typeof s.protocol !== 'string' || !/^[a-z0-9.-]{1,40}$/.test(s.protocol) ||

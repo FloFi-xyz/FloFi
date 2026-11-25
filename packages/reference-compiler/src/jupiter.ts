@@ -51,6 +51,7 @@ export function jupiterIntent(workflow: SemanticWorkflow, owner: string): Jupite
   if (fields.chain !== profile.chain) fail('SOLANA_CLUSTER_UNSUPPORTED');
   if (!input || !output || input === output || input.decimals !== fields.input.decimals || output.decimals !== fields.output.decimals) fail('SOLANA_MINT_UNSUPPORTED');
   if (fields.protocols.join() !== profile.protocol) fail('SOLANA_SWAP_PROVIDER_UNSUPPORTED');
+  if (!Number.isSafeInteger(fields.slippageBps) || fields.slippageBps < 1 || fields.slippageBps > profile.maximumSlippageBps) fail('SOLANA_SLIPPAGE_OUT_OF_RANGE');
   return { nodeId: nodes[0]!.nodeId, owner: solanaAddress(owner), input: input!, output: output!, amount: fields.amount, slippageBps: fields.slippageBps };
 }
 export function jupiterBuildQuery(intent: JupiterIntent): Record<string, string> {
@@ -99,6 +100,18 @@ export function parseJupiterBuild(value: unknown, intent: JupiterIntent, fetched
     computeBudget: (b.computeBudgetInstructions as unknown[]).map(instruction), setup: (b.setupInstructions as unknown[]).map(instruction),
     swap: instruction(b.swapInstruction), cleanup: b.cleanupInstruction === null ? null : instruction(b.cleanupInstruction),
     lookupTableAddresses: Object.keys(tables).map(solanaAddress) };
+}
+
+/** Read a verified provider recommendation. Manual limits above 3% require an explicit user choice. */
+export async function readJupiterSlippageRecommendation(intent: JupiterIntent, http: JupiterHttp, observedAt: string): Promise<JupiterQuote> {
+  const value = record(await http({ ...jupiterBuildQuery(intent), slippageBps: 'rtse' }), 'JUPITER_RTSE_INVALID');
+  const slippageBps = value.slippageBps;
+  if (typeof slippageBps !== 'number' || !Number.isSafeInteger(slippageBps) || slippageBps < 1 || slippageBps > 300) fail('JUPITER_RTSE_OUT_OF_RANGE');
+  const parsed = parseJupiterBuild(value, { ...intent, slippageBps: slippageBps as number }, observedAt);
+  const swap = decodeJupiterSwap(parsed.swap.data);
+  if (parsed.swap.programId !== P.jupiter || swap.inAmount !== intent.amount || swap.quotedOutAmount !== parsed.quote.outAmount ||
+      swap.slippageBps !== slippageBps || swap.platformFeeBps !== 0 || swap.positiveSlippageBps !== 0) fail('JUPITER_RTSE_INVALID');
+  return parsed.quote;
 }
 
 /** route_v2 / shared_accounts_route_v2: [id: u8 (shared only)] in_amount u64, quoted_out_amount u64, slippage_bps u16, platform_fee_bps u16, positive_slippage_bps u16, route_plan. */

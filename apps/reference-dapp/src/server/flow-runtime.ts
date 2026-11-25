@@ -18,6 +18,7 @@ import { randomBytes } from 'node:crypto';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { Backend, BackendOptions } from '../../backend/app.ts';
 import type { FlowName } from '../../backend/flows.ts';
+import type { PreviewPurpose } from '../../backend/preview.ts';
 import { callCloudFlow, listCloudRuns, previewCloudFlow, readCloudRun, type CloudRunSummary, type FlowResult } from './cloud-api-client.ts';
 import { isHostedDeployment } from './deployment.ts';
 import { notifySimulation } from './simulation-observer.ts';
@@ -144,7 +145,7 @@ export async function cloudFlowMode(flow: FlowName, env: Env = process.env, tran
  */
 export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch;
   readonly betaIdentity?: BetaRequestIdentity | null;
-  readonly purpose?: 'SIMULATION' | 'QUOTE'; readonly timeoutMs?: number; readonly maxAttempts?: number;
+  readonly purpose?: PreviewPurpose; readonly timeoutMs?: number; readonly maxAttempts?: number;
   /** P0 catalog reliability: the caller stopped waiting (e.g. the browser cancelled its quote): the API abandons the preview. */
   readonly signal?: AbortSignal } = {}): Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);

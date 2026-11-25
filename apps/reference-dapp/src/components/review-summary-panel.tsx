@@ -9,6 +9,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
+import { ELEVATED_SLIPPAGE_WARNING_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { useLocale } from '../i18n/locale';
 import { TechnicalBody } from './technical-body';
 import { TokenAmountText } from './token-amount-text';
@@ -150,6 +151,8 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   </>;
   const warnings = sim.warnings.filter(warning => !warning.technical && !(poolQuote && warning.message === 'This is a pool quote. Network fees and exact transaction simulation are not available yet.'))
     .map((warning, index) => <p className="review-panel-note review-panel-warning" key={index}>{t(warning.message)}</p>);
+  const elevatedSlippage = workflow.nodes.some(node => (node.actionType === 'asset.swap.exact-input' || node.actionType === 'asset.bridge') &&
+    node.userConstraints.some(constraint => constraint.kind === 'MAXIMUM_SLIPPAGE_BPS' && constraint.maximumBps > ELEVATED_SLIPPAGE_WARNING_BPS));
   if (stage === 'execute') {
     // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review keeps the workflow's summary (only what the owner configured) and marks the fee and
     // the permissions as needing a refreshed Review; no stale figure is shown as current and nothing can be authorized from it.
@@ -203,6 +206,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       {!walletPays && <p className="review-panel-note">{t('You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.')}</p>}
       {/* Without a fee ceiling row to carry "Paid by your wallet", who pays stays said in its own sentence (flofi-security review). */}
       {walletPays && !walletFeeRow && <p className="review-panel-note">{t('Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>}
+      {elevatedSlippage && <p className="review-panel-note review-panel-warning">{t('Above 3%, the price can move substantially against you before the operation stops.')}</p>}
       {warnings}
       {technical}
     </section>;

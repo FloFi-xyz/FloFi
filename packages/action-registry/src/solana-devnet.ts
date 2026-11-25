@@ -8,6 +8,7 @@
  * the on-chain account says 64, and the chain is authoritative. Every simulation re-reads and re-verifies it.
  * Devnet tokens have no value. Jupiter is not involved: Jupiter routing is mainnet-only.
  */
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 export const SOLANA_DEVNET_CHAIN = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
 export type SolanaDevnetTokenSymbol = 'SOL' | 'devUSDC';
 export type SolanaDevnetToken = { readonly symbol: SolanaDevnetTokenSymbol; readonly label: string; readonly mint: string; readonly decimals: number;
@@ -39,7 +40,7 @@ export const ORCA_WHIRLPOOLS_DEVNET = Object.freeze({
     tokenVaultB: '7DM3RMz2yzUB8yPRQM3FMZgdFrwZGMsabsfsKopWktoX', tickSpacing: 64 }),
   /** Anchor sha256("global:swap_v2")[0..8] and sha256("event:Traded")[0..8]. */
   swapV2Discriminator: '2b04ed0b1ac91e62', tradedEventDiscriminator: 'e1ca49af932ba096',
-  maximumSlippageBps: 300, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 400_000,
+  maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 400_000,
   /**
    * P0: the swap carries its own reviewed compute-unit price. A transaction without one is changed by wallets that add a priority fee
    * before signing (observed: Phantom inserts SetComputeUnitPrice), and the exact-byte check then refuses it. Micro-lamports per compute unit.

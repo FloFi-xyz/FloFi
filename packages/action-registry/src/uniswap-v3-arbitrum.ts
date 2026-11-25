@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { ARBITRUM_ONE } from './arbitrum-chain.js';
 import { type UniswapCatalogLiquidity } from './uniswap-v3-catalog.js';
 /** Shared swap/liquidity deployment profile, freshly verified PUBLIC_READ_ONLY at block 513952674.
@@ -25,7 +26,7 @@ export const UNISWAP_V3_ARBITRUM = Object.freeze({
     usdc: 'b46445c0c96a50cd0ae6245d2ceb5058fbbcd24afad9cb878974d8f17b4655c8',
     weth: 'cbbb906270e2b7c031e119ec2f41a8d73d3e14ab437075760adc735e38edd888',
   }),
-  reviewTtlSeconds: 60, defaultSlippageBps: 50, maximumSlippageBps: 300,
+  reviewTtlSeconds: 60, defaultSlippageBps: 100, maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS,
 });
 /** Existing catalog liquidity engine; no pool creation or native ETH wrapping. Nitro fees include posting gas. */
 export const UNISWAP_V3_ARBITRUM_LIQUIDITY: UniswapCatalogLiquidity = Object.freeze({

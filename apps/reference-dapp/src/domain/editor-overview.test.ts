@@ -46,8 +46,8 @@ describe('BUILD-FLOFI-BUILDER-UX-002 Editor overview and card status', () => {
     // An unapplied amount and a card being set up are drafts: the workflow is not configured until they are applied.
     expect(editorOverview(state.workflow, context, review, { amountInputs: { [swap!.nodeId]: '2' } })).toMatchObject({ state: 'draft', drafts: 1 });
     expect(editorOverview(state.workflow, context, review, { setup: { id: 'setup-1', action: 'bridge' } })).toMatchObject({ count: 2, state: 'draft', drafts: 1 });
-    // A review warning (elevated slippage) is a step that needs attention, named with its step number.
-    state = apply(state, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '200' });
+    // A review warning (elevated slippage: above 3%, CTO decision of 2026-11-25) is a step that needs attention, named with its step number.
+    state = apply(state, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '400' });
     const warned = editorOverview(state.workflow, context, lintWorkflow(state.workflow, context));
     expect(warned.state).toBe('attention');
     expect(warned.attention.map(step => step.step)).toEqual([2]);

@@ -334,7 +334,7 @@ describe('UX-002 canonical composer projections', () => {
 
   it('shows existing slippage findings while keeping quote gates distinct from authoring errors', () => {
     setWorkflow();
-    fixture.store.state = editorReducer(initialEditor(), { type: 'ADD_SWAP', source: 'CANVAS', baseRevision: 0, direction: 'USDC_TO_WETH', amount: '1', slippage: '200' }, fixture.store.context);
+    fixture.store.state = editorReducer(initialEditor(), { type: 'ADD_SWAP', source: 'CANVAS', baseRevision: 0, direction: 'USDC_TO_WETH', amount: '1', slippage: '400' }, fixture.store.context);
     const node = fixture.store.state.workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input')!;
     fixture.store.review = lintWorkflow(fixture.store.state.workflow, fixture.store.context);
     const state = composerNodeState(fixture.store.review, node.nodeId);
