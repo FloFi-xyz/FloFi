@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { isAbsolute, join } from 'node:path';
 import { createPublicTestnetService, publicRecordingEnabled,
   type PublicTestnetService, type PublicRun, type PublicBegin, type PublicGaslessBegin } from '../server/public-testnet-service';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../server/public-testnet-rpc';
-import { cloudFlow, cloudFlowMode } from './cloud-flow';
+import { cloudFlow, cloudFlowMode, withFlightFlowAccess } from './cloud-flow';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
   type CatalogNetworkRuntime } from '../server/catalog-networks';
@@ -55,26 +55,26 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
 }
 const id = (value: unknown) => typeof value === 'string' && /^(pub|rhs|bas|ars|ets)-[0-9a-f]{24}$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
 export async function publicPrepare(workflow: SemanticWorkflow, account?: string): Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
   // The authored swap's chain selects the deployment: a catalog network (Base's USDC ⇄ WETH reference swap included), else the testnets.
   return run('prepare', account ? [workflow, account] : [workflow], service => service.prepare(workflow, account), catalogNetworkOfWorkflow(workflow, 'asset.swap.exact-input'));
 
   });
 }
 export async function publicRefresh(executionId: string): Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
   return run('refresh', [executionId], service => service.refresh(id(executionId)));
 
   });
 }
 export async function publicReview(executionId: string, manifestHash: string): Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
   return run('review', [executionId, manifestHash], service => service.review(id(executionId), manifestHash));
 
   });
 }
 export async function publicBegin(executionId: string, account: string): Promise<PublicResult<PublicBegin>> {
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
   return run('begin', [executionId, account], service => service.begin(id(executionId), account));
 
   });
@@ -94,11 +94,11 @@ export async function publicReport(executionId: string, attemptId: string,
 const gaslessAttempt = (value: unknown) => typeof value === 'string' && /^rhs-[0-9a-f]{24}\.gasless\.[1-8]$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
 const typedSignature = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]{130}$/.test(value);
 export async function publicBeginGasless(executionId: string, account: string): Promise<PublicResult<PublicGaslessBegin>> {
-  return withFlightAccess(async () => run('beginGasless', [executionId, account], service => service.beginGasless(id(executionId), account)));
+  return withFlightFlowAccess(async () => run('beginGasless', [executionId, account], service => service.beginGasless(id(executionId), account)));
 }
 export async function publicSubmitGasless(executionId: string, attemptId: string, signatures: { readonly trade: string; readonly approval: string | null }):
   Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
     if (!signatures || !typedSignature(signatures.trade) || !(signatures.approval === null || typedSignature(signatures.approval))) return { ok: false, code: 'INPUT_INVALID' };
     const clean = { trade: signatures.trade, approval: signatures.approval };
     return run('submitGasless', [executionId, attemptId, clean], service => service.submitGasless(id(executionId), gaslessAttempt(attemptId), clean));
@@ -128,7 +128,7 @@ async function testnetSwapAvailable(): Promise<boolean> {
   return publicRecordingEnabled(process.env);
 }
 export async function publicAvailability(): Promise<boolean> {
-  return withFlightAccess(testnetSwapAvailable);
+  return withFlightFlowAccess(testnetSwapAvailable);
 }
 /** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
 async function catalogSwapAvailable(chain: string): Promise<boolean> {
@@ -140,11 +140,11 @@ async function catalogSwapAvailable(chain: string): Promise<boolean> {
   return localCatalogNetworkMode(network, process.env) !== 'off' && Boolean(dir && isAbsolute(dir));
 }
 export async function catalogSwapAvailability(chain: string): Promise<boolean> {
-  return withFlightAccess(() => catalogSwapAvailable(chain));
+  return withFlightFlowAccess(() => catalogSwapAvailable(chain));
 }
 /** One authorized read for the swap store's initial view, with each network's own deployment checks. */
 export async function publicSwapAvailability(): Promise<{ testnet: boolean; catalogs: Record<string, boolean> }> {
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
     const [testnet, catalogs] = await Promise.all([
       testnetSwapAvailable(),
       Promise.all(CATALOG_NETWORK_IDENTITIES.map(async ({ chain }) => [chain, await catalogSwapAvailable(chain)] as const)),
@@ -154,5 +154,5 @@ export async function publicSwapAvailability(): Promise<{ testnet: boolean; cata
 }
 /** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet swaps (live or the MOCKED loopback harness). */
 export async function robinhoodSwapAvailability(): Promise<boolean> {
-  return withFlightAccess(() => catalogSwapAvailable(CATALOG_NETWORKS.robinhood.chain));
+  return withFlightFlowAccess(() => catalogSwapAvailable(CATALOG_NETWORKS.robinhood.chain));
 }

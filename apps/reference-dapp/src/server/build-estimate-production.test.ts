@@ -15,7 +15,7 @@ import { baseCatalog } from './base-mainnet.test-harness';
 import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
 import { composeStrategy } from '../engine/strategy-engine';
 import { readBuildEstimate } from './build-estimate';
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { cloudPreview } from './flow-runtime';
 import type { FlowName } from '../../backend/flows';
 
@@ -31,8 +31,8 @@ const networkCases = [
 ] as const;
 const dirs: string[] = [];
 afterEach(() => { resetNetworkCatalogs(); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-function workflow(network: string, inputAsset: string, outputAsset: string) {
-  const result = composeStrategy({ action: 'swap', network, inputAsset, outputAsset, amount: '1' });
+function workflow(network: string, inputAsset: string, outputAsset: string, amount = '1') {
+  const result = composeStrategy({ action: 'swap', network, inputAsset, outputAsset, amount });
   if (!result.ok) throw Error(result.code);
   return result.workflow;
 }
@@ -119,6 +119,32 @@ describe('production Swap quote parity through cloudPreview', () => {
       preview: (flow, args, options) => backend.previewFlow(flow, args, options?.purpose), prices: null });
     expect(result).toMatchObject({ ok: true, estimate: { provider: 'Jupiter', symbol: output, slippageBps: 100 } });
     expect(methods).toEqual([]); expect(harness.state.sent).toEqual([]);
+  });
+  it.each([['EVM selected', '0x' + '1'.repeat(40)], ['signed out', undefined], ['Solana connected', createMockedSolanaWallet().owner]])(
+    'quotes the 5 USDC → SOL incident through the deployed preview contract with %s', async (_scenario, owner) => {
+      const harness = createMockedSolanaJupiter();
+      const http = vi.fn(harness.http);
+      const backend = createBackend({ db, env: { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, logger: quiet,
+        tenantId: 'test', holderId: 'quote', evidenceStore: null, http,
+        rpc: { 'jupiter-swap': async () => { throw Error('QUOTE_MUST_NOT_READ_WALLET_STATE'); } } });
+      const w = workflow('solana', 'USDC', 'SOL', '5'), nodeId = w.nodes[0]!.nodeId;
+      const preview: NonNullable<Parameters<typeof readBuildEstimate>[2]>['preview'] = async (flow, args, options) => {
+        const path = '/v1/previews/jupiter-swap', route = backend.routes.find(r => r.name === 'preview')!;
+        expect(flow).toBe('jupiter-swap');
+        const answer = await route.handler({ method: 'POST', path, query: new URLSearchParams(), headers: {},
+          body: { args, purpose: options?.purpose }, requestId: 'incident-regression' }, route.pattern.exec(path)!);
+        return answer.body as Awaited<ReturnType<typeof backend.previewFlow>>;
+      };
+      const result = await readBuildEstimate({ workflow: w, nodeId, owner }, production, { preview, prices: null });
+      expect(result).toMatchObject({ ok: true, estimate: { provider: 'Jupiter', symbol: 'SOL', expected: expect.stringMatching(/^[0-9.]+$/) } });
+      expect(http).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: '5000000', taker: UNIVERSAL_QUOTE_SUBJECTS.SOLANA }));
+      expect(harness.state.sent).toEqual([]);
+    });
+  it('quotes a mainnet EVM swap with Solana selected without forwarding the Solana address', async () => {
+    const s = evmSetup(networkCases[0]), owner = createMockedSolanaWallet().owner;
+    expect(await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId, owner }, production, { preview: s.preview, prices: null }))
+      .toMatchObject({ ok: true, estimate: { provider: 'Uniswap V3', symbol: 'WETH' } });
+    expect(s.preview.mock.calls[0]![1]).toEqual([s.w]);
   });
   it('a production configuration failure never opens a local RPC or direct provider fallback', async () => {
     const s = evmSetup(networkCases[0]), fetch = vi.fn(); vi.stubGlobal('fetch', fetch);

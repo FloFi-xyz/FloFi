@@ -34,6 +34,12 @@ describe('BUILD-MCP-001 read-only flow previews', () => {
     expect(harness.state.sent).toEqual([]);
     const value = (quote as { value: Record<string, unknown> }).value;
     for (const key of ['id', 'review', 'authorization', 'attempt', 'unsignedTransaction']) expect(value).not.toHaveProperty(key);
+    const evm = '0x' + 'a'.repeat(40);
+    for (const legacyArgs of [[workflow], [workflow, evm]]) {
+      expect(await call({ args: legacyArgs, purpose: 'QUOTE' })).toMatchObject({ ok: true, value: { amount: '1000000' } });
+    }
+    await expect(call({ args: [workflow, evm], purpose: 'SIMULATION' })).rejects.toMatchObject({ status: 400, message: 'ARGUMENTS_INVALID' });
+    expect(methods).toEqual([]);
   });
 
   it('the per-call run log keeps the durable store contract and is never shared', async () => {
@@ -120,7 +126,7 @@ describe('P0 catalog reliability: previews nobody waits for never hold the share
     expect(shared.reads.length).toBe(single);
   });
 
-  it('previews that differ in amount, subject or purpose are never shared', async () => {
+  it('coalesces the same market quote across legacy subjects and keeps different amounts and simulations separate', async () => {
     const harness = createMockedSolanaJupiter(), owner = createMockedSolanaWallet().owner, other = createMockedSolanaWallet().owner;
     harness.fund(owner, 3_000_000_000n, { USDC: 100_000_000n }); harness.fund(other, 3_000_000_000n, { USDC: 100_000_000n });
     let open: () => void = () => undefined, previews = 0;
@@ -131,14 +137,14 @@ describe('P0 catalog reliability: previews nobody waits for never hold the share
     const workflowOf = (amount: string): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'workflow-preview-keys', revision: 1, resourceEdges: [],
       nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from: 'USDC', to: 'SOL', amount, slippage: '100' })] });
     const answers = Promise.all([backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('2'), owner], 'QUOTE'),
-      backend.previewFlow('jupiter-swap', [workflowOf('1'), other], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'SIMULATION')]);
+      backend.previewFlow('jupiter-swap', [workflowOf('1'), other], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'SIMULATION'),
+      backend.previewFlow('jupiter-swap', [workflowOf('1'), other], 'SIMULATION')]);
     await tick(); open();
     const [one, two, otherSubject] = await answers;
-    // Four different requests (amount, subject, purpose): four computations. Sharing any of them would leave fewer.
-    expect(previews).toBeGreaterThanOrEqual(4);
+    expect(previews).toBe(4);
     expect((one as { value: { amount: string } }).value.amount).toBe('1000000');
     expect((two as { value: { amount: string } }).value.amount).toBe('2000000');
-    expect(otherSubject).toMatchObject({ ok: true });
+    expect(otherSubject).toEqual(one);
   });
 
   it('a preview every caller has left is abandoned: its queued reads are dropped, and a later identical preview starts afresh', async () => {

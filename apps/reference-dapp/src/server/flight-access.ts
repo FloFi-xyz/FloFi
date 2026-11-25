@@ -91,10 +91,8 @@ export async function flightWalletRefusal(owner: unknown, env: Readonly<Record<s
   if (betaAccessMode(env) === 'open') return null;
   const principal = walletPrincipalOf(owner);
   try {
-    await requireFlightAccess(principal ?? undefined, env);
-    // The flow actions' own boundary (`withFlightAccess()`, no principal) also requires every wallet this browser proved: checked here too, so a
-    // refusal there (e.g. a second, unlinked wallet of a mixed EVM/Solana workflow) is named instead of reaching the Editor redacted.
-    if (principal) await requireFlightAccess(undefined, env);
+    if (principal) await requireFlightAccess(principal, env);
+    else await requireFlightProductAccess(env);
     return null;
   }
   catch (error) { return error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message) ? error.message : 'BETA_UNAVAILABLE'; }
@@ -121,6 +119,19 @@ export async function requireFlightOwner(env: Readonly<Record<string, string | u
 /** Scope propagation covers previews and nested service calls without sharing one request's identity with another. */
 export async function withFlightAccess<T>(work: () => Promise<T>): Promise<T> {
   return withBetaIdentity(await requireFlightAccess(), work);
+}
+export async function withFlightProductAccess<T>(work: () => Promise<T>): Promise<T> {
+  return withBetaIdentity(await requireFlightProductAccess(), work);
+}
+
+/** Retain only admitted wallet proofs for a proposal that selects its own source wallets. */
+export async function flightProposalWallets(wallets: readonly WalletPrincipal[], env: Readonly<Record<string, string | undefined>> = process.env):
+Promise<readonly WalletPrincipal[]> {
+  const admitted = await Promise.all(wallets.map(async wallet => {
+    try { await requireFlightAccess(wallet, env); return wallet; }
+    catch (error) { if (error instanceof Error && error.message === 'BETA_WALLET_NOT_LINKED') return null; throw error; }
+  }));
+  return admitted.filter(wallet => wallet !== null);
 }
 
 /** Owner-authenticated recovery path: status, receipts, late wallet reports and safe cancellation stay reachable after revocation. */

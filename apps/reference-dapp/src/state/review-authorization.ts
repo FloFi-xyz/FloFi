@@ -61,11 +61,11 @@ export function reviewBindingAdopts(bound: ReviewWalletBinding, current: { reado
 }
 
 /** Review callbacks only: no install, request, begin, submit or execute method crosses this boundary. */
-export function useReviewAuthorization(kind: SimulationSource['kind']): { authorization: ReviewAuthorization; wallet: ReviewWallet } {
+export function useReviewAuthorization(kind: SimulationSource['kind'], operationChain?: string | null): { authorization: ReviewAuthorization; wallet: ReviewWallet } {
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
   const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), across = useAcross();
-  const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment(), solanaComposition = useSolanaComposition(), solanaTransfer = useSolanaTransfer();
+  const sharedWallet = useBuild009Wallet(), solanaComposition = useSolanaComposition(), solanaTransfer = useSolanaTransfer();
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged (or attached) Uniswap position-management run is served by the position store.
   const uniswapPosition = useOptionalUniswapPosition();
   const { restorationEpoch } = useWorkflow();
@@ -250,6 +250,7 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       calls(q.calls, authorization.chain, 'Uniswap Position Manager'); break;
     }
   }
+  const environment = useExecutionEnvironment(operationChain ?? authorization.chain);
   const account = environment.walletKind === 'solana' ? jupiter.session?.account.address ?? null : sharedWallet.account;
   const chain = environment.walletKind === 'solana' ? solanaWalletChainRef(environment.walletChain) : sharedWallet.chainId === '0x7a69' ? 'eip155:31337' : walletChainRef(sharedWallet.chainId);
   // EVM signing-provider identity is tracked by object in the shared authority epoch.
@@ -260,17 +261,25 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
   const identity = JSON.stringify([account, chain, environment.walletKind === 'evm' ? sharedWallet.revision : jupiter.revision ?? 0, restorationEpoch,
     environment.walletKind === 'evm' ? sharedWallet.chainId : environment.walletChain, providerKey]);
   // Keep this guard mounted in the shell. Returning to the old wallet cannot revive the old Review.
-  const [binding, setBinding] = useState({ key: authorization.key, identity, changed: false, account, chain, restorationEpoch, adopted: false });
+  const evmRevision = environment.walletKind === 'evm' ? sharedWallet.revision : null;
+  const networkRevision = environment.walletKind === 'evm' ? sharedWallet.networkRevision : null;
+  const [binding, setBinding] = useState({ key: authorization.key, identity, changed: false, account, chain, restorationEpoch, adopted: false, evmRevision, networkRevision });
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-10): a Review bound while no wallet was connected yet (the wallet still restoring after a
   // reload or a navigation) adopts the first wallet that connects only when that wallet is exactly the Review's owner and nothing else
   // changed: no false "Wallet changed". Any other wallet, any change once a wallet was bound, or another workflow still retires the Review.
   const publicProfile = kind === 'public' ? swapProfile(publicSwap.run?.quote.chainId) : null;
   const unownedChain = publicProfile && !ownerBoundSwapReview(publicProfile) && authorization.owner === null ? authorization.chain : null;
-  const adopt = binding.key === authorization.key && !binding.changed && binding.identity !== identity && reviewBindingAdopts(binding, { account, chain }, restorationEpoch,
-    authorization.owner, environment.walletKind, authorization.accepted, unownedChain);
+  // A single move onto the reviewed network with the same EVM account can finish a pending Review.
+  // The shared revision detects any intervening account, provider or network changes, including batched events.
+  const entersReviewedNetwork = !authorization.accepted && binding.restorationEpoch === restorationEpoch &&
+    account !== null && account === binding.account && chain !== null && chain === authorization.chain && chain !== binding.chain &&
+    binding.evmRevision !== null && evmRevision === binding.evmRevision + 1 &&
+    binding.networkRevision !== null && networkRevision === binding.networkRevision + 1;
+  const adopt = binding.key === authorization.key && !binding.changed && binding.identity !== identity && (entersReviewedNetwork ||
+    reviewBindingAdopts(binding, { account, chain }, restorationEpoch, authorization.owner, environment.walletKind, authorization.accepted, unownedChain));
   const changed = binding.key === authorization.key && !adopt && (binding.changed || binding.identity !== identity);
-  if (binding.key !== authorization.key) setBinding({ key: authorization.key, identity, changed: false, account, chain, restorationEpoch, adopted: false });
-  else if (adopt) setBinding({ ...binding, identity, account, chain, adopted: binding.adopted || account !== null });
+  if (binding.key !== authorization.key) setBinding({ key: authorization.key, identity, changed: false, account, chain, restorationEpoch, adopted: false, evmRevision, networkRevision });
+  else if (adopt) setBinding({ ...binding, identity, account, chain, adopted: binding.adopted || account !== null, evmRevision, networkRevision });
   else if (changed && !binding.changed) setBinding({ ...binding, changed: true });
   if (changed) authorization.ready = false;
   return { authorization, wallet: { account, chain, environment: environment.walletEnvironment, changed } };

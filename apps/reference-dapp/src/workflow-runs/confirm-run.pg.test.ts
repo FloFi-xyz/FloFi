@@ -460,6 +460,56 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
     } finally { await t.drop(); }
   });
 
+  it('keeps the claimed EVM and Solana owners and uses reconciled amounts through ETH → USDC → Solana USDC → SOL', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['base-swap', 'crosschain-universal', 'jupiter-swap'], delegation: false,
+        policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana,base' } });
+      const workflow = { version: 2, steps: [
+        { action: 'swap', network: 'base', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.005', slippageBps: 50 },
+        { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'solana', asset: 'USDC', amount: '12', routing: 'best' },
+        { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '12', slippageBps: 50 },
+      ], bindings: [{ step: 1, amountFrom: 0 }, { step: 2, amountFrom: 1 }] };
+      const { composeWorkflowBound } = await import('../engine/strategy-engine.ts');
+      const composed = composeWorkflowBound(workflow, undefined);
+      if (!composed.ok) throw new Error(composed.code + JSON.stringify(composed.issues));
+      expect(composed.bindings).toHaveLength(2);
+      const baseUsdc = composed.bindings[0]!.asset, solUsdc = composed.bindings[1]!.asset;
+      const { approval, claimed } = await started(h, workflow);
+      const run = await runOf(h, approval.approvalId);
+      expect(claimed.view.workflowRun?.stepWallet).toBe(h.evm.address);
+      h.flows.ownerExecutes('base-swap', h.evm.address, claimed.workflow, 'RECONCILED',
+        { received: [{ asset: `${baseUsdc.chainId}/erc20:${baseUsdc.address}`, amount: '9000000' }] });
+      await h.drain(run.runId);
+      const bridge = await continued(h, approval.approvalId);
+      expect(bridge.view.workflowRun).toMatchObject({ step: { index: 1, count: 3 }, stepWallet: h.evm.address, stepDestinationWallet: h.sol.address });
+      expect((await h.store.steps(run.runId))[1]).toMatchObject({ bound: { used: '9000000' }, strategy: { amount: '9' } });
+      const step = (await h.store.steps(run.runId))[1]!;
+      const route = { sourceChain: baseUsdc.chainId, destinationChain: solUsdc.chainId, inputAmount: '9000000',
+        inputToken: { chainId: baseUsdc.chainId, kind: 'TOKEN', address: baseUsdc.address },
+        outputToken: { chainId: solUsdc.chainId, kind: 'TOKEN', address: solUsdc.address } };
+      const check = { tenantId: h.d.tenantId, flow: 'crosschain-universal', owner: h.evm.address, createdAt: step.claimedAt!,
+        workflowId: bridge.workflow!.workflowId };
+      const review = { workflow: bridge.workflow, recipientKind: 'CONNECTED_DESTINATION_WALLET', route };
+      await expect(loadedOwnerStepDeliveryRefusal(t.db, { ...check, load: async () => ({ review: { ...review, recipient: '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV' } }) }))
+        .resolves.toBe('HANDOFF_WORKFLOW_MISMATCH');
+      await expect(loadedOwnerStepDeliveryRefusal(t.db, { ...check, load: async () => ({ review: { ...review, recipient: h.sol.address } }) })).resolves.toBeNull();
+      await applyApproval(h.surface, approval.secret, [h.evm, h.sol], bridge.workflow, h.d.now());
+      const bridgeRun = h.flows.ownerExecutes('crosschain-universal', h.evm.address, bridge.workflow, 'RECONCILED');
+      bridgeRun.recordExtras = { format: 'flofi.universal-bridge-run.v1', verdict: 'RECONCILED', received: '8500000',
+        destination: { chainId: solUsdc.chainId, transactionHash: '7'.repeat(86), final: true, amount: '8500000' },
+        review: { ...review, recipient: h.sol.address } };
+      await h.drain(run.runId);
+      const swap = await continued(h, approval.approvalId);
+      expect(swap.view.workflowRun).toMatchObject({ step: { index: 2, count: 3 }, stepWallet: h.sol.address });
+      expect((await h.store.steps(run.runId))[2]).toMatchObject({ bound: { used: '8500000' }, strategy: { amount: '8.5' } });
+      await applyApproval(h.surface, approval.secret, [h.evm, h.sol], swap.workflow, h.d.now());
+      h.flows.ownerExecutes('jupiter-swap', h.sol.address, swap.workflow, 'RECONCILED');
+      await h.drain(run.runId);
+      expect(await runOf(h, approval.approvalId)).toMatchObject({ state: 'COMPLETED' });
+    } finally { await t.drop(); }
+  });
+
   it.each(['proven', 'unproven', 'legacy bound'] as const)('BUILD-CROSSCHAIN-UNIVERSAL-001: Swap → Bridge → Swap with bindings resolves each received amount in confirm mode (%s Relay ERC-20 delivery)', async proof => {
     const t = await createTestDatabase();
     try {

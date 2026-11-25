@@ -20,7 +20,7 @@ import { isUniversalBridgeSpec } from '../engine/strategy-engine';
 import { UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 
 export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | 'SOLANA' | 'NONE';
-  /** BUILD-CROSSCHAIN-UNIVERSAL-001: a Solana ⇄ EVM bridge previews with the destination ecosystem's public quote subject as recipient (read-only). */
+  /** A bridge simulation without an explicit recipient needs the destination ecosystem's wallet. */
   readonly destinationSubject?: 'EVM' | 'SOLANA' };
 /** The flow that previews a strategy, or the reason MCP cannot preview it. */
 export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: string } {
@@ -103,6 +103,17 @@ function canonicalArtifacts(source: unknown): Record<string, Json> | null {
 
 export type SimulationView = { readonly kind: string; readonly provenance: string; readonly observedAt: string | null; readonly expiresAt: string | null;
   readonly facts: Record<string, Json>; readonly canonicalArtifacts: Record<string, Json> | null };
+/** Only economic facts from the dedicated market preview. It has no subject address or executable artifacts. */
+export function projectJupiterMarketQuote(value: unknown): SimulationView {
+  const q = obj(value);
+  if (q.format !== 'flofi.jupiter-quote-preview.v1' || typeof q.expiresAt !== 'string' ||
+      !Number.isFinite(Date.parse(q.expiresAt)) || typeof q.expectedOut !== 'string' || !/^[0-9]+$/.test(q.expectedOut)) return fail();
+  if (Date.parse(q.expiresAt) <= Date.now()) throw new Error('JUPITER_QUOTE_STALE');
+  return { kind: 'MARKET_QUOTE', provenance: q.provenance === 'MOCKED' || q.provenance === 'PUBLIC_MAINNET' ? q.provenance : 'UNSPECIFIED',
+    observedAt: typeof q.observedAt === 'string' ? q.observedAt : null, expiresAt: q.expiresAt,
+    facts: { ...pick(q, ['amount', 'expectedOut', 'minimumOut', 'slippageBps']), inputToken: pick(q.input, ['mint', 'decimals', 'symbol']),
+      outputToken: pick(q.output, ['mint', 'decimals', 'symbol']) }, canonicalArtifacts: null };
+}
 /** The allowlisted view of a flow's preview result. Throws `MCP_SIMULATION_PROJECTION_FAILED` on an unexpected shape. */
 export function projectSimulation(flow: FlowName, value: unknown): SimulationView {
   const record = obj(value);

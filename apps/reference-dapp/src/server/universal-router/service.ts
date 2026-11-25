@@ -25,7 +25,7 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi
 import { associatedTokenAddress, compileUniversalArtifacts, decodeRelayDepositLog, decodeSplTokenAccount, describeSolanaWalletChange, encodeErc20ApproveExact, readSolanaAccounts,
   solanaAddress, verifySignedSolanaSwap, verifySolanaCluster, SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID, type SignedSolanaTransaction, type SolanaRpc,
   type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
-import { assertRouterTransition, canonicalUniversalAddress, compareUniversalRoutes, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization, ROUTER_PHASES,
+import { assertRouterTransition, canonicalUniversalAddress, compareUniversalRoutes, hashArtifactBytes, isUniversalQuoteSubject, l1FeeReviewBound, networkFeeWithinAuthorization, ROUTER_PHASES,
   universalNetworkOfChain, universalRouteCommitment,
   validateUniversalBridgeWorkflow, type EvidenceBundle, type RouteChange, type RouterPhase, type SemanticWorkflow, type UniversalBridgeFields, type UniversalNetwork,
   type UniversalRoute, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
@@ -224,8 +224,10 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     if (fields.recipient === 'CONNECTED_OWNER') return { recipient: owner, kind: 'CONNECTED_OWNER' as const };
     if (fields.recipient === 'CONNECTED_DESTINATION_WALLET') {
       if (!destinationWallet) fail('UNIVERSAL_DESTINATION_WALLET_REQUIRED');
+      if (isUniversalQuoteSubject(destinationWallet)) fail('UNIVERSAL_DESTINATION_WALLET_INVALID');
       return { recipient: canonicalUniversalAddress(destination, destinationWallet, 'UNIVERSAL_DESTINATION_WALLET_INVALID'), kind: 'CONNECTED_DESTINATION_WALLET' as const };
     }
+    if (isUniversalQuoteSubject(fields.recipient)) fail('UNIVERSAL_RECIPIENT_INVALID');
     return { recipient: canonicalUniversalAddress(destination, fields.recipient, 'UNIVERSAL_RECIPIENT_INVALID'), kind: 'EXPLICIT' as const };
   }
   async function destinationObservation(destination: UniversalNetwork, recipient: string, output: TokenFacts) {
@@ -275,6 +277,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   // --- Review -----------------------------------------------------------------------------------------------------------
   /** `unwrapped`: a refresh of a run whose own unwrap is confirmed — the owner already holds the input as native ETH; only the deposit remains. */
   async function buildReview(workflow: SemanticWorkflow, ownerInput: string, destinationWallet?: string, unwrapped = false): Promise<UniversalReview> {
+    if (isUniversalQuoteSubject(ownerInput)) fail('UNIVERSAL_OWNER_INVALID');
     const f = intentOf(workflow), owner = canonicalUniversalAddress(f.source, ownerInput, 'UNIVERSAL_OWNER_INVALID');
     const { recipient, kind } = bindRecipient(f, f.destination, owner, destinationWallet);
     const inputFacts = await tokenFacts(f.source, f.inputAsset), outputFacts = await tokenFacts(f.destination, f.outputAsset);
@@ -945,6 +948,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     }); },
     async review(id: string, commitment: string, workflow: SemanticWorkflow): Promise<UniversalRecord> { return locked(id, async () => {
       const record = await load(id);
+      if (isUniversalQuoteSubject(record.owner) || isUniversalQuoteSubject(record.review.recipient)) fail('UNIVERSAL_REVIEW_CHANGED');
       if (!sameWorkflow(workflow, record.workflow)) fail('UNIVERSAL_SEMANTIC_REVISION_CHANGED');
       if (record.verdict !== 'PENDING' || active(record) || record.phase !== 'PREPARED') fail('UNIVERSAL_REVIEW_NOT_ALLOWED');
       if (record.requote) fail('UNIVERSAL_REQUOTE_REQUIRED');
@@ -953,9 +957,10 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       return save({ ...record, phase: 'AUTHORIZED', authorization: commitment, error: null });
     }); },
     /** Retires an unused authorization: a workflow edit or a wallet account change in the owner's browser after Review. */
-    async invalidate(id: string, reason: 'SEMANTIC_EDIT' | 'WALLET_CHANGED' = 'SEMANTIC_EDIT'): Promise<UniversalRecord> { return locked(id, async () => {
+    async invalidate(id: string, reason: 'SEMANTIC_EDIT' | 'WALLET_CHANGED' = 'SEMANTIC_EDIT', commitment?: string): Promise<UniversalRecord> { return locked(id, async () => {
       const record = await load(id);
       if (reason !== 'SEMANTIC_EDIT' && reason !== 'WALLET_CHANGED') fail('UNIVERSAL_INVALIDATION_REASON_INVALID');
+      if (commitment !== undefined && commitment !== record.review.commitment) return record;
       return record.authorization && record.phase === 'AUTHORIZED' && !active(record)
         ? save(deauthorized(record, reason === 'WALLET_CHANGED' ? 'UNIVERSAL_WALLET_CHANGED_REVIEW_REQUIRED' : 'UNIVERSAL_SEMANTIC_EDIT_REQUIRES_REVIEW')) : record;
     }); },
@@ -963,8 +968,10 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
      * Re-verifies the Review against fresh chain state, re-quotes the SAME provider and compares (no fallback of any kind), re-simulates
      * the remaining reviewed calls (EVM), claims the attempt's identities and persists PREPARED with the exact wallet request.
      */
-    async begin(id: string, ownerInput: string, workflow: SemanticWorkflow): Promise<UniversalBegin> { return locked(id, async () => {
+    async begin(id: string, ownerInput: string, workflow: SemanticWorkflow, expectedCommitment?: string): Promise<UniversalBegin> { return locked(id, async () => {
       const record = await load(id);
+      if (expectedCommitment !== undefined && record.review.commitment !== expectedCommitment) fail('UNIVERSAL_REVIEW_CHANGED');
+      if (isUniversalQuoteSubject(record.owner) || isUniversalQuoteSubject(record.review.recipient)) fail('UNIVERSAL_REVIEW_REQUIRED');
       if (!executionEnabled) fail('UNIVERSAL_EXECUTION_NOT_ENABLED');
       const network = universalNetworkOfChain(record.review.route.sourceChain)!, owner = canonicalUniversalAddress(network, ownerInput, 'UNIVERSAL_OWNER_INVALID');
       if (owner !== record.owner) fail('UNIVERSAL_WRONG_OWNER');
@@ -980,8 +987,10 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       return network.ecosystem === 'EVM' ? beginEvm(record, owner) : beginSolana(record);
     }); },
     /** EVM: the handoff boundary; SUBMITTING is durable before the browser calls the wallet. */
-    async handoff(id: string): Promise<UniversalRecord> { return locked(id, async () => {
+    async handoff(id: string, expectedAttempt?: string): Promise<UniversalRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
+      if (expectedAttempt !== undefined && attempt?.attemptId !== expectedAttempt) fail('UNIVERSAL_ATTEMPT_ID_MISMATCH');
+      if (isUniversalQuoteSubject(record.owner) || isUniversalQuoteSubject(record.review.recipient)) fail('UNIVERSAL_WALLET_HANDOFF_NOT_AUTHORIZED');
       if (!executionEnabled || attempt?.ecosystem !== 'EVM' || attempt.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment ||
           now().getTime() >= Date.parse(record.review.expiresAt)) fail('UNIVERSAL_WALLET_HANDOFF_NOT_AUTHORIZED');
       const a = attempt as UniversalEvmAttempt, { d, rpc } = evmOf(record.review.route.sourceChain);
@@ -1021,6 +1030,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     /** Solana: verify the reviewed bytes (or a verified Lighthouse guard) and the owner signature, persist both, then broadcast exactly once. */
     async submit(id: string, signedTransaction: string): Promise<UniversalRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
+      if (isUniversalQuoteSubject(record.owner) || isUniversalQuoteSubject(record.review.recipient)) fail('UNIVERSAL_WALLET_HANDOFF_NOT_AUTHORIZED');
       if (!executionEnabled || attempt?.ecosystem !== 'SOLANA' || attempt.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment)
         fail('UNIVERSAL_WALLET_HANDOFF_NOT_AUTHORIZED');
       const a = attempt as UniversalSolanaAttempt, src = record.review.source as SolanaReviewSource;

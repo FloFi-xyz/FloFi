@@ -13,7 +13,8 @@
  * The first tier that has exactly one wallet fills the field; a tier with several asks the owner to choose (never a guess). Only public
  * addresses are ever read or accepted: no private key, seed phrase or secret is asked for or stored. Nothing here connects, signs or sends.
  */
-import { canonicalUniversalAddress, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { isUniversalQuoteSubject, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { operationWalletAddress } from './wallet-inventory';
 
 export type DestinationEcosystem = 'evm' | 'solana';
 export type DestinationSource = 'SESSION' | 'ACCOUNT' | 'SAVED' | 'MANUAL';
@@ -54,10 +55,7 @@ export type DestinationResolution =
 
 const canonical = (ecosystem: DestinationEcosystem, address: string) => ecosystem === 'evm' ? address.toLowerCase() : address;
 /** Review P2: a candidate is used only when its ADDRESS is valid for the ecosystem (the same canonical check the server binds), not just its label. */
-const validFor = (ecosystem: DestinationEcosystem, address: string) => {
-  try { canonicalUniversalAddress(UNIVERSAL_NETWORKS[ecosystem === 'solana' ? 'solana' : 'base'], address.trim(), 'DESTINATION_INVALID'); return true; }
-  catch { return false; }
-};
+const validFor = (ecosystem: DestinationEcosystem, address: string) => operationWalletAddress(ecosystem, address.trim()) !== null;
 const unique = (wallets: readonly DestinationCandidate[]) => wallets.filter((wallet, index) =>
   wallets.findIndex(other => canonical(other.ecosystem, other.address) === canonical(wallet.ecosystem, wallet.address)) === index);
 
@@ -192,11 +190,11 @@ export function checkDestinationAddress(network: UniversalNetworkKey, value: str
   const text = value.trim();
   if (!text) return { ok: false, code: 'DESTINATION_REQUIRED' };
   const target = UNIVERSAL_NETWORKS[network];
-  try { return { ok: true, address: canonicalUniversalAddress(target, text, 'DESTINATION_INVALID') }; }
-  catch {
-    const evmShaped = /^0x[0-9a-fA-F]{40}$/.test(text), solanaShaped = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text);
-    return { ok: false, code: target.ecosystem === 'SOLANA' && evmShaped || target.ecosystem === 'EVM' && solanaShaped ? 'DESTINATION_WRONG_ECOSYSTEM' : 'DESTINATION_INVALID' };
-  }
+  const address = operationWalletAddress(destinationEcosystemOf(network), text);
+  if (address) return { ok: true, address };
+  if (isUniversalQuoteSubject(text)) return { ok: false, code: 'DESTINATION_INVALID' };
+  const evmShaped = /^0x[0-9a-fA-F]{40}$/.test(text), solanaShaped = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text);
+  return { ok: false, code: target.ecosystem === 'SOLANA' && evmShaped || target.ecosystem === 'EVM' && solanaShaped ? 'DESTINATION_WRONG_ECOSYSTEM' : 'DESTINATION_INVALID' };
 }
 /** "Solana · Phantom · 8xY…k2P": network, provider and a short address (the full address stays available to the caller). */
 export function destinationLabel(network: UniversalNetworkKey, wallet: Pick<DestinationCandidate, 'address' | 'providerName'>): string {

@@ -21,14 +21,14 @@ import { looksSecret } from '../../domain/copilot-conversation';
 import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
 import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan } from '../../platform/index.ts';
-import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { channelRequester, createChannelApproval, endChannelApproval, inSigningFlow, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
 import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
 import { learningCopy } from '../../domain/copilot-learning-copy.ts';
 import type { ChannelLearning, ChannelLearningPrincipal, ChannelLearningSession } from './learning.ts';
 import { channelLearningCopy } from './learning-copy.ts';
-import { channelCopy, readyText, shorten, type AuthorizationFacts, type PreviewNote } from './copy.ts';
+import { channelCopy, readyText, shorten, type AuthorizationFacts, type MarketQuoteNote, type PreviewNote } from './copy.ts';
+import type { SimulationView } from '../../mcp/simulation.ts';
 import { channelRowId, keyedDigest, leaseToken, open, seal, sealContext } from './crypto.ts';
 import { addressContext, deliverConversation, newOutboxId, sealReply, type DeliveryContext } from './delivery.ts';
 import type { ChannelLogger } from './log.ts';
@@ -442,36 +442,46 @@ export function createChannelService(ctx: ChannelContext) {
         lastApprovalId: approval.approvalId } };
   }
 
-  /** The shared platform's read-only preview, when its subject is known from the strategy itself; bounded in time and per conversation. */
+  /** The shared platform's read-only preview, bounded in time and per conversation. */
   async function previewOf(conversationId: string, strategy: ChannelWorkflow, now: Date): Promise<PreviewNote> {
     const first = isStrategyWorkflow(strategy.spec) ? strategy.spec.steps[0]! : strategy.spec;
     const plan = previewPlan(first);
-    if ('code' in plan) return { kind: 'SKIPPED' };
-    const subject = plan.subject === 'NONE' ? 'none' : plan.subject === 'EVM' ? strategy.intendedWallet?.address : undefined;
-    if (!subject && strategy.stepCount === 1) return { kind: 'SKIPPED' };
+    if (strategy.stepCount === 1 && 'code' in plan) return { kind: 'SKIPPED' };
+    const subject = strategy.intendedWallet?.address;
+    const request = { strategy: strategy.spec, workflowHash: strategy.workflowHash, ...(subject ? { simulationSubject: subject } : {}) };
+    const cancellation = new AbortController();
+    const options = { signal: cancellation.signal, budget: () => store.allow(`channel:preview:${conversationId}`, LIMITS.preview[0], LIMITS.preview[1], now) };
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => {
+      reject(new PlatformRefusal('SIMULATION_TIMEOUT'));
+      cancellation.abort();
+    }, ctx.previewTimeoutMs ?? 60_000); });
     try {
       if (strategy.stepCount > 1) {
-        const preview = await Promise.race([
-          simulateWorkflowPreview(ctx.platform.runtime, { strategy: strategy.spec, workflowHash: strategy.workflowHash,
-            simulationSubject: strategy.intendedWallet?.address ?? (plan.subject === 'SOLANA' ? UNIVERSAL_QUOTE_SUBJECTS.SOLANA : UNIVERSAL_QUOTE_SUBJECTS.EVM) },
-          { budget: () => store.allow(`channel:preview:${conversationId}`, LIMITS.preview[0], LIMITS.preview[1], now) }),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PlatformRefusal('SIMULATION_TIMEOUT')), ctx.previewTimeoutMs ?? 60_000); }),
-        ]);
+        const preview = await Promise.race([simulateWorkflowPreview(ctx.platform.runtime, request, options), timeout]);
         return { kind: 'WORKFLOW', total: preview.stepCount, simulated: preview.steps.filter(step => step.state === 'SIMULATED').length,
           pending: preview.steps.filter(step => step.state === 'AWAITING_PRODUCER_SETTLEMENT').length,
+          quotes: preview.steps.flatMap(step => marketNote(step.view) ?? []),
           codes: preview.steps.filter(step => step.code !== null).map(step => step.code!) };
       }
-      const result = await Promise.race([
-        simulatePreview(ctx.platform.runtime, { strategy: strategy.spec, workflowHash: strategy.workflowHash, simulationSubject: subject! },
-          { budget: () => store.allow(`channel:preview:${conversationId}`, LIMITS.preview[0], LIMITS.preview[1], now) }),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PlatformRefusal('SIMULATION_TIMEOUT')), ctx.previewTimeoutMs ?? 60_000); }),
-      ]);
+      const result = await Promise.race([simulatePreview(ctx.platform.runtime, request, options), timeout]);
+      if (result.view.kind === 'MARKET_QUOTE') {
+        const quote = marketNote(result.view);
+        return quote ? { kind: 'MARKET_QUOTE', quote } : { kind: 'FAILED', code: 'SIMULATION_UNAVAILABLE' };
+      }
       return { kind: 'PASSED', provenance: result.view.provenance };
     } catch (cause) {
       const code = cause instanceof PlatformRefusal || (cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message)) ? (cause as Error).message : 'SIMULATION_UNAVAILABLE';
       return code === 'SIMULATION_SUBJECT_INVALID' ? { kind: 'SKIPPED' } : { kind: 'FAILED', code };
     } finally { clearTimeout(timer); }
+  }
+
+  function marketNote(view: SimulationView | null): MarketQuoteNote | null {
+    if (view?.kind !== 'MARKET_QUOTE') return null;
+    const { expectedOut, outputToken } = view.facts;
+    if (typeof expectedOut !== 'string' || !outputToken || typeof outputToken !== 'object' || Array.isArray(outputToken)) return null;
+    const { decimals, symbol } = outputToken;
+    return typeof decimals === 'number' && typeof symbol === 'string' ? { units: expectedOut, decimals, symbol, provenance: view.provenance } : null;
   }
 
   /**

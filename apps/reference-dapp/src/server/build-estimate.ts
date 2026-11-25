@@ -156,7 +156,6 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     const solanaMainnet = node.chainId === JUPITER_SOLANA_MAINNET.chain && node.adapterConstraints.protocols.includes('jupiter');
     if ((catalogNetwork || solanaMainnet) && (seams.preview || !seams.rpc && !seams.http)) {
       const flow = catalogNetwork ? catalogNetwork.flows.swap : 'jupiter-swap';
-      const subject = typeof owner === 'string' ? owner : UNIVERSAL_QUOTE_SUBJECTS.SOLANA;
       startUsd();
       const previewFlow = seams.preview ?? cloudPreview;
       const request: NonNullable<Parameters<typeof cloudPreview>[2]> = {
@@ -164,7 +163,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
         ...(seams.signal ? { signal: seams.signal } : {}),
       };
       const started = performance.now();
-      let preview = await previewFlow(flow, catalogNetwork ? [workflow] : [workflow, subject], request);
+      let preview = await previewFlow(flow, catalogNetwork ? [workflow] : [workflow, UNIVERSAL_QUOTE_SUBJECTS.SOLANA], request);
       // Railway and Vercel can roll independently. An API without the new catalog quote purpose still serves the verified ownerless preview.
       if (catalogNetwork && preview?.ok === false && preview.code === 'PREVIEW_QUOTE_NOT_AVAILABLE' && !seams.signal?.aborted) {
         const remaining = CLOUD_QUOTE_TIMEOUT_MS - Math.ceil(performance.now() - started);
@@ -223,9 +222,9 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     // UX-007: catalog networks (Base, Arbitrum One, Robinhood Chain) quote through the one shared read-only swap quote reader that
     // Simulate uses, under the network's own deployment gate (off: no estimate). No owner binding, approval state or Review is produced.
     if (catalogNetwork) return await catalogEstimate();
-    if (node.chainId === JUPITER_SOLANA_MAINNET.chain && typeof owner === 'string') {
-      // The taker is an untrusted quote parameter only; this read never binds ownership or grants authority.
-      const intent = jupiterIntent(workflow, owner), http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);
+    if (solanaMainnet) {
+      const intent = jupiterIntent(workflow, UNIVERSAL_QUOTE_SUBJECTS.SOLANA);
+      const http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);
       startUsd();
       const q = parseJupiterBuild(await http(jupiterBuildQuery(intent)), intent, now().toISOString()).quote;
       const usd = await quoteUsd(intent.amount, intent.input.decimals, q.outAmount, intent.output.decimals);

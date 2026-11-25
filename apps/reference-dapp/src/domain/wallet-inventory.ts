@@ -11,6 +11,7 @@
  * never listed twice. Matching is by identity only, never by label. Display only: nothing here connects, signs or authorizes.
  */
 import { isLegacyWallet, isPrivyWallet, type AccountWallet } from '../accounts/account-model';
+import { canonicalUniversalAddress, isUniversalQuoteSubject, UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import type { SavedWallet } from './credentials';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 
@@ -26,6 +27,34 @@ export type WalletStatus = 'Active' | 'Connected · not saved' | 'Saved' | 'Not 
 
 /** EVM addresses compare case-insensitively; Solana keys exactly. */
 export const canonicalWalletAddress = (ecosystem: WalletEcosystem, address: string) => ecosystem === 'evm' ? address.toLowerCase() : address;
+
+/** The operation's CAIP-2 source chain determines which session can act. */
+export function operationWalletEcosystem(chain: string | null | undefined): WalletEcosystem | null {
+  if (chain?.startsWith('eip155:')) return 'evm';
+  if (chain?.startsWith('solana:')) return 'solana';
+  return null;
+}
+
+/** Check address compatibility only. Connection, account ownership and signing authority come from the caller's session. */
+export function operationWalletAddress(ecosystem: WalletEcosystem, address: unknown): string | null {
+  try {
+    const canonical = canonicalUniversalAddress(UNIVERSAL_NETWORKS[ecosystem === 'evm' ? 'base' : 'solana'], address);
+    return isUniversalQuoteSubject(canonical) ? null : canonical;
+  } catch { return null; }
+}
+
+/** Select only among the candidates admitted by the connection or account boundary. */
+export function resolveOperationWallet(ecosystem: WalletEcosystem, candidates: readonly string[], override?: string | null):
+  { readonly kind: 'RESOLVED'; readonly address: string } | { readonly kind: 'MISSING' | 'AMBIGUOUS' | 'UNSUPPORTED' | 'UNAUTHORIZED' } {
+  const addresses = [...new Set(candidates.flatMap(candidate => operationWalletAddress(ecosystem, candidate) ?? []))];
+  if (override != null) {
+    const address = operationWalletAddress(ecosystem, override);
+    if (!address) return { kind: 'UNSUPPORTED' };
+    return addresses.includes(address) ? { kind: 'RESOLVED', address } : { kind: 'UNAUTHORIZED' };
+  }
+  if (addresses.length === 1) return { kind: 'RESOLVED', address: addresses[0]! };
+  return { kind: addresses.length ? 'AMBIGUOUS' : candidates.length ? 'UNSUPPORTED' : 'MISSING' };
+}
 const identity = (ecosystem: WalletEcosystem, address: string) => `${ecosystem}:${canonicalWalletAddress(ecosystem, address)}`;
 const sameProvider = (saved: SavedWallet, active: ActiveWallet) => saved.ecosystem === active.ecosystem && saved.providerKey === active.providerKey &&
   canonicalWalletAddress(saved.ecosystem, saved.address) === canonicalWalletAddress(active.ecosystem, active.address);

@@ -288,8 +288,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   workflowSnapshot.current = workflow;
   // The EVM chains this workflow uses: the only ones the wallet is asked about. A workflow without any EVM step (Solana only) is not reviewed
   // here — this path needs the owner's EVM wallet — and keeps the Editor's per-step path instead of a dead end.
-  const evmChains = [...new Set(((workflow as { nodes?: readonly { chainId?: string }[] }).nodes ?? []).map(n => n.chainId ?? '').filter(c => c.startsWith('eip155:')))];
-  const evmWorkflow = evmChains.length > 0;
+  const chains = (workflow as { nodes?: readonly { chainId?: string }[] }).nodes?.map(n => n.chainId ?? '') ?? [];
+  const evmChains = [...new Set(chains.filter(c => c.startsWith('eip155:')))];
+  const evmWorkflow = evmChains.length > 0 && !chains.some(c => c.startsWith('solana:'));
   // Re-read when the wallet changes (a FloFi sign-in usually comes with it): without an account session the step-by-step path stays primary.
   useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailability({ enabled: r.enabled, singleStep: r.enabled && r.singleStep === true }))
     .catch(() => setAvailability({ enabled: false, singleStep: false })); }, [evmAccount]);

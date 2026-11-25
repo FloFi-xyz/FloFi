@@ -38,9 +38,15 @@ export const CreateStrategyRequest = Type.Object({ strategy: StrategyInputSchema
  */
 export const PublicCreateStrategyRequest = Type.Object({ strategy: PublicStrategyInputSchema }, { ...strict, description: 'A FloFi StrategySpec on mainnets: a version 1 strategy or a version 2 step list.' });
 export const ValidateStrategyRequest = Type.Object({}, strict);
-export const SimulateStrategyRequest = Type.Object({ simulationSubject: Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
-  description: 'The account whose PUBLIC balances and allowances the read-only simulation reads (EVM address or Solana public key). It is not authenticated, ' +
-    'not an owner and grants nothing; nothing is stored for it.' }) }, strict);
+export const SimulateStrategyRequest = Type.Object({
+  simulationSubject: Type.Optional(Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
+    description: 'A public address for a wallet-specific simulation. Omit it for market quotes.' })),
+  simulationSubjects: Type.Optional(Type.Object({
+    evm: Type.Optional(Type.String({ pattern: '^0x[0-9a-fA-F]{40}$' })),
+    solana: Type.Optional(Type.String({ pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$' })),
+  }, { ...strict, description: 'Public simulation addresses by ecosystem. They can supply a bridge destination for preview only and carry no execution authority.' })),
+}, strict);
+export type SimulateStrategyRequestBody = Static<typeof SimulateStrategyRequest>;
 export const CreateApprovalRequest = Type.Object({ strategyId: StrategyId, workflowHash: Type.String({ pattern: '^0x[0-9a-f]{64}$',
   description: 'The workflowHash of that strategy, as returned when it was created. A different hash is refused (STRATEGY_CHANGED).' }),
   returnTarget: Type.Optional(Type.Object({
@@ -96,7 +102,7 @@ export const StrategyValidationView = Type.Object({ object: Type.Literal('strate
 export const SimulationView = Type.Object({ object: Type.Literal('simulation'), strategyId: StrategyId, workflowHash: WorkflowHash, kind: Type.String(),
   provenance: Type.String(), observedAt: Nullable(Type.String()), expiresAt: Nullable(Type.String()), simulationSubject: Nullable(Type.String()),
   subjectRole: Type.Literal('SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION'), preview: Type.Literal(true), persisted: Type.Literal(false),
-  authorizable: Type.Literal(false), evidenceLevel: literals(['MOCKED_SIMULATION_PREVIEW', 'SIMULATION_PREVIEW_NOT_EXECUTION'] as const),
+  authorizable: Type.Literal(false), evidenceLevel: literals(['MOCKED_SIMULATION_PREVIEW', 'SIMULATION_PREVIEW_NOT_EXECUTION', 'MARKET_QUOTE_ONLY'] as const),
   facts: Type.Record(Type.String(), Type.Unknown()), canonicalArtifacts: Nullable(Type.Record(Type.String(), Type.Unknown())), notes: Type.Array(Type.String()),
   authority: Authority }, strict);
 
@@ -107,7 +113,7 @@ export const WorkflowSimulationView = Type.Object({
   steps: Type.Array(Type.Object({ index: Type.Integer(), workflowHash: WorkflowHash,
     state: literals(['SIMULATED', 'AWAITING_PRODUCER_SETTLEMENT', 'NOT_COMPLETED', 'FAILED'] as const), reason: Nullable(Type.String()),
     amountFrom: Type.Array(Type.Integer()), simulationSubject: Nullable(Type.String()),
-    subjectSource: literals(['REQUEST', 'PUBLIC_QUOTE_SUBJECT', 'NONE'] as const),
+    subjectSource: literals(['REQUEST', 'PUBLIC_QUOTE_SUBJECT', 'ACCOUNT_WALLET', 'NONE'] as const),
     provenance: Nullable(Type.String()), observedAt: Nullable(Timestamp), expiresAt: Nullable(Timestamp),
     facts: Nullable(Type.Record(Type.String(), Type.Unknown())) }, strict)),
   executionSimulation: Type.Literal('FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION'),

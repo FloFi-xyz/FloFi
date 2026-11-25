@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { BUILD_ESTIMATE_STREAM, estimateMatchesNode, requestBuildEstimate, type BuildEstimate, type BuildEstimateResult } from '../domain/build-estimate';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
+import { networkIdentity } from '../domain/network-registry';
 import { createJourney, reportJourney } from '../domain/journey-metrics';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import { isUsdEstimate, type UsdEstimate } from '../domain/usd-estimate';
@@ -134,9 +135,11 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
   // Catalog/layout renders may recreate the preview object. Only changed snapshot contents invalidate its request.
   const snapshot = useMemo(() => serialized ? JSON.parse(serialized) as SemanticWorkflow : undefined, [serialized]);
   const key = useMemo(() => serialized ? hashArtifactBytes('semantic-workflow', new TextEncoder().encode(serialized)) : null, [serialized]);
-  const scope = JSON.stringify([key, nodeId, owner ?? null, destinationWallet ?? null]);
   const node = snapshot?.nodes.find(node => node.nodeId === nodeId);
   const chain = node?.chainId;
+  const marketSwap = node?.actionType === 'asset.swap.exact-input' && networkIdentity(chain)?.environment === 'MAINNET';
+  const quoteOwner = marketSwap ? undefined : owner;
+  const scope = JSON.stringify([key, nodeId, quoteOwner ?? null, destinationWallet ?? null]);
   const unresolved = node?.inputs.some(input => input.kind === 'OUTPUT_REFERENCE');
   const bridge = node?.actionType === 'asset.bridge' ? bridgeEstimateRequest(node) : null;
   const provider = node?.adapterConstraints.protocols.some(protocol => protocol === 'uniswap' || protocol === 'uniswap-v3') ? 'Uniswap V3'
@@ -191,7 +194,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     const cancel = requestBuildEstimate(signal => { const ready = recalled(scope); return ready ? Promise.resolve({ ok: true as const, estimate: ready }) : sharedEstimate(scope, async shared => {
       sent = true;
       const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', accept: BUILD_ESTIMATE_STREAM, 'x-quote-correlation-id': correlationId },
-        body: JSON.stringify({ workflow: snapshot, nodeId, owner, ...destinationWallet ? { destinationWallet } : {} }), signal: shared });
+        body: JSON.stringify({ workflow: snapshot, nodeId, owner: quoteOwner, ...destinationWallet ? { destinationWallet } : {} }), signal: shared });
       const result = await readEstimate(response);
       if (!result || typeof result !== 'object' || result.ok !== true && result.ok !== false || result.ok && (!result.estimate || typeof result.estimate !== 'object'))
         return { ok: false, code: 'ESTIMATE_RESPONSE_INVALID', correlationId };
@@ -204,7 +207,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
       accept(estimate, !estimate, response.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' } : response);
     });
     return () => { disposed = true; cancel(); clearTimeout(expire); };
-  }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh, frozen, unresolved]);
+  }, [key, scope, snapshot, nodeId, quoteOwner, destinationWallet, chain, provider, refresh, frozen, unresolved]);
   if (!quotable) return { status: 'idle' };
   if (unresolved) return { status: 'unavailable', code: 'ESTIMATE_DEPENDENCY_UNRESOLVED' };
   // A frozen card that never had an answer for this snapshot shows none (never "calculating": nothing is asked); an answer it keeps past its

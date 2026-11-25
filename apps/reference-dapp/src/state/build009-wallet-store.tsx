@@ -34,7 +34,7 @@ type Wallet = { readonly available: boolean; readonly account: string | null; re
   /** The same notice as a catalog message and its values (P0 hotfix, locale contract): render it with `tr(...notice)`. */
   readonly notice?: WalletNotice | null;
   /** Monotonic authority epoch: genuine provider/account/chain transitions and disconnects only. */
-  readonly revision: number; readonly busy: boolean;
+  readonly revision: number; readonly networkRevision: number; readonly busy: boolean;
   /**
    * BUILD-FLOFI-PRODUCT-UX-001: a remembered EVM session is still being read back silently (`eth_accounts`): the header shows a neutral slot, never a
    * false "not connected". Bounded by the wallet's answer or `WALLET_RESTORE_TIMEOUT_MS`.
@@ -67,6 +67,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   const error = notice ? walletNoticeText(notice) : null;
   const setError = (value: string | WalletNotice | null) => setNotice(value === null ? null : typeof value === 'string' ? [value] : value);
   const [revision, setRevision] = useState(0);
+  const [networkRevision, setNetworkRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const { walletHint } = useProductBootstrap();
   const [restoring, setRestoring] = useState(() => walletHint.includes('evm'));
@@ -86,6 +87,8 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   const authority = useRef<{ provider: EvmProvider | null; account: string | null; chainId: string | null }>({ provider: null, account: null, chainId: null });
   const updateAuthority = useCallback((update: Partial<typeof authority.current>, disconnect = false) => {
     const previous = authority.current, next = { ...previous, ...update };
+    if (!disconnect && next.provider === previous.provider && next.account === previous.account && next.chainId !== previous.chainId)
+      setNetworkRevision(n => n + 1);
     if (disconnect || next.provider !== previous.provider || next.account !== previous.account || next.chainId !== previous.chainId) setRevision(n => n + 1);
     authority.current = next;
     connected.current = Boolean(next.account); setAccount(next.account); setChainId(next.chainId);
@@ -214,7 +217,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
     updateWalletPreference({ evmDisconnected: true }); forgetAccountWalletReconnect('evm'); clearChosenEvmWallet(); suppressed.current = true;
     rememberWalletHint('evm', false); setRestoring(false);
     setError(null); setBusy(false); }, [updateAuthority]);
-  return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, notice, revision, busy, restoring, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, notice, revision, networkRevision, busy, restoring, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
 }
 export function useBuild009Wallet(): Wallet { const value = useContext(Context); if (!value) throw new Error('BUILD009_WALLET_MISSING'); return value; }
 /** The operational EVM wallet where the product shell provides one; null elsewhere (e.g. `/connections`, outside the shell). */

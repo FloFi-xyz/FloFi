@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from '../server/flight-access';
+import { flightProposalWallets, withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner, withFlightProductAccess } from '../server/flight-access';
 /**
  * BUILD-MCP-002 → BUILD-DEVELOPER-001: server actions of `/approve`, the FloFi-controlled page where an external proposal meets its
  * owner — for every requester kind this deployment serves (`src/server/approval-surface.ts`), not only MCP.
@@ -98,10 +98,12 @@ export async function approvalHandoffPreview(secret: string): Promise<Result<App
  * command. `share` is the owner's choice to let the requester see the status of runs started from it.
  */
 export async function claimApprovalHandoff(secret: string, share: boolean): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => {
+  return withFlightProductAccess(async () => {
   try {
-    if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<ClaimedProposal>('claim', [secret, share === true]) };
-    const value = await claimApproval(await surface(), secret, await currentWalletPrincipals(), share === true); notify(secret); return { ok: true, value };
+    if (remoteAutomationApproval(secret)) return await withFlightAccess(async () =>
+      ({ ok: true, value: await remoteApproval<ClaimedProposal>('claim', [secret, share === true]) }));
+    const value = await claimApproval(await surface(), secret, await flightProposalWallets(await currentWalletPrincipals()), share === true);
+    notify(secret); return { ok: true, value };
   } catch (cause) { return failure(cause); }
 
   });
@@ -112,10 +114,12 @@ export async function claimApprovalHandoff(secret: string, share: boolean): Prom
  * proposal's workflow hash. Anything else — an edit, another proposal — is a mismatch and the handoff stays CLAIMED.
  */
 export async function markApprovalApplied(secret: string, workflow: unknown): Promise<Result<ApprovalView>> {
-  return withFlightAccess(async () => {
+  return withFlightProductAccess(async () => {
   try {
-    if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<ApprovalView>('apply', [secret, workflow]) };
-    const value = await applyApproval(await surface(), secret, await currentWalletPrincipals(), workflow); notify(secret); return { ok: true, value };
+    if (remoteAutomationApproval(secret)) return await withFlightAccess(async () =>
+      ({ ok: true, value: await remoteApproval<ApprovalView>('apply', [secret, workflow]) }));
+    const value = await applyApproval(await surface(), secret, await flightProposalWallets(await currentWalletPrincipals()), workflow);
+    notify(secret); return { ok: true, value };
   } catch (cause) { return failure(cause); }
 
   });
@@ -133,8 +137,12 @@ export async function setApprovalSharing(secret: string, share: boolean): Promis
 }
 
 // ── BUILD-CHAT-E2E-001: a multi-step approval's workflow run, for the wallets this browser proved (never a client-supplied address) ──────
-const runAction = async <T>(work: (approvals: ApprovalSurface, wallets: Awaited<ReturnType<typeof currentWalletPrincipals>>) => Promise<T>): Promise<Result<T>> => {
-  try { return { ok: true, value: await work(await surface(), await currentWalletPrincipals()) }; } catch (cause) { return failure(cause); }
+const runAction = async <T>(work: (approvals: ApprovalSurface, wallets: Awaited<ReturnType<typeof currentWalletPrincipals>>) => Promise<T>,
+  eligibleOnly = false): Promise<Result<T>> => {
+  try {
+    const wallets = await currentWalletPrincipals();
+    return { ok: true, value: await work(await surface(), eligibleOnly ? await flightProposalWallets(wallets) : wallets) };
+  } catch (cause) { return failure(cause); }
 };
 
 export async function setAppliedDeveloperSharing(approvalId: string, share: boolean): Promise<Result<{ statusShared: boolean }>> {
@@ -147,12 +155,12 @@ export async function workflowRunStatusHandoff(approvalId: string): Promise<Resu
 }
 /** The step the owner signs now, once the previous one reconciled (the ordinary single-step proposal the signing surface loads). */
 export async function continueWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunContinue(s, approvalId, w));
+  return withFlightProductAccess(async () => { return runAction((s, w) => workflowRunContinue(s, approvalId, w), true);
   });
 }
 /** The owner chose to confirm each step in their wallet. */
 export async function startWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunStart(s, approvalId, w));
+  return withFlightProductAccess(async () => { return runAction((s, w) => workflowRunStart(s, approvalId, w), true);
   });
 }
 /** The owner ends the run (nothing in flight) or, for a delegated run, revokes its authorization. */
@@ -162,7 +170,7 @@ export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Resu
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function resumeWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunResume(s, approvalId, w));
+  return withFlightProductAccess(async () => { return runAction((s, w) => workflowRunResume(s, approvalId, w), true);
   });
 }
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the owner chose user-funded execution groups for the wallets this browser reported. */

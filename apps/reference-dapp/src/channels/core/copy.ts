@@ -8,6 +8,7 @@
 import { userFacingError } from '../../platform/conversation-state.ts';
 import type { ChannelLanguage } from './config.ts';
 import { LANDED_LABELS_PT, landedKind, type LandedKind } from '../../domain/landed-attempts.ts';
+import { formatDisplayTokenAmount } from '../../domain/token-amount-display.ts';
 
 /** `0x1234…abcd` for every address or hash in a channel text. */
 export const shorten = (text: string) => text.replace(/0x([0-9a-fA-F]{4})[0-9a-fA-F]{32,60}([0-9a-fA-F]{4})(?![0-9a-fA-F])/g, '0x$1…$2');
@@ -15,9 +16,25 @@ const NETWORK_LABEL: Readonly<Record<string, string>> = { 'base': 'Base', 'base-
   'arbitrum-sepolia': 'Arbitrum Sepolia', 'ethereum': 'Ethereum', 'ethereum-sepolia': 'Ethereum Sepolia', 'solana': 'Solana', 'solana-devnet': 'Solana Devnet' };
 export const networkLabel = (id: string) => NETWORK_LABEL[id] ?? id;
 
+export type MarketQuoteNote = { readonly units: string; readonly decimals: number; readonly symbol: string; readonly provenance: string };
 export type PreviewNote = { readonly kind: 'PASSED'; readonly provenance: string } | { readonly kind: 'FAILED'; readonly code: string }
-  | { readonly kind: 'WORKFLOW'; readonly total: number; readonly simulated: number; readonly pending: number; readonly codes: readonly string[] }
+  | { readonly kind: 'MARKET_QUOTE'; readonly quote: MarketQuoteNote }
+  | { readonly kind: 'WORKFLOW'; readonly total: number; readonly simulated: number; readonly pending: number; readonly codes: readonly string[];
+    readonly quotes?: readonly MarketQuoteNote[] }
   | { readonly kind: 'SKIPPED' } | { readonly kind: 'DISABLED' };
+const previewWalletMessage: Readonly<Record<string, Record<ChannelLanguage, string>>> = {
+  EVM_WALLET_REQUIRED: { EN: 'Connect an EVM wallet to continue', PT: 'Conecte uma carteira EVM para continuar' },
+  SOLANA_WALLET_REQUIRED: { EN: 'Connect a Solana wallet to continue', PT: 'Conecte uma carteira Solana para continuar' },
+  UNIVERSAL_DESTINATION_WALLET_REQUIRED: { EN: 'Choose the wallet that will receive the bridge delivery', PT: 'Escolha a carteira que receberá os fundos da ponte' },
+  SIMULATION_REQUIRES_OWNER_BROWSER: { EN: 'Continue in FloFi for wallet simulation', PT: 'Continue no FloFi para simular com sua carteira' },
+};
+const previewDetails = (codes: readonly string[], language: ChannelLanguage) => [...new Set(codes.map(code => previewWalletMessage[code]?.[language] ?? code))].join('. ');
+const marketQuote = (q: MarketQuoteNote, language: ChannelLanguage) => {
+  const amount = formatDisplayTokenAmount(q, { language, symbol: q.symbol });
+  return language === 'EN' ? `Market quote${q.provenance === 'MOCKED' ? ' (MOCKED)' : ''} estimates ${amount}.`
+    : `A cotação de mercado${q.provenance === 'MOCKED' ? ' (MOCKED)' : ''} estima ${amount}.`;
+};
+const workflowQuotes = (quotes: readonly MarketQuoteNote[] | undefined, language: ChannelLanguage) => (quotes ?? []).map(q => ` ${marketQuote(q, language)}`).join('');
 export type ReadyFacts = { readonly lines: readonly string[]; readonly networks: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
   readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number };
 export type RunLine = { readonly status: string; readonly reconciled: boolean; readonly terminal: boolean; readonly errorCode: string | null;
@@ -88,8 +105,9 @@ const EN = {
   ready: 'Strategy ready:',
   network: (labels: string, real: boolean) => `Network: ${labels}${real ? ' — REAL FUNDS' : ' (test funds)'}`,
   preview: (p: PreviewNote) => p.kind === 'PASSED' ? `Simulation preview passed (read-only${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). FloFi simulates again before your review.`
-    : p.kind === 'WORKFLOW' ? `Workflow preview: ${p.simulated}/${p.total} steps simulated against current state.${p.pending ? ` ${p.pending} await earlier steps' received funds.` : ''}${p.codes.length ? ` Details: ${p.codes.join(', ')}.` : ''} FloFi freshly simulates every step after the previous step reconciles, before your Manifest review and wallet signature.`
-    : p.kind === 'FAILED' ? `Simulation preview did not pass (${p.code}). FloFi will show the details when you open it.`
+    : p.kind === 'MARKET_QUOTE' ? `${marketQuote(p.quote, 'EN')} Connect a Solana wallet in FloFi for simulation and Review.`
+    : p.kind === 'WORKFLOW' ? `Workflow preview: ${p.simulated}/${p.total} steps simulated against current state.${workflowQuotes(p.quotes, 'EN')}${p.pending ? ` ${p.pending} await earlier steps' received funds.` : ''}${p.codes.length ? ` ${previewDetails(p.codes, 'EN')}.` : ''} FloFi freshly simulates every step after the previous step reconciles, before your Manifest review and wallet signature.`
+    : p.kind === 'FAILED' ? `Preview unavailable. ${previewDetails([p.code], 'EN')}. Open FloFi to continue.`
       : p.kind === 'SKIPPED' ? 'FloFi runs the simulation when you open it.' : 'FloFi runs the simulation when you open it.',
   authorize: (wallet: string | null, minutes: number) => `Nothing is authorized yet: open FloFi${wallet ? `, connect the wallet ${wallet}` : ', connect your wallet'}, review the Strategy Manifest and sign there. The link works once and expires in ${minutes} minutes.`,
   ai: 'Interpreted from your message with an AI assistant. It is not financial advice; you decide.',
@@ -230,8 +248,9 @@ const PT: Copy = {
   ready: 'Estratégia pronta:',
   network: (labels, real) => `Rede: ${labels}${real ? ' — FUNDOS REAIS' : ' (fundos de teste)'}`,
   preview: p => p.kind === 'PASSED' ? `Prévia da simulação aprovada (somente leitura${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). O FloFi simula de novo antes da sua revisão.`
-    : p.kind === 'WORKFLOW' ? `Prévia do fluxo: ${p.simulated}/${p.total} etapas simuladas no estado atual.${p.pending ? ` ${p.pending} aguardam os fundos recebidos das etapas anteriores.` : ''}${p.codes.length ? ` Detalhes: ${p.codes.join(', ')}.` : ''} O FloFi simula cada etapa depois da reconciliação anterior, antes da revisão do Manifest e da assinatura da carteira.`
-    : p.kind === 'FAILED' ? `A prévia da simulação não passou (${p.code}). O FloFi mostra os detalhes quando você abrir.` : 'O FloFi roda a simulação quando você abrir.',
+    : p.kind === 'MARKET_QUOTE' ? `${marketQuote(p.quote, 'PT')} Conecte uma carteira Solana no FloFi para simular e revisar.`
+    : p.kind === 'WORKFLOW' ? `Prévia do fluxo: ${p.simulated}/${p.total} etapas simuladas no estado atual.${workflowQuotes(p.quotes, 'PT')}${p.pending ? ` ${p.pending} aguardam os fundos recebidos das etapas anteriores.` : ''}${p.codes.length ? ` ${previewDetails(p.codes, 'PT')}.` : ''} O FloFi simula cada etapa depois da reconciliação anterior, antes da revisão do Manifest e da assinatura da carteira.`
+    : p.kind === 'FAILED' ? `Prévia indisponível. ${previewDetails([p.code], 'PT')}. Abra o FloFi para continuar.` : 'O FloFi roda a simulação quando você abrir.',
   authorize: (wallet, minutes) => `Nada está autorizado ainda: abra o FloFi${wallet ? `, conecte a carteira ${wallet}` : ', conecte sua carteira'}, revise o Strategy Manifest e assine lá. O link funciona uma vez e expira em ${minutes} minutos.`,
   ai: 'Interpretado da sua mensagem com um assistente de IA. Não é recomendação financeira; a decisão é sua.',
   linkLabel: 'Autorizar',

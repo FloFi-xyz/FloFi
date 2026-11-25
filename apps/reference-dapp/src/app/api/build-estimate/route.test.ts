@@ -10,7 +10,7 @@ import type { UsdEstimate } from '../../../domain/usd-estimate';
 
 type Seams = { correlationId?: string; signal?: AbortSignal; onUsd?: (pending: Promise<UsdEstimate | null>) => void };
 const h = vi.hoisted(() => ({ read: null as null | ((seams: Seams) => Promise<unknown>) }));
-vi.mock('../../../server/flight-access', () => ({ withFlightAccess: <T>(work: () => Promise<T>) => work() }));
+vi.mock('../../../server/flight-access', () => ({ requireFlightProductAccess: async () => null }));
 vi.mock('../../../server/build-estimate', () => ({ readBuildEstimate: (_input: unknown, _env: unknown, seams: Seams) => h.read!(seams) }));
 const { POST } = await import('./route');
 const { BUILD_ESTIMATE_STREAM } = await import('../../../domain/build-estimate');

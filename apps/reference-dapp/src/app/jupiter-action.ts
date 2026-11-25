@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { withFlightOwner } from '../server/flight-access';
 import { JUPITER_SOLANA_MAINNET as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createJupiterService, type JupiterService, type JupiterWalletDiagnostic } from '../server/jupiter-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from './cloud-flow';
+import { cloudFlow, withFlightFlowAccess } from './cloud-flow';
 import { createJupiterHttp } from '../server/jupiter-http';
 import { koraGasForFlow } from '../gas-abstraction/kora/runtime';
 
@@ -39,15 +39,15 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'JUPITER_SERVICE_UNAVAILABLE' }; }
 }
 export async function jupiterInfo() {
-  return withFlightAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled }));
+  return withFlightFlowAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled }));
   });
 }
 export async function jupiterSimulate(workflow: SemanticWorkflow, owner: string) {
-  return withFlightAccess(async () => { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner));
+  return withFlightFlowAccess(async () => { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner));
   });
 }
 export async function jupiterReview(id: string, commitment: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow));
+  return withFlightFlowAccess(async () => { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow));
   });
 }
 export async function jupiterInvalidate(id: string) {
@@ -55,7 +55,7 @@ export async function jupiterInvalidate(id: string) {
   });
 }
 export async function jupiterBegin(id: string, owner: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('begin', [id, owner, workflow], service => service.begin(id, owner, workflow));
+  return withFlightFlowAccess(async () => { return run('begin', [id, owner, workflow], service => service.begin(id, owner, workflow));
   });
 }
 export async function jupiterWalletFailure(id: string, diagnostic: JupiterWalletDiagnostic) {
@@ -63,7 +63,7 @@ export async function jupiterWalletFailure(id: string, diagnostic: JupiterWallet
   });
 }
 export async function jupiterSubmit(id: string, signedTransaction: string) {
-  return withFlightAccess(async () => { return run('submit', [id, signedTransaction], service => service.submit(id, signedTransaction));
+  return withFlightFlowAccess(async () => { return run('submit', [id, signedTransaction], service => service.submit(id, signedTransaction));
   });
 }
 export async function jupiterObserve(id: string) {

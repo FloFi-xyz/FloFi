@@ -33,7 +33,7 @@ import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from
 import { credentialDigest, credentialOf } from './oauth/crypto.ts';
 import { mcpState, type McpState } from './oauth/state.ts';
 import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime.ts';
-import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, userMessageContent, type ToolName } from './tools.ts';
+import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, userMessageContent, type ToolContext, type ToolName } from './tools.ts';
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
 import { deploymentAutomationReader, type AutomationReadPort } from './automations.ts';
 import { deploymentPortfolioPort, type PortfolioReadPort } from './account.ts';
@@ -209,26 +209,36 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     }).catch(() => null);
     if (!betaIdentity) return reject(403, 'BETA_ACCESS_DENIED');
   }
-  const held = principalScopes(principal), missing = body === null ? [] : requiredScopes(body, principal).filter(s => !held.includes(s));
+  const held = principalScopes(principal), required = body === null ? [] : requiredScopes(body, principal), missing = required.filter(s => !held.includes(s));
   if (missing.length) {
     logger?.warn('mcp.insufficient_scope', { principal: principal.id, scope: missing.join(' ') });
     return reject(403, 'MCP_INSUFFICIENT_SCOPE', oauth && principal.kind === 'mcp-oauth'
       ? { 'www-authenticate': challenge(oauth, [...new Set([...held, ...missing])], 'insufficient_scope') } : {});
   }
-  // A `flofi.runs` read by an OAuth account sees only wallets that account linked on FloFi (never an address from the request).
-  if (principal.kind === 'mcp-oauth' && state && body !== null && requiredScopes(body, principal).includes('flofi.runs')) {
+  let simulationWallets: ToolContext['simulationWallets'];
+  // Owner reads require link storage. Simulation loads the same consented links only when it needs a compatible subject.
+  if (principal.kind === 'mcp-oauth' && state && held.includes('flofi.runs')) {
     const linkState = state, account = principal.accountId;
-    const links = await store(() => linkState.links.active(account, now)).catch(() => null);
-    if (!links) { logger?.warn('mcp.oauth.store_unavailable', { request_id: budget.requestId }); return reject(503, 'MCP_OAUTH_STORE_UNAVAILABLE'); }
     const productIdentity = betaIdentity;
-    const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
-    // `owners` keeps each link's namespace (a Solana wallet owns its automations as `solana`); `wallets` stays the address list runs are read by.
-    // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: balance/position reads only for links made once `/connections` disclosed them (fail closed when unset).
     const portfolioFrom = portfolioLinksFrom(env);
-    principal = Object.freeze({ ...principal, wallets: Object.freeze(eligible.map(l => l.address)),
-      owners: Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address }))),
-      portfolioOwners: Object.freeze(portfolioFrom ? eligible.filter(e => links.some(l => l.namespace === e.namespace && l.address === e.address
-        && l.createdAt.getTime() >= portfolioFrom.getTime())).map(l => Object.freeze({ namespace: l.namespace, address: l.address })) : []) });
+    async function loadWallets() {
+      const links = await store(() => linkState.links.active(account, now)).catch(() => null);
+      if (!links) { logger?.warn('mcp.oauth.store_unavailable', { request_id: budget.requestId }); return null; }
+      const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
+      const owners = Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address })));
+      // Balance reads require links made after the connections disclosure took effect.
+      const portfolioOwners = Object.freeze(portfolioFrom ? owners.filter(e => links.some(l => l.namespace === e.namespace && l.address === e.address
+        && l.createdAt.getTime() >= portfolioFrom.getTime())) : []);
+      return { wallets: Object.freeze(owners.map(l => l.address)), owners, portfolioOwners };
+    }
+    let lookup: ReturnType<typeof loadWallets> | undefined;
+    const wallets = () => lookup ??= loadWallets();
+    if (required.includes('flofi.runs')) {
+      const linked = await wallets();
+      if (!linked) return reject(503, 'MCP_OAUTH_STORE_UNAVAILABLE');
+      principal = Object.freeze({ ...principal, ...linked });
+    }
+    if (portfolioFrom) simulationWallets = async () => (await wallets())?.portfolioOwners ?? [];
   }
   // Every runtime call of this request is bounded by its budget (an injected runtime too).
   const runtime = options.runtime ? boundedRuntime(options.runtime, budget) : deploymentRuntime(env, budget), active = principal;
@@ -245,6 +255,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     return listPublishedStudioIntegrations(host.db, host.tenantId);
   };
   const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, portfolio, publicStudioIntegrations,
+    ...simulationWallets ? { simulationWallets } : {},
     ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;
       logger?.info('mcp.tool', { request_id: budget.requestId, principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }); } }),

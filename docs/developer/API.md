@@ -119,9 +119,10 @@ Body: `{}` or none. Re-composes the stored strategy with the current engine: `re
 
 ### `POST /strategies/{id}/simulate`
 
-Body: `{ "simulationSubject": "<EVM address or Solana public key>" }`. The subject is the account whose public state the preview
-reads; it is not authenticated and grants nothing. Response: `kind`, `provenance`, `observedAt`, `expiresAt`, `facts`,
-`canonicalArtifacts`, `notes`, `evidenceLevel` (`MOCKED_SIMULATION_PREVIEW` or `SIMULATION_PREVIEW_NOT_EXECUTION`), and the
+Send `{}` for a wallet-independent preview. For wallet-specific reads, pass `simulationSubject` with a public EVM address or
+Solana public key. You can also pass `simulationSubjects` with `evm` and `solana` addresses. These inputs grant no authority.
+The response carries `kind`, `provenance`, `observedAt`, `expiresAt`, `facts`, `canonicalArtifacts`, `notes`, and
+`evidenceLevel`. Jupiter can return `MARKET_QUOTE_ONLY` without a Solana address. Every response also includes the
 constants `preview: true`, `persisted: false`, `authorizable: false`,
 `subjectRole: "SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION"`. One step at a time: a multi-step strategy is
 `422 CAPABILITY_NOT_SUPPORTED` (`SIMULATE_ONE_STEP_AT_A_TIME`). Never calldata, unsigned transactions or signatures.
@@ -129,8 +130,9 @@ constants `preview: true`, `persisted: false`, `authorizable: false`,
 ### `POST /strategies/{id}/simulate-workflow`
 
 Uses the same request body as `simulate` and returns one entry per step of the canonical workflow. Each entry reports its
-workflow hash, state, amount dependencies and the public simulation subject and its source. A step using a different wallet
-family uses a public quote subject, identified by `subjectSource: "PUBLIC_QUOTE_SUBJECT"`. The overall status is
+workflow hash, state, amount dependencies and the public simulation subject and its source. If a wallet-specific step requires
+a different wallet family, the entry is `NOT_COMPLETED` and identifies the required wallet. A cross-ecosystem bridge preview
+uses the recipient in the strategy or the destination ecosystem's entry in `simulationSubjects`. The overall status is
 `STEP_PREVIEWS_AVAILABLE` when all steps simulated or `INCOMPLETE` when any step could not be simulated, including when a
 step awaits a previous step's settlement. FloFi runs a fresh simulation with the owner's actual wallet and reconciled amounts
 before authorizing each live step. The preview is read-only and carries `authority: "NONE"`.

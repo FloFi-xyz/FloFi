@@ -12,6 +12,7 @@
  * a tool argument; the runtime answers `null` for any run that wallet does not own.
  */
 import type { FlowName } from '../../backend/flows.ts';
+import type { PreviewPurpose } from '../../backend/preview.ts';
 import type { DelegationFacts } from '../workflow-runs/authorization-plan.ts';
 import type { UserFundedFacts } from '../workflow-runs/execution-groups.ts';
 import { currentBetaIdentity } from '../flight/beta-context.ts';
@@ -32,7 +33,7 @@ export type McpRuntime = {
    * but whose owner execution needs a separate opt-in). Only called for flows that expose `info`; `null` when unknown.
    */
   readonly info?: (flow: FlowName) => Promise<{ readonly executionEnabled: boolean; readonly networks?: readonly string[] } | null>;
-  readonly preview: (flow: FlowName, args: readonly unknown[]) => Promise<Result<unknown>>;
+  readonly preview: (flow: FlowName, args: readonly unknown[], purpose?: PreviewPurpose, signal?: AbortSignal) => Promise<Result<unknown>>;
   readonly run: (runId: string, owner: string) => Promise<Result<CloudRun | null>>;
   readonly journal: (runId: string, owner: string, after: number | null, limit: number) => Promise<Result<CloudJournalPage | null>>;
   /** The evidence the flow derives from its durable record (`FLOWS[flow].evidence`), read with the owner's read-only `status`. */
@@ -88,7 +89,8 @@ export function deploymentRuntime(env: Env = process.env, budget?: RequestBudget
     kind: flowRuntimeKind(env),
     mode: flow => cloudFlowMode(flow, env),
     info: async flow => infoOf(await cloudFlow<unknown>(flow, 'info', [], { env })),
-    preview: async (flow, args) => await cloudPreview(flow, args, { env }) ?? REQUIRED,
+    preview: async (flow, args, purpose, signal) => await cloudPreview(flow, args, { env, ...(purpose ? { purpose } : {}),
+      ...(signal ? { signal } : {}) }) ?? REQUIRED,
     run: async (runId, owner) => await cloudRun(runId, owner, { env }) ?? REQUIRED,
     journal: async (runId, owner, after, limit) => await cloudRunJournal(runId, owner, after, limit, { env }) ?? REQUIRED,
     evidence: async (flow, runId, owner) => evidenceOf(flow, await cloudFlow(flow, 'status', [runId], { env, principal: owner })),
@@ -120,7 +122,8 @@ function budgetedDeploymentRuntime(env: Env, budget: RequestBudget): McpRuntime 
       return result === null ? null : result.ok && (result.value === 'live' || result.value === 'harness') ? result.value : 'off';
     },
     info: async flow => infoOf(fact(await cloudFlow<unknown>(flow, 'info', [], read()))),
-    preview: async (flow, args) => checked<unknown>(await cloudPreview(flow, args, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.preview), maxAttempts: 1 }) ?? REQUIRED),
+    preview: async (flow, args, purpose, signal) => checked<unknown>(await cloudPreview(flow, args, { env, transport,
+      ...(purpose ? { purpose } : {}), ...(signal ? { signal } : {}), timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.preview), maxAttempts: 1 }) ?? REQUIRED),
     // The same per-read cap as every other upstream read (never the client's 30 s default, which outlived the tool's own cap).
     run: async (runId, owner) => checked<CloudRun | null>(await cloudRun(runId, owner, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read) }) ?? REQUIRED),
     journal: async (runId, owner, after, limit) => checked<CloudJournalPage | null>(await cloudRunJournal(runId, owner, after, limit,
@@ -154,7 +157,7 @@ export function boundedRuntime(runtime: McpRuntime, budget: RequestBudget): McpR
     kind: runtime.kind,
     mode: flow => withinBudget(budget, read, () => runtime.mode(flow)),
     ...runtime.info ? { info: (flow: FlowName) => withinBudget(budget, read, () => runtime.info!(flow)) } : {},
-    preview: (flow, args) => bounded(preview, () => runtime.preview(flow, args)),
+    preview: (flow, args, purpose, signal) => bounded(preview, () => runtime.preview(flow, args, purpose, signal)),
     run: (runId, owner) => bounded(read, () => runtime.run(runId, owner)),
     journal: (runId, owner, after, limit) => bounded(read, () => runtime.journal(runId, owner, after, limit)),
     evidence: (flow, runId, owner) => bounded(read, () => runtime.evidence(flow, runId, owner)),
@@ -194,7 +197,8 @@ export function embeddedMcpRuntime(runtime: Pick<EmbeddedRuntime, 'backend' | 'r
     kind: 'embedded',
     mode: async flow => { const r = await runtime.backend.callFlow(flow, 'mode', [], undefined, null, currentBetaIdentity()); return r.ok && (r.value === 'live' || r.value === 'harness') ? r.value : 'off'; },
     info: async flow => infoOf(await runtime.backend.callFlow(flow, 'info', [], undefined, null, currentBetaIdentity()).catch(() => null)),
-    preview: async (flow, args) => { const r = await guard(() => runtime.backend.previewFlow(flow, args, undefined, { betaIdentity: currentBetaIdentity() })); return r.ok ? r.value : r; },
+    preview: async (flow, args, purpose, signal) => { const r = await guard(() => runtime.backend.previewFlow(flow, args, purpose,
+      { betaIdentity: currentBetaIdentity(), ...(signal ? { signal } : {}) })); return r.ok ? r.value : r; },
     run: (runId, owner) => guard(() => runtime.run(runId, owner)),
     journal: (runId, owner, after, limit) => guard(() => runtime.journal(runId, owner, after, limit)),
     evidence: async (flow, runId, owner) => evidenceOf(flow, await record(flow, runId, owner)),

@@ -10,14 +10,16 @@
  * consulted once a slot is granted (see `simulationAdmission`).
  */
 import type { PreviewPlan, SimulationView } from '../mcp/simulation.ts';
-import { previewPlan, projectSimulation } from '../mcp/simulation.ts';
+import { previewPlan, projectJupiterMarketQuote, projectSimulation } from '../mcp/simulation.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import type { Composition } from '../engine/strategy-engine';
 import { PlatformRefusal, refuse } from './refusal.ts';
 import { composeSingleStep, composeWorkflowOrRefuse } from './strategy.ts';
 import type { NetworkScope } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
-import { UNIVERSAL_QUOTE_SUBJECTS as QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
+import { operationWalletAddress, resolveOperationWallet } from '../domain/wallet-inventory.ts';
+import type { WalletRef } from './handoff-store.ts';
+import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 
 /**
  * P0 catalog reliability (P0-E): three simultaneous read-only MCP simulations (an Arbitrum swap, a Base → Arbitrum bridge and a Base Aave supply)
@@ -55,6 +57,7 @@ async function admitSimulation(budget: PreviewOptions['budget'], signal: AbortSi
     activeSimulations++;
     let allowed: boolean;
     try { allowed = !budget || await budget(); } catch (error) { releaseSimulationSlot(); throw error; }
+    if (signal?.aborted) { releaseSimulationSlot(); return 'SIMULATION_CANCELLED'; }
     if (!allowed) { releaseSimulationSlot(); return 'SIMULATION_RATE_LIMITED'; }
     return 'GRANTED';
   }
@@ -86,8 +89,11 @@ function releaseSimulationSlot(): void {
   dispatchWaiters();
 }
 
-export type PreviewRequest = { readonly strategy: unknown; readonly workflowHash: string; readonly simulationSubject: string };
+export type PreviewRequest = { readonly strategy: unknown; readonly workflowHash: string; readonly simulationSubject?: string;
+  readonly simulationSubjects?: Partial<Record<'evm' | 'solana', string>> };
 export type PreviewOptions = { readonly budget?: () => Promise<boolean>;
+  /** Verified wallets for which this caller may read balances. They authorize no financial action. */
+  readonly simulationWallets?: readonly WalletRef[] | (() => Promise<readonly WalletRef[]>);
   /** The caller's own request ended (P0-E review): a queued preview leaves the queue and a multi-step preview starts no further step. */
   readonly signal?: AbortSignal;
   /** BUILD-FLOFI-MAINNET-PRODUCT-001: the caller's network scope (default: this server's). */
@@ -95,6 +101,31 @@ export type PreviewOptions = { readonly budget?: () => Promise<boolean>;
 export type SimulationPreview = { readonly composition: Composition; readonly plan: PreviewPlan; readonly view: SimulationView;
   /** The public account whose balances the preview read, or null when the flow reads none. Never an owner or an authorization. */
   readonly simulationSubject: string | null };
+
+type WalletSubject = Exclude<PreviewPlan['subject'], 'NONE'>;
+const subjectEcosystem = (subject: WalletSubject) => subject === 'SOLANA' ? 'solana' as const : 'evm' as const;
+async function linkedSubject(subject: WalletSubject, wallets: PreviewOptions['simulationWallets']) {
+  const ns = subject === 'SOLANA' ? 'solana' : 'eip155';
+  const available = typeof wallets === 'function' ? await wallets() : wallets ?? [];
+  return resolveOperationWallet(subjectEcosystem(subject), available.filter(wallet => wallet.namespace === ns).map(wallet => wallet.address));
+}
+const requiredSubjectCode = (subject: WalletSubject) => subject === 'SOLANA' ? 'SOLANA_WALLET_REQUIRED' : 'EVM_WALLET_REQUIRED';
+
+type SubjectBinding = { readonly address: string | null; readonly source: WorkflowStepPreview['subjectSource'] };
+async function previewSubject(plan: PreviewPlan, request: PreviewRequest, options: PreviewOptions, multi: boolean): Promise<SubjectBinding> {
+  const required = plan.subject;
+  if (required === 'NONE') return { address: null, source: 'NONE' };
+  const ecosystem = subjectEcosystem(required), explicit = request.simulationSubjects?.[ecosystem];
+  const supplied = explicit ?? request.simulationSubject;
+  const address = operationWalletAddress(ecosystem, supplied);
+  if (address) return { address, source: 'REQUEST' };
+  const oppositeJupiterSubject = plan.flow === 'jupiter-swap' && operationWalletAddress('evm', supplied) !== null;
+  if (explicit !== undefined || !multi && supplied !== undefined && !oppositeJupiterSubject) return refuse('SIMULATION_SUBJECT_INVALID');
+  const linked = await linkedSubject(required, options.simulationWallets);
+  if (linked.kind === 'RESOLVED') return { address: linked.address, source: 'ACCOUNT_WALLET' };
+  if (plan.flow === 'jupiter-swap') return { address: null, source: 'PUBLIC_QUOTE_SUBJECT' };
+  return refuse(requiredSubjectCode(required));
+}
 
 /**
  * Refusals: the composition's own code (with issues), `SIMULATE_ONE_STEP_AT_A_TIME`, the preview plan's code (e.g.
@@ -104,24 +135,39 @@ export type SimulationPreview = { readonly composition: Composition; readonly pl
 export async function simulatePreview(runtime: EngineRuntime, request: PreviewRequest, options: PreviewOptions = {}): Promise<SimulationPreview> {
   const c = composeSingleStep(request.strategy, request.workflowHash, 'SIMULATE_ONE_STEP_AT_A_TIME', options.scope ?? networkScope()), plan = previewPlan(c.strategy);
   if ('code' in plan) return refuse(plan.code);
-  const evm = /^0x[0-9a-fA-F]{40}$/.test(request.simulationSubject);
-  if (plan.subject === 'EVM' && !evm || plan.subject === 'SOLANA' && evm) return refuse('SIMULATION_SUBJECT_INVALID');
+  const binding = await previewSubject(plan, request, options, false);
+  return previewBoundStep(runtime, c, plan, binding, request, options);
+}
+
+async function previewBoundStep(runtime: EngineRuntime, c: Composition, plan: PreviewPlan, binding: SubjectBinding,
+  request: PreviewRequest, options: PreviewOptions): Promise<SimulationPreview> {
+  let destination: string | null = null;
+  if (plan.destinationSubject) {
+    const explicit = request.simulationSubjects?.[subjectEcosystem(plan.destinationSubject)];
+    if (explicit !== undefined) {
+      destination = operationWalletAddress(subjectEcosystem(plan.destinationSubject), explicit);
+      if (!destination) return refuse('SIMULATION_SUBJECT_INVALID');
+    } else {
+      const linked = await linkedSubject(plan.destinationSubject, options.simulationWallets);
+      if (linked.kind !== 'RESOLVED') return refuse('UNIVERSAL_DESTINATION_WALLET_REQUIRED');
+      destination = linked.address;
+    }
+  }
   const admission = await admitSimulation(options.budget, options.signal);
   if (admission !== 'GRANTED') return refuse(admission);
+  const quote = binding.source === 'PUBLIC_QUOTE_SUBJECT', subject = binding.address;
   let preview;
   try {
-    const subject = evm ? request.simulationSubject.toLowerCase() : request.simulationSubject;
-    // BUILD-CROSSCHAIN-UNIVERSAL-001: a cross-ecosystem bridge needs a destination wallet; the preview uses the public quote subject (no key exists).
-    const destination = plan.destinationSubject ? [QUOTE_SUBJECTS[plan.destinationSubject]] : [];
-    preview = await runtime.preview(plan.flow, plan.subject === 'NONE' ? [c.workflow] : [c.workflow, subject, ...destination]);
+    preview = quote ? await runtime.preview(plan.flow, [c.workflow, UNIVERSAL_QUOTE_SUBJECTS.SOLANA], 'QUOTE', options.signal)
+      : await runtime.preview(plan.flow, subject ? [c.workflow, subject, ...destination ? [destination] : []] : [c.workflow], undefined, options.signal);
   } finally { releaseSimulationSlot(); }
   if (!preview.ok) return refuse(preview.code);
-  return { composition: c, plan, view: projectSimulation(plan.flow, preview.value), simulationSubject: plan.subject === 'NONE' ? null : request.simulationSubject };
+  return { composition: c, plan, view: quote ? projectJupiterMarketQuote(preview.value) : projectSimulation(plan.flow, preview.value), simulationSubject: subject };
 }
 
 export type WorkflowStepPreview = { readonly index: number; readonly workflowHash: string; readonly flow: string | null;
   readonly state: 'SIMULATED' | 'AWAITING_PRODUCER_SETTLEMENT' | 'NOT_COMPLETED' | 'FAILED'; readonly code: string | null;
-  readonly amountFrom: readonly number[]; readonly simulationSubject: string | null; readonly subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'NONE';
+  readonly amountFrom: readonly number[]; readonly simulationSubject: string | null; readonly subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'ACCOUNT_WALLET' | 'NONE';
   readonly view: SimulationView | null };
 /**
  * Preview an entire canonical sequence without asking the caller to manually split it. Every supported step uses its real flow
@@ -132,20 +178,22 @@ export type WorkflowStepPreview = { readonly index: number; readonly workflowHas
 export async function simulateWorkflowPreview(runtime: EngineRuntime, request: PreviewRequest, options: PreviewOptions = {}) {
   const workflow = composeWorkflowOrRefuse(request.strategy, request.workflowHash, options.scope ?? networkScope());
   const steps: WorkflowStepPreview[] = [];
+  let budget: Promise<boolean> | undefined;
+  const consumeBudget = options.budget;
+  const stepOptions = { ...options, ...consumeBudget ? { budget: () => budget ??= consumeBudget() } : {} };
   for (const [index, composition] of workflow.steps.entries()) {
     // The caller's request ended: no further step is started (its answer has already been given).
     if (options.signal?.aborted) return refuse('SIMULATION_CANCELLED');
     const plan = previewPlan(composition.strategy), dependencies = workflow.bindings.filter(b => b.step === index).map(b => b.amountFrom);
-    const evm = /^0x[0-9a-fA-F]{40}$/.test(request.simulationSubject);
-    const subject = 'subject' in plan && plan.subject !== 'NONE'
-      ? (plan.subject === 'EVM') === evm ? request.simulationSubject : QUOTE_SUBJECTS[plan.subject] : request.simulationSubject;
-    const subjectSource = !('subject' in plan) || plan.subject === 'NONE' ? 'NONE' as const
-      : subject === request.simulationSubject ? 'REQUEST' as const : 'PUBLIC_QUOTE_SUBJECT' as const;
+    let binding: SubjectBinding = { address: null, source: 'NONE' };
     try {
-      const preview = await simulatePreview(runtime, { strategy: composition.strategy, workflowHash: composition.workflowHash, simulationSubject: subject },
-        { ...options.scope ? { scope: options.scope } : {}, ...options.signal ? { signal: options.signal } : {}, ...index === 0 && options.budget ? { budget: options.budget } : {} });
-      steps.push({ index, workflowHash: composition.workflowHash, flow: preview.plan.flow, state: 'SIMULATED', code: null, amountFrom: dependencies,
-        simulationSubject: preview.simulationSubject, subjectSource, view: preview.view });
+      if ('code' in plan) throw new PlatformRefusal(plan.code);
+      binding = await previewSubject(plan, request, stepOptions, true);
+      const preview = await previewBoundStep(runtime, composition, plan, binding, request, stepOptions);
+      const marketOnly = binding.source === 'PUBLIC_QUOTE_SUBJECT';
+      steps.push({ index, workflowHash: composition.workflowHash, flow: preview.plan.flow, state: marketOnly ? 'NOT_COMPLETED' : 'SIMULATED',
+        code: marketOnly ? 'SOLANA_WALLET_REQUIRED' : null, amountFrom: dependencies,
+        simulationSubject: binding.address, subjectSource: binding.source, view: preview.view });
     } catch (cause) {
       const code = cause instanceof PlatformRefusal || cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? (cause as Error).message : 'SIMULATION_UNAVAILABLE';
       if (code === 'SIMULATION_BUSY' || code === 'SIMULATION_RATE_LIMITED' || code === 'SIMULATION_CANCELLED') return refuse(code);
@@ -153,10 +201,10 @@ export async function simulateWorkflowPreview(runtime: EngineRuntime, request: P
       if (code === 'MCP_REQUEST_TIMEOUT' || code === 'MCP_REQUEST_CANCELLED') throw cause;
       const awaiting = dependencies.length > 0 && /INSUFFICIENT|BALANCE|NO_COLLATERAL|COLLATERAL_REQUIRED/.test(code);
       // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): a step whose read ran out of time did not fail — it did not finish.
-      const unfinished = /^(MCP_UPSTREAM_TIMEOUT|CLOUD_PREVIEW_TIMEOUT|CLOUD_API_DEADLINE_EXCEEDED)$/.test(code);
+      const unfinished = /^(MCP_UPSTREAM_TIMEOUT|CLOUD_PREVIEW_TIMEOUT|CLOUD_API_DEADLINE_EXCEEDED|UNIVERSAL_DESTINATION_WALLET_REQUIRED|SOLANA_WALLET_REQUIRED|EVM_WALLET_REQUIRED|SIMULATION_REQUIRES_OWNER_BROWSER)$/.test(code);
       steps.push({ index, workflowHash: composition.workflowHash, flow: 'flow' in plan ? plan.flow : null,
         state: awaiting ? 'AWAITING_PRODUCER_SETTLEMENT' : unfinished ? 'NOT_COMPLETED' : 'FAILED', code, amountFrom: dependencies,
-        simulationSubject: subjectSource === 'NONE' ? null : subject, subjectSource, view: null });
+        simulationSubject: binding.address, subjectSource: binding.source, view: null });
     }
   }
   return { workflowHash: workflow.workflowHash, fundsClass: workflow.fundsClass, stepCount: workflow.steps.length, steps,

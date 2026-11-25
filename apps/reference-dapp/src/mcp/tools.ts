@@ -167,9 +167,12 @@ function schemasFor(scope: NetworkScope) {
   bound: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash) }, strict),
   request: Type.Object({ strategy: StrategyInput, workflowHash: Hash }, strict),
   simulate: Type.Object({ strategy: StrategyInput, workflowHash: Hash,
-    simulationSubject: Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
+    simulationSubject: Type.Optional(Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
       description: 'The account whose PUBLIC balances and allowances the read-only simulation uses (EVM address or Solana public key). It is not authenticated, ' +
-        'not an owner and grants nothing; nothing is stored for it.' }) }, strict),
+        'not an owner and grants nothing; nothing is stored for it. Omit for wallet-independent flows or to use an eligible linked wallet.' })),
+    simulationSubjects: Type.Optional(Type.Object({ evm: Type.Optional(Type.String({ pattern: '^0x[0-9a-fA-F]{40}$' })),
+      solana: Type.Optional(Type.String({ pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$' })) },
+    { ...strict, description: 'Explicit read-only subjects by ecosystem. Also supplies an implicit bridge destination for preview only.' })) }, strict),
   // Education: FloFi's concept catalog, a strategy explained, and the platform guide. General knowledge only.
   concept: Type.Object({ concept: Type.Optional(Type.Union(CONCEPT_IDS.map(id => Type.Literal(id)), { description: 'A concept id from FloFi\'s catalog. Give this or `term`.' })),
     term: Type.Optional(Phrase(80, 'The concept in the user\'s own words (EN or PT, e.g. "health factor", "perda impermanente"). Give this or `concept`.')),
@@ -233,6 +236,7 @@ export const TOOL_SCOPES: Readonly<Record<ToolName, McpScope>> = Object.freeze({
 
 export type ToolEvent = { readonly tool: string; readonly outcome: string; readonly durationMs: number };
 export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: McpRuntime; readonly onTool?: (event: ToolEvent) => void; readonly now?: () => number;
+  readonly simulationWallets?: NonNullable<import('../platform/preview.ts').PreviewOptions['simulationWallets']>;
   /** BUILD-MCP-002: present for OAuth deployments. */
   readonly oauth?: OAuthConfig; readonly state?: McpState;
   /** BUILD-FLOFI-STUDIO-UNIVERSAL-002: PUBLIC Studio metadata only. MCP account ids are not FloFi accounts, so PRIVATE audiences never apply. */
@@ -559,25 +563,31 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   Schemas.simulate, { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async args => {
     // BUILD-MCP-002: an OAuth account also has an hourly simulation budget (they reach public chains and providers).
     const account = ctx.principal.kind === 'mcp-oauth' ? ctx.principal.accountId : null, state = ctx.state;
+    const simulationWallets = ctx.simulationWallets ?? (ctx.principal.kind === 'mcp-oauth' ? ctx.principal.portfolioOwners ?? [] : []);
     const workflow = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope);
     if (workflow.steps.length > 1) {
-      const preview = await simulateWorkflowPreview(ctx.runtime, args, { scope, ...ctx.budget ? { signal: ctx.budget.signal } : {}, ...account && state
+      const preview = await simulateWorkflowPreview(ctx.runtime, args, { scope, simulationWallets, ...ctx.budget ? { signal: ctx.budget.signal } : {}, ...account && state
         ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
-      return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true, conversationState: simulationState(),
+      return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true,
+        conversationState: preview.status === 'INCOMPLETE' ? conversationState('DRAFT_CREATED') : simulationState(),
         subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
-        notes: ['Each step uses its own provider simulation against the current chain state.',
+        notes: ['Each step uses the corresponding provider preview. A market quote leaves wallet simulation incomplete.',
           'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',
           'Confirm each step: FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs that step.',
           'User-funded groups: a dependent step in the same group spends the earlier step\'s signed guaranteed minimum; in a later group, the reconciled delivery.'] };
     }
-    const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...ctx.budget ? { signal: ctx.budget.signal } : {}, ...account && state
+    const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, simulationWallets, ...ctx.budget ? { signal: ctx.budget.signal } : {}, ...account && state
       ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
+    const marketOnly = view.kind === 'MARKET_QUOTE';
     return { ok: true, workflowHash: c.workflowHash, flow: plan.flow, kind: view.kind, provenance: view.provenance, observedAt: view.observedAt, expiresAt: view.expiresAt,
       simulationSubject, subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION',
-      preview: true, persisted: false, authorizable: false, evidenceLevel: view.provenance === 'MOCKED' ? 'MOCKED_SIMULATION_PREVIEW' : 'SIMULATION_PREVIEW_NOT_EXECUTION',
-      facts: view.facts, canonicalArtifacts: view.canonicalArtifacts, authority: AUTHORITY, conversationState: simulationState(),
+      preview: true, persisted: false, authorizable: false, evidenceLevel: marketOnly ? 'MARKET_QUOTE_ONLY'
+        : view.provenance === 'MOCKED' ? 'MOCKED_SIMULATION_PREVIEW' : 'SIMULATION_PREVIEW_NOT_EXECUTION',
+      facts: view.facts, canonicalArtifacts: view.canonicalArtifacts, authority: AUTHORITY,
+      conversationState: marketOnly ? conversationState('DRAFT_CREATED', 'SOLANA_WALLET_REQUIRED') : simulationState(),
       notes: ['Amounts are integer native units of the named tokens.', 'Quotes and state expire; the FloFi app re-simulates before any Review.',
-        'A simulation is evidence of what would happen at the observed block, not a guarantee and not an execution.'] };
+        marketOnly ? 'A compatible Solana wallet is required for transaction simulation and Review.'
+          : 'A simulation is evidence of what would happen at the observed block, not a guarantee and not an execution.'] };
   });
 
   register('get_execution_status', 'Execution status', 'Status, attempts and journal page of one FloFi execution, read from FloFi\'s durable state, with its canonical ' +
