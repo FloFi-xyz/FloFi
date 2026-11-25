@@ -223,6 +223,12 @@ export type EditorWorkflowRunState = {
    * ended (nothing of it was signed) and the workflow reviewed again, in one action. Absent: a state without it.
    */
   endAndReview?(): Promise<void>;
+  /**
+   * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (beta incident: the wallet refused the batch): the wallet refused this run's batch BEFORE sending anything
+   * (WALLET_BATCH_NOT_SENT, e.g. no atomic batching on this network). The owner may end that unsent run and confirm each step separately instead —
+   * offered, never chosen for them, and never after an answer that may have sent anything. Absent: a state without it.
+   */
+  continueStepByStep?(): Promise<void>;
   /** Stops showing a followed earlier run (it stays stored and is offered again). */
   hide(): void;
   /** A HALTED run stopped at a group nothing was signed for: it continues (as a batch again, or through each step's own flow). */
@@ -249,6 +255,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const [phase, setPhase] = useState<EditorRunPhase>('idle');
   const [review, setReview] = useState<EditorExecutionReview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The workflow revision whose batch the owner chose to confirm step by step after their wallet refused it unsent (`continueStepByStep`). */
+  const [stepByStepFor, setStepByStepFor] = useState<string | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [updated, setUpdated] = useState<EditorWorkflowRunState['updated']>([]);
@@ -718,6 +726,17 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     record.current = null; refusedFor(null); reviewedWorkflow.current = null;
     await reviewNow();
   });
+  const continueStepByStep = () => guard(async () => {
+    // Only after the wallet's own proof that nothing was sent; the server still refuses to end a run anything of which may execute.
+    if (!approvalId || error !== 'WALLET_BATCH_NOT_SENT' || unrecorded) return;
+    const r = await cancelWorkflowRunHandoff(approvalId);
+    if (!r.ok) throw new Error(r.code);
+    dropStored(approvalId);
+    setFollowing(false); setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; setUpdated([]); recovered.current = null;
+    setUnrecorded(false); authorizedRevision.current = null; accepted.current = new Map(); acceptedRecipients.current = new Map(); acceptedCaps.current = new Map();
+    record.current = null; refusedFor(null); reviewedWorkflow.current = null; setPhase('idle');
+    setStepByStepFor(`${workflow.workflowId}:${workflow.revision}`);
+  });
   const resume = () => guard(async () => {
     if (!approvalId) return;
     const r = await resumeWorkflowRunHandoff(approvalId);
@@ -748,8 +767,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   return { available: Boolean(approvalId) && !following || available && enabled, phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
     canReview: available && enabled && evmWorkflow && !approvalId,
     visible: Boolean(approvalId) || available && (enabled || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
-    stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)
+    stepByStep: !ownRun && (!evmWorkflow || stepByStepFor === `${workflow.workflowId}:${workflow.revision}` || (review ? reviewOffersStepByStep(review)
       : error !== null && !following && !TRANSIENT_REVIEW_FAILURE.has(error))),
+    ...ownRun && error === 'WALLET_BATCH_NOT_SENT' && !unrecorded ? { continueStepByStep } : {},
     unloaded: Boolean(approvalId && !run),
     startReview: runReview, authorize, confirmUpdate, authorizeDue, checkWallet, end, dismiss };
 }
@@ -1488,6 +1508,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       {endable && !['wallet', 'confirming'].includes(phase) && <>
           {state.unrecorded && <p className="muted" role="note">{tr('Your wallet may already have sent this batch. Check your wallet\'s activity before ending the workflow: ending it does not stop a batch already on chain.')}</p>}
           {mechanismChanged && state.started && state.endAndReview && <button type="button" className="primary" disabled={busy} onClick={() => void state.endAndReview?.()}>{tr('End and review again')}</button>}
+          {state.continueStepByStep && <>
+            <p className="muted" role="note">{tr('If your wallet does not support one-confirmation batches on this network, confirm each step separately: your wallet then asks once per step, in order, and each step runs only after the one before it settled.')}</p>
+            <button type="button" className="secondary" disabled={busy} onClick={() => void state.continueStepByStep?.()}>{tr('Confirm each step separately')}</button></>}
           <button type="button" className="quiet" onClick={() => void state.end()}>{tr('End workflow')}</button></>}
       {state.unloaded && !busy && <>
         <p className="muted" role="note">{tr('Forgetting removes this workflow only from this browser: the run, and anything your wallet already sent, stay. Check your wallet\'s activity first.')}</p>

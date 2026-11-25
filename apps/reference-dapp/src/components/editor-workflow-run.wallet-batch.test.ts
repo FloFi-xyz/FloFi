@@ -21,11 +21,11 @@ vi.mock('react', async importOriginal => {
     useRef: (v: unknown) => slot(() => ({ current: v })), useCallback: (f: unknown) => { hooks.at++; return f; },
     useEffect: (f: () => unknown) => { hooks.effects[hooks.at++] = f; } };
 });
-const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn() }));
+const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn(), cancel: vi.fn() }));
 vi.mock('../app/editor-workflow-execution-action', () => ({ editorWorkflowExecutionAvailability: async () => ({ enabled: true, code: null }),
   reviewEditorWorkflow: server.review, authorizeEditorWorkflow: server.authorize }));
 vi.mock('../app/approve-action', () => ({ workflowRunStatusHandoff: server.status, prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorizeGroup,
-  reportUserFundedBatch: server.report, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: vi.fn() }));
+  reportUserFundedBatch: server.report, cancelWorkflowRunHandoff: server.cancel, resumeWorkflowRunHandoff: vi.fn() }));
 const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn() }));
 vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
   signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
@@ -85,6 +85,7 @@ beforeEach(() => {
   server.prepare.mockResolvedValue({ ok: true, value: prepared });
   server.authorizeGroup.mockResolvedValue({ ok: true, value: proposal });
   server.report.mockResolvedValue({ ok: true, value: proposal });
+  server.cancel.mockResolvedValue({ ok: true, value: proposal });
   // The wallet knows only the batch it answered with; its receipts are final at once.
   browser.hashes.mockImplementation(async (id: string) => { if (id !== ANSWERED) throw new Error('EIP5792_UNKNOWN_BUNDLE_ID'); return { hashes: [HASH], failed: false }; });
   browser.send.mockImplementation(sendThen(async onSending => { asked(onSending); return ANSWERED; }));
@@ -134,6 +135,31 @@ describe('Editor batch send: the attempt is kept only once the wallet is asked t
     expect(refused.error).toBe('WALLET_BATCH_NOT_SENT');
     expect(refused.unrecorded).toBe(false);
     expect(stored()?.sent).toBeUndefined();
+  });
+});
+
+describe('BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: a batch the wallet refused before sending anything', () => {
+  it('offers to confirm each step separately; choosing it ends the unsent run and switches this revision to the step-by-step path', async () => {
+    browser.send.mockImplementationOnce(sendThen(async onSending => { asked(onSending); throw new Error('WALLET_BATCH_NOT_SENT'); }));
+    const refused = await authorizeOnce();
+    expect(refused.error).toBe('WALLET_BATCH_NOT_SENT');
+    expect(refused.stepByStep).toBe(false);
+    // Offered, never chosen: nothing was retried or switched by itself.
+    expect(refused.continueStepByStep).toBeTypeOf('function');
+    expect(browser.send).toHaveBeenCalledTimes(1);
+    await refused.continueStepByStep!();
+    expect(server.cancel).toHaveBeenCalledWith(APPROVAL);
+    const after = render();
+    expect(after).toMatchObject({ error: null, run: null, started: false, stepByStep: true });
+    expect(browser.send).toHaveBeenCalledTimes(1);
+  });
+  it('is never offered after an answer that may have sent the batch, nor after the owner\'s own rejection', async () => {
+    browser.send.mockImplementationOnce(sendThen(async onSending => { asked(onSending); throw Object.assign(new Error('timeout'), { code: -32603 }); }));
+    expect((await authorizeOnce()).continueStepByStep).toBeUndefined();
+    hooks.slots = []; storage.clear();
+    browser.send.mockImplementationOnce(sendThen(async () => { throw new Error('WALLET_REQUEST_REJECTED'); }));
+    expect((await authorizeOnce()).continueStepByStep).toBeUndefined();
+    expect(server.cancel).not.toHaveBeenCalled();
   });
 });
 

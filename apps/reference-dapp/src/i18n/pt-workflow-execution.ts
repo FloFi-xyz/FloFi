@@ -203,6 +203,9 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'This step (for example wrapping or unwrapping ETH) runs through its own review and wallet confirmation.': 'Esta etapa (por exemplo, converter ETH em WETH ou o contrário) passa pela própria revisão e confirmação na carteira.',
   'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.': 'Este Withdraw deixaria seu fator de saúde da Aave abaixo de 2,0 após o lote. Retire menos ou pague parte da dívida antes.',
   'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.': 'Um Repay precisa ser menor que sua dívida atual (o pagamento total não é oferecido aqui). Reduza o valor do Repay.',
+  'If your wallet does not support one-confirmation batches on this network, confirm each step separately: your wallet then asks once per step, in order, and each step runs only after the one before it settled.':
+    'Se a sua carteira não aceita lotes com uma só confirmação nesta rede, confirme cada passo separadamente: sua carteira então pede uma confirmação por passo, em ordem, e cada passo só roda depois que o anterior for concluído.',
+  'Confirm each step separately': 'Confirmar cada passo separadamente',
   'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.': 'Sua carteira recusou este lote antes de enviar qualquer coisa (talvez não o suporte nesta rede). Nada foi enviado; você pode tentar de novo.',
   'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.':
     'Sua carteira está bloqueada ou outra conta está selecionada. Desbloqueie a carteira, selecione a conta a que esta execução pertence e tente de novo; nada foi enviado.',
