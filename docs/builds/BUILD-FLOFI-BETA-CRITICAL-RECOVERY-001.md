@@ -90,7 +90,17 @@ Each run was against the branch after its commit:
   amount wins; a percentage of a native coin above its spendable amount writes nothing. Not changed (documented): the auto-sent amount shows as the
   person's own message without a separate disclosure; Telegram has no balance shortcut, so it asks the amount.
 - flofi-mcp (3, highest low): Solana mainnet aliases are now canonical in the published strategy (one meaning, one strategy, one hash); devnet keeps
-  its exact runtime keys. Batch 3 (frontend-ux, swap, bridge): see the PR.
+  its exact runtime keys.
+- flofi-frontend-ux (6, highest medium): the automatic relative answer looked like a number the person typed (no provenance) and could be sent twice
+  with two mounted panels → **changed: the share the person named is now offered as one highlighted button with its exact figure; nothing is sent by
+  itself.** The misleading "nothing to use" copy now names the actual reason (zero balance, fee reserve, unrepresentable). The held-elsewhere guidance
+  is inside the announced alert. Not changed: slippage range copy assumes the 300 bps maximum (pinned by test).
+- flofi-bridge (3, highest medium): found the strongest code-level candidate for the "Base hard-coded" report — `RouterForm`
+  (`components/router-panel.tsx:73-121`) falls back to the environment's Base → Arbitrum pair when a card's draft networks are not a certified pair,
+  shows "Base → Arbitrum One"/"Recipient on Arbitrum" and, outside the compact options, re-targets the proposal. **Pre-existing, not fixed here**
+  (handoff item 1). A bridge to Robinhood Chain (USDC → USDG) followed by a USDC step is refused by the funding check instead of being read correctly
+  (fails closed; handoff item 3).
+- flofi-swap: not received before the PR was opened (handoff item 6).
 - `state/supply-store.test.tsx` ("a recovered request without a hash…", untouched by this build) failed once under a 4-worker load and passed three
   times in isolation and in the next broad run: a timing-sensitive test, recorded here, not retried in CI.
 - Toolchain: the full `pnpm check` gate runs on the pinned Node 24.21.0 (checksum-verified) and pnpm 11.22.0; earlier focused runs used Node 24.22.3. Local PostgreSQL is 16 (CI uses 18).
@@ -125,3 +135,19 @@ should be run by the owner with their own wallet.
 | Relative amounts on Telegram/MCP | Not done | Telegram has no balance shortcut UI. The question is asked and the user types the amount |
 | Jira | Not done | Connector not authorized in this session |
 | Multichain-state UX of #251 | **CTO decision** | See §1.3 |
+
+## 7. Handoff (PR opened at the owner's request for another session to finish)
+
+1. **Router "Base hard-coded" candidate** (bridge review finding 1): in `RouterForm`, never fall back to the environment's pair for an existing node
+   (`network = routed ?? (nodeId ? null : environment)`), apply the `draftUncertified` guard outside compact mode, take labels only from `routed` or
+   `existing.network`. Add a test. Also harden `state/router-store.tsx` fallbacks (`networkOfRecord` → `'mainnet'`, `'testnet'` default).
+2. **Wallet batch refusal (incident 6):** server-recorded proven not-sent report, then resume step by step from the last reconciled step (see §2).
+3. `bindDependentSteps`: compute a bridge's delivered asset with `defaultUniversalOutput` (or the Router pair's destination) when `outputAsset` is null.
+4. Run the full gate on the final SHA: `pnpm check` (pinned Node 24.21.0 — the schema step refuses other versions), `python3 scripts/governance_lite.py`,
+   `python3 scripts/agent_guard.py review --base origin/main`; then CircleCI certification and Vercel Preview on that exact SHA. The last full local
+   gate on this branch was interrupted by the PR request (typecheck, lint, build and schema drift had passed on `bf69f33` with Node 24.21.0).
+5. Browser evidence for the new states (relative-amount button, shortfall copy, no-Privy "Add a sign-in method", held-elsewhere alert) at 1815 px and
+   390 px, EN and PT; and the regression e2e suites that cover the chat composition and amount shortcuts (`amount-shortcuts.spec.ts`,
+   `chat-sequence.spec.ts`, `conversational-workflow.spec.ts`).
+6. flofi-swap review result (requested, not received), and flofi-data-privacy (selected by impact; no persistence changed — state the reason if skipped).
+7. §6 items (500 bps / Auto slippage policy decision, USD equivalents, route validation, PT/EN audit, Jira) and the CTO decision in §1.3.

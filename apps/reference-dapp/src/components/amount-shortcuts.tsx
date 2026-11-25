@@ -56,22 +56,19 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
     setRead({ status: 'loading' }); setChanged(false);
     void load().then(next => { if (alive.current) setRead(next); });
   }, [load, follows]);
-  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "todo o USDC que tenho", "half my ETH": the user already chose the share of this balance, so the amount
-  // it gives is sent once as their answer, straight from this fresh read (the same path and checks as pressing the button; nothing is signed).
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "todo o USDC que tenho", "half my ETH": the share the person already named is offered first, with the exact
+  // figure this read gives; one click sends it through the same fresh-read checks as any shortcut (specialist review: never sent by itself, so the
+  // answer is always the person's own action and can never be sent twice).
   const relative = request.relative ?? null;
   const relativeAnswer = source && relative && read.status === 'ready' ? relativeShortcut(read.units, source, relative) : null;
-  const answered = useRef<string | null>(null);
-  useEffect(() => {
-    // Only a fresh read of a balance no earlier step of the workflow spends or delivers (as for a click); otherwise the person picks or types.
-    if (!relativeAnswer?.amount || follows || disabled || working || answered.current === request.question || Date.now() - readAt.current > FRESH_MS || !stillOpen()) return;
-    answered.current = request.question;
-    onPick(relativeAnswer.amount);
-  }, [relativeAnswer?.amount, follows, disabled, working, request.question, stillOpen, onPick]);
   if (!source || follows) return null;
   const shortcuts: readonly AmountShortcut[] = read.status === 'ready' ? amountShortcuts(read.units, source) : [];
-  async function pick(key: AmountShortcutKey) {
+  /** The amount one choice writes from a read (a shortcut key, or the share the person named). */
+  const amountOf = (key: AmountShortcutKey | 'RELATIVE', units: bigint): string | null => !source ? null : key === 'RELATIVE'
+    ? relative ? relativeShortcut(units, source, relative).amount : null : amountShortcuts(units, source).find(item => item.key === key)?.amount ?? null;
+  async function pick(key: AmountShortcutKey | 'RELATIVE') {
     if (!source || read.status !== 'ready' || working) return;
-    const shown = shortcuts.find(item => item.key === key)?.amount;
+    const shown = amountOf(key, read.units);
     if (!shown) return;
     setWorking(true);
     try {
@@ -84,7 +81,7 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
         if (!alive.current) return;
         setRead(current);
       }
-      const now = current.status === 'ready' ? amountShortcuts(current.units, source).find(item => item.key === key)?.amount ?? null : null;
+      const now = current.status === 'ready' ? amountOf(key, current.units) : null;
       if (now !== shown) { if (alive.current) setChanged(true); return; }
       // The question may have closed or changed while the balance was read again: never answer a different one.
       if (!alive.current || !stillOpen()) return;
@@ -95,7 +92,18 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
   const time = read.status === 'ready' && read.observedAt ? new Date(read.observedAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
   const reserve = source.native ? NATIVE_FEE_RESERVE[source.chain] ?? null : null;
   const busy = disabled || working || read.status === 'loading';
+  const relativeFigure = relativeAnswer?.amount ? shortcutFigure(relativeAnswer.units, source.decimals, symbol, lang, false) : null;
+  const relativeLabel = relative && relativeFigure ? relative.kind === 'ALL' ? tr('Use all your {0} on {1}: {2}', symbol, networkName, relativeFigure)
+    : tr('Use {0}% of your {1} on {2}: {3}', lang === 'PT' ? relative.percent.replace('.', ',') : relative.percent, symbol, networkName, relativeFigure) : null;
+  const balanceFigure = read.status === 'ready' ? shortcutFigure(read.units, source.decimals, symbol, lang) : '';
+  const shortfall = relativeAnswer?.shortfall === 'ZERO' ? tr('Your {0} balance on {1} is {2}, so there is nothing to use for this request. Add funds or type an amount.', symbol, networkName, balanceFigure)
+    : relativeAnswer?.shortfall === 'RESERVE' ? tr('FloFi keeps {0} for network fees, so that share of your {1} cannot be used. Type a smaller amount.',
+      shortcutFigure(reserve ?? 0n, source.decimals, symbol, lang), balanceFigure)
+    : relativeAnswer?.shortfall ? tr('FloFi cannot write that share of your balance as an amount here. Type an amount.') : null;
   return <div className="amount-shortcuts">
+    {relativeLabel && <div className="copilot-options" role="group" aria-label={tr('The amount you asked for')}>
+      <button type="button" className="chat-action amount-shortcut" data-variant="primary" data-shortcut="relative" disabled={busy}
+        onClick={() => void pick('RELATIVE')}>{relativeLabel}</button></div>}
     <div className="copilot-options" role="group" aria-label={tr('Amount shortcuts')} aria-busy={read.status === 'loading' || working || undefined}>
       {(['25', '50', '75', 'MAX'] as const).map(key => {
         const shortcut = shortcuts.find(item => item.key === key), amount = shortcut?.amount ?? null;
@@ -114,8 +122,7 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
         : read.status === 'unavailable' ? tr(read.reason === 'wallet' ? 'Connect the wallet that will sign to use your balance. You can still type an amount.'
           : 'Your balance could not be read. Type an amount instead.')
           : changed ? tr('Your balance changed. Check the amounts and choose again.')
-          : relative && relativeAnswer && !relativeAnswer.amount ? tr('Your {0} balance on {1} is {2}, so there is nothing to use for this request. Add funds or type an amount.',
-            symbol, networkName, shortcutFigure(read.status === 'ready' ? read.units : 0n, source.decimals, symbol, lang))
+          : shortfall ? shortfall
             : <>{time ? tr('Balance on {0} at {1}: {2}', networkName, time, shortcutFigure(read.units, source.decimals, symbol, lang))
               : tr('Balance on {0}: {1}', networkName, shortcutFigure(read.units, source.decimals, symbol, lang))}
             {reserve !== null && <> {tr('Max keeps {0} for network fees.', shortcutFigure(reserve, source.decimals, symbol, lang))}</>}

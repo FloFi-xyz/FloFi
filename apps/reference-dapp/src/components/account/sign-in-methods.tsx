@@ -152,11 +152,11 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
   return <AccountShell showcase="account" start>
     <h1 className={styles.title}>{t('Sign-in methods')}</h1>
     <p className={styles.lead}>{t('Every method here opens this same account.')}</p>
-    {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
     {/* BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (beta incident: Google could not be linked to a wallet account): Google already opens another FloFi
-        account (usually an empty one created by signing in with Google first). Never a dead end: the existing, checked way to bring it here. */}
-    {error === 'FLOFI_SIGN_IN_METHOD_HELD_ELSEWHERE' && <p className={styles.small} role="note">
-      {t('If that account is empty, sign in with it and choose “Bring this sign-in to my other account”.')}</p>}
+        account (usually an empty one created by signing in with Google first). Never a dead end: the existing, checked way to bring it here, inside
+        the announced alert (frontend-ux review L3). */}
+    {error && <p className={styles.error} role="alert">{t(accountMessage(error))}{error === 'FLOFI_SIGN_IN_METHOD_HELD_ELSEWHERE' &&
+      <> {t('If that account is empty, sign in with it and choose “Bring this sign-in to my other account”.')}</>}</p>}
     {notice && <p className={styles.status} role="status">{notice}</p>}
     {/* A link that came back from the provider's page (a new document): the next step is the account itself. */}
     {linked && !moved && <div className={styles.row}><a className={styles.primary} href="/app" data-continue-account="true">{t('Continue to my account')}</a></div>}

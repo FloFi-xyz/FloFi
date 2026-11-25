@@ -140,22 +140,29 @@ export function amountShortcuts(units: bigint, source: Pick<AmountSource, 'decim
   return out;
 }
 
+/** Why a relative request writes no amount (frontend-ux review M2: never "nothing to use" when the person holds funds). */
+export type RelativeShortfall = 'ZERO' | 'RESERVE' | 'NO_RESERVE' | 'UNREPRESENTABLE';
 /**
  * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: the amount a relative request ("all my USDC", "25% of my SOL") writes from a read balance, with exactly
  * the shortcut rules above — rounded down, a native coin keeps its network's fee reserve (no native "all" where no reserve is defined), and a
- * zero or unrepresentable result writes nothing (null), so FloFi never proposes an amount the wallet cannot spend.
+ * request the balance cannot honour writes nothing (`amount: null`) and says why, so FloFi never proposes an amount the wallet cannot spend and
+ * never shrinks the person's share silently.
  */
-export function relativeShortcut(units: bigint, source: Pick<AmountSource, 'decimals' | 'native' | 'chain'>, relative: RelativeAmount): AmountShortcut {
+export function relativeShortcut(units: bigint, source: Pick<AmountSource, 'decimals' | 'native' | 'chain'>, relative: RelativeAmount):
+  { readonly units: bigint; readonly amount: string | null; readonly shortfall: RelativeShortfall | null } {
+  const none = (shortfall: RelativeShortfall) => ({ units: 0n, amount: null, shortfall });
+  if (units <= 0n) return none('ZERO');
   const step = source.decimals > SHORTCUT_DECIMALS ? 10n ** BigInt(source.decimals - SHORTCUT_DECIMALS) : 1n;
   const floor = (value: bigint) => value - value % step;
   const reserve = source.native ? NATIVE_FEE_RESERVE[source.chain] ?? null : 0n;
-  if (reserve === null) return { key: 'MAX', units: 0n, amount: null };
+  if (reserve === null) return none('NO_RESERVE');
   const spendable = units > reserve ? units - reserve : 0n;
   const share = relativeBasisPoints(relative) === 10_000n && !source.native ? spendable : floor(units * relativeBasisPoints(relative) / 10_000n);
-  // A percentage the fee reserve does not leave room for is not shrunk silently (chat review M3): nothing is written and the person types it.
-  if (relative.kind === 'PERCENT' && share > spendable) return { key: '50', units: 0n, amount: null };
+  // A percentage the fee reserve does not leave room for is not shrunk silently (chat review M3).
+  if (relative.kind === 'PERCENT' && share > spendable || spendable === 0n) return none('RESERVE');
   const value = share <= spendable ? share : floor(spendable);
-  return { key: relative.kind === 'ALL' ? 'MAX' : '50', units: value, amount: shortcutAnswer(value, source.decimals) };
+  const amount = shortcutAnswer(value, source.decimals);
+  return amount ? { units: value, amount, shortfall: null } : none(value === 0n ? 'ZERO' : 'UNREPRESENTABLE');
 }
 
 /**
