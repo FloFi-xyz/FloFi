@@ -55,7 +55,10 @@ Object.freeze({
 ] as const).map(([id, from, input, inputSymbol, to, output, outputSymbol]) => Object.freeze({ id,
   source: Object.freeze({ chainId: from, address: input, decimals: 6, symbol: inputSymbol }),
   destination: Object.freeze({ chainId: to, address: output, decimals: 6, symbol: outputSymbol }), minimumAmount: '1', maximumAmount: U256_MAX }))]);
-export const ROUTER_MAXIMUM_SLIPPAGE_BPS = 300;
+export const ROUTER_MAXIMUM_SLIPPAGE_BPS = 500;
+export const ROUTER_TESTNET_MAXIMUM_SLIPPAGE_BPS = 300;
+export const routerMaximumSlippageBps = (pair: RouterPair): number =>
+  pair.source.chainId === 'eip155:84532' ? ROUTER_TESTNET_MAXIMUM_SLIPPAGE_BPS : ROUTER_MAXIMUM_SLIPPAGE_BPS;
 export function routerPair(sourceChain: string, sourceToken: string, destinationChain: string, destinationToken: string): RouterPair | null {
   return ROUTER_PAIRS.find(p => p.source.chainId === sourceChain && p.source.address === sourceToken &&
     p.destination.chainId === destinationChain && p.destination.address === destinationToken) ?? null;

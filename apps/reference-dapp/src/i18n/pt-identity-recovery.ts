@@ -50,6 +50,7 @@ export const portugueseIdentityRecovery: Readonly<Record<string, string>> = {
   'Now link {0} to this account so it opens it.': 'Agora vincule {0} a esta conta para que ele a abra.',
   'This account signs in with': 'Esta conta entra com',
   'Add a sign-in method': 'Adicionar um método de login',
+  'To add Google or email, first confirm it’s you with a sign-in method this account already has.': 'Para adicionar Google ou e-mail, primeiro confirme que é você com um método de login que esta conta já tem.',
   'For your security, confirm it’s you before adding a sign-in method.': 'Por segurança, confirme que é você antes de adicionar um método de login.',
   'Adding sign-in methods is not available here yet.': 'Adicionar métodos de login ainda não está disponível aqui.',
   'Link Google': 'Vincular Google', 'Link an email': 'Vincular um e-mail', 'Link this email': 'Vincular este e-mail',

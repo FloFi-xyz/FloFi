@@ -26,6 +26,11 @@ import type { ChainTransport } from '../delegation/chains.ts';
 import type { StepRequirement } from '../delegation/steps.ts';
 import { routeMatchesIntent, routeMatchesPair } from '../server/across-route.ts';
 import type { RouteRequest, TransferHint } from '../server/router-providers.ts';
+/**
+ * The widest slippage a batched or signed-ahead group may carry (its minimum is fixed when the group is prepared). BUILD-FLOFI-BETA-CRITICAL-
+ * RECOVERY-001: a single step accepts up to 5% (CTO decision); a step above 3% runs as its own owner step instead of joining a group.
+ */
+export const MAX_BATCH_SLIPPAGE_BPS = 300;
 
 /** The Across deposit of a bridge step inside a wallet batch (persisted with the prepared group; amounts as decimal strings). */
 export type AcrossDepositUserCall = {
@@ -91,7 +96,7 @@ export function bridgeStepRefusal(step: StepRequirement, chains: readonly string
   if (strategy.routing !== undefined && strategy.routing !== 'auto' && strategy.routing !== 'across') return 'USER_FUNDED_BRIDGE_PROVIDER_UNSUPPORTED';
   if (strategy.recipient !== undefined && (typeof strategy.recipient !== 'string' || !owner || strategy.recipient.toLowerCase() !== owner.toLowerCase()))
     return 'USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER';
-  if ((step.slippageBps ?? 0) > Math.min(ROUTER_MAXIMUM_SLIPPAGE_BPS, profile.maximumSlippageBps)) return 'WORKFLOW_SLIPPAGE_UNSUPPORTED';
+  if ((step.slippageBps ?? 0) > Math.min(MAX_BATCH_SLIPPAGE_BPS, ROUTER_MAXIMUM_SLIPPAGE_BPS, profile.maximumSlippageBps)) return 'WORKFLOW_SLIPPAGE_UNSUPPORTED';
   return null;
 }
 

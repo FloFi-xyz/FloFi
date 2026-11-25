@@ -7,8 +7,11 @@ import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } fro
 import { localizedProvider, retryAccountWallets, useDestinationWallets } from '../state/destination-wallets';
 import type { DestinationInventory } from '../domain/destination-wallet';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
-import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { ROUTER_PHASES, UNIVERSAL_NETWORKS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeFailureMessage } from '../domain/bridge-failure';
+import { bridgeEstimateRequest } from '../domain/bridge-estimate';
+import { universalDiscover } from '../app/universal-router-action';
+import { slippageRangeMessage } from '../domain/slippage-policy';
 import { useLocale } from '../i18n/locale';
 import { useWorkflow } from '../state/workflow-store';
 import { useUniversalRouter } from '../state/universal-router-store';
@@ -17,7 +20,7 @@ import { createUniversalBridgeFromInput, resolveUniversalAsset, universalAssetRe
   type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { TokenAmountInput } from './token-amount-input';
-import { PriceDifferenceInput } from './price-difference-input';
+import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
 import { AssetSearch } from './asset-search';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
@@ -152,6 +155,7 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
   const [input, setInput] = useState<UniversalBridgeInput>(existing ? universalInputOf(existing)
     : { source: 'solana', destination: 'base', inputAsset: 'USDC', outputAsset: 'USDC', amount: '', recipient: '', slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' });
   const [error, setError] = useState('');
+  const [auto, setAuto] = useState<{ readonly key: string; readonly pending: boolean; readonly bps: number | null; readonly expiresAt: number } | null>(null);
   const set = (patch: Partial<UniversalBridgeInput>) => setInput(value => {
     const next = { ...value, ...patch };
     // A source token change never changes the independently selected destination token.
@@ -184,16 +188,51 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
   const destinationState = destinationCheck && !destinationCheck.ok ? 'error' : !input.recipient && cross && (destinationResolution.kind === 'CHOOSE' || destinationResolution.kind === 'NONE'
     || destinationResolution.kind === 'UNAVAILABLE') ? 'attention'
     : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? 'loading' : 'normal';
+  const amount = options && nodeId ? amountInputs[nodeId] ?? input.amount : input.amount;
+  const autoSupported = input.routing === 'BEST' || input.routing === 'RELAY';
+  const autoKey = JSON.stringify([input.source, input.destination, input.inputAsset, input.outputAsset, amount, input.recipient, input.routing]);
+  const currentAuto = autoSupported && auto?.key === autoKey ? auto : null;
+  const autoBps = currentAuto && currentAuto.expiresAt > Date.now() ? currentAuto.bps : null;
+  async function requestAuto() {
+    const pending = { key: autoKey, pending: true, bps: null, expiresAt: 0 };
+    setAuto(pending);
+    let bps: number | null = null, expiresAt = 0;
+    try {
+      const node = createUniversalBridgeFromInput('node-preview', { ...input, amount, slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE });
+      const request = bridgeEstimateRequest(node);
+      if (request) {
+        const result = await universalDiscover({ ...request, providers: ['relay'], recommendSlippage: true });
+        const candidate = result.ok && result.value.candidates.find(row => row.provider === 'relay' && row.executableBy === 'UNIVERSAL_ROUTER' && row.status === 'EXECUTABLE');
+        if (candidate && candidate.recommendedSlippageBps !== undefined && candidate.expiresAt && Date.parse(candidate.expiresAt) > Date.now()) {
+          bps = candidate.recommendedSlippageBps; expiresAt = Date.parse(candidate.expiresAt);
+        }
+      }
+    } catch { /* The quote cannot recommend an exact value for this draft. */ }
+    setAuto(current => current === pending ? { key: autoKey, pending: false, bps, expiresAt } : current);
+  }
+  function changeSlippage(slippage: string) {
+    set({ slippage }); setAuto(null);
+  }
+  function applyAutoSlippage(slippage: string) {
+    // A delayed click on a quote that expired since the previous render has to fetch a new recommendation.
+    if (!currentAuto || currentAuto.expiresAt <= Date.now()) {
+      void requestAuto(); return;
+    }
+    changeSlippage(slippage);
+  }
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
       // BUILD-FLOFI-UX-FIX-003: the compact options propose the amount the card shows (its draft, as the Router form does), never a hidden older one.
-      const proposed = options && nodeId && amountInputs[nodeId] !== undefined ? { ...input, amount: amountInputs[nodeId]! } : input;
+      const proposed = { ...input, amount };
       createUniversalBridgeFromInput(nodeId ?? 'node-preview', proposed); setError('');
       propose(nodeId ? { type: 'SET_UNIVERSAL_BRIDGE', nodeId, input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision }
         : { type: 'ADD_UNIVERSAL_BRIDGE', input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision });
       onDone?.();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID'); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID';
+      setError(slippageRangeMessage(code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS) ?? code);
+    }
   }
   const compact = options && Boolean(nodeId);
   return <form className={`inspector-fields universal-bridge-form${compact ? ' bridge-options-form' : ''}`} aria-label={tr(nodeId ? 'Edit universal bridge' : 'Create universal bridge')} onSubmit={submit}>
@@ -226,7 +265,10 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
-      onBpsChange={slippage => set({ slippage })}/></label>
+      onBpsChange={changeSlippage}/></label>
+    <SlippageChoices bps={input.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onBpsChange={changeSlippage}
+      autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} onApplyAuto={applyAutoSlippage} autoPending={currentAuto?.pending ?? false}/>
+    {currentAuto && !currentAuto.pending && autoBps === null && <small role="status">{tr('Relay could not recommend a price difference for this bridge. Check the networks, assets and amount, or enter a value.')}</small>}
     {!compact && <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
@@ -292,7 +334,8 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   const canExecute = Boolean(authorized && !router.retired && !pending && fresh > 0 && router.executionEnabled);
   const canRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && ['PREPARED', 'AUTHORIZED'].includes(record.phase) &&
     !record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state)) && (record.requote || fresh === 0));
-  const message = (code: string | null | undefined) => code ? destinationWalletMessage(code) ?? walletNonceMessage(code) ?? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
+  const message = (code: string | null | undefined) => code ? destinationWalletMessage(code) ?? walletNonceMessage(code) ?? MESSAGES[code]
+    ?? slippageRangeMessage(code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS) ?? bridgeFailureMessage(code) : null;
   const info = router.error ?? record?.error;
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
   const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';

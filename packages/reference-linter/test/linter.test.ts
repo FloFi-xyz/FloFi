@@ -9,7 +9,8 @@ const context = createReviewContext({ registryId: referenceRegistry.registryId, 
 const make = (bps: number) => ({ ...templateWorkflow(), nodes: [...templateWorkflow().nodes, createSwapNode('node-002', 'USDC_TO_WETH', '2', String(bps), context)] });
 
 describe('deterministic swap review', () => {
-  it.each([[0, 'ZERO_SLIPPAGE'], [1, null], [100, null], [101, 'ELEVATED_SLIPPAGE'], [300, 'ELEVATED_SLIPPAGE'], [301, 'SLIPPAGE_ABOVE_REVIEW_LIMIT'], [10000, 'SLIPPAGE_ABOVE_REVIEW_LIMIT']] as const)('%i bps', (bps, code) => {
+  it.each([[0, 'ZERO_SLIPPAGE'], [1, null], [100, null], [101, null], [300, null], [301, 'ELEVATED_SLIPPAGE'],
+    [500, 'ELEVATED_SLIPPAGE'], [501, 'SLIPPAGE_ABOVE_REVIEW_LIMIT'], [10000, 'SLIPPAGE_ABOVE_REVIEW_LIMIT']] as const)('%i bps', (bps, code) => {
     const result = lintWorkflow(make(bps), context);
     expect(result.findings.some(f => f.code === code)).toBe(code !== null);
     expect(result.findings.some(f => f.code === 'UNQUOTED_EXECUTION_UNAVAILABLE')).toBe(true);

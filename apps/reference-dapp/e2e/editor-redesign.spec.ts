@@ -68,8 +68,8 @@ test('header, cards, FloFi summary and footer state only the real workflow; Show
   // The footer hosts the one Canvas lifecycle control; no copy of it remains in the Canvas.
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(1);
   await expect(footer.locator('.canvas-primary-action button[data-lifecycle-action]')).toHaveCount(1);
-  // A second swap whose slippage the workflow's review warns about.
-  await sendChatCommand(page, 'Swap 1 USDC to WETH on Base Sepolia slippage 300 bps');
+  // A second swap whose slippage the workflow's review warns about (above 3%: CTO decision of 2026-11-25).
+  await sendChatCommand(page, 'Swap 1 USDC to WETH on Base Sepolia slippage 400 bps');
   const ir = JSON.parse(await readWorkflowIr(page)) as { nodes: { nodeId: string }[] };
   const warned = ir.nodes.at(-1)!.nodeId;
   await expect(canvas.locator('.editor-state-pill')).toHaveText('Workflow state: Needs attention');

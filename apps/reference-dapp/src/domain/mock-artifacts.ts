@@ -22,6 +22,9 @@ export function generationEligibility(workflow: Workflow, context: ReviewContext
   }
   const block = findings.find(finding => finding.severity === 'BLOCK' && finding.code !== 'UNQUOTED_EXECUTION_UNAVAILABLE');
   if (block) return { eligible: false, reason: `${block.code} on ${block.nodeId} blocks generation. Resolve it in the Editor first.` };
+  const aboveMockLimit = workflow.nodes.find(node => node.userConstraints.some(constraint =>
+    constraint.kind === 'MAXIMUM_SLIPPAGE_BPS' && constraint.maximumBps > MOCKED_CHAIN_PROFILE.maximumEligibleSlippageBps));
+  if (aboveMockLimit) return { eligible: false, reason: `SLIPPAGE_ABOVE_REVIEW_LIMIT on ${aboveMockLimit.nodeId} blocks generation. Resolve it in the Editor first.` };
   return { eligible: true };
 }
 

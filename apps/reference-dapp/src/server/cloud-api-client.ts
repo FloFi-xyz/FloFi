@@ -14,6 +14,7 @@ import { WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow.ts';
 import { DEVELOPER_LIVE_HEADER } from '../workflow-runs/external-step.ts';
 import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
 import { betaIdentityHeaders, currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
+import type { PreviewPurpose } from '../../backend/preview.ts';
 
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -95,7 +96,7 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
  */
 export async function previewCloudFlow<T>(flow: string, args: readonly unknown[], options: {
   betaIdentity?: BetaRequestIdentity | null;
-  env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; timeoutMs?: number; maxAttempts?: number; purpose?: 'SIMULATION' | 'QUOTE';
+  env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; timeoutMs?: number; maxAttempts?: number; purpose?: PreviewPurpose;
   /** The caller's deadline: aborts the preview in flight and ends the retries (`CLOUD_API_DEADLINE_EXCEEDED`). */
   signal?: AbortSignal } = {}): Promise<FlowResult<T>> {
   const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;

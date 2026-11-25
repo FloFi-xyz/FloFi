@@ -5,6 +5,9 @@
  * no market value, and an asset without a verified feed shows no number. Never Review input, never an executable quote.
  */
 import { networkIdentity } from './network-registry';
+import type { DisplayPriceAsset } from './price-assets';
+import type { Language } from '../i18n/language';
+import { translate } from '../i18n/translate';
 
 /** The verified USD feeds the price source serves. */
 export type PriceAsset = 'ETH' | 'SOL';
@@ -17,6 +20,8 @@ export function priceAssetOf(symbol: string | null | undefined): PriceAsset | nu
 /** USD equivalents of one swap estimate (2-decimal strings), with the price's provenance. */
 export type UsdEstimate = { readonly input: string | null; readonly output: string | null; readonly source: 'CHAINLINK' | 'FIXTURE';
   readonly evidence: 'PUBLIC_READ_ONLY' | 'MOCKED'; readonly observedAt: string };
+export type DisplayPrices = Partial<Record<DisplayPriceAsset, { readonly priceUsd: string; readonly observedAt: string;
+  readonly validUntil: number; readonly evidence: UsdEstimate['evidence'] }>>;
 
 /** BUILD-FLOFI-MAINNET-BRIDGE-RECONCILIATION-003: a streamed USD line is attached to a card only when it has exactly this shape. */
 export function isUsdEstimate(value: unknown): value is UsdEstimate {
@@ -37,19 +42,24 @@ export function usdAmount(units: string, decimals: number, priceUsd: string): st
   return `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`;
 }
 /** "≈ $1,234.56", or "< $0.01" for a positive value below a cent. */
-export function formatUsd(value: string): string {
+export function formatUsd(value: string, language: Language = 'EN'): string {
   const [whole = '0', cents = '00'] = value.split('.');
+  if (language === 'PT') return whole === '0' && cents === '00' ? '< US$ 0,01' : `≈ US$ ${whole.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${cents}`;
   if (whole === '0' && cents === '00') return '< $0.01';
   return `≈ $${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${cents}`;
 }
 
 /** What one value box shows under its amount. `value`: a USD figure; otherwise a short reason, never a placeholder number. */
 export type UsdLine = { readonly kind: 'value' | 'test-token' | 'pending' | 'unavailable'; readonly text: string; readonly title: string };
-export function usdLine(network: string, usd: string | null | undefined, estimate: { readonly status: 'pending' | 'ready' | 'none'; readonly mocked?: boolean; readonly observedAt?: string }): UsdLine {
+export function usdLine(network: string, usd: string | null | undefined, estimate: { readonly status: 'pending' | 'ready' | 'none'; readonly mocked?: boolean; readonly observedAt?: string },
+  language: Language = 'EN'): UsdLine {
+  const t = (message: string, ...parameters: readonly string[]) => translate(language, message, ...parameters);
   const identity = networkIdentity(network.replace(/ \(\d+\)$/, ''));
-  if (identity && identity.environment !== 'MAINNET') return { kind: 'test-token', text: 'Test token · no USD value', title: `${identity.name} test tokens have no market value.` };
-  if (usd) return { kind: 'value', text: estimate.mocked ? `${formatUsd(usd)} · test price` : formatUsd(usd),
-    title: `Estimated from the verified ${estimate.mocked ? 'test (MOCKED)' : 'Chainlink'} USD price${estimate.observedAt ? ` observed at ${estimate.observedAt}` : ''}. Not a quote.` };
-  if (estimate.status === 'pending') return { kind: 'pending', text: 'Estimating USD…', title: 'Waiting for the current estimate.' };
-  return { kind: 'unavailable', text: 'USD price unavailable', title: 'No verified USD price is available for this asset right now.' };
+  if (identity && identity.environment !== 'MAINNET') return { kind: 'test-token', text: t('Test token · no USD value'), title: t('{0} test tokens have no market value.', identity.name) };
+  if (usd) return { kind: 'value', text: estimate.mocked ? t('{0} · test price', formatUsd(usd, language)) : formatUsd(usd, language),
+    // CI review: the tooltip keeps its original honesty wording (verified source, observation time, "Not a quote."), now in PT too.
+    title: [t(estimate.mocked ? 'Estimated from the verified test (MOCKED) USD price.' : 'Estimated from the verified Chainlink USD price.'),
+      estimate.observedAt ? t('Observed at {0}.', new Date(estimate.observedAt).toLocaleString(language === 'PT' ? 'pt-BR' : 'en-US')) : '', t('Not a quote.')].filter(Boolean).join(' ') };
+  if (estimate.status === 'pending') return { kind: 'pending', text: t('Estimating USD…'), title: t('Waiting for the current estimate.') };
+  return { kind: 'unavailable', text: t('USD price unavailable'), title: t('No verified USD price is available for this asset right now.') };
 }

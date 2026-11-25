@@ -19,7 +19,7 @@ const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof 
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
 // Counts the cards that may ask for a live quote (a frozen card keeps its estimate and asks nothing).
 vi.mock('../state/build-estimate', () => ({ useLiveQuote: (workflow: unknown, _node: string, _owner: unknown, _destination: unknown, frozen?: boolean) => {
-  if (workflow && !frozen) fixture.quotes++; return { status: 'idle', estimate: null }; } }));
+  if (workflow && !frozen) fixture.quotes++; return { status: 'idle', estimate: null }; }, useDisplayPrices: () => ({}) }));
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {

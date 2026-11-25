@@ -16,7 +16,7 @@ export type UniversalRoutingProvider = typeof UNIVERSAL_ROUTING_PROVIDERS[number
 /** `BEST_MINIMUM_OUTPUT`: the executable route with the highest guaranteed minimum output. `PREFERENCE_ORDER`: the first executable provider in order. */
 export const UNIVERSAL_ROUTE_SELECTIONS = Object.freeze(['BEST_MINIMUM_OUTPUT', 'PREFERENCE_ORDER'] as const);
 export type UniversalRouteSelection = typeof UNIVERSAL_ROUTE_SELECTIONS[number];
-export const UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS = 300;
+export const UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS = 500;
 
 export type UniversalEcosystem = 'EVM' | 'SOLANA';
 export type UniversalNetworkKey = 'solana' | 'base' | 'arbitrum-one' | 'ethereum' | 'robinhood';

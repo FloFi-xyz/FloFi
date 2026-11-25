@@ -129,6 +129,17 @@ describe('swaps', () => {
     expect(convert(action(swap({ outputAsset: 'SOL' })), 'Swap 100 USDC to SOL on Base').kind).toBe('UNSUPPORTED');
     expect(convert(action(swap({ outputAsset: 'USDC' })), 'Swap 100 USDC to USDC on Base')).toMatchObject({ kind: 'REJECTED', code: 'INVALID_ASSET_PAIR' });
   });
+  it('grounds Manual slippage in the requested limit, never the input amount', () => {
+    const solana = swap({ network: 'SOLANA', inputAsset: 'SOL', outputAsset: 'USDC', amount: '250' });
+    expect(convert(action({ ...solana, slippageBps: '250' }), 'Swap 250 SOL for USDC on Solana with 1% max slippage'))
+      .toMatchObject({ kind: 'CLARIFICATION', missing: ['slippage'] });
+    expect(convert(action({ ...solana, slippageBps: '500' }), 'Swap 250 SOL for USDC on Solana with slippage -5%'))
+      .toMatchObject({ kind: 'CLARIFICATION', missing: ['slippage'] });
+    sameAsTyped(convert(action({ ...solana, slippageBps: '500' }), 'Swap 250 SOL for USDC on Solana with max price difference 5%'),
+      'swap 250 SOL to USDC on Solana slippage 500 bps');
+    expect(convert(action({ ...solana, slippageBps: '501' }), 'Swap 250 SOL for USDC on Solana with max price difference 5.01%'))
+      .toMatchObject({ kind: 'REJECTED', code: 'COPILOT_SLIPPAGE_OUT_OF_RANGE' });
+  });
   it('authors Solana and Solana Devnet swaps', () => {
     sameAsTyped(convert(action(swap({ network: 'SOLANA', inputAsset: 'SOL', outputAsset: 'USDC', amount: '1' })), 'Swap 1 SOL to USDC on Solana'),
       'swap 1 SOL to USDC on Solana slippage 100 bps');

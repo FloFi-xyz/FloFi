@@ -237,8 +237,15 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's pending transaction count read BEFORE the request leaves FloFi.
   // Any transaction the owner's account sends afterwards (this batch included) carries this nonce or a later one; it is what lets the server prove
   // a batch the wallet rejected was never sent (`user-funded/decline-proof.ts`). Not readable: the group is prepared as before, never deletable.
-  const ownerNonce = await t.rpc('eth_getTransactionCount', [group.owner, 'pending']).then(v => big(v).toString(), () => null);
-  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, ...ownerNonce !== null ? { ownerNonce } : {}, simulation,
+  const [ownerNonce, fromBlockHash] = await Promise.all([
+    t.rpc('eth_getTransactionCount', [group.owner, 'pending']).then(v => big(v).toString(), () => null),
+    t.rpc('eth_getBlockByNumber', [hex(BigInt(fromBlock)), false]).then(value => {
+      const block = value as { number?: unknown; hash?: unknown } | null;
+      return block?.number === hex(BigInt(fromBlock)) && typeof block.hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(block.hash) ? block.hash.toLowerCase() : null;
+    }, () => null),
+  ]);
+  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, ...ownerNonce !== null ? { ownerNonce } : {},
+    ...fromBlockHash ? { fromBlockHash } : {}, simulation,
     ...sponsorship ? { sponsorship } : {},
     fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(),
       l1FeeUpperBound: l1FeeUpperBound.toString(), estimated: true, sponsorship: sponsorship ? sponsorship.required ? 'REQUIRED' : 'OFFERED' : null } });

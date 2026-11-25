@@ -227,6 +227,9 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   if (error === 'UNIVERSAL_SIMULATION_TIMEOUT') return 'The bridge provider did not answer in time, so this step was not simulated and nothing was signed or sent. Try again in a moment.';
   if (error === 'JUPITER_QUOTE_TIMEOUT') return 'Jupiter did not answer in time. Simulate again in a moment.';
   if (error === 'JUPITER_RATE_LIMITED') return 'Jupiter is limiting requests. Wait a moment and simulate again.';
+  if (/^(?:JUPITER|DEVNET_SWAP)_SWAP_FAILED$/.test(error)) return 'The swap failed on chain. Only the network fee was charged.';
+  if (error === 'JUPITER_WRAPPED_SOL_ACCOUNT_PRESENT') return 'Your wallet holds a wrapped SOL account. Unwrap it in your wallet before swapping SOL.';
+  if (/^JUPITER_(?:SLIPPAGE_MISMATCH|MINIMUM_OUTPUT_INVALID)$/.test(error)) return 'The provider response could not be verified. Try another route or try again later.';
   // An Aave reserve short of liquidity (or collateral) is not the owner's balance: it keeps the lending sentence, before the balance rule.
   if (/^(?:BORROW|WITHDRAW)_INSUFFICIENT_LIQUIDITY$|LIQUIDITY_(?:UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_COLLATERAL/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident B): a single owner-wallet swap pays its network fee in the network's own ETH. FloFi's USDC fee
@@ -426,6 +429,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
   const warn = (severity: SimulationWarning['severity'], message: string, technical = false) => view.warnings.push({ severity, message, ...technical ? { technical: true as const } : {} });
   const stop = (message: string) => { view.status = 'blocked'; view.message = message; warn('blocking', message); return view; };
   if (source.state.busy) { view.message = 'Updating the simulation…'; return view; }
+  if (source.kind === 'solana-swap' && source.state.record?.attempt?.state === 'REVERTED' &&
+      /^(?:JUPITER|DEVNET_SWAP)_SWAP_FAILED$/.test(source.state.record.error ?? '')) return stop(simulationError(source.state.record.error!));
   if (source.state.error) return stop(simulationError(source.state.error, source.kind));
   // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): a bridge re-quoted in place after a refusal shows its fresh, authorizable Review — with why the earlier
   // one could not run (visible, never technical) — instead of blocking it.

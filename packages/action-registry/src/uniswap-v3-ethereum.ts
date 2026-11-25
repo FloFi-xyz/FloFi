@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { ETHEREUM_MAINNET } from './ethereum-chain.js';
 import { type UniswapCatalogLiquidity } from './uniswap-v3-catalog.js';
 /** Shared swap/liquidity deployment profile, freshly verified PUBLIC_READ_ONLY at Ethereum block 26208660.
@@ -25,7 +26,7 @@ export const UNISWAP_V3_ETHEREUM = Object.freeze({
     usdc: 'c1bcd4dc4f30c4dcf6c9fe462abeaf2efefc065dcb4dec74996e471f1ce219b4',
     weth: '5566bf50796faf93c9b6f6adacd3b32c70bfe16b48ffc59db6cd144cbdc89739',
   }),
-  reviewTtlSeconds: 60, defaultSlippageBps: 50, maximumSlippageBps: 300,
+  reviewTtlSeconds: 60, defaultSlippageBps: 100, maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS,
 });
 /** Existing catalog liquidity engine; no pool creation or native ETH wrapping. Ethereum L1 gas accounting. */
 export const UNISWAP_V3_ETHEREUM_LIQUIDITY: UniswapCatalogLiquidity = Object.freeze({

@@ -104,9 +104,9 @@ export async function cancelSequential(deps: WorkflowRunSurface, run: RunRecord,
   }
   return proposalOf(deps, await cancelRun(deps, run, wallets, 'OWNER_CANCELLED', options), null, base);
 }
-export async function resumeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {
+export async function resumeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView, loadStep = true) {
   const resumed = await resumeRun(deps, run, wallets);
-  return proposalOf(deps, resumed, await currentStep(deps, resumed, wallets), base);
+  return proposalOf(deps, resumed, loadStep ? await currentStep(deps, resumed, wallets) : null, base);
 }
 /** The run's ONE authorization Review (delegated mode): the exact workflow grants the owner's wallet signs, one per EVM network. */
 export async function authorizationReviewSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[]): Promise<WalletWorkflowReviewView> {

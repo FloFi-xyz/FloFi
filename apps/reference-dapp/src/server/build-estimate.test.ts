@@ -8,7 +8,8 @@ import { createEthereumSepoliaReviewContext } from '@defi-workflow-engine/refere
 import { createMockedSolanaJupiter, createMockedSolanaDevnetOrca, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { createSolanaSwapNode, type SolanaSwapInput } from '../domain/jupiter-authoring';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { readBuildEstimate } from './build-estimate';
+import { readBuildEstimate, readDisplayPrices } from './build-estimate';
+import type { PriceSource } from '../automations/price-source';
 import { readBaseQuoteOnServer, referenceContext } from './base-rpc';
 import { fileURLToPath } from 'node:url';
 const now = new Date('2026-10-08T12:00:00Z');
@@ -36,6 +37,15 @@ function rpc(profile: PublicSwapProfile = BASE_SEPOLIA, chain = profile.chainHex
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe('read-only Build estimates', () => {
+  it('publishes only matching recent observations for the supported display feeds', async () => {
+    const prices: PriceSource = { id: 'fixture', assets: ['ETH', 'SOL', 'USDC', 'USDT', 'BTC'], maxAgeMs: 60_000,
+      observe: async asset => ({ ok: true, observation: { asset: asset === 'USDT' ? 'USDC' : asset, priceUsd: '0.981',
+        observedAt: new Date(now.getTime() - (asset === 'SOL' ? 61_000 : 1_000)).toISOString(), receivedAt: now.toISOString(),
+        evidence: 'MOCKED', source: 'FIXTURE', provenance: {} } }) };
+    expect(await readDisplayPrices(prices, now)).toEqual(Object.fromEntries(['ETH', 'USDC'].map(asset => [asset, {
+      priceUsd: '0.981', observedAt: new Date(now.getTime() - 1_000).toISOString(), validUntil: now.getTime() + 30_000, evidence: 'MOCKED',
+    }])));
+  });
   it('uses the existing public quote reader and binds output, chain, provider and workflow hash', async () => {
     const workflow = authored(), reader = rpc();
     expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, { NODE_ENV: 'production' }, { rpc: reader, now: () => now })).toEqual({ ok: true, estimate: {

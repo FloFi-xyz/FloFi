@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightOwner } from '../server/flight-access';
+import { withFlightOwner, withFlightProductAccess } from '../server/flight-access';
 import { JUPITER_SOLANA_MAINNET as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createJupiterService, type JupiterService, type JupiterWalletDiagnostic } from '../server/jupiter-service';
@@ -8,6 +8,8 @@ import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
 import { cloudFlow, withFlightFlowAccess } from './cloud-flow';
 import { createJupiterHttp } from '../server/jupiter-http';
 import { koraGasForFlow } from '../gas-abstraction/kora/runtime';
+import { cloudPreview } from '../server/flow-runtime';
+import { jupiterSlippagePreview, type JupiterSlippagePreview } from '../../backend/preview';
 
 let service: JupiterService | null = null;
 const HARNESS = 'http://127.0.0.1:8551';
@@ -41,6 +43,20 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
 export async function jupiterInfo() {
   return withFlightFlowAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled }));
   });
+}
+/** Price-tolerance recommendation for a draft. It creates no run or wallet request. */
+export async function jupiterSuggestSlippage(workflow: SemanticWorkflow): Promise<JupiterSlippagePreview | null> {
+  try {
+    return await withFlightProductAccess(async () => {
+      const cloud = await cloudPreview<JupiterSlippagePreview>('jupiter-swap', [workflow], { purpose: 'SLIPPAGE', timeoutMs: 9_000, maxAttempts: 1 });
+      if (cloud) return cloud.ok ? cloud.value : null;
+      const harness = process.env.GRYLOO_JUPITER_HARNESS === 'MOCKED_LOOPBACK_ONLY';
+      const endpoint = harness ? HARNESS + '/swap/v2/build' : profile.api + profile.endpoint;
+      const http = createJupiterHttp(endpoint, harness ? undefined : process.env.JUPITER_API_KEY);
+      const signal = AbortSignal.timeout(9_000);
+      return await jupiterSlippagePreview(workflow, query => http(query, signal));
+    });
+  } catch { return null; }
 }
 export async function jupiterSimulate(workflow: SemanticWorkflow, owner: string) {
   return withFlightFlowAccess(async () => { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner));

@@ -151,6 +151,10 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat review additions', () => {
     for (const yes of ['Apply it', 'apply', 'Yes', 'Aplicar', 'sim']) expect(classifyAnswer(yes, 'RESOLVE_EDIT')).toBe('YES');
     for (const no of ['Discard it', 'discard', 'Descartar', 'No', 'não']) expect(classifyAnswer(no, 'RESOLVE_EDIT')).toBe('NO');
     for (const unclear of ['maybe', 'apply 30 instead', 'make it 5']) expect(classifyAnswer(unclear, 'RESOLVE_EDIT')).toBe('UNCLEAR');
+    // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: a step-removing chat change is applied or discarded in the chat with the same explicit answers.
+    for (const yes of ['Apply it', 'Aplicar']) expect(classifyAnswer(yes, 'RESOLVE_PROPOSAL')).toBe('YES');
+    for (const no of ['Discard it', 'Descartar', 'não']) expect(classifyAnswer(no, 'RESOLVE_PROPOSAL')).toBe('NO');
+    for (const unclear of ['maybe', 'swap 3 instead']) expect(classifyAnswer(unclear, 'RESOLVE_PROPOSAL')).toBe('UNCLEAR');
     expect(answerLanguage('Descartar', 'EN')).toBe('EN');
   });
   it('sums cost lines exactly per asset (no conversion, no rounding) and counts what it cannot read', () => {

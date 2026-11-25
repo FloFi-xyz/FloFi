@@ -71,6 +71,11 @@ const CLAIM_TEXT: Record<string, string> = {
   WALLET_REQUEST_REJECTED: 'The request was rejected in your wallet. Nothing was signed.',
   WALLET_BATCH_SEND_UNCONFIRMED: 'Your wallet was asked to send this batch, but its answer never arrived, so FloFi cannot tell whether it was sent. Check your wallet\'s activity. FloFi will not ask your wallet for it again; the workflow can be ended once the prepared request expires.',
   WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.',
+  WALLET_BATCH_REFUSAL_RECORDED: 'FloFi recorded the refusal. It needs to check the network before you can confirm the steps separately.',
+  WORKFLOW_RUN_FALLBACK_UNAVAILABLE: 'This batch cannot switch to separate confirmations. Check your wallet activity before trying again.',
+  WORKFLOW_RUN_FALLBACK_NOT_READY: 'FloFi is still waiting for the network to confirm the wallet request expired. Try again in a minute.',
+  WORKFLOW_RUN_FALLBACK_UNPROVEN: 'FloFi could not verify that the batch stayed off-chain. Check your wallet activity before continuing.',
+  WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST: 'The workflow changed while FloFi checked the batch. Check its latest status.',
   WALLET_ACCOUNT_MISMATCH: 'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.',
   // P0 universal execution: what the chain's own contracts say about a token, or what the network lacks, in plain words.
   SIMULATION_SWAP_OUTPUT_SHORT: 'A token in this batch does not deliver the full amount the swap sends (it charges a fee on transfer or changes balances), so it cannot be batched. Nothing was sent.',

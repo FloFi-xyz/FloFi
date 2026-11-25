@@ -27,6 +27,7 @@ export const portugueseChatE2eFix: Readonly<Record<string, string>> = {
     'Confirmar cada etapa · Etapa {0} de {1}: {2}. Cada etapa é simulada, revisada e confirmada na sua carteira separadamente, em ordem; este resultado cobre apenas esta etapa.',
   'All {0} steps of this workflow are completed and reconciled.': 'As {0} etapas deste fluxo foram concluídas e reconciliadas.',
   'This edit is no longer pending.': 'Esta edição já não está pendente.',
+  'This change cannot be applied to the current workflow.': 'Esta alteração não pode ser aplicada ao fluxo atual.',
   'Not requested': 'Não solicitado',
   'Simulated or reviewed only: no wallet request was made, so nothing was sent.': 'Apenas simulado ou revisado: nenhum pedido foi feito à carteira, então nada foi enviado.',
   'The simulation or Review recorded an issue before any wallet request, so nothing was sent.': 'A simulação ou a revisão registrou um problema antes de qualquer pedido à carteira, então nada foi enviado.',

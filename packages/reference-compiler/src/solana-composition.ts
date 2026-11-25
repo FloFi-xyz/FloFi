@@ -64,6 +64,7 @@ export async function simulateSolanaComposition(workflow: SemanticWorkflow, owne
   const s = swap.review;
   if (s.format !== 'gryloo.orca-devnet-review.v1' || s.owner !== owner || s.workflow.nodes.length !== 1 || JSON.stringify(s.workflow.nodes[0]) !== JSON.stringify(composed.producer))
     fail('SOLANA_COMPOSITION_SWAP_REVIEW_MISMATCH');
+  if (s.slippageBps > 300) fail('SOLANA_SLIPPAGE_OUT_OF_RANGE');
   const fields = readConcentratedLiquidity(composed.isolatedConsumer as never), token = composed.source.token;
   if (s.output.mint !== (token === 0 ? fields.token0.address : fields.token1.address)) fail('SOLANA_COMPOSITION_SWAP_REVIEW_MISMATCH');
   const cap = BigInt(compositionCap(workflow)), other = BigInt(token === 0 ? fields.amount1Max : fields.amount0Max), slippageBps = fields.slippageBps!;

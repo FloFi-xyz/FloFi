@@ -2,13 +2,50 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { jupiterSuggestSlippage } from '../app/jupiter-action';
 import { createSolanaSwapNode, formatTokenAmount, solanaSwapDetails, solanaSwapLabels, solanaTokenLabel, solanaTokensFor, type SolanaNetwork, type SolanaSwapInput,
   type SolanaSwapSymbol } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
 import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
-import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
+import { DEFAULT_SLIPPAGE, slippageRangeMessage } from '../domain/slippage-policy';
+import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+
+export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: string) {
+  const key = input?.network === 'Solana' ? JSON.stringify([scope, input.from, input.to, input.amount]) : null;
+  const [status, setStatus] = useState<{ key: string; pending: boolean; bps: number | null; expires: number; error: string | null } | null>(null);
+  const request = useRef(0);
+  const visible = status?.key === key ? status : null;
+  useEffect(() => {
+    if (!visible?.bps) return;
+    const expiry = setTimeout(() => setStatus(current => current === visible ? null : current), Math.max(0, visible.expires - Date.now()));
+    return () => clearTimeout(expiry);
+  }, [visible]);
+  async function suggest() {
+    if (!key || !input || visible?.pending) return;
+    let workflow: SemanticWorkflow;
+    try {
+      workflow = { schemaVersion: '1.0.0', workflowId: 'workflow-jupiter-slippage', revision: 1, resourceEdges: [],
+        nodes: [createSolanaSwapNode('node-002', { ...input, slippage: DEFAULT_SLIPPAGE })] };
+    } catch {
+      setStatus({ key, pending: false, bps: null, expires: 0, error: 'Choose two different tokens and enter a valid amount to check Auto slippage.' });
+      return;
+    }
+    const generation = ++request.current;
+    setStatus({ key, pending: true, bps: null, expires: 0, error: null });
+    const result = await jupiterSuggestSlippage(workflow).catch(() => null);
+    if (generation !== request.current) return;
+    const expires = Date.parse(result?.expiresAt ?? '');
+    const hash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
+    const bps = result?.format === 'flofi.jupiter-rtse.v1' && result.workflowHash === hash && expires > Date.now() &&
+      Number.isSafeInteger(result.slippageBps) && result.slippageBps >= 1 && result.slippageBps <= 300 ? result.slippageBps : null;
+    setStatus({ key, pending: false, bps, expires, error: bps === null ? 'Jupiter did not provide a usable slippage recommendation. Set a Manual limit or try again.' : null });
+  }
+  return { autoBps: visible?.bps ?? null, autoPending: Boolean(visible?.pending), ...(key ? { onRequestAuto: () => void suggest() } : {}),
+    autoError: visible?.error ?? null };
+}
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
@@ -21,6 +58,7 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
   const [error, setError] = useState('');
   const set = (patch: Partial<SolanaSwapInput>) => setInput(value => ({ ...value, ...patch }));
   const tokens = solanaTokensFor(input.network), label = devnet ? 'Solana Devnet' : 'Solana';
+  const { autoError, ...auto } = useJupiterSlippageChoices(input, `${nodeId ?? 'new'}:${state.workflow.revision}`);
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -28,13 +66,18 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
       const command = nodeId ? { type: 'SET_SOLANA_SWAP' as const, nodeId, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
         : { type: 'ADD_SOLANA_SWAP' as const, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
       if (direct) dispatch(command); else propose(command); onDone?.();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'SOLANA_SWAP_INPUT_INVALID'); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : 'SOLANA_SWAP_INPUT_INVALID';
+      setError(slippageRangeMessage(code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS) ?? code);
+    }
   }
   return <form className="inspector-fields" aria-label={tr(nodeId ? `Edit ${label} swap` : `Create ${label} swap`)} onSubmit={submit}>
     <label>{tr(label)}{tr(" from token")}<select aria-label={tr("From token")} value={input.from} onChange={e => set({ from: e.target.value as SolanaSwapSymbol })}>{tokens.map(t => <option key={t} value={t}>{tr(solanaTokenLabel(input.network, t))}</option>)}</select></label>
     <label>{tr(label)}{tr(" to token")}<select aria-label={tr("To token")} value={input.to} onChange={e => set({ to: e.target.value as SolanaSwapSymbol })}>{tokens.map(t => <option key={t} value={t}>{tr(solanaTokenLabel(input.network, t))}</option>)}</select></label>
     <label>{tr(label)}{tr(" amount")}<input aria-label={tr("Amount")} inputMode="decimal" autoComplete="off" maxLength={40} value={input.amount} onChange={e => set({ amount: e.target.value })}/></label>
-    <label>{tr(label)}{tr(" slippage (bps)")}<input aria-label={tr("Slippage (bps)")} inputMode="numeric" autoComplete="off" maxLength={4} value={input.slippage} onChange={e => set({ slippage: e.target.value })}/></label>
+    <label>{tr('Max price difference (%)')}<PriceDifferenceInput bps={input.slippage} maxLength={6} onBpsChange={slippage => set({ slippage })}/></label>
+    <SlippageChoices {...auto} bps={input.slippage} maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onBpsChange={slippage => set({ slippage })}/>
+    {autoError && <p className="muted" role="status">{tr(autoError)}</p>}
     {devnet && <p className="muted">{tr("Devnet test tokens have no value.")}</p>}
     {error && <p role="alert">{tr(error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review swap change' : direct ? 'Add swap' : 'Review swap proposal')}</button>

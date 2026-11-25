@@ -31,7 +31,7 @@ export const UNIVERSAL_BRIDGE_ROUTING: Readonly<Record<UniversalBridgeRouting, {
 export const UNIVERSAL_BRIDGE_ROUTING_LABEL: Readonly<Record<UniversalBridgeRouting, string>> = Object.freeze({
   BEST: 'Automatic: the executable route with the highest guaranteed minimum', RELAY: 'Relay only', LIFI: 'LI.FI only (quotes; execution not available yet)',
   MAYAN: 'Mayan only (quotes; execution not available yet)', ACROSS: 'Across only (certified Router pairs)' });
-/** BUILD-FLOFI-PRODUCT-UX-001: the shared product default (1%, `slippage-policy.ts`), within the universal router's 300 bps limit. */
+/** The shared 1% authoring default. */
 export const UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE = DEFAULT_SLIPPAGE;
 export const UNIVERSAL_BRIDGE_NETWORKS: readonly { readonly key: UniversalNetworkKey; readonly label: string }[] = Object.freeze(
   (Object.keys(UNIVERSAL_NETWORKS) as UniversalNetworkKey[]).map(key => Object.freeze({ key, label: UNIVERSAL_NETWORKS[key].name })));
@@ -70,7 +70,10 @@ export function resolveUniversalAsset(key: UniversalNetworkKey, reference: strin
     return { asset: { kind: 'TOKEN', address: network.ecosystem === 'EVM' ? address.toLowerCase() : address, decimals }, symbol: known?.symbol ?? 'TOKEN' };
   }
   const symbol = text.toUpperCase();
-  if (symbol === network.native.symbol) return { asset: { kind: 'NATIVE', decimals: network.native.decimals }, symbol: network.native.symbol };
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "Solana" written as a token (ChatGPT/Claude MCP clients pass the user's words) is the native coin SOL,
+  // never a verified SPL token that happens to carry that display name.
+  if (symbol === network.native.symbol || network.ecosystem === 'SOLANA' && symbol === 'SOLANA')
+    return { asset: { kind: 'NATIVE', decimals: network.native.decimals }, symbol: network.native.symbol };
   if (network.ecosystem === 'SOLANA') {
     const token = Object.values(SOLANA_MAINNET_TOKENS).find(t => t.symbol === symbol && !t.native) ?? resolveSolanaCatalogAsset(text);
     return token ? { asset: { kind: 'TOKEN', address: token.mint, decimals: token.decimals }, symbol: token.symbol } : fail('UNIVERSAL_ASSET_UNKNOWN');

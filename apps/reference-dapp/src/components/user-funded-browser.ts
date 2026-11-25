@@ -30,10 +30,10 @@ import { circleSigningContext } from '../wallet/flofi-signing';
 import { connectSolanaWallet, signAllWithSolanaWallet } from '../wallet/solana-wallet';
 import { walletPreference } from '../wallet/wallet-registry';
 import type { WalletProfile } from '../workflow-runs/execution-groups';
+import { isWalletBatchRefusalCode } from '../workflow-runs/state-machine';
 import { signWorkflowGrant } from './delegation-browser';
 
 const fail = (code: string): never => { throw new Error(code); };
-const NOT_SENT_CODES: ReadonlySet<number> = new Set([5700, 5710, 5740, 5750, 5760, 4100, 4200, -32601, -32602]);
 const evmProvider = (): EvmProvider => chosenEvmProvider() ?? injected() ?? fail('EVM_WALLET_NOT_FOUND');
 const rejected = (cause: unknown) => (cause as { code?: unknown } | null)?.code === 4001 ? fail('WALLET_REQUEST_REJECTED') : Promise.reject(cause);
 /** A wallet request that failed before anything was sent: the owner's own rejection keeps `rejected`'s code, anything else becomes `code`. */
@@ -156,9 +156,9 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSendi
       const code = codeOf(cause);
       if (request.id && code === eip5792.DUPLICATE_ID) return request.id;
       // Refusals the wallet returns BEFORE sending anything (EIP-5792 5700 unsupported capability, 5710 unsupported chain, 5740 batch too large,
-      // 5750 atomic batching unsupported, 5760 upgrade rejected; EIP-1193 4100 unauthorized, 4200 unsupported method; JSON-RPC -32601/-32602): nothing
-      // was sent, so the group can be offered again. Any other error stays "may have been sent" (fail closed).
-      if (typeof code === 'number' && NOT_SENT_CODES.has(code)) return fail('WALLET_BATCH_NOT_SENT');
+      // 5750 atomic-ready wallet rejected the upgrade, 5760 atomicity not supported; EIP-1193 4100 unauthorized, 4200 unsupported method; JSON-RPC -32601/-32602): nothing
+      // was sent according to the wallet. Keep the provider code for the server's independent fallback check.
+      if (isWalletBatchRefusalCode(code)) throw Object.assign(new Error('WALLET_BATCH_NOT_SENT'), { walletCode: code });
       return rejected(cause);
     });
   return eip5792.sendCallsId(answer);

@@ -14,6 +14,7 @@
  *    any redeployment until it is re-verified.
  * A different deployment anywhere fails closed (`UNIVERSAL_UNEXPECTED_CONTRACT`).
  */
+import { UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { ARBITRUM_ONE } from './arbitrum-chain.js';
 import { ETHEREUM_MAINNET } from './ethereum-chain.js';
 import { ROBINHOOD_CHAIN_MAINNET } from './robinhood-chain.js';
@@ -123,6 +124,6 @@ export const UNIVERSAL_ROUTER_DEPLOYMENT: UniversalRouterDeployment = Object.fre
     mayan: Object.freeze({ api: 'https://price-api.mayan.finance/v3', sdkVersion: '15_3_0' }), // @mayanfinance/swap-sdk 15.3.0, read 2026-10-25
     across: Object.freeze({ api: 'https://app.across.to/api' }),
   }),
-  reviewTtlSeconds: 120, defaultSlippageBps: 50, maximumSlippageBps: 300, deliveryAttentionSeconds: 3_600,
+  reviewTtlSeconds: 120, defaultSlippageBps: 50, maximumSlippageBps: UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS, deliveryAttentionSeconds: 3_600,
 });
 export const universalEvmDeployment = (chain: string): UniversalEvmDeployment | null => UNIVERSAL_ROUTER_DEPLOYMENT.evm[chain] ?? null;

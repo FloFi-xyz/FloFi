@@ -330,7 +330,7 @@ function swapOf(workflow: SemanticWorkflow) {
   const out = node.inputs.find(p => p.name === 'asset-out');
   const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
   if (amount?.kind !== 'QUANTITY' || out?.kind !== 'ASSET' || slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS' ||
-      slip.maximumBps < 1 || slip.maximumBps > 300) fail('PUBLIC_SWAP_INVALID');
+      slip.maximumBps < 1 || slip.maximumBps > profile.maximumSlippageBps) fail('PUBLIC_SWAP_INVALID');
   const inputToken = address('address' in amount.value.asset ? amount.value.asset.address : '');
   const outputToken = address('address' in out.value ? out.value.address : '');
   if (!(inputToken === profile.usdc || inputToken === profile.weth) ||
@@ -1295,7 +1295,7 @@ function catalogSwapRead(workflow: SemanticWorkflow, P: CatalogSwapProfile): { n
   const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
   // The CoW variant names a second protocol; only the plain Uniswap declaration is this service's intent.
   if (amount?.kind !== 'QUANTITY' || !('address' in amount.value.asset) || out?.kind !== 'ASSET' || !('address' in out.value) || slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS' ||
-      node.adapterConstraints.protocols.join() !== 'uniswap' || slip.maximumBps < 1 || slip.maximumBps > 300) fail('PUBLIC_SWAP_INVALID');
+      node.adapterConstraints.protocols.join() !== 'uniswap' || slip.maximumBps < 1 || slip.maximumBps > P.maximumSlippageBps) fail('PUBLIC_SWAP_INVALID');
   const ref = (asset: { chainId: string; address: string; decimals: number }) => ({ chain: asset.chainId, address: asset.address, decimals: asset.decimals, officialId: null });
   return { node, fields: { chain: node.chainId, input: ref(amount.value.asset), output: ref(out.value), amount: amount.value.amount, slippageBps: slip.maximumBps } };
 }

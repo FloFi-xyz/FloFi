@@ -11,11 +11,11 @@
 import { assertLogName, reentrantLeases, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { ETHEREUM_ROUTER_NETWORKS } from '@defi-workflow-engine/action-registry';
 import type { FlowDeps, FlowName } from './flows.ts';
-import { jupiterBuildQuery, jupiterIntent, parseJupiterBuild } from '@defi-workflow-engine/reference-compiler';
+import { jupiterBuildQuery, jupiterIntent, parseJupiterBuild, readJupiterSlippageRecommendation } from '@defi-workflow-engine/reference-compiler';
 import { hashArtifactBytes, UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 
-export type PreviewPurpose = 'SIMULATION' | 'QUOTE';
+export type PreviewPurpose = 'SIMULATION' | 'QUOTE' | 'SLIPPAGE';
 export type JupiterQuotePreview = { readonly format: 'flofi.jupiter-quote-preview.v1'; readonly workflowHash: string; readonly nodeId: string;
   readonly chain: string; readonly input: { readonly mint: string; readonly decimals: number; readonly symbol: string };
   readonly output: { readonly mint: string; readonly decimals: number; readonly symbol: string }; readonly amount: string;
@@ -33,6 +33,17 @@ export async function jupiterQuotePreview(input: unknown, deps: FlowDeps, now = 
     output: { mint: intent.output.mint, decimals: intent.output.decimals, symbol: intent.output.symbol }, amount: intent.amount,
     expectedOut: quote.outAmount, minimumOut: quote.otherAmountThreshold, slippageBps: intent.slippageBps, expiresAt: new Date(now + 30_000).toISOString(),
     observedAt: quote.fetchedAt, provenance: deps.mode === 'live' ? 'PUBLIC_MAINNET' : 'MOCKED' };
+}
+
+export type JupiterSlippagePreview = { readonly format: 'flofi.jupiter-rtse.v1'; readonly workflowHash: string;
+  readonly slippageBps: number; readonly expiresAt: string };
+export async function jupiterSlippagePreview(input: unknown, http: FlowDeps['http'], now = Date.now()): Promise<JupiterSlippagePreview> {
+  if (!http) throw new Error('JUPITER_CONFIGURATION_INVALID');
+  const workflow = validateAuthoringWorkflow(input, createBaseSepoliaReviewContext());
+  const intent = jupiterIntent(workflow, UNIVERSAL_QUOTE_SUBJECTS.SOLANA);
+  const quote = await readJupiterSlippageRecommendation(intent, http, new Date(now).toISOString());
+  return { format: 'flofi.jupiter-rtse.v1', workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))),
+    slippageBps: quote.slippageBps, expiresAt: new Date(now + 30_000).toISOString() };
 }
 
 

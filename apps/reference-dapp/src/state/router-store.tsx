@@ -58,9 +58,9 @@ function errorValue(value: unknown): unknown {
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
 /** The network a stored run belongs to (its reviewed source and destination chains). */
-const networkOfRecord = (record: RouterRecord): RouterNetwork =>
+const networkOfRecord = (record: RouterRecord): RouterNetwork | null =>
   NETWORKS.find(n => ROUTER_NETWORK_OPTIONS[n].pair.source.chainId === record.review.intent.sourceChain &&
-    ROUTER_NETWORK_OPTIONS[n].pair.destination.chainId === record.review.intent.destinationChain) ?? 'mainnet';
+    ROUTER_NETWORK_OPTIONS[n].pair.destination.chainId === record.review.intent.destinationChain) ?? null;
 function readPointer(network: RouterNetwork): Pointer | null {
   try {
     const value = JSON.parse(window.localStorage.getItem(KEY[network]) ?? 'null') as Pointer | null;
@@ -81,9 +81,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   const [runs, setRuns] = useState<readonly RouterRunSummary[]>([]), [notice, setNotice] = useState<string | null>(null);
   const [requoted, setRequoted] = useState<Store['requoted']>(null);
   const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
-  // The authored bridge decides the network; a recovered run keeps its own; the journey defaults to the testnet.
-  const network: RouterNetwork = routerNetworkOf(workflow) ?? (record ? networkOfRecord(record) : 'testnet');
-  const profile = ROUTER_NETWORK_OPTIONS[network].profile;
+  const recordNetwork = record ? networkOfRecord(record) : null;
+  // The default is for the idle panel only. Simulation and wallet switches require an authored or recovered route.
+  const activeNetwork = routerNetworkOf(workflow) ?? recordNetwork, network = activeNetwork ?? 'mainnet';
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const latestSession = useRef(session); latestSession.current = session;
@@ -92,13 +92,15 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   // A recovered run stays visible on the untouched template; any other workflow change retires its Review.
   const retired = Boolean(record && JSON.stringify(record.workflow) !== JSON.stringify(workflow) &&
     !(recovered && workflow.revision === 0 && workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
-  function accept(value: RouterRecord) {
+  function accept(value: RouterRecord, expected?: RouterNetwork) {
     // Only the signed-in wallet's run is shown; a late answer for a previous session never repaints the view.
-    if (value.owner !== latestSession.current?.account) return;
+    const route = networkOfRecord(value);
+    if (!route || expected && expected !== route || value.owner !== latestSession.current?.account) return false;
     visibleRun.current = value.id; setRecord(value);
     const hash = value.attempts.at(-1)?.transactionHash;
-    try { window.localStorage.setItem(KEY[networkOfRecord(value)], JSON.stringify({ id: value.id, owner: value.owner, ...hash ? { hash, attemptId: value.attempts.at(-1)?.attemptId } : {} })); }
+    try { window.localStorage.setItem(KEY[route], JSON.stringify({ id: value.id, owner: value.owner, ...hash ? { hash, attemptId: value.attempts.at(-1)?.attemptId } : {} })); }
     catch { /* The server run remains authoritative. */ }
+    return true;
   }
   async function refreshRuns(net: RouterNetwork = network) {
     const listed = await routerRuns(net).catch(() => null);
@@ -124,7 +126,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       if (!pointer || pointer.owner !== current.account) continue;
       if (typeof pointer.attemptId === 'string' && typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash)) await routerReport(net, pointer.id, { kind: 'HASH', hash: pointer.hash, attemptId: pointer.attemptId }).catch(() => undefined);
       const result = await routerStatus(net, pointer.id).catch(() => null);
-      if (result?.ok && latestSession.current?.account === current.account) { setRecord(result.value); setRecovered(true); return; }
+      if (result?.ok && networkOfRecord(result.value) === net && result.value.owner === current.account && latestSession.current?.account === current.account) {
+        setRecord(result.value); setRecovered(true); return;
+      }
     }
   }
   /**
@@ -138,10 +142,11 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       const pointer = readPointer(net);
       if (pointer?.owner !== stale.account) continue;
       const result = await routerStatus(net, pointer.id).catch(() => null);
-      if (result?.ok) target = result.value;
+      if (result?.ok && networkOfRecord(result.value) === net && result.value.owner === stale.account) target = result.value;
     }
-    if (target && target.phase === 'AUTHORIZED' && !target.attempts.some(a => ACTIVE.includes(a.state)))
-      await routerInvalidate(networkOfRecord(target), target.id, 'WALLET_CHANGED').catch(() => undefined);
+    const targetNetwork = target && networkOfRecord(target);
+    if (target && targetNetwork && target.phase === 'AUTHORIZED' && !target.attempts.some(a => ACTIVE.includes(a.state)))
+      await routerInvalidate(targetNetwork, target.id, 'WALLET_CHANGED').catch(() => undefined);
     await walletSignOut().catch(() => undefined);
     latestSession.current = null; setSession(null); setRecord(null); setRecovered(false); setRuns([]); setExecutionEnabled(false);
     setNotice('ROUTER_WALLET_ACCOUNT_CHANGED');
@@ -171,9 +176,11 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; };
   }, [available, network, session?.account]);
   useEffect(() => {
-    if (record && retired && record.phase === 'AUTHORIZED')
-      routerInvalidate(networkOfRecord(record), record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('ROUTER_AUTHORIZATION_INVALIDATION_FAILED'));
-  }, [record, retired]);
+    if (record && recordNetwork && retired && record.phase === 'AUTHORIZED')
+      routerInvalidate(recordNetwork, record.id).then(r => {
+        if (r.ok && visibleRun.current === record.id) accept(r.value, recordNetwork);
+      }).catch(() => setError('ROUTER_AUTHORIZATION_INVALIDATION_FAILED'));
+  }, [record, recordNetwork, retired]);
   // A different connected account ends the previous account's session and clears its unused authorization (fail closed).
   useEffect(() => {
     const current = latestSession.current;
@@ -220,36 +227,47 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }); }
   async function open(runId: string) { await operation(async () => {
     if (!latestSession.current) throw new Error('WALLET_SESSION_REQUIRED');
-    accept(unwrap(await routerStatus(network, runId))); setRecovered(true);
+    const found = unwrap(await routerStatus(network, runId));
+    if (!accept(found, network)) throw new Error('ROUTER_PAIR_UNSUPPORTED');
+    setRecovered(true);
   }); }
   async function loadRuns() { await operation(async () => { await refreshRuns(); }); }
   async function simulate(options: SimulateOptions = {}) { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
-    const snapshot = latest.current, owner = await establishSession(options.interactive !== false);
+    const snapshot = latest.current, route = routerNetworkOf(snapshot);
+    if (!route) throw new Error('ROUTER_PAIR_UNSUPPORTED');
+    const owner = await establishSession(options.interactive !== false);
     if (latest.current !== snapshot) return;
-    const result = await routerSimulate(network, snapshot, owner.account);
+    const result = await routerSimulate(route, snapshot, owner.account);
     if (latest.current !== snapshot || latestSession.current?.account !== owner.account) return;
     const value = unwrap(result);
-    setRecovered(false); accept(value); void refreshRuns();
+    if (!accept(value, route)) throw new Error('ROUTER_PAIR_UNSUPPORTED');
+    setRecovered(false); void refreshRuns(route);
   }); }
-  async function refresh() { await operation(async () => { if (!record) throw new Error('ROUTER_RUN_MISSING'); accept(unwrap(await routerRefresh(networkOfRecord(record), record.id))); }); }
+  async function refresh() { await operation(async () => {
+    if (!record || !recordNetwork) throw new Error('ROUTER_RUN_MISSING');
+    accept(unwrap(await routerRefresh(recordNetwork, record.id)), recordNetwork);
+  }); }
   async function review() { await operation(async () => {
-    if (!record || retired) throw new Error('ROUTER_SIMULATION_REQUIRED');
-    accept(unwrap(await routerReview(networkOfRecord(record), record.id, record.review.commitment, record.workflow)));
+    if (!record || !recordNetwork || retired) throw new Error('ROUTER_SIMULATION_REQUIRED');
+    if (!accept(unwrap(await routerReview(recordNetwork, record.id, record.review.commitment, record.workflow)), recordNetwork)) return;
     // The owner authorized the re-quoted Review: what changed since the earlier one is no longer news.
     setRequoted(null);
   }); }
   async function observe() { await operation(async () => {
-    if (!record) throw new Error('ROUTER_RUN_MISSING');
+    if (!record || !recordNetwork) throw new Error('ROUTER_RUN_MISSING');
     await deliverWalletResults(record.owner);
-    accept(unwrap(await routerObserve(networkOfRecord(record), record.id))); void refreshRuns(networkOfRecord(record));
+    accept(unwrap(await routerObserve(recordNetwork, record.id)), recordNetwork); void refreshRuns(recordNetwork);
   }); }
-  async function switchNetwork() { await operation(async () => { await wallet.switchTo(profile.source.chainHex as Parameters<typeof wallet.switchTo>[0]); }); }
+  async function switchNetwork() { await operation(async () => {
+    if (!activeNetwork) throw new Error('ROUTER_PAIR_UNSUPPORTED');
+    await wallet.switchTo(ROUTER_NETWORK_OPTIONS[activeNetwork].profile.source.chainHex as Parameters<typeof wallet.switchTo>[0]);
+  }); }
   /** One Execute click = one exact wallet request (the exact approval, or the bridge deposit). */
   async function execute() { await operation(async () => {
-    if (!record || retired || record.phase !== 'AUTHORIZED' || record.authorization !== record.review.commitment) throw new Error('ROUTER_REVIEW_REQUIRED');
-    const net = networkOfRecord(record), source = ROUTER_NETWORK_OPTIONS[net].profile.source.chainHex;
+    if (!record || !recordNetwork || retired || record.phase !== 'AUTHORIZED' || record.authorization !== record.review.commitment) throw new Error('ROUTER_REVIEW_REQUIRED');
+    const net = recordNetwork, source = ROUTER_NETWORK_OPTIONS[net].profile.source.chainHex;
     const current = await ownerSession();
     if (current.chainId !== source) throw new Error('ROUTER_WRONG_CHAIN');
     if (current.account !== record.owner || latestSession.current?.account !== record.owner) throw new Error('ROUTER_WRONG_OWNER');
@@ -281,7 +299,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
         const refusal = walletNonceRefusal('ROUTER', evidence, 'RESPONSE_INVALID'); if (refusal) throw new Error(refusal);
       }
     };
-    const acceptCurrent = (value: RouterRecord) => { if (visibleRun.current === id) accept(value); };
+    const acceptCurrent = (value: RouterRecord) => { if (visibleRun.current === id && value.id === id) accept(value, net); };
     let prepared = false, attemptId = '';
     try {
       await validateSession(null);
@@ -356,7 +374,12 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }); }
   // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): a settling run follows the worker's reconciliation from its durable record (no chain read).
   useSettlementSync({ record, busy: () => busyRef.current, epoch: () => operationEpoch.current, visible: () => visibleRun.current,
-    read: shown => routerStatus(networkOfRecord(shown), shown.id), accept });
+    read: async shown => {
+      const route = networkOfRecord(shown);
+      if (!route) return null;
+      const result = await routerStatus(route, shown.id);
+      return result.ok && networkOfRecord(result.value) !== route ? null : result;
+    }, accept });
   return <Context.Provider value={{ network, available, availability, availabilityKnown, executionEnabled, record, busy, signing, error, retired, recovered, session, sessionReady, runs, notice,
     requoted: requoted && requoted.runId === record?.id ? requoted : null,
     simulate, refresh, review, execute, observe, switchNetwork, signIn, signOut, open, loadRuns }}>

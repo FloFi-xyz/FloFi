@@ -15,7 +15,7 @@ async function replacingProposal(page: Page) {
   await sendChatCommand(page, 'swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
   await page.getByLabel('Describe your flow').fill(LENDING);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('This change would also remove 1. Swap. Review it on the Canvas before applying; nothing changed yet.');
+  await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('This change would also remove 1. Swap. Nothing changed yet: apply it, or discard it to keep your workflow as it is.');
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
 }
@@ -44,6 +44,28 @@ test('the explicit Dismiss control discards the proposal without changing the wo
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+});
+
+/** BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (CTO: no mandatory Canvas navigation): the same proposal is applied or discarded from the chat itself. */
+test('the chat applies the replacing proposal on an explicit answer, without opening the Canvas proposal', async ({ page }) => {
+  await replacingProposal(page);
+  const log = page.getByRole('log', { name: 'Conversation' });
+  await log.getByRole('button', { name: 'Apply it', exact: true }).last().click();
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
+  await expect(log.locator('.message').last()).toContainText('Applied. Any earlier simulation or review of this workflow no longer applies.');
+  await assertNoFinancialCanvasAction(page);
+});
+
+test('the chat discards the replacing proposal on an explicit answer and keeps the workflow', async ({ page }) => {
+  await replacingProposal(page);
+  const log = page.getByRole('log', { name: 'Conversation' });
+  await log.getByRole('button', { name: 'Discard it', exact: true }).last().click();
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+  await expect(log.locator('.message').last()).toContainText('Discarded. Your workflow is unchanged.');
 });
 
 test('a three-step chat composition commits atomically and grants no financial authorization', async ({ page }) => {

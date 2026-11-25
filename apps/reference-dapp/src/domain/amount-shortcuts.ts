@@ -21,10 +21,13 @@ import type { CopilotNetworkId } from './network-registry';
 import type { PortfolioNetworkId, WalletPortfolio } from './wallet-portfolio';
 import type { Workflow } from './initial-workflow';
 import { stepAssets } from './workflow-sequence';
+import { relativeBasisPoints, type RelativeAmount } from './relative-amount';
 
 /** What FloFi is waiting for: the amount of one single action that spends a wallet balance (never a cap on a future output). */
 export type AwaitingAmount = { readonly field: 'amount'; readonly action: 'SWAP' | 'BRIDGE' | 'TRANSFER' | 'SUPPLY'; readonly asset: string;
-  readonly network: CopilotNetworkId; readonly question: string };
+  readonly network: CopilotNetworkId; readonly question: string;
+  /** BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: the user already stated it relative to this balance ("all my USDC", "metade do meu SOL"). */
+  readonly relative?: RelativeAmount };
 /** The exact asset whose balance the shortcuts read. */
 export type AmountSource = { readonly networkId: PortfolioNetworkId; readonly ecosystem: 'evm' | 'solana'; readonly chain: string; readonly symbol: string;
   readonly address: string | null; readonly decimals: number; readonly native: boolean;
@@ -135,6 +138,31 @@ export function amountShortcuts(units: bigint, source: Pick<AmountSource, 'decim
   // Max: the whole token balance (exact), or the native coin above its reserve (rounded down like a percentage).
   out.push(spendable === null ? { key: 'MAX', units: 0n, amount: null } : shortcut('MAX', source.native ? floor(spendable) : spendable));
   return out;
+}
+
+/** Why a relative request writes no amount (frontend-ux review M2: never "nothing to use" when the person holds funds). */
+export type RelativeShortfall = 'ZERO' | 'RESERVE' | 'NO_RESERVE' | 'UNREPRESENTABLE';
+/**
+ * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: the amount a relative request ("all my USDC", "25% of my SOL") writes from a read balance, with exactly
+ * the shortcut rules above — rounded down, a native coin keeps its network's fee reserve (no native "all" where no reserve is defined), and a
+ * request the balance cannot honour writes nothing (`amount: null`) and says why, so FloFi never proposes an amount the wallet cannot spend and
+ * never shrinks the person's share silently.
+ */
+export function relativeShortcut(units: bigint, source: Pick<AmountSource, 'decimals' | 'native' | 'chain'>, relative: RelativeAmount):
+  { readonly units: bigint; readonly amount: string | null; readonly shortfall: RelativeShortfall | null } {
+  const none = (shortfall: RelativeShortfall) => ({ units: 0n, amount: null, shortfall });
+  if (units <= 0n) return none('ZERO');
+  const step = source.decimals > SHORTCUT_DECIMALS ? 10n ** BigInt(source.decimals - SHORTCUT_DECIMALS) : 1n;
+  const floor = (value: bigint) => value - value % step;
+  const reserve = source.native ? NATIVE_FEE_RESERVE[source.chain] ?? null : 0n;
+  if (reserve === null) return none('NO_RESERVE');
+  const spendable = units > reserve ? units - reserve : 0n;
+  const share = relativeBasisPoints(relative) === 10_000n && !source.native ? spendable : floor(units * relativeBasisPoints(relative) / 10_000n);
+  // A percentage the fee reserve does not leave room for is not shrunk silently (chat review M3).
+  if (relative.kind === 'PERCENT' && share > spendable || spendable === 0n) return none('RESERVE');
+  const value = share <= spendable ? share : floor(spendable);
+  const amount = shortcutAnswer(value, source.decimals);
+  return amount ? { units: value, amount, shortfall: null } : none(value === 0n ? 'ZERO' : 'UNREPRESENTABLE');
 }
 
 /**

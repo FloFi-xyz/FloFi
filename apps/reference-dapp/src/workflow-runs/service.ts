@@ -25,14 +25,15 @@ import { networkScope } from '../server/network-scope.ts';
 import type { GrantView } from '../delegation/authority.ts';
 import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from './authorization-plan.ts';
 import type { RunRecord, RunStepRecord, VerifiedDecline, WorkflowRunStore } from './pg-store.ts';
-import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
+import { declineProofFacts, proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { amountsAvailable, boundDeliveryRefusal } from './received-amounts.ts';
 import { preparedGroupDeliveryRefusal, stopRunFromCurrent } from './user-funded-pass.ts';
-import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
+import { CONFIRM_RUN_SECONDS, isWalletBatchFallbackCode, MAYBE_SUBMITTED, WALLET_BATCH_FALLBACK_VERIFIED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_REFUSAL_RECORDED,
+  WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
-import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
+import { evmStepBuildable, MAX_BATCH_SLIPPAGE_BPS, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, koraGroupNativeCovers, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
@@ -257,9 +258,11 @@ export function resumeRefusal(run: RunRecord, steps: readonly RunStepRecord[], g
 export async function resumeRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[]): Promise<RunRecord> {
   assertRunWallets(run, wallets);
   const groups = run.mode === 'USER_FUNDED' ? await deps.store.groups(run.runId) : [], steps = await deps.store.steps(run.runId);
+  const at = groupAt(groups, run.currentStep);
+  if (at?.code === WALLET_BATCH_REFUSAL_RECORDED && at.state === 'PREPARED') return resumeRefusedWalletBatch(deps, run, at);
+  if (run.state === 'RUNNING' && at?.prepared?.kind === WALLET_BATCH_FALLBACK_VERIFIED) return run;
   const refusal = resumeRefusal(run, steps, groups, deps.now());
   if (refusal) return refuse(refusal);
-  const at = groupAt(groups, run.currentStep);
   if (at && !isOwnerStepGroup(at)) return resumeUserFunded(deps, run, at);
   const step = steps.find(s => s.stepIndex === run.currentStep)!;
   if (!await deps.store.transition(run.runId, { version: run.version, from: ['HALTED'] }, 'RUNNING', { code: null }, 'RUN_RESUMED')) refuse('WORKFLOW_RUN_CHANGED');
@@ -359,8 +362,11 @@ const preparedHorizonMs = (strategy: GroupRecord['strategy']) => strategy === 'E
   : strategy === 'SOLANA_SIGN_ALL' ? solanaPreparedTtlMs(1) : 0;
 /** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
 /** Whether a step can join a user-funded batch: true, or the builder's own closed reason why not (shown as the group's downgrade). */
+// Swap review (recovery build): a Solana sign-all or durable-nonce group fixes each minimum when it is prepared, like an EVM batch, so a Solana
+// swap above the batch limit runs as its own owner step (the single-step limit is 5%).
 export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]): boolean | string =>
-  st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, evmOwner, facts.bridgeRoutes) ?? true);
+  st.namespace === 'solana' ? st.action !== 'swap' || (st.slippageBps ?? 0) <= MAX_BATCH_SLIPPAGE_BPS || 'WORKFLOW_SLIPPAGE_UNSUPPORTED'
+    : (evmStepBuildable(st, facts.chains, evmOwner, facts.bridgeRoutes) ?? true);
 /**
  * The owner chose user-funded execution with the wallets their browser reported (EIP-5792 capabilities, Wallet Standard features): the run's
  * groups are planned for exactly those wallets and stored with the mode, in one transaction (the database checks every group's fee payer is
@@ -420,6 +426,90 @@ function handedTo(g: GroupRecord, handout: string | undefined): boolean {
   const a = Buffer.from(handoutHashOf(handout), 'hex'), b = Buffer.from(bound, 'hex');
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+type WalletBatchPreparation = { readonly requestId: string; readonly preparedAt: string };
+
+function batchPreparation(g: GroupRecord): WalletBatchPreparation | null {
+  const p = g.prepared as { request?: { id?: unknown }; preparedAt?: unknown } | null;
+  return typeof p?.request?.id === 'string' && /^0x[0-9a-f]{64}$/.test(p.request.id) && typeof p.preparedAt === 'string'
+    ? { requestId: p.request.id, preparedAt: p.preparedAt } : null;
+}
+
+function dueUnansweredBatch(run: RunRecord, g: GroupRecord, now: Date): boolean {
+  return run.mode === 'USER_FUNDED' && run.state === 'RUNNING' && run.expiresAt > now && run.currentStep === g.stepFrom
+    && g.state === 'PREPARED' && g.authorization === null && g.submission === null && g.outcome === null && walletBatchUnanswered(g);
+}
+
+/** The originating browser reports a pre-dispatch wallet refusal. This holds new hand-outs while the exact batch remains observable. */
+export async function recordWalletBatchRefusal(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  requestId: unknown, preparedAt: unknown, handout: unknown, walletCode: unknown): Promise<void> {
+  assertRunWallets(run, wallets);
+  if (!isWalletBatchFallbackCode(walletCode) || typeof handout !== 'string' || !HANDOUT.test(handout)) return refuse('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+  const recorded = await deps.store.atomically(run.runId, async scope => {
+    const g = (await scope.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+    const preparation = batchPreparation(g);
+    if (!preparation || preparation.requestId !== requestId || preparation.preparedAt !== preparedAt || typeof g.prepared?.handoutHash !== 'string'
+      || !handedTo(g, handout) || !dueUnansweredBatch(scope.run, g, deps.now())) return refuse('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+    if (!deps.userFunded || !g.validUntil || g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS >= scope.run.expiresAt.getTime()
+      || 'reason' in declineProofFacts(g.prepared, true)) return refuse('WORKFLOW_RUN_FALLBACK_UNAVAILABLE');
+    if (g.code === WALLET_BATCH_REFUSAL_RECORDED) return g;
+    const marked = await scope.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'PREPARED', { code: WALLET_BATCH_REFUSAL_RECORDED }, 'GROUP_STATE', g.version);
+    if (!marked) return null;
+    await scope.appendEvent('GROUP_WALLET_REFUSAL_REPORTED', WALLET_BATCH_REFUSAL_RECORDED, { group: g.groupIndex, ...preparation, walletCode });
+    return marked;
+  });
+  if (!recorded) return refuse('WORKFLOW_RUN_CHANGED');
+}
+
+/** The refused preparation as evidence: everything the wallet was given, never the hand-out secret's hash. */
+function refusedBatchEvidence(prepared: GroupRecord['prepared']): Record<string, unknown> | null {
+  if (!prepared || typeof prepared !== 'object') return null;
+  const evidence: Record<string, unknown> = { ...prepared as Record<string, unknown> };
+  delete evidence.handoutHash;
+  return evidence;
+}
+/** Same run, same current step. A browser report becomes usable only after independent chain evidence and a locked comparison. */
+async function resumeRefusedWalletBatch(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord): Promise<RunRecord> {
+  const now = deps.now(), preparation = batchPreparation(g);
+  if (!dueUnansweredBatch(run, g, now) || !preparation || !g.validUntil) return refuse('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+  const paused = executionRefusal();
+  if (paused) return refuse(paused);
+  const settledAt = new Date(g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS);
+  if (now < settledAt) return refuse('WORKFLOW_RUN_FALLBACK_NOT_READY');
+  // Security review (recovery build): one chain proof per preparation per minute and process, as for History's decline proofs. A repeat inside
+  // the window is answered "not ready yet" without reading the chain again.
+  const key = `fallback:${run.runId}:${g.groupIndex}:${preparation.preparedAt}`, last = recentUnproven.get(key);
+  if (last !== undefined && now.getTime() - last < DECLINE_PROOF_RETRY_MS) return refuse('WORKFLOW_RUN_FALLBACK_NOT_READY');
+  const proof = await proveDeclinedBatchUnsent(deps.userFunded?.evm(g.chain) ?? null, g.prepared, settledAt, now, true);
+  if (!proof.proven) {
+    if (recentUnproven.size >= 1_000) recentUnproven.clear();
+    recentUnproven.set(key, now.getTime());
+    deps.log('workflow_run.batch_fallback_unproven', { runId: run.runId, group: g.groupIndex, reason: proof.reason });
+    return refuse(proof.reason === 'DECLINE_PROOF_NOT_SETTLED' || proof.reason === 'DECLINE_PROOF_CHAIN_BEHIND'
+      ? 'WORKFLOW_RUN_FALLBACK_NOT_READY' : 'WORKFLOW_RUN_FALLBACK_UNPROVEN');
+  }
+  const resumed = await deps.store.atomically(run.runId, async scope => {
+    const group = (await scope.groups(run.runId))[g.groupIndex];
+    if (!group || group.version !== g.version || group.code !== WALLET_BATCH_REFUSAL_RECORDED || !dueUnansweredBatch(scope.run, group, deps.now())) return null;
+    const steps = await scope.steps(run.runId);
+    if (steps.slice(0, g.stepFrom).length !== g.stepFrom || steps.slice(0, g.stepFrom).some(s => s.state !== 'RECONCILED')) return null;
+    for (let index = g.stepFrom; index <= g.stepTo; index++) {
+      if (steps[index]?.state !== 'DELEGATED' || !await scope.stepTransition(run.runId, index, ['DELEGATED'], 'BLOCKED', { code: WALLET_BATCH_FALLBACK_VERIFIED })) return null;
+      if (!await scope.stepTransition(run.runId, index, ['BLOCKED'], 'PENDING', { code: null }, 'STEP_RESUMED')) return null;
+    }
+    const changed = await scope.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'PLANNED', { strategy: 'EVM_OWNER_STEP', signing: 'WHEN_DUE',
+      // Security review: the exact batch the wallet refused stays in the record (without its hand-out hash) for reconciliation and evidence.
+      prepared: { kind: WALLET_BATCH_FALLBACK_VERIFIED, ...preparation, refused: refusedBatchEvidence(g.prepared) }, validUntil: null, code: WALLET_BATCH_FALLBACK_VERIFIED },
+      'GROUP_RESUMED', g.version);
+    if (!changed) return null;
+    const { ownerNonce, fromBlock, toBlock } = proof;
+    await scope.appendEvent('GROUP_WALLET_FALLBACK_VERIFIED', WALLET_BATCH_FALLBACK_VERIFIED, { group: g.groupIndex, ...preparation, ownerNonce, fromBlock, toBlock });
+    return scope.run;
+  });
+  if (!resumed) return refuse('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+  await advanceRun(runnerDeps(deps), run.runId);
+  return (await deps.store.byId(run.runId)) ?? resumed;
+}
 /** What the owner's browser is shown of a prepared artifact: never the hand-out token's hash. */
 const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Object.entries(prepared).filter(([key]) => key !== 'handoutHash')) as Prepared;
 /**
@@ -467,6 +557,7 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   if (run.expiresAt <= now) refuse('WORKFLOW_RUN_EXPIRED');
   // A batch already handed to a browser goes again, or is prepared again, only to that browser (`handedTo`).
   if (batch && g.state === 'PREPARED' && !handedTo(g, handout)) refuse('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
+  if (batch && g.state === 'PREPARED' && g.code === WALLET_BATCH_REFUSAL_RECORDED) refuse(WALLET_BATCH_REFUSAL_RECORDED);
   if (g.state === 'PREPARED' && g.validUntil && g.validUntil > now) {
     const deliveryRefusal = preparedGroupDeliveryRefusal(run, g, steps);
     if (deliveryRefusal) return refuse(deliveryRefusal);
@@ -735,6 +826,8 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   assertRunWallets(run, wallets);
   if (run.mode !== 'USER_FUNDED') refuse('WORKFLOW_RUN_NOT_USER_FUNDED');
   const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  if (g.prepared?.kind === WALLET_BATCH_FALLBACK_VERIFIED && answer.kind === 'EVM_WALLET_BATCH')
+    return batchAnsweredAfterStop(deps, run, g, { batchId: answer.batchId });
   if (answeredOnce(g)) return answeredAgain(deps, run, g, answer);
   if (stoppedUnanswered(g)) {
     const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
@@ -791,6 +884,8 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   if (!authorized) {
     const latest = (await deps.store.groups(run.runId))[groupIndex];
     if (latest && answeredOnce(latest)) return answeredAgain(deps, run, latest, answer);
+    if (latest?.prepared?.kind === WALLET_BATCH_FALLBACK_VERIFIED && answer.kind === 'EVM_WALLET_BATCH')
+      return batchAnsweredAfterStop(deps, run, latest, { batchId: answer.batchId });
     if (latest && g.strategy === 'EVM_WALLET_BATCH' && stoppedUnanswered(latest))
       return await batchAnsweredAfterStop(deps, run, latest, { batchId: String(verified.value.batchId) });
     return refuse('WORKFLOW_RUN_CHANGED');
@@ -849,7 +944,7 @@ async function batchAnsweredAfterStop(deps: WorkflowRunDeps, run: RunRecord, g: 
     notSent: answer.notSent ?? null });
   // An answer that contradicts a verified rejection is kept as an append-only fact: History can then never delete the attempt (0033's closed
   // allowlist refuses any event it does not name). Recording it never changes the refusal.
-  if (g.code === WALLET_REQUEST_REJECTED)
+  if (g.code === WALLET_REQUEST_REJECTED || g.prepared?.kind === WALLET_BATCH_FALLBACK_VERIFIED)
     await deps.store.recordAnswerAfterStop(run.runId, g.groupIndex, { batchIdReported: answer.batchId !== undefined, hashes: answer.hashes ?? null,
       notSent: answer.notSent ?? null }).catch(() => deps.log('workflow_run.answer_after_stop_unrecorded', { run: run.runId, group: g.groupIndex }));
   return refuse('WALLET_BATCH_ANSWERED_AFTER_STOP');
@@ -865,6 +960,8 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
   assertRunWallets(run, wallets);
   const groups = await deps.store.groups(run.runId);
   const g = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  if (g.prepared?.kind === WALLET_BATCH_FALLBACK_VERIFIED)
+    return batchAnsweredAfterStop(deps, run, g, { hashes: hashes.length, notSent });
   if (g.strategy !== 'EVM_WALLET_BATCH') refuse('WORKFLOW_RUN_GROUP_NOT_BATCH');
   if (notSent === true) {
     if (stoppedUnanswered(g)) return await batchAnsweredAfterStop(deps, run, g, { hashes: 0, notSent: true });
@@ -928,6 +1025,8 @@ export type RunView = { readonly workflowRunId: string; readonly approvalId: str
   readonly authority: 'NONE'; readonly note: string | null };
 export type RunGroupView = { readonly index: number; readonly chain: string; readonly strategy: string; readonly signing: string; readonly steps: readonly [number, number];
   readonly state: string; readonly awaitsDelivery: number | null; readonly code: string | null; readonly validUntil: string | null;
+  /** Owner only. Earliest time the server can check an unanswered batch for safe per-step continuation. */
+  readonly batchFallbackAt?: string;
   /** Always the run's own wallet on this network (S1). */
   readonly feePayer: string;
   /**
@@ -991,6 +1090,7 @@ function provenNothingSent(run: RunRecord, steps: readonly RunStepRecord[], grou
 export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'steps' | 'groups'>; readonly now?: () => Date }, run: RunRecord,
   options: { readonly outcomes: boolean; readonly origin?: string | null; readonly owner?: boolean }): Promise<RunView> {
   const owner = options.owner === true;
+  const now = deps.now?.() ?? new Date();
   const steps = await deps.store.steps(run.runId);
   const groupRecords = run.mode === 'USER_FUNDED' ? await deps.store.groups(run.runId) : [];
   const composed = composeWorkflowBound(run.strategy, run.workflowHash);
@@ -1033,9 +1133,12 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
         ? { chain: typeof (t as { chain?: unknown }).chain === 'string' ? (t as { chain: string }).chain : g.chain, hash: (t as { hash: string }).hash } : null;
       return entry ? [{ ...entry, explorerUrl: executionExplorer(entry.chain, entry.hash, false) }] : [];
     });
+    const fallbackAt = g.validUntil && new Date(g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS);
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
       // Requesters see that the owner's wallet pays, never which wallet, its batch id or its fees; shared status adds hashes and the gas amount.
       code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: owner ? g.feePayer : 'OWNER_WALLET',
+      ...owner && fallbackAt && fallbackAt < run.expiresAt && g.code === WALLET_BATCH_REFUSAL_RECORDED && dueUnansweredBatch(run, g, now)
+        ? { batchFallbackAt: fallbackAt.toISOString() } : {},
       maxFee: owner && fee?.maxCost && fee.unit && (fee.unit !== 'token' || tokenFee) ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false,
         ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {}, ...tokenFee ? { token: tokenFee } : {} } : null,
       // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet). ADR-0010: a fee
@@ -1068,7 +1171,8 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   const ownerGroup = group && (group.strategy === 'EVM_OWNER_STEP' || group.strategy === 'SOLANA_OWNER_STEP');
   const nextAction = run.state === 'PENDING' ? 'OWNER_CHOOSES_MODE' : run.state === 'HALTED' ? 'OWNER_DECIDES'
     : ['RUNNING', 'ATTENTION'].includes(run.state)
-      ? (run.mode === 'CONFIRM_EACH_STEP' || (run.mode === 'USER_FUNDED' && ownerGroup)) && (current?.state === 'READY' || current?.state === 'PENDING') ? 'OWNER_SIGNS_STEP'
+      ? group?.code === WALLET_BATCH_REFUSAL_RECORDED && group.state === 'PREPARED' ? 'OWNER_DECIDES'
+        : (run.mode === 'CONFIRM_EACH_STEP' || (run.mode === 'USER_FUNDED' && ownerGroup)) && (current?.state === 'READY' || current?.state === 'PENDING') ? 'OWNER_SIGNS_STEP'
         : run.mode === 'USER_FUNDED' && group && !ownerGroup && ['PLANNED', 'PREPARED'].includes(group.state) ? 'OWNER_SIGNS_GROUP'
           : run.mode === 'USER_FUNDED' && group?.state === 'AUTHORIZED' && group.strategy === 'EVM_WALLET_BATCH' ? 'OWNER_CONFIRMS_BATCH'
             : 'WAITING_FOR_RECONCILIATION' : 'NONE';
@@ -1097,7 +1201,7 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
             : halted === 'STOPPED' ? 'Stopped before any step completed. FloFi submits nothing more of it; the owner decides what happens next.'
               : run.state === 'ATTENTION' ? 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.'
                 : unanswered ? `Ended. ${mayHaveExecuted}` : null;
-  const resumable = resumeRefusal(run, steps, groupRecords, deps.now?.() ?? new Date()) === null;
+  const resumable = resumeRefusal(run, steps, groupRecords, now) === null;
   return { workflowRunId: run.runId, approvalId: run.handoffId, state: run.state, mode: run.mode, stepCount: run.stepCount, currentStep: run.currentStep, code: run.code,
     workflowHash: run.workflowHash, expiresAt: run.expiresAt.toISOString(), completedAt: run.completedAt?.toISOString() ?? null, createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(), stepsVisible: options.outcomes, steps: views, nextAction, groups, halted, resumable, authority: 'NONE', note };

@@ -194,7 +194,7 @@ describe('BUILD-DEVELOPER-001 approvals: bound to one strategy revision, claimed
     const runtime = recordingRuntime({ modes: { 'base-sepolia-swap': 'harness' } }), p = await developerProject(t.db), api = developerApi({ db: t.db, runtime }, p.key);
     const rows = async () => (await t.db.query(`SELECT count(*)::int AS n FROM mcp_handoffs WHERE requester_kind = 'DEVELOPER_PROJECT' AND requester_ref = $1`, [`${p.projectId}.sandbox`])).rows[0]!.n;
     // Above the review's slippage limit: the strategy composes and passes every availability fact, but the review blocks it.
-    const blocked = await api<{ id: string; workflowHash: string; availability: Record<string, unknown> }>('POST', '/strategies', { strategy: { ...SWAP, slippageBps: 400 } });
+    const blocked = await api<{ id: string; workflowHash: string; availability: Record<string, unknown> }>('POST', '/strategies', { strategy: { ...SWAP, slippageBps: 501 } });
     expect(blocked.status, blocked.text).toBe(201);
     expect(blocked.body.availability).toMatchObject({ approvable: false, reason: 'REVIEW_BLOCKED' });
     const refused = await api('POST', '/approvals', { strategyId: blocked.body.id, workflowHash: blocked.body.workflowHash });
@@ -202,7 +202,7 @@ describe('BUILD-DEVELOPER-001 approvals: bound to one strategy revision, claimed
     expect(errorOf(refused).issues).toEqual([{ path: '/strategy', rule: 'SLIPPAGE_ABOVE_REVIEW_LIMIT' }]);
     expect(await rows()).toBe(0);
     // The same swap within the limit is handed off: the blocker, not the action, was refused.
-    const fine = (await api<{ id: string; workflowHash: string }>('POST', '/strategies', { strategy: { ...SWAP, slippageBps: 50 } })).body;
+    const fine = (await api<{ id: string; workflowHash: string }>('POST', '/strategies', { strategy: { ...SWAP, slippageBps: 500 } })).body;
     expect((await api('POST', '/approvals', { strategyId: fine.id, workflowHash: fine.workflowHash })).status).toBe(201);
     expect(await rows()).toBe(1);
   });

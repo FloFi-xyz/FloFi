@@ -28,7 +28,7 @@ import { composerSummary, composerNodeState } from '../domain/composer-presentat
 import { RepayAuthoringForm } from './repay-panel';
 import { BorrowAuthoringForm } from './borrow-panel';
 import { SupplyAuthoringForm } from './supply-panel';
-import { SolanaSwapForm } from './jupiter-panel';
+import { SolanaSwapForm, useJupiterSlippageChoices } from './jupiter-panel';
 import { solanaSwapDetails, solanaSwapLabels } from '../domain/jupiter-authoring';
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
 import { SolanaLiquidityForm } from './solana-liquidity-panel';
@@ -43,7 +43,7 @@ import { supplyReviewFormId, poolReviewFormId } from './composer-card';
 import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksConfiguration } from './stocks-settings';
 import { DEFAULT_SLIPPAGE, bpsToPercent, priceDifferenceLabel } from '../domain/slippage-policy';
-import { priceDifferenceBps } from './price-difference-input';
+import { priceDifferenceBps, SlippageChoices } from './price-difference-input';
 import { plainFinding } from '../domain/editor-overview';
 import { withoutChainId } from '../domain/approved-ux';
 import { workflowPositionManagement } from '../domain/liquidity-positions';
@@ -67,13 +67,16 @@ function slippageMessage(cause: unknown) {
  * BUILD-FIX-UX-001: the swap's maximum slippage, edited like any other parameter (Enter or Apply). It always shows the applied value.
  * P0 approved UX (boards 04, 16): it is the card's "Max price difference", typed in percent; the command still carries exact basis points.
  */
-function SlippageField({ value, current, error, onChange, onSubmit }: { value: string; current: number | null; error: string; onChange(value: string): void; onSubmit(event: FormEvent<HTMLFormElement>): void }) {
+function SlippageField({ value, current, error, onChange, onSubmit, auto }: { value: string; current: number | null; error: string;
+  onChange(value: string): void; onSubmit(event: FormEvent<HTMLFormElement>): void; auto?: ReturnType<typeof useJupiterSlippageChoices> }) {
   const { t: tr } = useLocale();
   const id = useId();
   return <form onSubmit={onSubmit} className="inspector-form" aria-label={tr("Max price difference")}>
     <label htmlFor={`${id}-slippage`}>{tr("Max price difference (%)")}</label>
     <input id={`${id}-slippage`} type="text" value={value} onChange={event => onChange(event.target.value)} inputMode="decimal" autoComplete="off" spellCheck={false} maxLength={6}
       aria-invalid={Boolean(error) || undefined} aria-describedby={`${id}-slippage-note`}/>
+    <SlippageChoices {...auto} bps={priceDifferenceBps(value)} maximumBps={SWAP_SLIPPAGE_RANGE.maximum} onBpsChange={bps => onChange(bpsToPercent(bps))}/>
+    {auto?.autoError && <p className="muted" role="status">{tr(auto.autoError)}</p>}
     <button type="submit" disabled={value === (current === null ? '' : bpsToPercent(String(current)))}>{tr("Apply max price difference")}</button>
     <p id={`${id}-slippage-note`} className={error ? 'form-error' : 'muted'} role={error ? 'alert' : undefined}>{error ? tr(error)
       : current === null ? tr('No max price difference is set for this step.') : tr('Applied limit: {0}. A fresh simulation and Review use it.', priceDifferenceLabel(current))}</p>
@@ -252,6 +255,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   const supply = node?.actionType === 'supply';
   const lendingDraft = node && !lending && ['supply', 'borrow', 'repay', 'withdraw'].includes(node.actionType) ? cryptoSelections[node.nodeId] : undefined;
   const solana = node ? solanaSwapDetails(node) : null;
+  const jupiterSlippage = useJupiterSlippageChoices(solana, `${node?.nodeId ?? ''}:${state.workflow.revision}`);
   const orcaPosition = node ? solanaLiquidityDetails(node) : null;
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a node that manages an existing position is never edited as a deposit here.
   const managed = node ? workflowPositionManagement({ nodes: [node] }) : null;
@@ -304,7 +308,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
         <label>{tr("Input amount (")}{tr(selection.from)})<TokenAmountInput value={amountInputs[node.nodeId] ?? cryptoSwap.amount} aria-invalid={Boolean(error) || undefined} onValueChange={value => { setError(''); editCanvasAmount(node.nodeId, value); }}/></label>
         {amountInputs[node.nodeId] !== undefined && <p className="muted">{tr("Press Enter to apply the amount.")}</p>}
       </form>}
-      {cryptoSwap && selection && <SlippageField value={slippage} current={Number(cryptoSwap.slippage)} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }}
+      {cryptoSwap && selection && node.userConstraints.some(constraint => constraint.kind === 'MAXIMUM_SLIPPAGE_BPS') && <SlippageField auto={jupiterSlippage} value={slippage} current={Number(cryptoSwap.slippage)} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }}
         onSubmit={event => applySlippage(event, bps => ({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, slippage: bps }, source: 'CANVAS', baseRevision: state.workflow.revision }))}/>}
       {/* BUILD-FLOFI-UX-FIX-003: a bridge's settings are only what its card does not edit (recipient, routing, slippage), without protocol text. */}
       {universalBridge && <UniversalBridgeForm options key={node!.nodeId + ':' + state.workflow.revision} nodeId={node!.nodeId}/>}

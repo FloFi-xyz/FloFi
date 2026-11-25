@@ -23,7 +23,8 @@ export function isSolanaCompositionCandidate(workflow: SemanticWorkflow): boolea
 export function validateSolanaCompositionWorkflow(workflow: SemanticWorkflow): BoundComposition {
   const composed = readBoundComposition(workflow);
   if (composed.binding.id !== SOLANA_DEVNET_SWAP_LIQUIDITY.id) fail('COMPOSITION_UNSUPPORTED');
-  validateSolanaSwapWorkflow(projectCompositionProducer(workflow));
+  const swap = validateSolanaSwapWorkflow(projectCompositionProducer(workflow));
+  if (swap.slippageBps > 300) fail('SOLANA_SLIPPAGE_OUT_OF_RANGE');
   const position = validateSolanaLiquidityWorkflow({ ...workflow, nodes: [composed.isolatedConsumer], resourceEdges: [] });
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a composition deposits; it never manages an existing position.
   if (position.management) fail('COMPOSITION_UNSUPPORTED');

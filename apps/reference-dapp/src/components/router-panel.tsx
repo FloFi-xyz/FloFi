@@ -2,16 +2,17 @@
 'use client';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { requotedMessage } from '../domain/simulation-presentation';
+import { slippageRangeMessage } from '../domain/slippage-policy';
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { ROUTER_PHASES, type RouteChange, type RouterPhase } from '@defi-workflow-engine/workflow-contracts';
+import { ROUTER_MAXIMUM_SLIPPAGE_BPS, ROUTER_PHASES, type RouteChange, type RouterPhase } from '@defi-workflow-engine/workflow-contracts';
 import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworkOfInput, ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS,
   ROUTER_ROUTING_LABEL, routerDisabledCode, type RouterBridgeInput, type RouterDestination, type RouterNetwork, type RouterRouting, type RouterSource } from '../domain/router-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
-import { PriceDifferenceInput } from './price-difference-input';
+import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
 import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { authoringEnvironment, useExecutionEnvironment } from '../state/capability-store';
@@ -70,11 +71,16 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
   // The wallet's environment bounds the choice; within it the chosen chains select the route (mainnet also offers the Robinhood Chain routes).
   const authoring = authoringEnvironment(walletEnvironment), environment = authoring === 'unknown' ? null : authoring;
   const chosen = { ...input, ...(nodeId ? bridgeNetworkInputs[nodeId] : {}) }, routed = routerNetworkOfInput(chosen);
-  const network: RouterNetwork | null = !environment ? null : routed && ROUTER_NETWORK_OPTIONS[routed].environment === environment ? routed : environment;
-  const option = network ? ROUTER_NETWORK_OPTIONS[network] : null, choices = environment && option ? routerChainChoices(environment, option.source) : null;
-  // A Canvas draft may briefly carry a Solana label; only a certified Router pair reaches the form fields.
+  // An existing card can temporarily have an incompatible draft pair. Keep its authored labels and block Review until the draft matches a pair.
+  const draftUncertified = Boolean(nodeId && (!existing || !routed));
+  const network: RouterNetwork | null = !environment ? null : routed && ROUTER_NETWORK_OPTIONS[routed].environment === environment ? routed : nodeId ? null : environment;
+  const displayed = nodeId ? existing && (routed ?? existing.network) : network;
+  const option = displayed ? ROUTER_NETWORK_OPTIONS[displayed] : null;
+  const maximumSlippageBps = option?.profile.maximumSlippageBps ?? ROUTER_MAXIMUM_SLIPPAGE_BPS;
+  const choices = environment && option?.environment === environment ? routerChainChoices(environment, option.source) : null;
   const fields = option ? routerInputForNetworks({ ...input, amount: nodeId ? amountInputs[nodeId] ?? input.amount : input.amount }, option) : input;
-  const l = LABELS[network ?? existing?.network ?? initialNetwork ?? 'mainnet'];
+  const destinationLabel = displayed ? LABELS[displayed].dstShort : null;
+  const guidance = draftUncertified ? 'Choose matching networks' : !network ? 'Connect a wallet on a supported network to configure Bridge.' : null;
   const chooseSource = (source: RouterSource) => {
     if (!environment) return;
     const destinations = routerChainChoices(environment, source).destinations;
@@ -82,20 +88,22 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
   };
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!network) return;
+    if (!network || draftUncertified) return;
     try {
       createRouterNode(nodeId ?? 'node-preview', fields); setError('');
       propose(nodeId ? { type: 'SET_ROUTER_BRIDGE', nodeId, input: fields, source: 'CANVAS', baseRevision: state.workflow.revision }
         : { type: 'ADD_ROUTER_BRIDGE', input: fields, source: 'CANVAS', baseRevision: state.workflow.revision });
       onDone?.();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID'); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID';
+      setError(slippageRangeMessage(code, maximumSlippageBps) ?? code);
+    }
   }
   const compact = options && Boolean(nodeId);
-  // The card's draft networks that are not a certified Router pair are never replaced by another route behind these compact options.
-  const draftUncertified = compact && Boolean(nodeId && bridgeNetworkInputs[nodeId]) && !routed;
   return <form className={`inspector-fields${compact ? ' bridge-options-form' : ''}`} aria-label={tr(nodeId ? 'Edit cross-chain bridge' : network === 'testnet' ? 'Create testnet cross-chain bridge' : 'Create cross-chain bridge')} onSubmit={submit}>
-    {compact ? !network && <p className="muted">{tr('Connect a wallet on a supported network to configure Bridge.')}</p> : <><p className="muted">{tr(!network ? 'Connect a wallet on a supported network to configure Bridge.' : network === 'testnet' ? 'Cross-chain Router · Base Sepolia → Arbitrum Sepolia · test USDC → USDC. No real funds; any wallet can use it. A route is chosen and shown at Review.'
-      : `Cross-chain Router · ${option!.sourceLabel} → ${option!.destinationLabel} · ${option!.pair.source.symbol} → ${option!.pair.destination.symbol}. Real funds on mainnet; a route is chosen and shown at Review.`)}</p>
+    {guidance && <p className="muted">{tr(guidance)}</p>}
+    {!compact && <>{network && <p className="muted">{tr(network === 'testnet' ? 'Cross-chain Router · Base Sepolia → Arbitrum Sepolia · test USDC → USDC. No real funds; any wallet can use it. A route is chosen and shown at Review.'
+      : `Cross-chain Router · ${option!.sourceLabel} → ${option!.destinationLabel} · ${option!.pair.source.symbol} → ${option!.pair.destination.symbol}. Real funds on mainnet; a route is chosen and shown at Review.`)}</p>}
     <label>{tr("Network")}<select aria-label={tr("Cross-chain network")} value={environment ?? ''} disabled>
       <option value={environment ?? ''}>{tr(environment === 'mainnet' ? 'Mainnet (real funds)' : environment === 'testnet' ? 'Testnet (test USDC)' : 'Network')}</option></select></label>
     <label>{tr("Source chain")}<select aria-label={tr("Cross-chain source chain")} value={option?.source ?? ''} disabled={!choices || choices.sources.length < 2}
@@ -105,15 +113,15 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
         <option key={destination} value={destination}>{tr(destination === 'Arbitrum' ? 'Arbitrum One' : destination || 'Network')}</option>)}</select></label>
     <label>{tr("Token")}<select aria-label={tr("Cross-chain token")} value={fields.token} disabled={!option}><option value={fields.token}>{tr(`${fields.token} → ${option?.pair.destination.symbol ?? fields.token}`)}</option></select></label>
     <label>{tr(`Amount (${fields.token})`)}<TokenAmountInput aria-label={tr(`Cross-chain amount (${fields.token})`)} maxLength={40} value={fields.amount} onValueChange={amount => set({ amount })}/></label></>}
-    <label>{tr("Recipient")}{tr(network ? ` on ${l.dstShort}` : '')}<input aria-label={tr("Cross-chain recipient")} autoComplete="off" spellCheck={false} maxLength={42} placeholder={tr("Your connected wallet")} value={input.recipient}
+    <label>{tr("Recipient")}{tr(destinationLabel ? ` on ${destinationLabel}` : '')}<input aria-label={tr("Cross-chain recipient")} autoComplete="off" spellCheck={false} maxLength={42} placeholder={tr("Your connected wallet")} value={input.recipient}
       onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr("Routing")}<select aria-label={tr("Cross-chain routing policy")} value={input.routing} onChange={e => set({ routing: e.target.value as RouterRouting })}>
       {(Object.keys(ROUTER_ROUTING_LABEL) as RouterRouting[]).map(k => <option key={k} value={k}>{tr(ROUTER_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Cross-chain max price difference (%)')} maxLength={5} bps={input.slippage} onBpsChange={slippage => set({ slippage })}/></label>
+    <SlippageChoices bps={input.slippage} maximumBps={maximumSlippageBps} onBpsChange={slippage => set({ slippage })}/>
     {!compact && network && option && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : network === 'mainnet' ? 'Maximum 100 USDC per bridge in this release.'
       : `Between ${bound(option.pair.minimumAmount, option.pair.source.decimals)} and ${bound(option.pair.maximumAmount, option.pair.source.decimals)} ${option.pair.source.symbol} per bridge in this release.`)}{tr(" The minimum you receive is fixed in the reviewed deposit.")}</small>}
     {error && <p role="alert">{tr(error)}</p>}
-    {draftUncertified && <p className="muted">{tr('Choose matching networks')}</p>}
     <button type="submit" disabled={!network || draftUncertified}>{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
@@ -123,6 +131,7 @@ const messagesFor = (l: Labels): Record<string, string> => ({
   ETHEREUM_MAINNET_NOT_ENABLED: 'Ethereum Mainnet routing is not enabled on this server.',
   ROUTER_NOT_ENABLED: 'The Cross-chain Router is not enabled on this server.', ROUTER_TESTNET_NOT_ENABLED: 'The testnet Cross-chain Router is not enabled on this server.',
   ROUTER_STORAGE_NOT_CONFIGURED: 'Execution storage is not configured on this server.',
+  ROUTER_PAIR_UNSUPPORTED: 'Choose matching networks',
   ROUTER_WALLET_REQUIRED: 'Connect a wallet first.', ROUTER_WRONG_CHAIN: `Switch your wallet to ${l.src}.`, ROUTER_WRONG_OWNER: 'Select the wallet account shown in Review.',
   ROUTER_REVIEW_REQUIRED: 'Accept the current Review first.', ROUTER_REVIEW_EXPIRED: 'This Review expired. Get a fresh route and review again.',
   ROUTE_CHANGED: 'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.',

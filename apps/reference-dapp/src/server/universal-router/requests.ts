@@ -12,7 +12,7 @@ const fail = (code: string): never => { throw new Error(code); };
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 export type DiscoveryTokenInput = { readonly kind: 'NATIVE' } | { readonly kind: 'TOKEN'; readonly address: string; readonly decimals: number; readonly symbol?: string };
 export type DiscoveryRequestInput = { readonly source: UniversalNetworkKey; readonly destination: UniversalNetworkKey; readonly inputToken: DiscoveryTokenInput;
-  readonly outputToken: DiscoveryTokenInput; readonly amount: string; readonly slippageBps: number; readonly owner?: string; readonly recipient?: string;
+  readonly outputToken: DiscoveryTokenInput; readonly amount: string; readonly slippageBps: number; readonly recommendSlippage?: true; readonly owner?: string; readonly recipient?: string;
   readonly providers?: readonly UniversalRoutingProvider[] };
 const KEYS = Object.keys(UNIVERSAL_NETWORKS) as UniversalNetworkKey[];
 function token(network: (typeof UNIVERSAL_NETWORKS)[UniversalNetworkKey], value: unknown): UniversalToken {
@@ -22,7 +22,7 @@ function token(network: (typeof UNIVERSAL_NETWORKS)[UniversalNetworkKey], value:
   return universalToken({ chainId: network.chain, kind: 'TOKEN', address: value.address as string, decimals: value.decimals as number, symbol }, network.chain, 'UNIVERSAL_REQUEST_TOKEN_INVALID');
 }
 export function parseDiscoveryRequest(value: unknown): DiscoveryRequest & { readonly providers: readonly UniversalRoutingProvider[] } {
-  if (!isObject(value) || Object.keys(value).some(k => !['source', 'destination', 'inputToken', 'outputToken', 'amount', 'slippageBps', 'owner', 'recipient', 'providers'].includes(k)))
+  if (!isObject(value) || Object.keys(value).some(k => !['source', 'destination', 'inputToken', 'outputToken', 'amount', 'slippageBps', 'owner', 'recipient', 'providers', 'recommendSlippage'].includes(k)))
     return fail('UNIVERSAL_REQUEST_INVALID');
   if (!KEYS.includes(value.source as UniversalNetworkKey) || !KEYS.includes(value.destination as UniversalNetworkKey) || value.source === value.destination)
     return fail('UNIVERSAL_REQUEST_NETWORK_INVALID');
@@ -33,8 +33,10 @@ export function parseDiscoveryRequest(value: unknown): DiscoveryRequest & { read
   const providers = value.providers === undefined ? [...UNIVERSAL_ROUTING_PROVIDERS] : Array.isArray(value.providers) &&
     value.providers.length >= 1 && value.providers.every(p => (UNIVERSAL_ROUTING_PROVIDERS as readonly unknown[]).includes(p)) && new Set(value.providers).size === value.providers.length
     ? value.providers as UniversalRoutingProvider[] : fail('UNIVERSAL_REQUEST_PROVIDERS_INVALID');
+  if (value.recommendSlippage !== undefined && (value.recommendSlippage !== true || providers.length !== 1 || providers[0] !== 'relay'))
+    return fail('UNIVERSAL_REQUEST_SLIPPAGE_INVALID');
   return { source, destination, inputToken: token(source, value.inputToken), outputToken: token(destination, value.outputToken), amount: value.amount,
-    slippageBps: value.slippageBps as number, providers,
+    slippageBps: value.slippageBps as number, providers, ...value.recommendSlippage === true ? { recommendSlippage: true } : {},
     ...value.owner !== undefined ? { owner: canonicalUniversalAddress(source, value.owner, 'UNIVERSAL_REQUEST_OWNER_INVALID') } : {},
     ...value.recipient !== undefined ? { recipient: canonicalUniversalAddress(destination, value.recipient, 'UNIVERSAL_REQUEST_RECIPIENT_INVALID') } : {} };
 }

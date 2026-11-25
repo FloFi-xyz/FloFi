@@ -22,7 +22,7 @@ import { applyApproval, claimApproval, openBrowserApproval, previewApproval, res
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
 import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
-  workflowRunUserFundedReport, workflowRunUserFundedStart, workflowRunUserFundedWalletRejected } from '../platform/approve';
+  workflowRunUserFundedReport, workflowRunUserFundedStart, workflowRunUserFundedWalletRefused, workflowRunUserFundedWalletRejected } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -169,8 +169,8 @@ export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Resu
   });
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
-export async function resumeWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightProductAccess(async () => { return runAction((s, w) => workflowRunResume(s, approvalId, w), true);
+export async function resumeWorkflowRunHandoff(approvalId: string, loadStep = true): Promise<Result<ClaimedProposal>> {
+  return withFlightProductAccess(async () => { return runAction((s, w) => workflowRunResume(s, approvalId, w, loadStep !== false), true);
   });
 }
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the owner chose user-funded execution groups for the wallets this browser reported. */
@@ -248,6 +248,11 @@ export async function reportUserFundedRejection(approvalId: string, groupIndex: 
   return runAction(async (s, w) => { await workflowRunUserFundedWalletRejected(s, approvalId, w, groupIndex, requestId); return null; });
 
   });
+}
+/** Record a wallet refusal without granting any new authorization. */
+export async function reportUserFundedRefusal(approvalId: string, groupIndex: number, requestId: string, preparedAt: string, handout: string,
+  walletCode: number): Promise<Result<ClaimedProposal>> {
+  return withFlightOwner(() => runAction((s, w) => workflowRunUserFundedWalletRefused(s, approvalId, w, groupIndex, requestId, preparedAt, handout, walletCode)));
 }
 /** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
 export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<WalletWorkflowReviewView>> {

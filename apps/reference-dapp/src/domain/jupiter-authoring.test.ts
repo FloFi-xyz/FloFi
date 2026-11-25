@@ -36,7 +36,8 @@ describe('Solana swap chat/canvas authoring', () => {
     expect(parseTokenAmount('10.5', 6)).toBe('10500000');
     for (const bad of ['0', '1e3', '-1', '1.0000001', '']) expect(() => parseTokenAmount(bad, 6)).toThrow();
     expect(() => createSolanaSwapNode('n', { ...canvasInput, to: 'USDC' })).toThrow('INVALID_ASSET_PAIR');
-    expect(() => createSolanaSwapNode('n', { ...canvasInput, slippage: '301' })).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
+    expect(solanaSwapDetails(createSolanaSwapNode('n', { ...canvasInput, slippage: '500' }))?.slippage).toBe('500');
+    expect(() => createSolanaSwapNode('n', { ...canvasInput, slippage: '501' })).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
     expect(() => parseLocalCommand('swap 10 BONK to SOL on Solana', templateEditor().workflow, context)).toThrow();
   });
   it('edits amount and slippage through chat with revision checks and undo/redo', () => {

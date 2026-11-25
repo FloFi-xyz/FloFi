@@ -5,7 +5,7 @@ import { useLocale } from '../i18n/locale';
 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { buildEstimateFailureMessage, buildEstimateFailureReference } from '../domain/build-estimate';
-import { useLiveQuote } from '../state/build-estimate';
+import { useDisplayPrices, useLiveQuote } from '../state/build-estimate';
 import { Handle, Position } from '@xyflow/react';
 import type { composerSummary, composerNodeState } from '../domain/composer-presentation';
 import type { Command } from '../domain/commands';
@@ -31,7 +31,9 @@ import { AssetSearch } from './asset-search';
 import { LendingReservePicker, type LendingPickerData } from './lending-card-picker';
 import { useRevealPanel } from './canvas-panel-reveal';
 import { ProposalReviewArtifact } from './proposal-review';
-import { usdLine, type UsdLine } from '../domain/usd-estimate';
+import { usdAmount, usdLine, type UsdLine } from '../domain/usd-estimate';
+import { displayPriceAsset } from '../domain/price-assets';
+import { parseTokenAmount } from '../domain/jupiter-authoring';
 import type { CanvasCardParam } from '../domain/canvas-card-summary';
 import type { CardStatus } from '../domain/editor-overview';
 import type { CanvasNodeExecution } from '../domain/canvas-execution';
@@ -551,6 +553,7 @@ export type ComposerCardData = {
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
+  amountAssets?: readonly Parameters<typeof displayPriceAsset>[0][];
   estimateEvmOwner?: string | null; estimateSolanaOwner?: string | null;
   amountEditor?: CanvasAmountEditor;
   contextualProposal?: boolean;
@@ -587,7 +590,7 @@ export type ComposerCardData = {
 
 /** Shared UX-002 card; inspection has no authoring or simulation-result status. */
 export function ComposerCard({ data: card }: { data: ComposerCardData }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   // UX-007: the shared live quote for swap cards (Swap and the Stocks swap): calculating at once, then this exact amount's estimate or none.
   const quoteNode = card.estimateWorkflow?.nodes.find(n => n.nodeId === card.estimateNodeId);
   const ecosystem = operationWalletEcosystem(quoteNode?.chainId);
@@ -603,6 +606,21 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const expiredEstimate = quote.status === 'expired' && (!card.inspection || quoteFrozen) ? quote.estimate : null;
   const usdState ={ status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
+  const amountAssets = card.inspection || quoteFrozen ? [] : card.amountAssets ?? [];
+  const displayPrices = useDisplayPrices(amountAssets.some(asset => displayPriceAsset(asset) !== null));
+  function amountUsd(network: string, symbol: string, amount: string | undefined) {
+    for (const asset of amountAssets) {
+      const feed = displayPriceAsset(asset);
+      const observed = feed && displayPrices[feed];
+      const assetSymbol = feed === 'ETH' && 'address' in asset ? 'WETH' : feed;
+      if (!observed || observed.validUntil <= Date.now() || (symbol !== assetSymbol && !(feed === 'SOL' && symbol === 'WSOL')) || !amount) continue;
+      try {
+        const value = usdAmount(parseTokenAmount(amount, asset.decimals), asset.decimals, observed.priceUsd);
+        return usdLine(network, value, { status: 'ready', mocked: observed.evidence === 'MOCKED', observedAt: observed.observedAt }, language);
+      } catch { break; }
+    }
+    return usdLine(network, null, { status: 'none' }, language);
+  }
   const [amountError, setAmountError] = useState<string | null>(null);
   const [fiatFirst, setFiatFirst] = useState(false);
   const stocksCard = card.summary.action === 'Stocks';
@@ -758,12 +776,12 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)}
           {...stocksCard ? (card.stocks?.side === 'source' && stockEquity ? { equity: stockEquity } : {}) : { picker: picker('source') }}
           hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
-          usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>
+          usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState, language)}/>
         <ValueBox round caption={networkPending ? 'You receive' : 'You receive, approximately'} {...networkPending ? { placeholder: 'calculated after the network' } : {}}
           amount={networkPending ? undefined : estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={!networkPending && quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
           {...stocksCard ? (card.stocks?.side === 'destination' && stockEquity ? { equity: stockEquity } : {}) : { picker: picker('destination') }}
           hint="Estimated output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
-          usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
+          usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState, language)}/>
         </ValuePair>
         {networkPending && <span className="composer-quote-note composer-network-pending-note" role="status"><span className="composer-network-pending-dot" aria-hidden="true"/>{tr('Choose the network in the chat')}</span>}
         {/* BUILD-FLOFI-UX-FIX-003: the card says only what the owner must act on — mismatched networks, or why no estimate could be produced — in plain
@@ -788,13 +806,13 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         </div>)}
         {amountError && <span className="composer-amount-error" role="alert">{tr(amountError)}</span>}
       </AmountContainer> : poolValues?.length === 2 ? <ValuePair relationship="contribution" className="nodrag nopan">
-        <ValueBox source label="First liquidity asset amount" inputLabel={`First liquidity amount (${poolValues[0]!.token})`} amount={poolValues[0]!.amount} token={poolValues[0]!.token} network={sourceNetwork} hint="First liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })}
+        <ValueBox source label="First liquidity asset amount" inputLabel={`First liquidity amount (${poolValues[0]!.token})`} amount={poolValues[0]!.amount} token={poolValues[0]!.token} network={sourceNetwork} hint="First liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={poolValues[0]!.token !== poolValues[1]!.token ? amountUsd(sourceNetwork, poolValues[0]!.token, poolValues[0]!.amount) : usdLine(sourceNetwork, null, { status: 'none' }, language)}
           picker={picker('source')} editor={card.poolProposal ? { value: poolValues[0]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(0, amount) } : undefined}/>
-        <ValueBox label="Second liquidity asset amount" inputLabel={`Second liquidity amount (${poolValues[1]!.token})`} amount={poolValues[1]!.amount} token={poolValues[1]!.token} network={sourceNetwork} hint="Second liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })}
+        <ValueBox label="Second liquidity asset amount" inputLabel={`Second liquidity amount (${poolValues[1]!.token})`} amount={poolValues[1]!.amount} token={poolValues[1]!.token} network={sourceNetwork} hint="Second liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={poolValues[0]!.token !== poolValues[1]!.token ? amountUsd(sourceNetwork, poolValues[1]!.token, poolValues[1]!.amount) : usdLine(sourceNetwork, null, { status: 'none' }, language)}
           picker={picker('destination')} editor={card.poolProposal ? { value: poolValues[1]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(1, amount) } : undefined}/>
       </ValuePair> : !card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action) && (amountParts || editor)
         ? (() => {
-          const fields = <><ValueBox source caption={['Borrow', 'Withdraw'].includes(card.summary.action) ? 'You receive' : 'You send'} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')}
+          const fields = <><ValueBox source caption={['Borrow', 'Withdraw'].includes(card.summary.action) ? 'You receive' : 'You send'} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={amountUsd(sourceNetwork, amountParts?.[2] ?? '', editor?.value ?? amountParts?.[1])} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')}
             editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={directCommit && Boolean(amountError)} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
           {card.funding && <span className="composer-quote-note composer-funding-note" role="status" data-changed={card.funding.changed || undefined}>{card.funding.changed
             ? tr('Step {0} delivers {1} on {2}: this step will no longer be funded by it. Press Enter to apply the change.', card.funding.step, card.funding.symbol, card.funding.network)

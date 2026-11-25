@@ -18,6 +18,7 @@ vi.mock('../wallet/evm-discovery', () => {
   return { chosenEvmProvider: () => provider, injected: () => provider, evmWalletIdentity: () => null, isFloFiWalletKey: () => false };
 });
 const { batchOutcome, batchSponsorshipOf, reportedPaymasterService, revokeUserOperation, sendWalletBatch } = await import('./user-funded-browser');
+const { walletBatchRefusalCode } = await import('../workflow-runs/state-machine');
 
 const HASH = '0x' + 'ab'.repeat(32);
 const status = (code: number, receipts: unknown[] = []) => eip5792.callsStatus({ version: '2.0.0', id: '0x01', chainId: '0xa4b1', status: code, atomic: true, receipts });
@@ -116,11 +117,17 @@ describe('sendWalletBatch', () => {
   });
   it('after wallet_sendCalls was requested: a pre-send refusal code is WALLET_BATCH_NOT_SENT, anything else stays "may have been sent"', async () => {
     wallet.answers.wallet_sendCalls = rpcError(5750);
-    await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_BATCH_NOT_SENT');
+    const upgradeDeclined = await sendWalletBatch(request, onSending).catch((cause: unknown) => cause);
+    expect(upgradeDeclined).toMatchObject({ message: 'WALLET_BATCH_NOT_SENT', walletCode: 5750 });
+    expect(walletBatchRefusalCode(upgradeDeclined)).toBeNull();
+    wallet.answers.wallet_sendCalls = rpcError(5760);
+    const atomicUnsupported = await sendWalletBatch(request, onSending).catch((cause: unknown) => cause);
+    expect(walletBatchRefusalCode(atomicUnsupported)).toBe(5760);
     wallet.answers.wallet_sendCalls = rpcError(-32603);
     const raw = await sendWalletBatch(request, onSending).catch((cause: unknown) => cause);
     expect(raw).toMatchObject({ code: -32603 });
-    expect(onSending).toHaveBeenCalledTimes(2);
+    expect(walletBatchRefusalCode(raw)).toBeNull();
+    expect(onSending).toHaveBeenCalledTimes(3);
   });
 
   // BUILD-FLOFI-MAINNET-EXEC-002 (ADR-0009): FloFi's sponsorship offer reaches only a wallet that reports `paymasterService` on the batch's chain.

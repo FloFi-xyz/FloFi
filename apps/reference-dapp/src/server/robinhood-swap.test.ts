@@ -139,7 +139,7 @@ describe('Robinhood Chain catalog swap: authoring identity', () => {
     const tampered = structuredClone(catalogSwapWorkflow(usdg, tsla, '1'));
     (tampered.nodes[0]!.expectedOutputs[0] as { minimumAmount: string }).minimumAmount = '5';
     expect(() => validateAuthoringWorkflow(tampered, ctx)).toThrow('CATALOG_SWAP_DECLARATION_INVALID');
-    expect(() => createCatalogSwapNode('n', { chain: 'eip155:4663', amount: '1', slippageBps: 301, input: { chain: 'eip155:4663', address: usdg.address!, decimals: 6, officialId: null },
+    expect(() => createCatalogSwapNode('n', { chain: 'eip155:4663', amount: '1', slippageBps: 501, input: { chain: 'eip155:4663', address: usdg.address!, decimals: 6, officialId: null },
       output: { chain: 'eip155:4663', address: tsla.address!, decimals: 18, officialId: tsla.stock!.officialId } })).toThrow('CATALOG_SWAP_SLIPPAGE_INVALID');
     // Unregistered Polygon remains outside the catalog-swap network registry.
     expect(() => createCatalogSwapNode('n', { chain: 'eip155:137', amount: '1', slippageBps: 50, input: { chain: 'eip155:137', address: usdg.address!, decimals: 6, officialId: null },

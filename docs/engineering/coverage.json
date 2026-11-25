@@ -1997,6 +1997,30 @@
     "app.server.build-estimate-latency": {
       "path": "apps/reference-dapp/src/server/build-estimate-latency.test.ts",
       "stage": "unit"
+    },
+    "app.domain.relative-amount": {
+      "path": "apps/reference-dapp/src/domain/relative-amount.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.intelligence.beta-critical-recovery": {
+      "path": "apps/reference-dapp/src/domain/intelligence/beta-critical-recovery.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.slippage-range-message": {
+      "path": "apps/reference-dapp/src/domain/slippage-range-message.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.flofi-wallet-bridge": {
+      "path": "apps/reference-dapp/src/domain/flofi-wallet-bridge.test.ts",
+      "stage": "unit"
+    },
+    "app.components.router-panel": {
+      "path": "apps/reference-dapp/src/components/router-panel.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.account.sign-in-methods": {
+      "path": "apps/reference-dapp/src/components/account/sign-in-methods.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2190,7 +2214,12 @@
     "app.channels.telegram.universal-actions",
     "app.domain.sequence-presentation",
     "app.server.catalog-quote-rpc",
-    "app.app.api.build-estimate.route"
+    "app.app.api.build-estimate.route",
+    "app.domain.relative-amount",
+    "app.domain.intelligence.beta-critical-recovery",
+    "app.domain.slippage-range-message",
+    "app.components.account.sign-in-methods",
+    "app.domain.flofi-wallet-bridge"
   ],
   "modules": [
     {
@@ -2323,7 +2352,8 @@
         "apps/reference-dapp/src/accounts/page-exit.ts",
         "apps/reference-dapp/src/app/(account)/account/sign-in-methods/page.tsx",
         "apps/reference-dapp/src/components/account/sign-in-methods.tsx",
-        "apps/reference-dapp/src/app/api/account/presence/route.ts"
+        "apps/reference-dapp/src/app/api/account/presence/route.ts",
+        "apps/reference-dapp/src/domain/flofi-wallet-bridge.ts"
       ],
       "suites": [
         "app.accounts.account-csp",
@@ -2377,7 +2407,9 @@
         "cloud-runtime.privy-accounts-migration.pg",
         "app.accounts.account-store-schema19.pg",
         "app.components.account.account-shell",
-        "app.app.api.account.presence.route"
+        "app.app.api.account.presence.route",
+        "app.components.account.sign-in-methods",
+        "app.domain.flofi-wallet-bridge"
       ],
       "gaps": [
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
@@ -2401,6 +2433,7 @@
         "packages/action-registry/src/universal-router.ts"
       ],
       "suites": [
+        "app.components.router-panel",
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
@@ -4846,7 +4879,8 @@
         "apps/reference-dapp/src/domain/chat-action-variant.ts",
         "apps/reference-dapp/src/domain/conversation-persistence.ts",
         "apps/reference-dapp/src/domain/amount-shortcuts.ts",
-        "apps/reference-dapp/src/components/amount-shortcuts.tsx"
+        "apps/reference-dapp/src/components/amount-shortcuts.tsx",
+        "apps/reference-dapp/src/domain/relative-amount.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -4884,7 +4918,9 @@
         "app.e2e.amount-shortcuts",
         "app.domain.arbitrum-authoring",
         "app.domain.catalog-copilot-parity",
-        "app.e2e.chat-liquidity-positions"
+        "app.e2e.chat-liquidity-positions",
+        "app.domain.relative-amount",
+        "app.domain.intelligence.beta-critical-recovery"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -5060,7 +5096,8 @@
         "reference-compiler.compile.fork",
         "reference-compiler.jupiter",
         "reference-compiler.native-eth",
-        "reference-compiler.orca-mainnet-liquidity"
+        "reference-compiler.orca-mainnet-liquidity",
+        "app.domain.slippage-range-message"
       ],
       "gaps": [
         "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
@@ -5191,6 +5228,7 @@
         "apps/reference-dapp/src/domain/simulation-unavailable.ts",
         "apps/reference-dapp/src/domain/solana-refusal.ts",
         "apps/reference-dapp/src/domain/usd-estimate.ts",
+        "apps/reference-dapp/src/domain/price-assets.ts",
         "apps/reference-dapp/src/domain/workflow-edits.ts",
         "apps/reference-dapp/src/domain/workflow-sequence.ts",
         "apps/reference-dapp/src/domain/workflow-steps.ts",

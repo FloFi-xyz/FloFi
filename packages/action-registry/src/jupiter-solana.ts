@@ -6,6 +6,7 @@
  * The API has no cluster parameter; devnet mints return "No routes found". Execution is mainnet-only.
  * Mint owners/decimals and the executable Jupiter program were read from mainnet-beta at slot 452337813.
  */
+import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 export const SOLANA_MAINNET_CHAIN = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 export type SolanaTokenSymbol = 'SOL' | 'USDC' | 'USDT';
 export type SolanaToken = { readonly symbol: SolanaTokenSymbol; readonly mint: string; readonly decimals: number;
@@ -31,7 +32,7 @@ export const JUPITER_SOLANA_MAINNET = Object.freeze({
   }),
   /** Anchor discriminators sha256("global:<name>")[0..8]; the only accepted swap instructions (exact input). */
   routeV2Discriminator: 'bb64facc31c4af14', sharedAccountsRouteV2Discriminator: 'd19853937cfed8e9',
-  maximumSlippageBps: 300, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 1_400_000,
+  maximumSlippageBps: DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 1_400_000,
 });
 export function solanaTokenByMint(mint: string): SolanaToken | null {
   return Object.values(SOLANA_MAINNET_TOKENS).find(token => token.mint === mint) ?? null;

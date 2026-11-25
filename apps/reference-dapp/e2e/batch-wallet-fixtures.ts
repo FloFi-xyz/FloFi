@@ -72,8 +72,8 @@ export async function walletSignedIn(page: Page, wallet: TestWallet, chainId = 8
 export type BatchWalletOptions = {
   /** What `wallet_getCapabilities` answers (default: atomic batching supported on Base). */
   readonly capabilities?: Readonly<Record<string, unknown>>;
-  /** `reject`: the owner declines every `wallet_sendCalls` in the wallet (EIP-1193 4001) — nothing reaches the chain. Default `execute`. */
-  readonly sendCalls?: 'execute' | 'reject';
+  /** `reject` simulates owner cancellation (4001). `unsupported` simulates a capability refusal (5760). Both leave the chain untouched. */
+  readonly sendCalls?: 'execute' | 'reject' | 'unsupported';
 };
 export type WalletRecorder = {
   /** Every EIP-1193 method the page asked the wallet, in order, across reloads. */
@@ -106,6 +106,7 @@ export async function installBatchWallet(page: Page, owner: string, options: Bat
       const request = params[0] as SentBatch;
       sent.push(request);
       if (options.sendCalls === 'reject') return { error: { code: 4001, message: 'User rejected the request.' } };
+      if (options.sendCalls === 'unsupported') return { error: { code: 5760, message: 'Atomic batching is unsupported.' } };
       if (request.id && batches.has(request.id)) return { error: { code: 5720, message: 'Duplicate id' } };
       if (request.chainId !== BASE || request.from.toLowerCase() !== owner || request.atomicRequired !== true) return { error: { code: 5700, message: 'Unsupported request' } };
       const hash = await chainControl<string>('MOCK_walletBatch', [owner, request.calls]);

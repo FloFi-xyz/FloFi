@@ -41,6 +41,8 @@ export const portugueseApprovedUxEditor: Readonly<Record<string, string>> = {
   'No max price difference is set for this step.': 'Este passo não tem diferença máxima de preço definida.',
   'Applied limit: {0}. A fresh simulation and Review use it.': 'Limite aplicado: {0}. Uma nova simulação e a Revisão usam esse limite.',
   'Enter a max price difference from 0.01% to 3%.': 'Informe uma diferença máxima de preço de 0,01% a 3%.',
+  'Enter a max price difference from 0.01% to 5%.': 'Informe uma diferença máxima de preço de 0,01% a 5%.',
+  'Relay could not recommend a price difference for this bridge. Check the networks, assets and amount, or enter a value.': 'A Relay não conseguiu recomendar uma diferença de preço para esta ponte. Confira as redes, os ativos e o valor ou informe um limite.',
   'Enter the max price difference as a percentage with up to two decimals (1 = 1%).': 'Informe a diferença máxima de preço em porcentagem, com até duas casas decimais (1 = 1%).',
   'This step is protected. Unlock it before changing its max price difference.': 'Este passo está protegido. Desbloqueie-o antes de alterar a diferença máxima de preço.',
   'This max price difference cannot be applied to this step.': 'Esta diferença máxima de preço não pode ser aplicada a este passo.',

@@ -25,7 +25,7 @@ describe('Solana canonical swap validation', () => {
     ['unsupported mint', { input: { chainId: chain, address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU', decimals: 6 } }, 'SOLANA_MINT_UNSUPPORTED'],
     ['wrong decimals', { output: { chainId: chain, address: 'So11111111111111111111111111111111111111112', decimals: 6 } }, 'SOLANA_MINT_UNSUPPORTED'],
     ['unsupported provider', { protocols: ['uniswap'] }, 'SOLANA_SWAP_PROVIDER_UNSUPPORTED'],
-    ['excessive slippage', { slippageBps: 301 }, 'SOLANA_SLIPPAGE_OUT_OF_RANGE'],
+    ['excessive slippage', { slippageBps: 501 }, 'SOLANA_SLIPPAGE_OUT_OF_RANGE'],
   ])('rejects %s', (_n, patch, code) => expect(() => validateAuthoringWorkflow(workflow([node(patch)]), context)).toThrow(code));
   it('rejects wrong-cluster assets, a wrong provider, unknown clusters and composition', () => {
     const devnet = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', testnet = 'solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z';

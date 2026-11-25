@@ -165,6 +165,14 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Base: swaps in and out, 
     s.review(id, s.load(id).quote.manifestHash);
     return { s, id };
   }
+  it('keeps an explicit 5% tolerance and exact minimum in the reviewed wallet payload', async () => {
+    chain.fundNative(owner, 10n ** 18n);
+    const { s, id } = await run(nativeWorkflow(ETH, ref(usdc), '1000000000000000', 500));
+    const q = s.load(id).quote;
+    const minimum = BigInt(q.expectedOut) * 9500n / 10_000n;
+    expect(q).toMatchObject({ slippageBps: 500, minimumOut: minimum.toString() });
+    expect(decodeNativeSwap(fromHex((await s.begin(id, owner)).tx.data), UNI.weth).amountOutMinimum).toBe(minimum);
+  });
   it('A — native ETH → USDC: a native quote (never WETH), no approval, value = amount in, receipt-reconciled with gas kept apart', async () => {
     chain.fundNative(owner, 10n ** 18n);
     const { s, id } = await run(nativeWorkflow(ETH, ref(usdc), '1000000000000000', 100));

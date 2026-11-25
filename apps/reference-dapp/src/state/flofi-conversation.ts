@@ -130,7 +130,7 @@ function otherRunWallet(view: Pick<LifecycleView, 'source' | 'wallet'>): string 
 const EDITING_PAUSED = 'Editing is paused while this workflow executes. You can change it once the run finishes or is ended.';
 /** The answer buttons FloFi offers for an open question (re-offered when an answer is unclear or an explanation interrupts it). */
 function questionOptions(kind: Question['open']['kind'], c: ReturnType<typeof conversationCopy>): string[] {
-  return kind === 'RESOLVE_EDIT' ? [c.applyEdit, c.discardEdit] : kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo]
+  return kind === 'RESOLVE_EDIT' || kind === 'RESOLVE_PROPOSAL' ? [c.applyEdit, c.discardEdit] : kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo]
     : kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
 }
 /** The runtime's in-place re-quote, when its state carries one (Router and universal bridges: BUILD-FLOFI-MAINNET-EXEC-002). */
@@ -189,7 +189,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const [, setTick] = useState(0);
   const ids = useRef(1), session = useRef(0), lock = useRef(false);
   const questionRef = useRef<Question | null>(null);
-  const latest = useRef({ bridge, state, context }); latest.current = { bridge, state, context };
+  const latest = useRef({ bridge, state, context, workflow }); latest.current = { bridge, state, context, workflow };
   const pendingCommit = useRef<Commit | null>(null), lastCommit = useRef<{ readonly before: Workflow; readonly expected: Workflow } | null>(null);
   /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the workflow FloFi last reported a final completed result for, and whether it continues as steps. */
   const finished = useRef<{ readonly workflowId: string; readonly continuable: boolean } | null>(null);
@@ -397,7 +397,10 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const lost = preview.error ? [] : lostSteps(before, preview.workflow, command, now.context, meta.language);
     if (lost.length) {
       propose(command);
-      say(scope, meta.language, (language, c) => c.destructive(lostSteps(before, preview.workflow, command, now.context, language).join(', ')), meta.role, { notes: meta.notes }); return;
+      // CTO decision (2026-11-25, no mandatory Canvas navigation): the proposal is resolved here or on the Canvas, bound to this exact command.
+      setQuestion({ open: { kind: 'RESOLVE_PROPOSAL', workflowId: before.workflowId, revision: now.state.workflow.revision, command: JSON.stringify(command) }, language: meta.language });
+      say(scope, meta.language, (language, c) => [c.destructive(lostSteps(before, preview.workflow, command, now.context, language).join(', ')),
+        { options: [c.applyEdit, c.discardEdit] }], meta.role, { notes: meta.notes }); return;
     }
     const result = commitChatCommand(command);
     if (!result.ok) {
@@ -637,6 +640,21 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   function answer(scope: number, open: Question, text: string) {
     const language = open.language, verdict = classifyAnswer(text, open.open.kind), view = latest.current.bridge;
     if (open.open.kind === 'NEXT_STEP') return false;
+    if (open.open.kind === 'RESOLVE_PROPOSAL') {
+      const { workflowId, revision, command } = open.open, now = latest.current;
+      const pending = now.workflow.pending;
+      // Applied or discarded on the Canvas, replaced by another proposal, or the workflow changed since: nothing is left to decide here.
+      if (!pending || JSON.stringify(pending.command) !== command || now.state.workflow.workflowId !== workflowId || now.state.workflow.revision !== revision) {
+        setQuestion(null); say(scope, language, (_, c) => [c.proposalGone, { options: [c.review] }]); return true;
+      }
+      if (verdict === 'UNCLEAR') { say(scope, language, (_, c) => [c.unclear, { options: [c.applyEdit, c.discardEdit] }]); return true; }
+      setQuestion(null);
+      if (verdict === 'NO') { now.workflow.dismissProposal(); say(scope, language, (_, c) => [c.proposalDiscarded, { question: c.nextQuestion, options: [c.addAnother, c.review] }]); return true; }
+      if (!pending.valid) { now.workflow.dismissProposal(); say(scope, language, (language, c) => [c.editRefused(translate(language, 'This change cannot be applied to the current workflow.')), { options: [c.review] }]); return true; }
+      now.workflow.applyProposal();
+      say(scope, language, (_, c) => [c.editApplied, { question: c.nextQuestion, options: [c.addAnother, c.review] }]);
+      return true;
+    }
     if (open.open.kind === 'RESOLVE_EDIT') {
       const { nodeId, workflowId, revision, draft } = open.open;
       const workflow = latest.current.state.workflow;
@@ -740,6 +758,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   // A confirmation that no longer binds (workflow, Review, wallet, network or quote changed) is retired as soon as FloFi sees it.
   useEffect(() => {
     const open = questionRef.current;
+    if (open?.open.kind === 'RESOLVE_PROPOSAL') {
+      // The owner applied or discarded the proposal on the Canvas (or another replaced it): the question has nothing left to decide.
+      if (JSON.stringify(workflow.pending?.command ?? null) !== open.open.command) setQuestion(null);
+      return;
+    }
     if (open?.open.kind === 'RESOLVE_EDIT') {
       // The owner applied or discarded the edit on the Canvas: the question has nothing left to decide.
       const nodeId = open.open.nodeId;
@@ -1172,7 +1195,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       append(scope, { role: 'system', text: guidance });
     }
   }
-  const phase = direct ? conversationPhase(bridge, question?.open ?? null, Boolean(destination) || copilot.drafting() || question?.open.kind === 'RESOLVE_EDIT') : null;
+  const phase = direct ? conversationPhase(bridge, question?.open ?? null, Boolean(destination) || copilot.drafting() || question?.open.kind === 'RESOLVE_EDIT' || question?.open.kind === 'RESOLVE_PROPOSAL') : null;
   // BUILD0-UX-001: `submit` is the same `send`, awaitable, for Build 0 (the request and FloFi's answer stay in this conversation).
   return { messages, input, setInput, send: (text: string) => void send(text), submit: send, busy: copilot.busy || sending, copilot, automation, dismissAutomation: () => setAutomation(null),
     manage, dismissManage: () => setManage(null),
