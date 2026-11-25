@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { walletPortfolio } from '../app/portfolio-action';
-import { amountBalance, amountShortcuts, amountSource, NATIVE_FEE_RESERVE, shortcutFigure, workflowTouches, type AmountShortcut, type AmountShortcutKey,
+import { amountBalance, amountShortcuts, amountSource, NATIVE_FEE_RESERVE, relativeShortcut, shortcutFigure, workflowTouches, type AmountShortcut, type AmountShortcutKey,
   type AwaitingAmount } from '../domain/amount-shortcuts';
 import { networkCatalogsVersion, subscribeNetworkCatalogs } from '../domain/asset-catalogs';
 import type { Workflow } from '../domain/initial-workflow';
@@ -56,6 +56,16 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
     setRead({ status: 'loading' }); setChanged(false);
     void load().then(next => { if (alive.current) setRead(next); });
   }, [load, follows]);
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "todo o USDC que tenho", "half my ETH": the user already chose the share of this balance, so the amount
+  // it gives is sent once as their answer, straight from this fresh read (the same path and checks as pressing the button; nothing is signed).
+  const relative = request.relative ?? null;
+  const relativeAnswer = source && relative && read.status === 'ready' ? relativeShortcut(read.units, source, relative) : null;
+  const answered = useRef<string | null>(null);
+  useEffect(() => {
+    if (!relativeAnswer?.amount || disabled || working || answered.current === request.question || !stillOpen()) return;
+    answered.current = request.question;
+    onPick(relativeAnswer.amount);
+  }, [relativeAnswer?.amount, disabled, working, request.question, stillOpen, onPick]);
   if (!source || follows) return null;
   const shortcuts: readonly AmountShortcut[] = read.status === 'ready' ? amountShortcuts(read.units, source) : [];
   async function pick(key: AmountShortcutKey) {
@@ -103,6 +113,8 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
         : read.status === 'unavailable' ? tr(read.reason === 'wallet' ? 'Connect the wallet that will sign to use your balance. You can still type an amount.'
           : 'Your balance could not be read. Type an amount instead.')
           : changed ? tr('Your balance changed. Check the amounts and choose again.')
+          : relative && relativeAnswer && !relativeAnswer.amount ? tr('Your {0} balance on {1} is {2}, so there is nothing to use for this request. Add funds or type an amount.',
+            symbol, networkName, shortcutFigure(read.status === 'ready' ? read.units : 0n, source.decimals, symbol, lang))
             : <>{time ? tr('Balance on {0} at {1}: {2}', networkName, time, shortcutFigure(read.units, source.decimals, symbol, lang))
               : tr('Balance on {0}: {1}', networkName, shortcutFigure(read.units, source.decimals, symbol, lang))}
             {reserve !== null && <> {tr('Max keeps {0} for network fees.', shortcutFigure(reserve, source.decimals, symbol, lang))}</>}

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { relativeAmountIn } from './relative-amount';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { parseLocalCommand, type Command } from './commands';
 import type { Workflow } from './initial-workflow';
@@ -153,10 +154,12 @@ function actionNetworks(action: StrategyAction, g: Grounding): Network[] {
 const chainOf = (network: Network) => networkOfCopilot(network as CopilotNetworkId).chain;
 // Any test-network or test-token wording rules out a mainnet (real funds) interpretation.
 export const TESTNET_WORDS = /\b(?:sepolia|devnet|testnets?|test\s?net(?:work)?|test\s+(?:usdc|tokens?|funds?|sol|eth)|dev\s?usdc|teste|testes|de\s+teste)\b/i;
-const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegExp>> = {
+const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, { test(text: string): boolean }>> = {
   // `\busdc` does not match inside "devUSDC": there is no word boundary between "v" and "U".
   USDC: /\busdc\b/i, DEVUSDC: /\b(?:dev\s?usdc|test\s?usdc)\b/i, WETH: /\bw?eth\b|\bether\b/i, ETH: /\bw?eth\b|\bether\b/i,
-  SOL: /\bsol\b/i, USDT: /\b(?:usdt|tether)\b/i, WBTC: /\bwbtc\b/i,
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (beta incident: "Quero trocar Solana por USDC na Solana", then "0.001"): people name SOL by its
+  // network's name exactly as they name ETH "ethereum"; a coin-position "solana" grounds SOL (read lazily: the rule is defined below).
+  SOL: { test: (text: string) => /\bsol\b/i.test(text) || SOLANA_AS_COIN.test(text) }, USDT: /\b(?:usdt|tether)\b/i, WBTC: /\bwbtc\b/i,
 };
 
 /** P0 hotfix (FIX 1): native ETH on a catalog network is grounded only by the user's own "ETH"/"ether" — "WETH" is a different asset and never
@@ -182,11 +185,22 @@ const ETHEREUM_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_V
 const ETHEREUM_AS_COIN = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'i');
 const ETHEREUM_AS_COIN_ALL = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'gi');
 const NATIVE_ETH_NAMED = { test: (text: string) => NATIVE_ETH_WORDS.test(text) || ETHEREUM_AS_COIN.test(text) };
+/**
+ * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "Solana" is the coin SOL in the same coin positions as "ethereum" above — after an amount ("0.5 solana"),
+ * after a trade verb ("trocar (a) solana", "swap solana"), before "por/for/to/into <token>", or after the exchange preposition "por/for" — and the
+ * Solana network anywhere else ("na Solana", "on Solana"). One word never grounds both: a coin-position "solana" is removed before networks are read.
+ */
+const SOLANA_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_VERBS}\s+(?:(?:o|a|os|as|my|meu|meus|minha|minhas|the|all|todo|toda|tudo|some|um|uma)\s+)?))solana\b`
+  + String.raw`|(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)`
+  + String.raw`\bsolana(?=\s+(?:por|for|to|into|em|pra|para)\s+(?:usdc|usdt|eth|weth|wbtc|btc|jup|bonk)\b)`
+  + String.raw`|(?<=\b(?:por|for)\s+(?:(?:o|a|the)\s+)?)solana\b(?!\s+(?:network|rede|chain|mainnet)\b)`;
+const SOLANA_AS_COIN = new RegExp(SOLANA_AS_COIN_SOURCE, 'i');
+const SOLANA_AS_COIN_ALL = new RegExp(SOLANA_AS_COIN_SOURCE, 'gi');
 /** WETH as people write it ("weth", "w-eth", "wrapped ether"): removed before native ETH is looked for (its catalog name "Ether" is inside it). */
 const WRAPPED_ETH_WORDS = /\bweth\b|\bw[\s-]+eth\b|\bwrapped[\s-]+eth(?:er)?\b/gi;
 /** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
 export function mentionedNetworks(raw: string): Network[] {
-  const text = raw.replace(ETHEREUM_AS_COIN_ALL, ' ');
+  const text = raw.replace(ETHEREUM_AS_COIN_ALL, ' ').replace(SOLANA_AS_COIN_ALL, ' ');
   return copilotNetworksMentioned(text).filter(id => {
     const identity = networkOfCopilot(id);
     // Catalog names can equal a chain alias (ARB is named Arbitrum). Asset context alone cannot choose a mainnet. A NATIVE coin's verified
@@ -297,7 +311,8 @@ function typedAddress(text: string, address: string): string {
 }
 /** The fixed-vocabulary key of a token in any case ("devusdc", "DevUSDC" → DEVUSDC); null for catalog symbols. */
 const legacyAsset = (asset: string): Exclude<CopilotLegacyAsset, 'OTHER'> | null => {
-  const key = asset.toUpperCase() === 'TESTUSDC' ? 'DEVUSDC' : asset.toUpperCase();
+  // "Solana" reported as a token is the native coin SOL (its grounding still requires a coin-position "solana" or "SOL" in the user's words).
+  const key = asset.toUpperCase() === 'TESTUSDC' ? 'DEVUSDC' : asset.toUpperCase() === 'SOLANA' ? 'SOL' : asset.toUpperCase();
   return Object.hasOwn(ASSET_MENTIONS, key) ? key as Exclude<CopilotLegacyAsset, 'OTHER'> : null;
 };
 const assetNamed = (text: string, asset: Exclude<CopilotAsset, 'OTHER'>) => { const key = legacyAsset(asset); return key ? ASSET_MENTIONS[key].test(text) : symbolNamed(text, asset); };
@@ -368,6 +383,13 @@ export function ambiguousAmount(text: string, value: string): { readonly written
     .filter(token => token.readings.includes(wanted));
   if (!tokens.length || tokens.some(token => token.readings.length === 1)) return null;
   return { written: tokens[0]!.written, readings: tokens[0]!.readings };
+}
+/**
+ * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "todo o USDC que tenho" names its amount relative to a balance FloFi can only read once the network and
+ * the token are settled, so those are asked first; the amount question comes last, where the balance shortcut can answer it (never a guess).
+ */
+function deferRelativeAmount(missing: string[], g: Grounding): void {
+  if (missing.length > 1 && missing.includes('amount') && relativeAmountIn(g.text)) missing.splice(missing.indexOf('amount'), 1);
 }
 function amountOf(value: string | null, g: Grounding, subject: Subject, field: CarriedField = 'amount'): string {
   const m = copyOf(g);
@@ -490,6 +512,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const devnetImplied = a.network === null && !named.length && impliesDevnet(g, [a.inputAsset, a.outputAsset]);
   const missing: CopilotAuthoringMissing[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null ? [g.policy.catalog ? 'inputAsset' as const : 'asset' as const] : []), ...(a.outputAsset === null ? [g.policy.catalog ? 'outputAsset' as const : 'asset' as const] : []),
     ...(a.network === null && !devnetImplied && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
+  deferRelativeAmount(missing, g);
   if (missing.length) ask(missing, stillNeeds(m, missing, 'swap'), missing.length === 1 && missing[0] === 'network' ? labels(supported) : []);
   const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'swap', notes);
   // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: ETH and WETH are different assets. On a catalog network native ETH is its own
@@ -556,6 +579,7 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   const options = touching.map(r => `${r.option.sourceLabel} → ${r.option.destinationLabel}`);
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(source === null ? ['sourceNetwork' as const] : []), ...(destination === null ? ['destinationNetwork' as const] : [])];
+  deferRelativeAmount(missing, g);
   if (missing.length) ask(missing, stillNeeds(m, missing, 'bridge'), source === null || destination === null ? options : []);
   const route = EXTENDED_ROUTES.find(r => r.src === source && r.dst === destination);
   if (!route) return ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, EXTENDED_ROUTES.filter(r => r.src === source || r.dst === destination)
@@ -610,6 +634,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
     return refuse(m.universalNetworks(labelsAll));
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(source === null ? ['sourceNetwork' as const] : []), ...(destination === null ? ['destinationNetwork' as const] : [])];
+  deferRelativeAmount(missing, g);
   const known = source ?? destination;
   // BUILD-FLOFI-UX-FIX-003: the public product asks one network side at a time, offering only the mainnets the universal bridge serves (a button then
   // answers exactly that side); the asset and the amount follow. Whether a live route exists between the two is decided at Simulate, never here.
@@ -709,6 +734,7 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   if (g.policy.networkDefaults && destination === null && source === 'BASE_SEPOLIA') { destination = 'ARBITRUM_SEPOLIA'; notes.push(m.routerDestinationNote); }
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(source === null ? ['sourceNetwork' as const] : []), ...(destination === null ? ['destinationNetwork' as const] : [])];
+  deferRelativeAmount(missing, g);
   // Only the counterpart that forms a supported pair is offered.
   if (missing.length) ask(missing, stillNeeds(m, missing, 'bridge'), source === null && destination === null ? pairs
     : source === null ? [destination === 'ARBITRUM_SEPOLIA' ? 'Base Sepolia' : 'Base'] : destination === null ? [source === 'BASE_SEPOLIA' ? 'Arbitrum Sepolia' : 'Arbitrum One'] : []);
@@ -752,6 +778,7 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const self = a.recipient === null && (SELF_RECIPIENT.test(g.text) || SELF_ANSWER.test((g.latest ?? '').trim()));
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(a.network === null && !TRANSFER_COPILOT_NETWORKS.some(n => named.includes(n)) ? ['network' as const] : [])];
+  deferRelativeAmount(missing, g);
   // One combined question when other slots are missing too; a lone missing destination is asked once the asset and network resolve.
   if (missing.length) ask(a.recipient === null && !self ? [...missing, 'recipient'] : missing, stillNeeds(m, a.recipient === null && !self ? [...missing, 'recipient'] : missing, 'transfer'),
     missing.length === 1 && missing[0] === 'network' ? labels(TRANSFER_COPILOT_NETWORKS) : []);
@@ -816,6 +843,7 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
   if (amountPolicy === 'PARTIAL_ONLY' && /\b(?:all|full|max(?:imum)?|entire|tudo|todos?|total|integral|máximo|maximo)\b/i.test(g.latest ?? g.text))
     refuse(m.partialLendingOnly(a.type === 'REPAY' ? 'repay' : 'withdraw'));
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : [])];
+  deferRelativeAmount(missing, g);
   // BUILD-ETHEREUM-001: each Aave asset has its own deployments (USDC on Base Sepolia — and, BUILD-BASE-001, Base mainnet — WBTC on Ethereum
   // Sepolia), so the asset bounds the network.
   // BUILD AAVE-V3-EXPANSION-001: the asset options are the named market's first reserves (its original verified asset first).
