@@ -56,7 +56,7 @@ simple, contextual way to prove and associate their wallets") or specify the pre
 | 3 | "Converta todo o USDC que tenho em ETH." | Relative amounts had no path: FloFi asked "o valor, a rede" with no options | Conversation engine + balance shortcuts | Pre-existing (feature gap) | `relative-amount.ts` reads ALL/half/N% deterministically. Network and token are asked first. The structured amount question carries `relative`, and the existing consented balance shortcut answers it once from a fresh read (native fee reserve, rounded down, nothing for a zero balance) | `beta-critical-recovery.test.ts` (fails on `main`), `relative-amount.test.ts` (19 cases) | **Not run** |
 | 4 | "Troque 1 USDC por ETH e depois troque o ETH recebido por USDC." refused | A composition naming no network fell into the legacy test-network Supply→Borrow→Swap composition → "não conseguiu construir esta sequência" | `copilot-conversation.ts` | Pre-existing | In the public product such a request goes to sequence authoring: it asks the network, then the cap of the dependent swap (`dependentCap`, PT/EN). The second swap is funded by the first (`fundedBy: 0`) | Fails on `main`, passes here | **Not run** |
 | 5 | Raw `ROUTER_SLIPPAGE_OUT_OF_RANGE` shown | Router and universal bridge forms put the thrown code into their alert | `components/router-panel.tsx`, `universal-bridge-panel.tsx` | Pre-existing | `slippageRangeMessage`: the action's actual range in the approved, translated wording ("from 0.01% to 3%"). The chat's Router rejection names the range | `slippage-range-message.test.ts` | **Not run** |
-| 6 | Wallet refused the batch | A batch refused **before sending** (EIP-5792 5700/5710/5740/5750/5760, 4100, 4200 → `WALLET_BATCH_NOT_SENT`) offered only "try again", which repeats the same refused batch | `components/editor-workflow-run.tsx` | Pre-existing | Offers (never chooses) "Confirm each step separately" with a disclosure. It ends the unsent run through the existing server cancellation and uses the per-step path for that revision. Never offered after a possibly-sent answer or the owner's own rejection | `editor-workflow-run.wallet-batch.test.ts` (2 cases) | **Not run**. The specific production refusal code is unknown (§1.1) |
+| 6 | Wallet refused the batch | A batch refused **before sending** (EIP-5792 5700/5710/5740/5750/5760, 4100, 4200 → `WALLET_BATCH_NOT_SENT`) only offers "try again", which repeats the same refused batch | `components/editor-workflow-run.tsx`, `workflow-runs` | Pre-existing | **Not corrected.** A client-side "Confirm each step separately" was implemented and then **reverted** after flofi-security and flofi-wallet-execution review: it could follow an earlier group that already executed (duplicate spend), stayed hidden while the prepared group counts as in flight (~12 min), was lost on reload, and would label the ended run "may have executed". A correct fix needs a server-recorded, proven not-sent report so the run can continue step by step from its last reconciled step | — | **Open**. The production refusal code is unknown (§1.1) |
 | 7 | Google could not be linked to a wallet account | Two dead ends: an account without a Privy link was offered no way to add a method. Google already opening another (empty, Google-first) account ended on "Nothing was linked, merged or moved" | `components/account/sign-in-methods.tsx` | Pre-existing | "Confirm it's you" (Privy sign-in with a method the account holds, which creates the link), and the existing checked path to bring an empty account's sign-in here. No ownership or merge logic changed | `sign-in-methods.test.tsx` | **Not run**. The production account state is unknown |
 | 8 | "Failed swap" (unspecified) | **Not established**: no execution record or provider response was available | — | — | None | — | Open |
 | 9 | Bridges Base→Robinhood, Base→Arbitrum, Ethereum→Arbitrum, Ethereum→Base→Aave | **Not established** without the attempt records. The route registry offers all four pairs. Ethereum→Base→Aave authoring was broken by incident 1 | — | — | Only the authoring part (incident 1) | — | Open |
@@ -67,8 +67,7 @@ simple, contextual way to prove and associate their wallets") or specify the pre
 - No authorization or execution without the owner's wallet. The relative-amount answer only writes an amount, through the same path as a typed one, before
   Simulate and Review.
 - Dependent steps never count funds twice. A cap is the user's own number. The runtime spends min(cap, what the earlier step actually delivered, reconciled).
-- No automatic retry or mode switch. The step-by-step offer needs the wallet's proof that nothing was sent, and the server still refuses to end a run anything
-  of which may execute.
+- No automatic retry or mode switch was added.
 - No schema validation was weakened. Slippage limits are unchanged (see §6).
 
 ## 4. Validation (local, MOCKED / loopback; not certification)
@@ -76,9 +75,14 @@ simple, contextual way to prove and associate their wallets") or specify the pre
 Each run was against the branch after its commit:
 
 - New and changed suites: `beta-critical-recovery` 12, `relative-amount` 19, `slippage-range-message` 5, `strategy-engine` new 4,
-  `editor-workflow-run.*` 198, `components/account` 20 — all passed.
+  `components/account` 20 — all passed.
 - Domain and state suites: 193 files, 2,992 tests passed. Copilot, router and universal bridge suites: 23 files, 787 tests passed.
 - `agent_guard.py check` PASS, `governance_lite.py` PASS.
+- Specialist review (read-only): flofi-security (5 findings, highest high) and flofi-wallet-execution (6, highest high) both found the duplicate-spend risk
+  in the step-by-step offer → reverted (incident 6). flofi-security also found "50% of my USDC" read as 5% and over-broad "all" readings → fixed: whole
+  percentages kept, a relative amount must name the token being asked about, the automatic answer needs a fresh read (≤30 s) and a balance no earlier step
+  touches. The EIP-5792 5750/5760 comment was corrected. Other specialists: see the PR.
+- Toolchain: the full `pnpm check` gate runs on the pinned Node 24.21.0 (checksum-verified) and pnpm 11.22.0; earlier focused runs used Node 24.22.3. Local PostgreSQL is 16 (CI uses 18).
 - Visual: `ux-refinement-evidence.spec.ts` passed on this branch (local PostgreSQL 16 instead of CI's 18; verified headless shell 1243, Anvil 1.8.3).
 - `pnpm check`, specialist reviews, CircleCI and Vercel Preview: see the PR. They are recorded there, not here, so this file never claims a result it does
   not hold.
@@ -104,7 +108,7 @@ should be run by the owner with their own wallet.
 | §7 Manual 250/500 bps, Auto slippage, elevated-slippage warning | **Not done** | 300 bps is the reviewed maximum in every swap, bridge and liquidity profile, validator, linter and compiler (`workflow-contracts`, `action-registry`). Widening it is a financial-safety policy change. It needs an explicit CTO decision on which protocols get 500 bps, plus swap, bridge and security review. Auto slippage needs a trusted route signal that does not exist yet |
 | §8 USD equivalents under every amount | Not done | Needs its own design check against the approved card contract |
 | §6 Live validation of every mainnet route | Not done | Needs production read access and route records |
-| §4 Capability-aware single confirmation for Phantom/Privy | Not changed | Existing per-wallet strategies kept. Only the refused-batch path was fixed |
+| §4 Capability-aware single confirmation; safe fallback after a refused batch | Not done | See incident 6. Needs a server-side not-sent report and resume-from-step; no client-only shortcut is safe |
 | §5 Google-first onboarding, invite redemption, account recovery audit | Partly | Only the linking dead ends were fixed |
 | §10 Full PT/EN audit of Web, MCP and Telegram | Partly | Every string added here has PT. No full audit was run |
 | Relative amounts on Telegram/MCP | Not done | Telegram has no balance shortcut UI. The question is asked and the user types the amount |
