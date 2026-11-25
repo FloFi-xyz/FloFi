@@ -21,7 +21,7 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareAppliedDeveloperApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
+import { workflowRunCloseRefusedTransfer, workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
   workflowRunUserFundedReport, workflowRunUserFundedStart, workflowRunUserFundedWalletRejected } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
@@ -248,6 +248,9 @@ export async function reportUserFundedRejection(approvalId: string, groupIndex: 
   return runAction(async (s, w) => { await workflowRunUserFundedWalletRejected(s, approvalId, w, groupIndex, requestId); return null; });
 
   });
+}
+export async function endRefusedTransferBatch(approvalId: string, requestId: string, handout: string, rpcCode: number): Promise<Result<null>> {
+  return withFlightOwner(() => runAction(async (s, w) => { await workflowRunCloseRefusedTransfer(s, approvalId, w, requestId, handout, rpcCode); return null; }));
 }
 /** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
 export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<WalletWorkflowReviewView>> {

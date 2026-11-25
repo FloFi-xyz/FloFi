@@ -28,7 +28,7 @@ import { authorizationReviewSequential, authorizeSequential, cancelSequential, c
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
-import { recordWalletDecline } from '../workflow-runs/service.ts';
+import { closeRefusedTransferBatch, recordWalletDecline } from '../workflow-runs/service.ts';
 
 /** A requester kind's own rule for who may claim its handoffs (e.g. only an intended wallet). Evaluated on the handoff's immutable data. */
 export type ClaimPolicy = (handoff: HandoffRecord, wallet: WalletRef) => Promise<ClaimVerdict> | ClaimVerdict;
@@ -259,6 +259,11 @@ export async function workflowRunUserFundedWalletRejected(surface: ApprovalSurfa
   requestId: unknown): Promise<void> {
   const c = await runContext(surface, approvalId, wallets);
   await recordWalletDecline(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof requestId === 'string' ? requestId : refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST'));
+}
+export async function workflowRunCloseRefusedTransfer(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[],
+  requestId: unknown, handout: unknown, rpcCode: unknown): Promise<void> {
+  const c = await runContext(surface, approvalId, wallets);
+  await closeRefusedTransferBatch(c.runs, c.run, wallets, requestId, handout, rpcCode);
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function workflowRunResume(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {

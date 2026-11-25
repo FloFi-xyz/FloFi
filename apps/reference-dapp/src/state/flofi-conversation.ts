@@ -61,6 +61,10 @@ export type { ChatContent, ChatMessage } from '../domain/chat-message';
 export { shownMessage } from '../domain/chat-message';
 type Copy = ReturnType<typeof conversationCopy>;
 export type ConversationBridge = LifecycleView & {
+  readonly grouped?: {
+    readonly phase: string; readonly error: string | null; readonly run: import('../workflow-runs/service').RunView | null;
+    readonly canReview: boolean; startReview(): Promise<void>; authorize(): Promise<void>;
+  } | undefined;
   /**
    * P0 approved UX (board 07): the blocker the Simulate panel shows now (its title, sentence and the server's numbers when it has them). While it is
    * set, a vague request ("explain", "why?", "não entendi", "me explique melhor") is answered with it — never "there is no pending proposal".
@@ -235,6 +239,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
    * execution boundary refused a changed quote, or the owner asked for a fresh one — whose next Review lists its changes before any confirmation.
    */
   const lastReview = useRef<{ workflowId: string; revision: number; review: ConversationReview } | null>(null);
+  const groupedRequest = useRef<{ scope: number; language: ConversationLanguage; settled: boolean } | null>(null);
+  const groupedWatch = useRef<{ scope: number; language: ConversationLanguage; status: string | null } | null>(null);
   const requote = useRef<{ scope: number } | null>(null);
   /** BUILD-FLOFI-E2E-RELIABILITY-001: continuations (run + next request) the owner declined in this conversation: never re-offered by FloFi itself. */
   const declined = useRef<Set<string>>(new Set());
@@ -508,6 +514,21 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       say(scope, language, (language, c) => [c.editPending(edit.step, translate(language, edit.action), edit.value), { question: c.editQuestion, options: [c.applyEdit, c.discardEdit] }]);
       return;
     }
+    if (view.grouped && view.groupedReview?.started) {
+      groupedWatch.current = { scope, language, status: null };
+      setTick(n => n + 1);
+      return;
+    }
+    if (view.grouped && !view.simulationBlocked && view.grouped.canReview) {
+      const binding = reviewBinding(view);
+      if (binding?.grouped && !fresh) { presentGroupedReview(scope, language, binding); return; }
+      if (groupedRequest.current?.scope === scope || view.grouped.phase === 'reviewing') { say(scope, language, (_, c) => c.busy); return; }
+      const request = { scope, language, settled: false };
+      groupedRequest.current = request;
+      say(scope, language, (_, c) => fresh ? c.refreshing : c.reviewStarting);
+      void view.grouped.startReview().finally(() => { request.settled = true; setTick(n => n + 1); });
+      return;
+    }
     // A runtime's availability that has not answered yet is unknown: FloFi waits and continues by itself instead of calling it unavailable.
     if (view.runtimeChecking) { resume.current = { scope, language, until: 'READY', error: null }; say(scope, language, (_, c) => c.checkingProviders); return; }
     const sequence = view.sequence;
@@ -585,6 +606,38 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     presentReview(current.scope, current.language, current.continuation);
   });
 
+  function presentGroupedReview(scope: number, language: ConversationLanguage, binding: ReviewBinding) {
+    setQuestion({ open: { kind: 'CONFIRM_EXECUTION', binding }, language });
+    say(scope, language, (_, c) => [c.reviewReady, { question: c.executeQuestion, options: [c.executeYes, c.executeNo] }]);
+  }
+  useEffect(() => {
+    const request = groupedRequest.current;
+    if (!request?.settled || bridge.grouped?.phase === 'reviewing') return;
+    groupedRequest.current = null;
+    if (request.scope !== session.current) return;
+    const binding = reviewBinding(bridge);
+    if (binding?.grouped) presentGroupedReview(request.scope, request.language, binding);
+    else if (!bridge.grouped) startReview(request.scope, request.language);
+    else say(request.scope, request.language, (language, c) => [c.reviewBlocked(translate(language, 'Execution unavailable')), { options: [c.review] }]);
+  });
+  useEffect(() => {
+    const watch = groupedWatch.current, grouped = bridge.grouped;
+    if (!watch || watch.scope !== session.current) return;
+    if (!grouped) { groupedWatch.current = null; return; }
+    const run = grouped.run, delivery = run?.groups.find(group => group.delivery?.state === 'AWAITING_DESTINATION')?.delivery;
+    const status = grouped.phase === 'wallet' ? 'Confirm in your wallet' : grouped.phase === 'confirming' ? 'Waiting for your wallet'
+      : run?.state === 'COMPLETED' && run.steps.length === run.stepCount && run.steps.every(step => step.state === 'RECONCILED') ? 'Every step reconciled.'
+      : run && ['ATTENTION', 'HALTED', 'FAILED', 'CANCELLED', 'EXPIRED'].includes(run.state) ? 'Execution needs attention'
+      : delivery ? 'Waiting for delivery' : run?.nextAction === 'WAITING_FOR_RECONCILIATION' ? 'Execution in progress'
+      : grouped.error ? 'Execution needs attention' : null;
+    if (!status || watch.status === status) return;
+    watch.status = status;
+    if (status === 'Every step reconciled.') {
+      groupedWatch.current = null;
+      offerNextSteps(watch.scope, watch.language, language => [translate(language, status), []]);
+    } else say(watch.scope, watch.language, language => translate(language, status));
+  });
+
   // ── Confirmation, execution and follow-up ──────────────────────────────────────────────────────────────────────────────────────────
   /** Follows the current execution in the chat from its durable record (announcing its phases), and offers only what the record allows. */
   function follow(scope: number, language: ConversationLanguage, auto = false) {
@@ -608,6 +661,14 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   function execute(scope: number, language: ConversationLanguage, binding: ReviewBinding) {
     const view = latest.current.bridge, controls = view.controls;
     setQuestion(null);
+    if (binding.grouped) {
+      if (!view.grouped || view.simulationBlocked || bindingIssue(binding, view)) {
+        say(scope, language, (_, c) => [c.invalidated.REVIEW_REPLACED, { options: [c.review] }]); return;
+      }
+      groupedWatch.current = { scope, language, status: null };
+      void view.grouped.authorize();
+      return;
+    }
     if (currentExecution(view.progress)?.started && !['simulate', 'approve', 'execute'].includes(projectCanvasAction(controls.current, controls).kind)) { follow(scope, language); return; }
     // Re-project at the answer, exactly as the Canvas CTA does at its click: an expired or replaced Review never starts.
     const action = projectCanvasAction(controls.current, controls);
@@ -728,6 +789,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     }
     const live = currentExecution(view.progress);
     if (request === 'STATUS') {
+      if (view.groupedReview?.started) {
+        groupedWatch.current = { scope, language, status: null };
+        setTick(n => n + 1);
+        return;
+      }
       if (!live) { say(scope, language, (_, c) => c.statusUnavailable); return; }
       if (view.controls.canCheck) { say(scope, language, (_, c) => c.statusChecking); view.controls.checkStatus(); }
       follow(scope, language); return;
@@ -764,7 +830,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     setQuestion(null);
     // P0 hotfix (execution continuity): the owner already authorized this Review in Execute and its run started, or the whole workflow completed:
     // the question was answered by that action. It closes quietly — never a "no longer valid / review again" message about a step that ran.
-    if (bridge.sequence?.finished || bridge.authorization.accepted && currentExecution(bridge.progress)?.started) return;
+    if (bridge.sequence?.finished || open.open.binding.grouped && bridge.groupedReview?.started
+      || bridge.authorization.accepted && currentExecution(bridge.progress)?.started) return;
     say(session.current, open.language, (_, c) => [c.invalidated[issue], { options: [c.review] }]);
   });
   // Execution follow-up: each phase of the durable record once, and the next wallet request only as its own explicit question.
@@ -1176,6 +1243,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   // BUILD0-UX-001: `submit` is the same `send`, awaitable, for Build 0 (the request and FloFi's answer stay in this conversation).
   return { messages, input, setInput, send: (text: string) => void send(text), submit: send, busy: copilot.busy || sending, copilot, automation, dismissAutomation: () => setAutomation(null),
     manage, dismissManage: () => setManage(null),
-    phase, question: question?.open.kind ?? null, direct };
+    phase, question: question?.open.kind ?? null, direct,
+    groupedReviewActive: question?.open.kind === 'CONFIRM_EXECUTION' && question.open.binding.grouped && !bindingIssue(question.open.binding, bridge) };
 }
 export type FlofiConversation = ReturnType<typeof useFlofiConversation>;

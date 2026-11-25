@@ -29,7 +29,7 @@ import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { amountsAvailable, boundDeliveryRefusal } from './received-amounts.ts';
 import { preparedGroupDeliveryRefusal, stopRunFromCurrent } from './user-funded-pass.ts';
-import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
+import { BATCH_PRE_SEND_REFUSALS, CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_NOT_SENT, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
@@ -422,6 +422,22 @@ function handedTo(g: GroupRecord, handout: string | undefined): boolean {
 }
 /** What the owner's browser is shown of a prepared artifact: never the hand-out token's hash. */
 const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Object.entries(prepared).filter(([key]) => key !== 'handoutHash')) as Prepared;
+
+/** Close an exact single native-transfer handout after the wallet definitively refused the batch. */
+export async function closeRefusedTransferBatch(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[],
+  requestId: unknown, handout: unknown, rpcCode: unknown): Promise<void> {
+  assertRunWallets(run, wallets);
+  if (typeof rpcCode !== 'number' || !BATCH_PRE_SEND_REFUSALS.has(rpcCode) || typeof handout !== 'string' || typeof requestId !== 'string')
+    return refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  const [group] = await deps.store.groups(run.runId);
+  const prepared = group?.prepared as { readonly group?: EvmGroupCalls; readonly request?: { readonly id?: string };
+    readonly handoutHash?: string; readonly superseded?: readonly unknown[] } | null | undefined;
+  const calls = prepared?.group?.calls;
+  if (!group || group.state !== 'PREPARED' || group.strategy !== 'EVM_WALLET_BATCH' || !prepared?.handoutHash || !handedTo(group, handout)
+    || prepared.request?.id !== requestId || prepared.superseded?.length || calls?.length !== 2
+    || calls[0]?.kind !== 'DEADLINE_GUARD' || calls[1]?.kind !== 'NATIVE_TRANSFER') return refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  await deps.store.cancel(run.runId, run.version, WALLET_BATCH_NOT_SENT, deps.now(), { refusedTransferBatch: { version: group.version, rpcCode } });
+}
 /**
  * Builds what the owner's wallet signs for one group, from fresh chain facts: an UPFRONT group at any time while the run is open; a WHEN_DUE
  * group only once it is the current group (its delivery reconciled). Bound steps spend the reconciled facts (never an estimate).
@@ -832,7 +848,7 @@ function batchAnswerMismatch(deps: WorkflowRunDeps, run: RunRecord, g: GroupReco
 // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): a group ended as a verified rejection (WALLET_REQUEST_REJECTED) is stopped
 // unanswered too: an answer for it is the strongest sign the proof was wrong, so it is refused, logged and kept as a fact (never dropped).
 const stoppedUnanswered = (g: GroupRecord) => (g.state === 'BLOCKED' || g.state === 'SKIPPED')
-  && (g.code === WALLET_BATCH_OUTCOME_UNKNOWN || g.code === WALLET_REQUEST_REJECTED) && walletBatchUnanswered(g);
+  && (g.code === WALLET_BATCH_OUTCOME_UNKNOWN || g.code === WALLET_REQUEST_REJECTED || g.code === WALLET_BATCH_NOT_SENT) && walletBatchUnanswered(g);
 /**
  * The owner's browser answered (a batch id, its transactions, or the wallet's "not sent") for a group stopped while its batch was unanswered:
  * never dropped silently behind the group's state. Nothing is recorded; the answer is logged (whether its batch id is the one FloFi handed out,
@@ -849,7 +865,7 @@ async function batchAnsweredAfterStop(deps: WorkflowRunDeps, run: RunRecord, g: 
     notSent: answer.notSent ?? null });
   // An answer that contradicts a verified rejection is kept as an append-only fact: History can then never delete the attempt (0033's closed
   // allowlist refuses any event it does not name). Recording it never changes the refusal.
-  if (g.code === WALLET_REQUEST_REJECTED)
+  if (g.code === WALLET_REQUEST_REJECTED || g.code === WALLET_BATCH_NOT_SENT)
     await deps.store.recordAnswerAfterStop(run.runId, g.groupIndex, { batchIdReported: answer.batchId !== undefined, hashes: answer.hashes ?? null,
       notSent: answer.notSent ?? null }).catch(() => deps.log('workflow_run.answer_after_stop_unrecorded', { run: run.runId, group: g.groupIndex }));
   return refuse('WALLET_BATCH_ANSWERED_AFTER_STOP');

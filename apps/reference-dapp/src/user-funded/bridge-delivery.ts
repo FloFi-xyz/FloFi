@@ -41,7 +41,7 @@ export type BridgeProgress = {
   readonly refund: { readonly transactionHash: string; readonly amount: string } | null;
 };
 export type BridgeDelivery =
-  | { readonly status: 'UNREADABLE' }
+  | { readonly status: 'UNREADABLE'; readonly progress?: BridgeProgress; readonly changed?: boolean }
   | { readonly status: 'PENDING'; readonly progress: BridgeProgress; readonly changed: boolean }
   | { readonly status: 'NOT_OBSERVED'; readonly progress: BridgeProgress; readonly changed: boolean; readonly code: 'BRIDGE_DELIVERY_NOT_OBSERVED' }
   | { readonly status: 'DIVERGENT'; readonly code: string; readonly progress: BridgeProgress | null }
@@ -135,8 +135,22 @@ export async function observeBridgeDelivery(deps: { readonly evm: (chain: string
       let scanFrom = BigInt(progress.scanFrom), fill: BridgeProgress['fill'] = null, revisit: bigint | null = null;
       for (let window = 0; !fill && revisit === null && window < SCAN_WINDOWS_PER_OBSERVATION && scanFrom <= latest; window++) {
         const to = scanFrom + BigInt(profile.destinationScanBlocks) - 1n < latest ? scanFrom + BigInt(profile.destinationScanBlocks) - 1n : latest;
-        const logs = await dt.rpc('eth_getLogs', [{ address: pair.destination.spokePool, fromBlock: tag(scanFrom), toBlock: tag(to),
-          topics: [TOPIC.filledRelay, word(BigInt(pair.source.chainId)), word(BigInt(progress.depositId))] }]);
+        let logs: unknown;
+        try {
+          logs = await dt.rpc('eth_getLogs', [{ address: pair.destination.spokePool, fromBlock: tag(scanFrom), toBlock: tag(to),
+            topics: [TOPIC.filledRelay, word(BigInt(pair.source.chainId)), word(BigInt(progress.depositId))] }]);
+        } catch (error) {
+          // An RPC can serve canonical receipts while refusing historical log ranges. Across can locate a candidate receipt in that case.
+          const hint = await depositStatus(deps, group, call, progress);
+          const hash = hint?.status === 'FILLED' ? hint.destinationTxHash : null;
+          const receipt = hash && HASH.test(hash) ? await canonicalReceipt(dt, hash) : null;
+          if (!receipt || !hash || receipt.blockNumber < BigInt(call.destinationFromBlock) || receipt.blockNumber > latest) throw error;
+          const check = fillMatches(pair, source, route, receipt.logs);
+          if (!check.ok) throw error;
+          fill = { transactionHash: hash, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash,
+            outputAmount: check.fill.updatedOutputAmount.toString(), relayer: check.fill.relayer };
+          break;
+        }
         if (!Array.isArray(logs)) throw new Error('BRIDGE_RPC_INVALID');
         for (const entry of logs) {
           const hash = String(record(entry).transactionHash ?? '').toLowerCase();
@@ -183,18 +197,19 @@ export async function observeBridgeDelivery(deps: { readonly evm: (chain: string
       received: { asset: assetKey({ chain: call.destinationChain, address: call.outputToken }), amount: f.outputAmount },
       transaction: { chain: call.destinationChain, hash: f.transactionHash } };
   } catch {
-    // A failed or malformed read decides nothing: observed again on the next pass.
-    return { status: 'UNREADABLE' };
+    // Keep the source facts verified before a read failed. No delivery is inferred from the error.
+    return changed ? { status: 'UNREADABLE', progress, changed } : { status: 'UNREADABLE' };
   }
+}
+async function depositStatus(deps: { readonly across?: AcrossRoutes }, group: EvmGroupCalls, call: AcrossDepositUserCall, progress: BridgeProgress) {
+  const status = deps.across?.(group.chain, call.destinationChain)?.status;
+  return status ? status(progress.sourceTransaction).catch(() => null) : null;
 }
 /** A refund the provider's deposit status points at, verified on the source chain (exactly the input back to the owner from the SpokePool). */
 async function refund(deps: { readonly across?: AcrossRoutes }, group: EvmGroupCalls, call: AcrossDepositUserCall, profile: RouterProfile, pair: ReturnType<typeof acrossPairOf>,
   progress: BridgeProgress, t: ChainTransport): Promise<BridgeDelivery | null> {
-  const status = deps.across?.(group.chain, call.destinationChain)?.status;
-  if (!status) return null;
-  let hint: Awaited<ReturnType<typeof status>>;
-  try { hint = await status(progress.sourceTransaction); } catch { return null; }
-  if (hint.status !== 'REFUNDED' || !hint.refundTxHash || !HASH.test(hint.refundTxHash)) return null;
+  const hint = await depositStatus(deps, group, call, progress);
+  if (hint?.status !== 'REFUNDED' || !hint.refundTxHash || !HASH.test(hint.refundTxHash)) return null;
   const receipt = await canonicalReceipt(t, hint.refundTxHash);
   const amount = receipt ? refundMatches(pair, group.owner.toLowerCase(), call.inputAmount, receipt.logs) : null;
   if (amount === null || !receipt || receipt.blockNumber > await safeHead(t, profile.finality)) return null;

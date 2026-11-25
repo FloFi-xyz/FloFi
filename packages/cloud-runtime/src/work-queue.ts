@@ -23,6 +23,7 @@ export interface WorkQueue {
 type ItemRow = { id: string; tenant_id: string; kind: string; dedupe_key: string; run_id: string | null; payload: Record<string, string>;
   deliveries: number; lease_token: string; trace_parent: string | null; created_at: Date };
 const reasonText = (reason: string) => reason.replace(/[^A-Za-z0-9_:. -]/g, '').slice(0, 200) || 'UNSPECIFIED';
+const workflowWake = "kind = 'workflow-run.advance' AND payload->>'wakeAfterLease' = 'true'";
 
 /**
  * BUILD-CLOUD-PARITY-001: `tenantId` scopes claims to one tenant, so deployments that share a database (for example a Preview
@@ -49,7 +50,8 @@ export function createPostgresWorkQueue(input: { db: Database; ownerId: string; 
             AND ($4::text IS NULL OR tenant_id = $4) AND ($5::text[] IS NULL OR kind = ANY($5::text[]))
           ORDER BY available_at, id LIMIT $1 FOR UPDATE SKIP LOCKED)
         UPDATE work_items w SET state = 'LEASED', lease_owner = $2, lease_token = gen_random_uuid(),
-          lease_expires_at = now() + make_interval(secs => $3::double precision / 1000), deliveries = w.deliveries + 1, updated_at = now()
+          lease_expires_at = now() + make_interval(secs => $3::double precision / 1000), deliveries = w.deliveries + 1, updated_at = now(),
+          payload = CASE WHEN w.kind = 'workflow-run.advance' AND w.payload->>'wakeAfterLease' = 'true' THEN w.payload - 'wakeAfterLease' ELSE w.payload END
         FROM candidate WHERE w.id = candidate.id
         RETURNING w.id::text AS id, w.tenant_id, w.kind, w.dedupe_key, w.run_id, w.payload, w.deliveries, w.lease_token::text AS lease_token,
           w.trace_parent, w.created_at`, [limit, ownerId, leaseMs, tenantId, kinds === undefined ? null : [...kinds]]);
@@ -57,10 +59,17 @@ export function createPostgresWorkQueue(input: { db: Database; ownerId: string; 
         payload: row.payload, deliveries: row.deliveries, leaseToken: row.lease_token, traceParent: row.trace_parent, createdAt: row.created_at }));
     },
     heartbeat: item => settle(item, `UPDATE work_items SET lease_expires_at = now() + make_interval(secs => $3::double precision / 1000), updated_at = now() WHERE lease_expires_at > now()`, [leaseMs]),
-    complete: item => settle(item, `UPDATE work_items SET state = 'DONE', lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
-      completed_at = now(), updated_at = now(), last_error = NULL WHERE true`, []),
+    complete: item => settle(item, `UPDATE work_items SET state = CASE WHEN ${workflowWake} THEN 'READY' ELSE 'DONE' END,
+      lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
+      available_at = CASE WHEN ${workflowWake} THEN now() ELSE available_at END,
+      completed_at = CASE WHEN ${workflowWake} THEN NULL ELSE now() END,
+      payload = CASE WHEN ${workflowWake} THEN payload - 'wakeAfterLease' ELSE payload END,
+      updated_at = now(), last_error = NULL WHERE true`, []),
     retry: (item, delayMs, reason) => settle(item, `UPDATE work_items SET state = 'READY', lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
-      available_at = now() + make_interval(secs => $3::double precision / 1000), last_error = $4, updated_at = now() WHERE true`, [Math.max(0, Math.round(delayMs)), reasonText(reason)]),
+      available_at = now() + make_interval(secs => CASE WHEN ${workflowWake}
+        THEN 0 ELSE $3::double precision / 1000 END),
+      payload = CASE WHEN ${workflowWake} THEN payload - 'wakeAfterLease' ELSE payload END,
+      last_error = $4, updated_at = now() WHERE true`, [Math.max(0, Math.round(delayMs)), reasonText(reason)]),
     async dead(item, reason) {
       return db.transaction(async tx => {
         const settled = await tx.query(`UPDATE work_items SET state = 'DEAD', lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,

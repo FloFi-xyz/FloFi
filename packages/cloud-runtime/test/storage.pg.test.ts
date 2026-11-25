@@ -150,6 +150,20 @@ describe('BUILD-CLOUD-001 fenced PostgreSQL leases', () => {
     await leases('next-request').hold('aborted-acquire', async () => { calls++; });
     expect(calls).toBe(1);
   });
+  it('retries a deadlocked release without replaying the action or stranding its fence', async () => {
+    let releases = 0, calls = 0;
+    const contended: Database = { ...db, query: async <R extends Record<string, unknown>>(sql: string, params?: readonly unknown[]) => {
+      if (sql.includes('SET expires_at = now()') && ++releases === 1)
+        return db.query<R>(`DO $$ BEGIN RAISE EXCEPTION 'test release contention' USING ERRCODE = '40P01'; END $$`);
+      return db.query<R>(sql, params);
+    } };
+    expect(await leases('contended-release', contended).hold('release-race', async () => ++calls)).toBe(1);
+    expect(releases).toBe(2);
+    await leases('next-holder').hold('release-race', async () => undefined);
+    const { rows } = await db.query(`SELECT fence::text AS fence FROM execution_leases WHERE lease_key = 'release-race'`);
+    expect(rows[0]?.fence).toBe('2');
+    expect(calls).toBe(1);
+  });
   it('an expired holder is fenced out: its writes fail after takeover', async () => {
     const log = createPostgresLogStore({ db, tenantId: 'default', namespace: 'ns' });
     await log.extend('fenced.jsonl', bytes('a\n'), lines());

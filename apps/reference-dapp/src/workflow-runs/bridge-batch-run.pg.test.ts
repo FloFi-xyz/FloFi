@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { CROSSCHAIN_ROUTER_ARBITRUM_BASE as P } from '@defi-workflow-engine/action-registry';
+import { createPostgresWorkQueue } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
 import { workflowRunStatus } from '../platform/index.ts';
@@ -29,6 +30,7 @@ import { evmCallsOf, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { AcrossDepositUserCall } from '../user-funded/bridge-calls.ts';
 import { BRIDGE_DELIVERY_MARGIN_SECONDS } from '../user-funded/bridge-delivery.ts';
 import { workflowRunHarness } from './workflow-run.test-harness.ts';
+import { WORKFLOW_RUN_ADVANCE_KIND as ADVANCE } from './state-machine.ts';
 
 const ARB = 'eip155:42161', BASE = 'eip155:8453', ROUTE = `${ARB}>${BASE}`;
 const A_USDC = ARBITRUM_MAINNET_SWAP.usdc.toLowerCase(), A_WETH = ARBITRUM_MAINNET_SWAP.weth.toLowerCase(), B_USDC = BASE_MAINNET_SWAP.usdc.toLowerCase();
@@ -81,6 +83,49 @@ const fill = (s: Started, deposit: AcrossDepositUserCall) => s.base.control.acro
   inputToken: deposit.inputToken, inputAmount: BigInt(deposit.inputAmount), outputAmount: BigInt(deposit.outputAmount), fillDeadline: deposit.fillDeadline });
 
 describe('P0 hotfix E1: Swap → Bridge (Arbitrum One → Base) as ONE persistent user-funded run (PostgreSQL, MOCKED chains)', () => {
+  it.each(['READY', 'LEASED_RETRY', 'LEASED_DONE', 'LEASED_RESTART'] as const)('wakes a %s owner wait once after the wallet reports submission', async state => {
+    const t = await createTestDatabase();
+    try {
+      const s = await start(t.db);
+      const runId = (await ownedRun(s.h.runs, s.approval.approvalId, s.wallets)).runId;
+      const tenantId = s.h.d.tenantId;
+      const queue = createPostgresWorkQueue({ db: t.db, ownerId: 'old-worker', tenantId });
+      const restarted = createPostgresWorkQueue({ db: t.open(), ownerId: 'restarted-worker', tenantId });
+      const job = async () => (await t.db.query(`SELECT id::text, state, lease_token::text, available_at <= now() AS due, payload
+        FROM work_items WHERE tenant_id = $1 AND kind = $2 AND dedupe_key = $3 AND state IN ('READY','LEASED')`, [tenantId, ADVANCE, runId])).rows;
+      expect(await s.h.drain()).toBe(1);
+      const delayed = await job();
+      expect(delayed).toEqual([expect.objectContaining({ state: 'READY', due: false })]);
+      expect(await restarted.claim(1, [ADVANCE])).toEqual([]);
+      if (state !== 'READY') await t.db.query(`UPDATE work_items SET available_at = now() WHERE id = $1`, [delayed[0]!.id]);
+      const [leased] = state === 'READY' ? [] : await queue.claim(1, [ADVANCE]);
+      const { hash, deposit } = await ownerSendsBatch(s);
+      if (leased) {
+        expect(await job()).toEqual([expect.objectContaining({ state: 'LEASED', lease_token: leased.leaseToken })]);
+        expect(await restarted.claim(1, [ADVANCE])).toEqual([]);
+        if (state === 'LEASED_RESTART') await t.db.query(`UPDATE work_items SET lease_expires_at = now() - interval '1 second' WHERE id = $1`, [leased.id]);
+        else expect(await (state === 'LEASED_DONE' ? queue.complete(leased) : queue.retry(leased, 300_000, 'WORKFLOW_RUN_WAITING'))).toBe(true);
+      }
+      const [observe] = await restarted.claim(1, [ADVANCE]);
+      expect(observe).toMatchObject({ id: delayed[0]!.id, payload: { runId } });
+      expect(observe!.payload).toEqual({ runId });
+      expect(await queue.claim(1, [ADVANCE])).toEqual([]);
+      if (leased) expect(await queue.retry(leased, 300_000, 'STALE_LEASE')).toBe(false);
+      // Subsequent retries retain their observation interval, including after a duplicate report.
+      expect(await restarted.retry(observe!, 15_000, 'WORKFLOW_RUN_WAITING')).toBe(true);
+      await workflowRunUserFundedReport(s.h.surface, s.approval.approvalId, s.wallets, 0, [hash]);
+      expect(await restarted.claim(1, [ADVANCE])).toEqual([]);
+      const fillHash = fill(s, deposit);
+      await t.db.query(`UPDATE work_items SET available_at = now() WHERE id = $1`, [observe!.id]);
+      expect(await s.h.drain()).toBe(1);
+      expect(await workflowRunStatus(s.h.surface, s.approval.approvalId, s.wallets)).toMatchObject({
+        view: { workflowRun: { run: { state: 'COMPLETED', groups: [{ delivery: { fill: { hash: fillHash } } }] } } },
+      });
+      expect(s.arb.control.sends() + s.base.control.sends()).toBe(0);
+      expect(s.across.controls.quotes).toBe(1);
+    } finally { await t.drop(); }
+  });
+
   it('one wallet batch; the run waits for the verified delivery on Base, reconciles it and completes; a reload reads it back; nothing is sent twice', async () => {
     const t = await createTestDatabase();
     try {

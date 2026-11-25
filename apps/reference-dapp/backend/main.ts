@@ -216,6 +216,7 @@ async function main(): Promise<void> {
   const tenantQueue = createPostgresWorkQueue({ db, ownerId: config.workerId, tenantId: config.tenantId });
   const queue = { ...tenantQueue, claim: (limit: number) => tenantQueue.claim(limit, Object.keys(handlers)) };
   const worker = createWorker({ queue, handlers, logger, workerId: config.workerId, concurrency: config.workerConcurrency,
+    ...(workflowRuns ? { idleMaxMs: 4_000 } : {}),
     sweep: async () => {
       // Every subsystem sweeps even when another fails. A failure of the reconciliation sweep or the automation sweep still fails `work.sweep`
       // (as before, now after the others ran); the delegation and workflow-run sweeps log their own closed cause instead of being dropped.

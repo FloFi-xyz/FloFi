@@ -640,18 +640,19 @@ test.describe('Live Canvas', () => {
     await expect(page.locator('.react-flow__edge.canvas-execution-edge-done')).toHaveCount(2);
     const green = await cards(page).first().evaluate(card => getComputedStyle(card).borderTopColor);
     expect(green).not.toBe(await page.locator('.simulate-canvas').evaluate(frame => getComputedStyle(frame).borderTopColor));
-    // Every recorded transaction stays reachable under Execution details, which a final result opens by default; the owner can still close it.
+    // The final result leaves transaction evidence collapsed until the owner opens it.
     const details = page.locator('.execution-details-disclosure');
-    await expect(details).toHaveAttribute('open', '');
+    await expect(details).not.toHaveAttribute('open', '');
+    await details.locator('summary').click();
     await expect(page.getByRole('region', { name: 'Execution details', exact: true })).toContainText('Supply');
     await details.locator('summary').click(); await expect(details).not.toHaveAttribute('open', '');
     expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
   });
-  test('a failed step is red beside its completed dependency; nothing completed is reset; details open with the failure', async ({ page }) => {
+  test('a failed step is red beside its completed dependency; nothing completed is reset; failure details stay collapsed', async ({ page }) => {
     await page.evaluate(() => { window.flofiExecuteAcceptance.liveCanvas(true); window.flofiExecuteAcceptance.evidence('progress-failed'); });
     await expect.poll(() => states(page)).toEqual(['done', 'failed', 'waiting']);
     await expect(page.locator('.react-flow__edge.canvas-execution-edge-failed')).toHaveCount(1);
-    await expect(page.locator('.execution-details-disclosure')).toHaveAttribute('open', '');
+    await expect(page.locator('.execution-details-disclosure')).not.toHaveAttribute('open', '');
     await expect(page.locator('.canvas-execution-badge[data-visual="failed"]')).toContainText('Failed');
     await page.screenshot({ path: '.tmp/live-canvas-failed.png' });
   });

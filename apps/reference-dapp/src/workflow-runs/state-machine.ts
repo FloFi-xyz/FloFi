@@ -54,6 +54,8 @@ export const DELEGATED_AUTHORIZATION_SECONDS = 24 * 3_600;
 /** How often the advance work item re-observes an open run (the flows' own reconciliation is the source of truth). */
 export const ADVANCE_RETRY_MS = 20_000;
 export const WORKFLOW_RUN_ADVANCE_KIND = 'workflow-run.advance';
+export const WALLET_BATCH_NOT_SENT = 'WALLET_BATCH_NOT_SENT';
+export const BATCH_PRE_SEND_REFUSALS: ReadonlySet<number> = new Set([5700, 5710, 5740, 5750, 5760, 4100, 4200, -32601, -32602]);
 
 /** Ending only skips unsubmitted work; reconciled steps and their evidence remain final. */
 /**

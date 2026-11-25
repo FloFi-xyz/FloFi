@@ -110,6 +110,8 @@ import { RepayPanel } from './repay-panel';
 import { BorrowPanel } from './borrow-panel';
 import { SupplyPanel } from './supply-panel';
 import { EstimateOwnersContext } from '../state/estimate-owners';
+import { InspectionCardValues } from './simulate-workflow-canvas';
+import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
 import { useJupiter } from '../state/jupiter-store';
 import { JupiterPanel } from './jupiter-panel';
 import { SolanaLiquidityPanel } from './solana-liquidity-panel';
@@ -662,7 +664,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
   // A single card back on its own flow shows only that flow (its own Review and wording): never the whole-workflow Review or a second primary action
   // beside it (final frontend-ux review). A started run of it always stays shown.
-  const groupedShown = workflowRunHere.visible && !singleCardFallback;
+  const groupedShown = workflowRunHere.visible && !singleCardFallback && (!workflowRunHere.earlier || workflowRunHere.canReview);
   // A single card that falls back to its own flow right after its Review continues there at once (read-only: its own fresh simulation, which never
   // opens the wallet selector or a sign-in: `simulateQuietly`). The owner's Simulate click already asked for it; a flow whose simulation needs a
   // wallet sign-in (the Router without a session, the universal Router) waits for the owner's own click.
@@ -960,19 +962,24 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
+      groupedReview: groupedPrimary && !engineering ? { workflow: state.workflow, account: connectedWallet.account, review: workflowRunHere.review, started: workflowRunHere.started } : undefined,
+      grouped: groupedPrimary && !engineering ? { ...workflowRunHere, authorize: async () => {
+        setTab('Execute');
+        await workflowRunHere.authorize();
+      } } : undefined,
       // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
       // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the destination's wallets are still being read (the chat waits and resumes by itself).
       destinationLoading,
       destinationWalletAction: destinationActions ? { ...destinationActions.connect, retry: destinationActions.retry } : null,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
-      simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
-        : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.'
+      simulationBlocked: walletIssue ?? (groupedPrimary && !engineering ? authoringIncomplete ? 'Check the workflow configuration on the Canvas before continuing.' : null
+        : groupedPrimary ? 'This workflow runs as one workflow run: follow it in Execute.'
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? conversationDestinationIssue
           ?? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       // P0 hotfix (locale contract): the same reason in either language, so the chat's message follows the interface language.
-      simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
-        : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.')
+      simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary && !engineering ? authoringIncomplete ? translate(shown, 'Check the workflow configuration on the Canvas before continuing.') : null
+        : groupedPrimary ? translate(shown, 'This workflow runs as one workflow run: follow it in Execute.')
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? destinationIssueIn(shown, 'approve-embedded')
           ?? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone || groupedSingleDone, blocker: blockerView, editingPaused,
@@ -1016,6 +1023,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       note: reviewExpiredHere ? 'Your review expired. Refresh the values to continue safely. Your workflow is still saved.' : null }
     : { placeholder: undefined, note: null };
   const chat = <CopilotPanel conversation={conversation} interactive={interactive} owner={owner} proof={proof} reviewInPanel={reviewBlock && groupedPrimary}
+    groupedReview={conversation.groupedReviewActive ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside compact/> : null}
     placeholder={assistantStage.placeholder} stageNote={assistantStage.note}
     overview={tab === 'Build' && chatFirst ? <EditorOverviewPanel overview={overview} showStep={showStep}/> : undefined}/>;
   // BUILD0-UX-001: a workflow restored or reopened, a run recovered from this browser, a live execution, a proposal or an unfinished Canvas card
@@ -1074,7 +1082,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Navigation only: every lifecycle action still opens its own stage, and each stage keeps its own simulation, Review, wallet and execution gates.
   const stageSignals = {
     started: workflowStarted, reviewed: Boolean(authorization.key), beyond: ['approve', 'execute', 'continue', 'recover'].includes(canvasAction.kind),
-    run: Boolean(workflowRunHere.review || workflowRunHere.run || workflowRunHere.earlier || workflowRunHere.unloaded || workflowRunHere.following || workflowRunHere.started),
+    run: Boolean(workflowRunHere.review || workflowRunHere.run || workflowRunHere.unloaded || workflowRunHere.following || workflowRunHere.started),
     sequence: sequenceContinuing || sequenceFinishedIdle || Boolean(sequenceRestore), recovery: recoveryPath, cow: localCowIntent,
     // A recovery projection always exists (a local runtime even names its network as a context issue); only a recovery action — set for a started
     // execution — is evidence of a record to recover.
@@ -1181,12 +1189,44 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const footerAction = tab === 'Execute' ? chatFirst ? executeFooterAction : reviewBlock ? reviewFooterAction : undefined
     : tab === 'Build' ? createAction : undefined;
   const footerStatusSource = !chatFirst ? undefined : tab === 'Execute' ? executeSimulation : tab === 'Simulate' && groupedPrimary ? groupedSimulationFooter : footerSimulation;
-  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
+  const inspectionValues = (() => {
+    if (engineering || (tab !== 'Simulate' && tab !== 'Execute')) return {};
+    const amount = (text: string | null | undefined) => text?.match(/^(?:≈\s*)?(\d+(?:\.\d+)?)\s/)?.[1] ?? null;
+    const activeRun = ownWorkflowRun && workflowRunHere.authorizedFor?.workflowId === state.workflow.workflowId
+      && workflowRunHere.authorizedFor.revision === state.workflow.revision ? ownWorkflowRun : null;
+    const reviewed = runReviewed && !runReviewed.refusal && (!groupedReviewExpired || activeRun)
+      && (!activeRun || activeRun.workflowHash === runReviewed.workflowHash) ? runReviewed : null;
+    const simulation = groupedPrimary ? null : projectSimulation(runtimeWorkflow, context, simulationSource);
+    const current = simulation?.status === 'ready' || liveExecution?.matchesWorkflow === true ? simulation?.steps ?? [] : [];
+    return Object.fromEntries(sequenceOrder(state.workflow).flatMap((node, index) => {
+      if (!['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType)) return [];
+      if (groupedPrimary) {
+        const group = activeRun?.groups.find(item => item.steps[0] <= index && item.steps[1] >= index);
+        const planned = group?.planned?.steps.find(item => item.index === index);
+        const step = reviewed?.steps.find(item => item.index === index), runStep = activeRun?.steps.find(item => item.index === index);
+        if (!step && !activeRun && tab === 'Simulate' && !runReviewed) return [];
+        const asset = stepAssets(node).output;
+        const actual = runStep?.state === 'RECONCILED' ? deliveredByRun(runStep.outcome?.received ?? [], asset) : null;
+        const minimum = planned?.minimum ?? step?.minimum, expected = planned?.expected ?? step?.expected;
+        return [[node.nodeId, { input: amount((planned?.spend ?? step?.spend)?.text), output: actual !== null && asset ? formatAssetAmount(actual, asset.decimals)
+          : amount((tab === 'Execute' ? minimum ?? expected : expected ?? minimum)?.text),
+        label: actual !== null ? 'Received (reconciled)' : minimum && (tab === 'Execute' || !expected) ? 'Minimum received' : 'Expected receipt',
+        provider: step?.provider ?? (group?.delivery?.step === index ? 'Across' : null) }]];
+      }
+      const step = current.find(item => item.id === node.nodeId);
+      const asset = stepAssets(node).output;
+      const completed = sequence?.completed.find(item => item.nodeId === node.nodeId)?.received ?? null;
+      const actual = completed ?? (liveExecution?.matchesWorkflow !== false && liveExecution?.state === 'complete' && step
+        ? deliveredByRecord(simulationSource.kind, stepRecord, asset) : null);
+      if (!step && actual === null && tab === 'Simulate') return [];
+      return [[node.nodeId, { input: amount(step?.input), output: actual !== null && asset ? formatAssetAmount(actual, asset.decimals)
+        : amount(tab === 'Execute' ? step?.minimum ?? step?.result : step?.result),
+      label: actual !== null ? 'Received (reconciled)' : tab === 'Execute' && step?.minimum ? 'Minimum received' : 'Expected receipt',
+      provider: step?.provider ?? null }]];
+    }));
+  })();
+  return <EstimateOwnersContext.Provider value={estimateOwners}><InspectionCardValues.Provider value={inspectionValues}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
-    {/* P0 workflow execution: after a reload, a whole-workflow run this browser started is offered (never followed silently). */}
-    {workflowRunHere.earlier && tab !== 'Execute' && <div className="editor-run-earlier-notice" role="status">
-      <span>{tr('A workflow you authorized earlier in this browser has not been closed.')}</span>
-      <button type="button" className="secondary" onClick={() => { setTab('Execute'); void workflowRunHere.followEarlier(); }}>{tr('Show its progress')}</button></div>}
     {flightNoticeView}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
@@ -1196,7 +1236,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         actionInFooter={chatFirst && !groupedPrimary && placement === 'footer'} review={executeReview}
         workflowProgress={workflowProgress} continuation={executeContinuationShown} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={groupedShown ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
+        workflowRun={groupedShown ? <EditorWorkflowRunPanel state={workflowRunHere} compact={!engineering} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
           facts={<WorkflowTechnicalFacts workflow={state.workflow} context={context}/>}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
@@ -1218,5 +1258,5 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       statusOverride={tab === 'Execute' && chatFirst ? executeStatus : null} stageBar={chatFirst && tab === 'Simulate'}
       stageNote={tab === 'Simulate' && chatFirst && !simulationReady && !executionUnderway && (groupedPrimary ? !runReviewed && !workflowRunHere.error
         : footerSimulation.status !== 'blocked' && footerSimulation.expiresAt === null) ? 'After simulating, you can review the details and then execute.' : null}/>}
-  </div></EditorChromeProvider></EstimateOwnersContext.Provider>;
+  </div></EditorChromeProvider></InspectionCardValues.Provider></EstimateOwnersContext.Provider>;
 }

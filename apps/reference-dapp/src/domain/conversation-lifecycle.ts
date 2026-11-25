@@ -22,6 +22,7 @@ import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import { runReconciled, type WorkflowProgressView } from './workflow-progress';
 import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
+import type { EditorExecutionReview } from '../editor/workflow-execution';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -39,12 +40,14 @@ export type LifecycleView = {
   readonly sequence?: ConversationSequence | null | undefined;
   /** P0 hotfix (execution continuity): the WHOLE workflow's progress (`workflow-progress.ts`), the same numbers Execute and the Dashboard show. */
   readonly workflowProgress?: WorkflowProgressView | null | undefined;
+  readonly groupedReview?: { readonly workflow: Workflow; readonly review: EditorExecutionReview | null; readonly account: string | null; readonly started: boolean } | undefined;
 };
 export type ConversationSequence = SequencePresentation & { readonly issue: string | null; readonly awaitingDelivery: boolean };
 /** Exactly what one conversational confirmation is about. */
 export type ReviewBinding = {
   readonly workflowId: string; readonly revision: number; readonly workflowHash: string; readonly source: SimulationSource['kind'];
   readonly authorizationKey: string; readonly manifestHash: string | null; readonly account: string; readonly chain: string | null; readonly expiresAt: number | null;
+  readonly grouped?: EditorExecutionReview;
 };
 export type BindingIssue = 'WORKFLOW_CHANGED' | 'REVIEW_REPLACED' | 'WALLET_CHANGED' | 'NETWORK_CHANGED' | 'QUOTE_EXPIRED' | 'REVIEW_UNAVAILABLE';
 /** FloFi's one open question. Only an explicit answer to it, while its binding still holds, does anything. */
@@ -79,6 +82,13 @@ const review = (view: LifecycleView, now: number) => projectReview(view.workflow
 
 /** The binding of the Review FloFi presents now, or null when there is no approvable (or already approved) Review for this wallet. */
 export function reviewBinding(view: LifecycleView, now = Date.now()): ReviewBinding | null {
+  if (view.groupedReview) {
+    const { workflow, review, account, started } = view.groupedReview;
+    const expiresAt = review?.validUntil ? Date.parse(review.validUntil) : NaN;
+    if (started || !review || review.refusal || review.mode === 'STEP_BY_STEP' || !account || !sameAccount(account, review.owner) || !(expiresAt > now)) return null;
+    return { grouped: review, workflowId: workflow.workflowId, revision: workflow.revision, workflowHash: review.workflowHash, source: view.source.kind,
+      authorizationKey: review.reviewedAt, manifestHash: null, account, chain: null, expiresAt };
+  }
   const current = review(view, now), key = view.authorization.key, account = view.wallet.account, hash = workflowHash(view.workflow);
   if (!key || !account || !hash || !(current.status === 'ready' || current.bindingValid)) return null;
   return { workflowId: view.workflow.workflowId, revision: view.workflow.revision, workflowHash: hash, source: view.source.kind, authorizationKey: key,
@@ -86,6 +96,15 @@ export function reviewBinding(view: LifecycleView, now = Date.now()): ReviewBind
 }
 /** Why a confirmation no longer applies (checked again at every answer and before every wallet request), or null while it still holds. */
 export function bindingIssue(binding: ReviewBinding, view: LifecycleView, now = Date.now()): BindingIssue | null {
+  if (binding.grouped) {
+    const grouped = view.groupedReview;
+    if (!grouped || grouped.workflow.workflowId !== binding.workflowId || grouped.workflow.revision !== binding.revision) return 'WORKFLOW_CHANGED';
+    if (!grouped.account || !sameAccount(grouped.account, binding.account)) return 'WALLET_CHANGED';
+    if (binding.expiresAt !== null && now >= binding.expiresAt) return 'QUOTE_EXPIRED';
+    const current = reviewBinding(view, now);
+    return current?.grouped === binding.grouped && current.workflowHash === binding.workflowHash ? null : 'REVIEW_REPLACED';
+  }
+  if (view.groupedReview) return 'REVIEW_REPLACED';
   if (view.workflow.workflowId !== binding.workflowId || view.workflow.revision !== binding.revision || workflowHash(view.workflow) !== binding.workflowHash) return 'WORKFLOW_CHANGED';
   if (!view.wallet.account || !sameAccount(view.wallet.account, binding.account) || view.wallet.changed) return 'WALLET_CHANGED';
   if (view.wallet.chain !== binding.chain) return 'NETWORK_CHANGED';

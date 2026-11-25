@@ -39,7 +39,7 @@
  * The interaction count is reported per wallet and is never rounded down: one interaction is not one signature for every chain (an EVM
  * signature never authorizes a Solana transaction), and a network switch the wallet asks to confirm is counted separately.
  */
-import type { StepRequirement, WorkflowRequirement } from '../delegation/steps.ts';
+import { assetKey, type StepRequirement, type WorkflowRequirement } from '../delegation/steps.ts';
 
 export type Namespace = 'eip155' | 'solana';
 /**
@@ -220,7 +220,9 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     if (namespace === 'eip155') {
       const evm = profile.eip155;
       const atomic = evm?.atomic[chain] ?? null;
-      const canBatch = chainEnabled && allBuildable && (atomic === 'supported' || atomic === 'ready');
+      const soleNativeTransfer = requirement.steps.length === 1 && members[0]?.action === 'transfer'
+        && members[0].inputs.length === 1 && assetKey(members[0].inputs[0]!) === `${chain}/native:ETH`;
+      const canBatch = chainEnabled && allBuildable && (atomic === 'supported' || atomic === 'ready' && !soleNativeTransfer);
       // A user operation needs the account to ALREADY be a smart account (`supported`): a typed-data signature cannot upgrade it, and an
       // operation signed for a plain account is only refused by the bundler after the delivery landed.
       const canUserOp = chainEnabled && allBuildable && evm?.wallet === 'INJECTED' && evm.typedData && facts.bundlerChains.includes(chain) && atomic === 'supported';
@@ -243,7 +245,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
           strategy = canBatch ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP'; signing = 'WHEN_DUE';
         }
       } else if (canBatch) strategy = 'EVM_WALLET_BATCH';
-      else { if (chainEnabled && allBuildable) downgrades.push(atomic === 'unsupported' ? 'WALLET_ATOMIC_BATCH_UNSUPPORTED' : 'WALLET_ATOMIC_BATCH_UNKNOWN'); strategy = 'EVM_OWNER_STEP'; }
+      else { if (chainEnabled && allBuildable && !soleNativeTransfer) downgrades.push(atomic === 'unsupported' ? 'WALLET_ATOMIC_BATCH_UNSUPPORTED' : 'WALLET_ATOMIC_BATCH_UNKNOWN'); strategy = 'EVM_OWNER_STEP'; }
       if (strategy === 'EVM_WALLET_BATCH' && atomic === 'ready') setup.push('EVM_SMART_ACCOUNT_UPGRADE');
     } else {
       const sol = profile.solana;

@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ReactFlow, Background, MarkerType, Panel, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeProps, type ReactFlowState, type Viewport } from '@xyflow/react';
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
@@ -27,6 +27,7 @@ const FIT_PADDING = { top: '32px', bottom: '136px', left: '32px', right: '32px' 
 const fitPadding = (controlsHeight: number) => ({ ...FIT_PADDING, bottom: `${Math.max(136, Math.ceil(controlsHeight) + 16)}px` as `${number}px` });
 function InspectionCard({ data }: NodeProps) { return <ComposerCard data={data as ComposerCardData}/>; }
 const nodeTypes = { workflow: InspectionCard };
+export const InspectionCardValues = createContext<Readonly<Record<string, ComposerCardData['inspectionValues']>>>({});
 /**
  * P0 hotfix (readable cards on narrow screens): below this frame width the read-only graph reads top to bottom, one card per row, and the graph
  * grows with its steps (CSS `--canvas-steps`), so fitting it never shrinks a card to an unreadable size; the page scrolls once.
@@ -110,6 +111,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   const lending = isLendingComposition(workflow);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): swap and bridge steps show the same shared live quote as Build (display only).
   const { evm: evmAccount, solana: solanaAccount } = useEstimateOwners();
+  const cardValues = useContext(InspectionCardValues);
   // BUILD-FLOFI-BUILDER-UX-002: the same flow placement as the Build Canvas, so a step keeps its place between Create and Simulate.
   const frame = useRef<HTMLElement>(null);
   const surface = useRef<HTMLDivElement>(null);
@@ -130,6 +132,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     position: positions[node.nodeId]!,
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending || narrow,
       summary: composerSummary(workflow, node, context),
+      inspectionValues: cardValues[node.nodeId],
       ...execution ? { execution: step ?? { visual: 'waiting', phase: null, text: { key: 'Waiting', args: [] } }, quoteFrozen: true } : {},
       // P0 workflow execution: Execute shows the same per-step quote as Create and Simulate (keyed by the step alone, so it is the cached answer,
       // not a new one), marked as an estimate or as expired — never a blank '—' for a value FloFi already knows. Signing never uses it.
@@ -137,7 +140,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
       // one (`quoteFrozen`): the execution view adds no quote traffic. The Build Canvas keeps live estimates on steps still waiting.
       ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} } };
-  }); }, [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution,
+  }); }, [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution, cardValues,
     // `catalogs` (read above): a token catalog registered since the last render renames its token on the cards.
     catalogs]);
   // BUILD-FLOFI-BUILDER-UX-002: the same link labels as the Build Canvas, so a link reads the same between Create and Simulate.

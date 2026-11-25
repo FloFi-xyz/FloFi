@@ -238,7 +238,7 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   let delivery: BridgeDelivery | null = null;
   if (r.status === 'RECONCILED' && sentGroup && bridge) {
     delivery = await observeBridgeDelivery(deps.userFunded, sentGroup, r.receipts ?? [], bridgeProgressOf(g.outcome));
-    if (delivery.status === 'UNREADABLE') return settled(run, SUBMIT_RETRY_MS, false, 'BRIDGE_AWAITING_DELIVERY');
+    if (delivery.status === 'UNREADABLE' && !delivery.progress) return settled(run, SUBMIT_RETRY_MS, false, 'BRIDGE_AWAITING_DELIVERY');
   }
   // The bridge step waits (its delivery is not final, not observed, or divergent): the other steps of the batch are recorded now.
   const waiting = delivery !== null && delivery.status !== 'DELIVERED' && delivery.status !== 'REFUNDED';
@@ -310,8 +310,12 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   if (delivery && waiting) {
     // The group stays open while its bridge waits: its progress (deposit id, scan cursor, fill) is kept on its outcome when it changed.
     const progress = delivery.progress;
-    if (progress && (delivery.status === 'DIVERGENT' || ('changed' in delivery && delivery.changed) || !bridgeProgressOf(g.outcome)))
-      await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], g.state, { outcome: { ...groupOutcome, status: 'AWAITING_DESTINATION' } }, 'GROUP_BRIDGE_OBSERVED');
+    if (progress && (delivery.status === 'DIVERGENT' || ('changed' in delivery && delivery.changed) || !bridgeProgressOf(g.outcome))) {
+      const observed = await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], g.state,
+        { outcome: { ...groupOutcome, status: 'AWAITING_DESTINATION' } }, 'GROUP_BRIDGE_OBSERVED', g.version);
+      if (!observed) return settled(run, SUBMIT_RETRY_MS);
+    }
+    if (delivery.status === 'UNREADABLE') return settled(run, SUBMIT_RETRY_MS, false, 'BRIDGE_AWAITING_DELIVERY');
     if (delivery.status === 'PENDING') {
       deps.log('workflow_run.bridge_awaiting_delivery', { run: run.runId, group: g.groupIndex, sourceFinal: delivery.progress.sourceSafe, filled: delivery.progress.fill !== null });
       return settled(run, SUBMIT_RETRY_MS, false, 'BRIDGE_AWAITING_DELIVERY');

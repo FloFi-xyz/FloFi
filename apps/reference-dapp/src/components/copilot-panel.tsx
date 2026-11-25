@@ -20,7 +20,8 @@ import { FloFiAvatar, UserAvatar } from './flofi-avatar';
  * this panel can render beside any stage without losing it. Suggested answers appear only on FloFi's latest message: an older button can never
  * answer a newer question.
  */
-export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false, placeholder = 'Ask or request a change', stageNote = null }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false, groupedReview, placeholder = 'Ask or request a change', stageNote = null }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+  groupedReview?: ReactNode;
   /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (section 10): the composer's hint for the Editor stage (Create, Simulate or Execute). */
   placeholder?: string | undefined;
   /** A local hint for the stage (e.g. C2: the Review expired): shown beside the conversation, never sent, stored or added to it. */
@@ -71,6 +72,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
         {message.role === 'ai' || message.role === 'flofi' ? <>
           <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} link={message.link} verbatim={message.verbatim} disabled={busy} onPick={send}/>
           {message.review && !reviewInPanel && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
+          {written === last && groupedReview}
           {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <ChatActions options={options} verbatim={message.verbatim} busy={busy} onPick={send}/>}

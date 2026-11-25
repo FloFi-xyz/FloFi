@@ -68,9 +68,17 @@ export function createPostgresLeaseStore(options: LeaseOptions): LeaseStore {
       finally {
         clearInterval(timer);
         // Expire rather than delete: the fence of this key keeps increasing across holders.
-        await options.db.query(`UPDATE execution_leases SET expires_at = now()
-            WHERE tenant_id = $1 AND namespace = $2 AND lease_key = $3 AND owner_id = $4 AND expires_at > now()`,
-        [options.tenantId, options.namespace, key, ownerId]).catch(() => undefined);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await options.db.query(`UPDATE execution_leases SET expires_at = now()
+              WHERE tenant_id = $1 AND namespace = $2 AND lease_key = $3 AND owner_id = $4 AND fence = $5 AND expires_at > now()`,
+            [options.tenantId, options.namespace, key, ownerId, lease.fence]);
+            break;
+          } catch (error) {
+            // The purge guard may deadlock with another acquisition. PostgreSQL rolled back only the release.
+            if ((error as { code?: string } | null)?.code !== '40P01') break;
+          }
+        }
       }
     },
   };

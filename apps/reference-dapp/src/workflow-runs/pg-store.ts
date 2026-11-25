@@ -14,7 +14,7 @@
 import { CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS, type Database, type Queryable, type Row } from '@defi-workflow-engine/cloud-runtime';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platform/handoff-store.ts';
-import { WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_REQUEST_REJECTED, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode,
+import { WALLET_BATCH_NOT_SENT, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_REQUEST_REJECTED, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode,
   type RunState, type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
 import { plannedGroupCode } from './owner-step-circle.ts';
@@ -94,10 +94,14 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
   const event = (tx: Queryable, runId: string, stepIndex: number | null, kind: string, code: string | null = null, detail: Readonly<Record<string, unknown>> | null = null) =>
     tx.query(`INSERT INTO workflow_run_events (tenant_id, run_id, step_index, kind, code, detail) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
       [tenantId, runId, stepIndex, kind, code, json(detail)]);
-  const enqueue = (tx: Queryable, runId: string, delayMs = 0) => tx.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, available_at)
+  const enqueue = (tx: Queryable, runId: string, delayMs = 0, wake = false) => tx.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, available_at)
       VALUES ($1, $2, $3, NULL, $4::jsonb, 'READY', now() + make_interval(secs => $5::double precision / 1000))
-      ON CONFLICT (tenant_id, kind, dedupe_key) WHERE state IN ('READY', 'LEASED') DO NOTHING`,
-  [tenantId, WORKFLOW_RUN_ADVANCE_KIND, runId, JSON.stringify({ runId }), Math.max(0, Math.round(delayMs))]);
+      ON CONFLICT (tenant_id, kind, dedupe_key) WHERE state IN ('READY', 'LEASED') DO UPDATE
+      SET available_at = CASE WHEN work_items.state = 'READY' THEN LEAST(work_items.available_at, EXCLUDED.available_at) ELSE work_items.available_at END,
+          payload = CASE WHEN work_items.state = 'LEASED' THEN work_items.payload || '{"wakeAfterLease":"true"}'::jsonb ELSE work_items.payload END,
+          updated_at = now()
+      WHERE $6::boolean`,
+  [tenantId, WORKFLOW_RUN_ADVANCE_KIND, runId, JSON.stringify({ runId }), Math.max(0, Math.round(delayMs)), wake]);
   const lockRun = async (tx: Queryable, runId: string) => {
     const row = (await tx.query('SELECT * FROM workflow_runs WHERE tenant_id = $1 AND run_id = $2 FOR UPDATE', [tenantId, runId])).rows[0];
     return row ? runOf(row) : null;
@@ -131,6 +135,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     if (!row) return null;
     await event(tx, runId, null, kind, patch.code ?? null, { group: groupIndex, state: to,
       ...patch.submission ? { hashes: (patch.submission as { hashes?: unknown }).hashes ?? null } : {} });
+    // The wallet already submitted. Commit its observation wake with the hashes, even if the API restarts before its next read.
+    if (to === 'SUBMITTED' && patch.submission?.kind === 'EVM_WALLET_BATCH') await enqueue(tx, runId, 0, true);
     return groupOf(row);
   };
 
@@ -277,13 +283,18 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
        */
       readonly verifiedDeclines?: ReadonlyMap<number, VerifiedDecline>;
       /** End the run only if every unanswered wallet batch is one of `verifiedDeclines` here, under the lock; otherwise refuse and change nothing. */
-      readonly onlyIfDeclineVerified?: boolean } = {}) => db.transaction(async tx => {
+      readonly onlyIfDeclineVerified?: boolean;
+      /** Exact handout validated by the owner service after a definitive wallet method refusal. */
+      readonly refusedTransferBatch?: { readonly version: number; readonly rpcCode: number };
+    } = {}) => db.transaction(async tx => {
       const run = await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
       if (run.version !== version) refuse('WORKFLOW_RUN_CHANGED');
       if (!['PENDING', 'RUNNING', 'HALTED'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.state}`);
       if (run.mode === 'DELEGATED') refuse('WORKFLOW_RUN_REVOKE_REQUIRED');
       const steps = (await tx.query('SELECT * FROM workflow_run_steps WHERE tenant_id = $1 AND run_id = $2 ORDER BY step_index FOR UPDATE', [tenantId, runId])).rows.map(stepOf);
       if (!canEndWorkflow(run, steps)) refuse('WORKFLOW_RUN_STEP_IN_FLIGHT');
+      const preSend = options.refusedTransferBatch;
+      if (preSend && (run.mode !== 'USER_FUNDED' || run.state !== 'RUNNING' || run.stepCount !== 1)) refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
       const row = (await tx.query(`UPDATE workflow_runs SET state = 'CANCELLED', code = $3, version = version + 1
         WHERE tenant_id = $1 AND run_id = $2 RETURNING *`, [tenantId, runId, code])).rows[0]!;
       // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a user-funded run ends only while no group may be in flight (signed but not reconciled).
@@ -292,7 +303,10 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         const groups = (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index FOR UPDATE', [tenantId, runId])).rows.map(groupOf);
         // The same rule the owner's "End workflow" uses (`groupInFlight`): FloFi never relays a skipped user operation or Solana signature, and
         // the owner is shown how to revoke a signed operation.
-        if (groups.some(g => groupInFlight(g, now))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+        const refused = preSend ? groups[0] : null;
+        if (preSend && (groups.length !== 1 || !refused || refused.version !== preSend.version || refused.state !== 'PREPARED'
+          || refused.submission || !walletBatchUnanswered(refused))) refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+        if (groups.some(g => g !== refused && groupInFlight(g, now))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
         if (options.onlyIfDeclineVerified) {
           const unanswered = groups.filter(g => g.state === 'PREPARED' && walletBatchUnanswered(g));
           const matches = (g: GroupRecord) => { const v = options.verifiedDeclines?.get(g.groupIndex), p = (g.prepared ?? {}) as { request?: { id?: unknown }; preparedAt?: unknown };
@@ -307,7 +321,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
           const prepared = (g.prepared ?? {}) as { readonly request?: { readonly id?: unknown }; readonly preparedAt?: unknown };
           const declined = Boolean(verified && g.state === 'PREPARED' && walletBatchUnanswered(g) && prepared.request?.id === verified.requestId
             && prepared.preparedAt === verified.preparedAt);
-          const skipped = declined ? WALLET_REQUEST_REJECTED : walletBatchUnanswered(g) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
+          const skipped = g === refused ? WALLET_BATCH_NOT_SENT : declined ? WALLET_REQUEST_REJECTED : walletBatchUnanswered(g) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
+          if (g === refused) await event(tx, runId, null, 'GROUP_BATCH_PRE_SEND_REFUSED', WALLET_BATCH_NOT_SENT, { group: g.groupIndex, rpcCode: preSend!.rpcCode });
           if (skipped !== code) for (let i = g.stepFrom; i <= g.stepTo; i++) outcomeOf.set(i, skipped);
           if (declined) await event(tx, runId, null, 'GROUP_DECLINE_VERIFIED', WALLET_REQUEST_REJECTED, { group: g.groupIndex, requestId: verified!.requestId,
             preparedAt: verified!.preparedAt, ownerNonce: verified!.ownerNonce, fromBlock: verified!.fromBlock, toBlock: verified!.toBlock });
