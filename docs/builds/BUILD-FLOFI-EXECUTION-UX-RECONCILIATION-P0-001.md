@@ -103,14 +103,18 @@ run `xuni-02c5ec75ce6546413be3ceb55364d970`.
 
 | When (UTC) | SHA | Action |
 | --- | --- | --- |
-| 2026-11-25 ~14:45 | (pending commit) | Takeover inventory + ledger; small refusal-copy fix |
-| (next) | | Re-run focused PG + typecheck; push branch; open PR; specialist review |
+| 2026-11-25 ~14:45 | `a68969f7` | Takeover inventory + ledger; commit + push; PR #252 opened |
+| 2026-11-25 ~14:46 | `a68969f7` | Re-verified: storage.pg 14/14; bridge-batch-run.pg 7/7 |
+| (in progress) | `a68969f7` | api-failover recheck; typecheck; specialist batch 1 (workflow/security/wallet-execution) |
+
+**PR:** https://github.com/FloFi-xyz/FloFi/pull/252  
+**HEAD:** `a68969f74ced20dc466163fad5b5a9d127dc8b17`
 
 ## 8. Exact next action
 
-1. Commit inherited implementation + this ledger on `fix/execution-ux-reconciliation-p0-001`.
-2. Push and open emergency PR against `main`.
-3. Re-run focused PostgreSQL wake + failover suites; typecheck with adequate heap.
-4. Specialist review: flofi-workflow, flofi-security, flofi-wallet-execution, flofi-bridge, flofi-frontend-ux, flofi-chat (batched ≤3).
-5. Document production Across recovery for CTO authorization after Railway worker deploy.
+1. ~~Commit / push / open PR~~ done (`a68969f7`, PR #252).
+2. Finish api-failover + typecheck on this SHA; amend ledger only if new evidence.
+3. Apply/resolve specialist findings (workflow, security, wallet-execution; then bridge, frontend-ux, chat).
+4. Run normal CI gates on the PR revision; do not declare live Across recovered until post-deploy observation evidence.
+5. CTO-authorized rollout: Railway worker/API before Vercel; then read-only confirm Across fill reconciliation.
 6. Do not merge/deploy without CTO authorization.
