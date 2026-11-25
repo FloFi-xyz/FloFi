@@ -28,6 +28,17 @@ describe('read-only Jupiter build transport', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('cancels an active provider read and starts no retry', async () => {
+    const caller = new AbortController();
+    const fetcher = vi.fn((_url: string, { signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })));
+    vi.stubGlobal('fetch', fetcher);
+    const result = expect(quote({}, caller.signal)).rejects.toThrow('JUPITER_QUOTE_CANCELLED');
+    caller.abort();
+    await result;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it('stops after the second temporary failure', async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn().mockImplementation(async () => new Response(null, { status: 503 }));

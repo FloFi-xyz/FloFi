@@ -32,6 +32,7 @@ import { solanaDevnetStatus } from '../app/solana-devnet-action';
 import { solanaTransferStatus } from '../app/solana-transfer-action';
 import { transferStatus } from '../app/robinhood-transfer-action';
 import { solanaLiquidityStatus } from '../app/solana-liquidity-action';
+import { solanaMainnetLiquidityStatus } from '../app/solana-mainnet-liquidity-action';
 import { uniswapLiquidityStatus } from '../app/uniswap-liquidity-action';
 import { SOLANA_DEVNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { routerStatus } from '../app/router-action';
@@ -204,7 +205,7 @@ async function readSequenceRecord(kind: string, runKey: string, sourceChain?: st
     : kind === 'solana-swap' ? await (devnet ? solanaDevnetStatus(runKey) : jupiterStatus(runKey))
     : kind === 'solana-transfer' ? await solanaTransferStatus(devnet ? 'devnet' : 'mainnet', runKey)
     : kind === 'transfer' ? await transferStatus(runKey)
-    : kind === 'solana-pool' ? await solanaLiquidityStatus(runKey)
+    : kind === 'solana-pool' ? await (devnet ? solanaLiquidityStatus(runKey) : solanaMainnetLiquidityStatus(runKey))
     : kind === 'uniswap-pool' ? await uniswapLiquidityStatus(runKey) : null;
   return result && result.ok ? result.value : null;
 }

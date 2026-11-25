@@ -52,12 +52,17 @@ export function untilAborted(rpc: Rpc, signal: AbortSignal): Rpc {
     : rpc(method, params, { signal: context?.signal ? AbortSignal.any([signal, context.signal]) : signal });
 }
 export function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
+  const http = deps.http;
   const router = deps.router ? { router: { ...deps.router, destinationRpc: untilAborted(deps.router.destinationRpc, signal) } } : {};
   const universal = deps.universal ? { universal: { ...deps.universal, solanaRpc: untilAborted(deps.universal.solanaRpc, signal),
     evmRpcs: Object.fromEntries(Object.entries(deps.universal.evmRpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
   // Per-chain read clients (Aave supply, transfers, catalog liquidity) share the same paced transports (follow-up review).
   const chains = deps.chains ? { chains: { ...deps.chains, rpcs: Object.fromEntries(Object.entries(deps.chains.rpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
   return { ...deps, ...router, ...universal, ...chains, rpc: untilAborted(deps.rpc, signal),
+    ...http ? { http: async query => {
+      if (signal.aborted) throw new Error('CLOUD_PREVIEW_TIMEOUT');
+      return http(query, signal);
+    } } : {},
     ...deps.quoteRpc ? { quoteRpc: untilAborted(observeOnly(deps.quoteRpc), signal) } : {} };
 }
 

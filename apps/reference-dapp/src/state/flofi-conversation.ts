@@ -544,7 +544,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: only the destination's wallets are missing because they are still being read: said once,
       // and the review continues by itself when they are (never armed again from that same resume; never while the workflow executes, above).
       const loading = view.destinationLoading;
-      if (loading && auto?.network === undefined) {
+      if (loading && view.simulationBlocked === loading.reason && auto?.network === undefined) {
         resume.current = { scope, language, until: 'WALLETS', error: null, context: { workflowId: view.workflow.workflowId, revision: view.workflow.revision,
           account: view.wallet.account ?? null, chain: view.wallet.chain ?? null, network: loading.network } };
         say(scope, language, (_, c) => c.identifyingWallets(loading.network));

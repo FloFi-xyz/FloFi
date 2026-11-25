@@ -20,7 +20,7 @@
 import { looksSecret } from '../../domain/copilot-conversation';
 import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
-import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan } from '../../platform/index.ts';
+import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan, type SimulationView } from '../../platform/index.ts';
 import { channelRequester, createChannelApproval, endChannelApproval, inSigningFlow, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
 import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
@@ -28,7 +28,6 @@ import { learningCopy } from '../../domain/copilot-learning-copy.ts';
 import type { ChannelLearning, ChannelLearningPrincipal, ChannelLearningSession } from './learning.ts';
 import { channelLearningCopy } from './learning-copy.ts';
 import { channelCopy, readyText, shorten, type AuthorizationFacts, type MarketQuoteNote, type PreviewNote } from './copy.ts';
-import type { SimulationView } from '../../mcp/simulation.ts';
 import { channelRowId, keyedDigest, leaseToken, open, seal, sealContext } from './crypto.ts';
 import { addressContext, deliverConversation, newOutboxId, sealReply, type DeliveryContext } from './delivery.ts';
 import type { ChannelLogger } from './log.ts';

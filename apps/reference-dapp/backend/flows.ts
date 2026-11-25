@@ -707,7 +707,8 @@ const attemptBoundResult = (check: (value: unknown) => boolean, pattern: RegExp)
   return (attemptId === undefined || typeof attemptId === 'string' && pattern.test(attemptId)) && check(report);
 };
 const routerWalletResult = attemptBoundResult(uniswapEvmResult, /^xroute-[a-f0-9]{32}\.(approval|deposit)\.[1-9][0-9]?$/);
-const universalWalletResult = attemptBoundResult(result, /^xuni-[a-f0-9]{32}\.(approval|deposit)\.[1-9][0-9]?$/);
+const UNIVERSAL_ATTEMPT_ID = /^xuni-[a-f0-9]{32}\.(approval|unwrap|deposit)\.[1-9][0-9]?$/;
+const universalWalletResult = attemptBoundResult(result, UNIVERSAL_ATTEMPT_ID);
 /**
  * BUILD-RH-002 `robinhood-liquidity`: Robinhood Chain (real funds) Uniswap v3 positions on official catalog pairs on the same liquidity
  * service, in their own `rhlp-` namespace, behind the Robinhood Chain gates (owner execution needs the real-funds opt-in).
@@ -890,7 +891,7 @@ const crosschainUniversal: FlowDefinition = {
     review: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), commitment, workflow) },
     invalidate: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), invalidation, commitment) },
     begin: { mutates: true, validate: optionalShape(3, id(UNIVERSAL_RUN_ID), universalAccount, workflow, commitment) },
-    handoff: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), id(/^xuni-[a-f0-9]{32}\.[a-z0-9_-]+\.[1-9][0-9]?$/)) },
+    handoff: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), id(UNIVERSAL_ATTEMPT_ID)) },
     report: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalWalletResult) },
     submit: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), signedTransaction) },
     walletFailure: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalDiagnostic) },

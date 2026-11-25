@@ -549,9 +549,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       translate(shown, destinationWalletPhrase(ecosystem)));
   };
   const destinationBlocked = destinationIssueIn(language === 'PT' ? 'PT' : 'EN');
+  const conversationDestinationIssue = destinationIssueIn(language === 'PT' ? 'PT' : 'EN', 'approve-embedded');
   // The account's wallets are still being read for this bridge's destination: the chat says so once and continues by itself when they are.
   const destinationLoading = destinationBlocked && universal.destinationIssue === DESTINATION_ISSUE.LOADING && universal.details
-    ? { network: universal.details.destinationLabel, reason: destinationBlocked } : null;
+    ? { network: universal.details.destinationLabel, reason: conversationDestinationIssue ?? destinationBlocked } : null;
   // What the owner can do about it where no Bridge card is shown (/approve): connect a wallet of the destination ecosystem (it only reads its
   // public address; nothing is signed) and, after a failed account read, read it again. Choosing or typing an address happens on the Canvas.
   const destinationEcosystemLabel = universal.details ? UNIVERSAL_NETWORKS[universal.details.destination].ecosystem === 'SOLANA' ? 'Solana' as const : 'EVM' as const : null;
@@ -964,7 +965,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
       simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.'
-        : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? destinationIssueIn(language === 'PT' ? 'PT' : 'EN', 'approve-embedded')
+        : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? conversationDestinationIssue
           ?? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       // P0 hotfix (locale contract): the same reason in either language, so the chat's message follows the interface language.
       simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'

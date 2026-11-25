@@ -226,7 +226,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
       const intent = jupiterIntent(workflow, UNIVERSAL_QUOTE_SUBJECTS.SOLANA);
       const http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);
       startUsd();
-      const q = parseJupiterBuild(await http(jupiterBuildQuery(intent)), intent, now().toISOString()).quote;
+      const q = parseJupiterBuild(await http(jupiterBuildQuery(intent), seams.signal), intent, now().toISOString()).quote;
       const usd = await quoteUsd(intent.amount, intent.input.decimals, q.outAmount, intent.output.decimals);
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Jupiter',
         expected: simulationAmount(q.outAmount, intent.output.decimals)!, minimum: simulationAmount(q.otherAmountThreshold, intent.output.decimals),

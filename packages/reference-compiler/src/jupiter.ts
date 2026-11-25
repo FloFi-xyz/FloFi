@@ -16,7 +16,7 @@ export type { SolanaToken, SolanaTokenSymbol } from '@defi-workflow-engine/actio
 export { assertMessageRoundTrip, estimateFee, readSolanaAccounts, setComputeUnitLimit, verifySolanaCluster } from './solana-swap.js';
 export type { SolanaBalances, SolanaRpc } from './solana-swap.js';
 
-export type JupiterHttp = (query: Record<string, string>) => Promise<unknown>;
+export type JupiterHttp = (query: Record<string, string>, signal?: AbortSignal) => Promise<unknown>;
 export type JupiterIntent = { owner: string; input: SolanaToken; output: SolanaToken; amount: string; slippageBps: number };
 export type JupiterRouteStep = SolanaRouteStep;
 export type JupiterQuote = SolanaSwapQuote;
