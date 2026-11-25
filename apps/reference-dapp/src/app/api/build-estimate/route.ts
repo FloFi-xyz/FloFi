@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { parseJsonBytes } from '@defi-workflow-engine/workflow-contracts';
 import { quoteFailure } from '../../../server/quote-failure';
-import { readBuildEstimate } from '../../../server/build-estimate';
+import { readBuildEstimate, readDisplayPrices } from '../../../server/build-estimate';
 import { randomUUID } from 'node:crypto';
 import { createLogger, parseTraceparent, withSpan } from '@defi-workflow-engine/cloud-runtime';
 import { requireFlightProductAccess } from '../../../server/flight-access';
@@ -9,6 +9,13 @@ import { withBetaIdentity } from '../../../flight/beta-context';
 import { BUILD_ESTIMATE_STREAM } from '../../../domain/build-estimate';
 import type { UsdEstimate } from '../../../domain/usd-estimate';
 export const maxDuration = 45;
+export async function GET() {
+  const headers = { 'cache-control': 'no-store' };
+  try {
+    const identity = await requireFlightProductAccess();
+    return await withBetaIdentity(identity, async () => Response.json(await readDisplayPrices().catch(() => ({})), { headers }));
+  } catch { return Response.json({}, { status: 403, headers }); }
+}
 export async function POST(request: Request) {
   try { return await withBetaIdentity(await requireFlightProductAccess(), () => estimate(request)); }
   catch (error) { return Response.json({ ok: false, code: error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message)

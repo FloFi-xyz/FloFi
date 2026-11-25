@@ -19,7 +19,7 @@
  *  - Each network is isolated (one failure leaves the others), the whole read has a time budget, and results are cached briefly per wallet.
  */
 import { CATALOG_NETWORKS, type CatalogNetworkId } from './catalog-networks.ts';
-import { AAVE_V3_MARKETS, ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ETHEREUM_BASE_ASSETS, JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog,
+import { AAVE_V3_MARKETS, JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog,
   type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { decodeRpcAccount, decodeSplTokenAccount, readSolanaAccounts, verifySolanaCluster, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { isSolanaPublicKey } from '@defi-workflow-engine/workflow-contracts';
@@ -33,6 +33,8 @@ import type { PriceObservation, PriceSource } from '../automations/price-source.
 import { clockUnixTimestamp, SOLANA_CLOCK_SYSVAR, SOLANA_TOKEN_2022_PROGRAM, token2022AccountIssue, token2022Display, token2022Rule,
   type Token2022Rule } from './solana-token-amount.ts';
 import { priceAssetOf, usdAmount, type PriceAsset } from '../domain/usd-estimate.ts';
+import { canonicalStablecoin } from '../domain/price-assets.ts';
+export { CANONICAL_STABLECOINS, ETHEREUM_USDT } from '../domain/price-assets.ts';
 import type { SolanaAssetCatalog, SolanaCatalogAsset } from '../domain/solana-asset-catalog.ts';
 import { normalizeEvmAddress, sumUsd, type PortfolioAccount, type PortfolioHolding, type PortfolioNetwork, type PortfolioNetworkId,
   type PortfolioPriceSource, type PortfolioProvenance, type PortfolioTokenCoverage, type WalletPortfolio } from '../domain/wallet-portfolio.ts';
@@ -176,25 +178,6 @@ type PortfolioPriceAsset = PriceAsset | 'USDC' | 'USDT';
 type HoldingDraft = Omit<PortfolioHolding, 'price' | 'valueUsd'> & { readonly priceAsset: PortfolioPriceAsset | null };
 const raw = (units: string) => ({ units, displayUnits: units, displayBasis: 'RAW' as const, unavailableCode: null });
 /** Tether USDt on Ethereum (issuer list: https://tether.to/en/supported-protocols/). */
-export const ETHEREUM_USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
-/**
- * The issuer-canonical stablecoins a USDC/USDT feed values, keyed by chain and contract (or mint): Circle USDC as FloFi pins it on Ethereum,
- * Base and Arbitrum One, Tether USDt on Ethereum, and the Solana USDC/USDT mints pinned for Jupiter. Any other contract — a bridged copy, a
- * token that only shares the symbol, USDG or a stock token — is never valued by these feeds.
- */
-export const CANONICAL_STABLECOINS: ReadonlyMap<string, { readonly asset: 'USDC' | 'USDT'; readonly decimals: number }> = new Map([
-  ...[ETHEREUM_BASE_ASSETS, BASE_BASE_ASSETS, ARBITRUM_BASE_ASSETS].flatMap(pinned => pinned.assets
-    .filter(asset => asset.symbol === 'USDC' && asset.assetClass === 'STABLECOIN' && asset.address)
-    .map(asset => [`${pinned.chain}:${asset.address!.toLowerCase()}`, { asset: 'USDC' as const, decimals: asset.decimals }] as const)),
-  [`${CATALOG_NETWORKS.ethereum.chain}:${ETHEREUM_USDT}`, { asset: 'USDT', decimals: 6 }],
-  [`${JUPITER_SOLANA_MAINNET.chain}:${SOLANA_MAINNET_TOKENS.USDC.mint}`, { asset: 'USDC', decimals: SOLANA_MAINNET_TOKENS.USDC.decimals }],
-  [`${JUPITER_SOLANA_MAINNET.chain}:${SOLANA_MAINNET_TOKENS.USDT.mint}`, { asset: 'USDT', decimals: SOLANA_MAINNET_TOKENS.USDT.decimals }],
-]);
-/** The canonical stablecoin a contract is, when its decimals also match the issuer's; null otherwise. */
-function canonicalStablecoin(chain: string, address: string, decimals: number): 'USDC' | 'USDT' | null {
-  const known = CANONICAL_STABLECOINS.get(`${chain}:${chain.startsWith('eip155:') ? address.toLowerCase() : address}`);
-  return known && known.decimals === decimals ? known.asset : null;
-}
 const ASSET_ORDER: Readonly<Record<CanonicalAsset['assetClass'], number>> = { NATIVE: 0, WRAPPED_NATIVE: 1, STABLECOIN: 2, STOCK_TOKEN: 3, TOKEN: 3 };
 /** Registered receipt and debt tokens are represented only in the separate DeFi positions scan. */
 const POSITION_TOKENS = new Set(AAVE_V3_MARKETS.flatMap(market => market.reserves.flatMap(reserve =>

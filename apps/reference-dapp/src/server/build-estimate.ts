@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { hashArtifactBytes, UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, SOLANA_MAINNET_TOKENS,
-  UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ROBINHOOD } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
 import { jupiterIntent, jupiterBuildQuery, parseJupiterBuild, simulateOrcaDevnetSwap } from '@defi-workflow-engine/reference-compiler';
 import { cloudPreview } from './flow-runtime.ts';
 import { quoteFailure } from './quote-failure.ts';
@@ -21,8 +20,9 @@ import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from './public-testnet-rpc
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc.ts';
 import { createJupiterHttp } from './jupiter-http.ts';
 import { deploymentPriceSource } from '../automations/config.ts';
-import type { PriceSource } from '../automations/price-source.ts';
-import { usdAmount, type PriceAsset, type UsdEstimate } from '../domain/usd-estimate.ts';
+import { observationFresh, type PriceSource } from '../automations/price-source.ts';
+import { usdAmount, type DisplayPrices, type UsdEstimate } from '../domain/usd-estimate.ts';
+import { DISPLAY_PRICE_ASSETS, displayPriceAsset, type DisplayPriceAsset } from '../domain/price-assets.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type QuoteReader = ReturnType<typeof createPublicSwapQuoteReader>;
@@ -39,37 +39,44 @@ function catalogReader(id: CatalogNetworkId, mode: 'live' | 'harness', build: ()
 // BUILD-FIX-UX-001: the deployment's price source, built once per process (its Chainlink feed verification is cached per instance).
 let processPrices: PriceSource | null | undefined;
 const USD_WAIT_MS = 2_500;
+const priceSource = (env: Env) => env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
+
+/** A closed set of optional price reads for amount cards without a token-to-token quote. No wallet, amount or route is sent. */
+export async function readDisplayPrices(prices = priceSource(process.env), now = new Date()): Promise<DisplayPrices> {
+  if (!prices) return {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const values: DisplayPrices = {};
+  const observations = DISPLAY_PRICE_ASSETS.filter(asset => prices.assets.includes(asset)).map(async asset => {
+    const result = await prices.observe(asset, now).catch(() => null);
+    if (!result?.ok || result.observation.asset !== asset || !observationFresh(result.observation, now, prices.maxAgeMs)) return;
+    const { priceUsd, observedAt, evidence } = result.observation;
+    const validUntil = Math.min(Date.parse(observedAt) + prices.maxAgeMs, now.getTime() + 30_000);
+    if (validUntil > now.getTime()) values[asset] = { priceUsd, observedAt, evidence, validUntil };
+  });
+  await Promise.race([Promise.all(observations), new Promise<void>(resolve => { timer = setTimeout(resolve, USD_WAIT_MS); })]).finally(() => clearTimeout(timer));
+  return { ...values };
+}
 /**
  * BUILD-FLOFI-BETA-UX-INTELLIGENCE-001 (WS03): once the token quote itself is ready, the most it may still wait for its optional USD figure. The
  * observation runs alongside the quote (`priceObserver`), so its USD_WAIT_MS budget counts from when it started — before, the 2.5 s wait started
  * only after the quote returned, and a slow price source added up to 2.5 s to the time to first quote.
  */
 export const USD_AFTER_QUOTE_MS = 300;
-type QuoteSide = { readonly asset: PriceAsset | null; readonly units: string; readonly decimals: number };
-const WRAPPED_ETH: Readonly<Record<string, string>> = {
-  'eip155:1': UNISWAP_V3_ETHEREUM.weth, 'eip155:8453': UNISWAP_V3_BASE.weth,
-  'eip155:42161': UNISWAP_V3_ARBITRUM.weth, 'eip155:4663': UNISWAP_V3_ROBINHOOD.weth,
-};
-function quotePriceAsset(chain: string, address: string | null, decimals: number): PriceAsset | null {
-  const weth = WRAPPED_ETH[chain];
-  if (weth && decimals === 18 && (address === null || address === weth || address === NATIVE_ETH)) return 'ETH';
-  if (chain === JUPITER_SOLANA_MAINNET.chain && address === SOLANA_MAINNET_TOKENS.SOL.mint && decimals === 9) return 'SOL';
-  return null;
-}
+type QuoteSide = { readonly asset: DisplayPriceAsset | null; readonly units: string; readonly decimals: number };
 /**
  * USD equivalents of a MAINNET quote's two sides — each only for an asset the verified price source observes freshly (a stale, failed or
  * slow observation gives none). Bounded, so a price read never delays the token estimate itself.
  */
 type PriceObservation = Awaited<ReturnType<PriceSource['observe']>> | null;
-type Observe = ((asset: PriceAsset) => Promise<PriceObservation>) & { readonly startedAt?: number };
+type Observe = ((asset: DisplayPriceAsset) => Promise<PriceObservation>) & { readonly startedAt?: number };
 /**
  * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: one price observation per asset per request, started as soon as the node names its assets, so the optional
  * USD read runs alongside the quote instead of after it. Display only; a failed or slow observation still gives no USD.
  */
-function priceObserver(prices: PriceSource | null, now: Date, assets: readonly (PriceAsset | null)[]): Observe | null {
+function priceObserver(prices: PriceSource | null, now: Date, assets: readonly (DisplayPriceAsset | null)[]): Observe | null {
   if (!prices) return null;
-  const started = new Map<PriceAsset, Promise<PriceObservation>>();
-  const observe: Observe = Object.assign((asset: PriceAsset) => {
+  const started = new Map<DisplayPriceAsset, Promise<PriceObservation>>();
+  const observe: Observe = Object.assign((asset: DisplayPriceAsset) => {
     let pending = started.get(asset);
     if (!pending) { pending = prices.observe(asset, now).catch(() => null); started.set(asset, pending); }
     return pending;
@@ -79,15 +86,16 @@ function priceObserver(prices: PriceSource | null, now: Date, assets: readonly (
 }
 async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [QuoteSide, QuoteSide], observeAsset: Observe | null, waitAfterQuote: number): Promise<UsdEstimate | null> {
   if (!prices) return null;
-  const assets = [...new Set(sides.map(side => side.asset).filter((asset): asset is PriceAsset => asset !== null && prices.assets.includes(asset)))];
+  const assets = [...new Set(sides.map(side => side.asset).filter((asset): asset is DisplayPriceAsset => asset !== null && prices.assets.includes(asset)))];
   if (!assets.length) return null;
-  const observe = observeAsset ?? ((asset: PriceAsset) => prices.observe(asset, now).catch(() => null));
+  const observe = observeAsset ?? ((asset: DisplayPriceAsset) => prices.observe(asset, now).catch(() => null));
   let timer: ReturnType<typeof setTimeout> | undefined;
   // The quote is ready: wait for USD only for what is left of its own budget, and never more than USD_AFTER_QUOTE_MS.
   const wait = Math.min(waitAfterQuote, Math.max(0, (observeAsset?.startedAt ?? Date.now()) + USD_WAIT_MS - Date.now()));
   const observed = await Promise.race([Promise.all(assets.map(async asset => [asset, await observe(asset)] as const)),
     new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), wait); })]).finally(() => clearTimeout(timer));
-  const fresh = new Map((observed ?? []).flatMap(([asset, result]) => result?.ok ? [[asset, result.observation] as const] : []));
+  const fresh = new Map((observed ?? []).flatMap(([asset, result]) => result?.ok && result.observation.asset === asset &&
+    observationFresh(result.observation, now, prices.maxAgeMs) ? [[asset, result.observation] as const] : []));
   const value = (side: QuoteSide) => { const o = side.asset ? fresh.get(side.asset) : undefined; return o ? usdAmount(side.units, side.decimals, o.priceUsd) : null; };
   const input = value(sides[0]), output = value(sides[1]), first = [...fresh.values()].sort((a, b) => a.observedAt.localeCompare(b.observedAt))[0];
   return first && (input || output) ? { input, output, source: first.source, evidence: first.evidence, observedAt: first.observedAt } : null;
@@ -107,7 +115,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     /** P0 (2026-11-12): whether a certified Router pair executes for the owner here (default: the Router flow's own `info`). */
     routerExecution?: (network: import('./router-runtime.ts').RouterNetwork, signal?: AbortSignal) => Promise<boolean> } = {}): Promise<BuildEstimateResult> {
   try {
-    const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
+    const prices = () => seams.prices !== undefined ? seams.prices : priceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
     const { workflow: raw, nodeId, owner, destinationWallet } = input as { workflow?: unknown; nodeId?: unknown; owner?: unknown; destinationWallet?: unknown };
     const workflow = validateArtifact('semantic-workflow', raw) as SemanticWorkflow;
@@ -115,9 +123,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     if (!node) throw Error('ESTIMATE_UNSUPPORTED');
     const now = seams.now ?? (() => new Date());
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
-    if (node.actionType === 'asset.bridge') return await readBridgeBuildEstimate(workflow, node.nodeId, workflowHash,
-      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId, seams.signal, seams.routerExecution);
-    if (node.actionType !== 'asset.swap.exact-input') throw Error('ESTIMATE_UNSUPPORTED');
+    if (node.actionType !== 'asset.swap.exact-input' && node.actionType !== 'asset.bridge') throw Error('ESTIMATE_UNSUPPORTED');
     const profile = publicSwapProfile(node.chainId);
     if (isHostedDeployment(env) && (profile || node.chainId === ORCA_WHIRLPOOLS_DEVNET.chain)) throw Error('TEST_NETWORK_NOT_AVAILABLE');
     const uniswap = node.adapterConstraints.protocols.some(protocol => protocol === 'uniswap' || protocol === 'uniswap-v3');
@@ -137,10 +143,8 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     let observer: Observe | null = null;
     const amountInput = node.inputs.find(input => input.name === 'amount-in');
     const outputInput = node.inputs.find(input => input.name === 'asset-out');
-    const priceOf = (asset: { chainId: string; decimals: number } & ({ address: string } | { nativeId: string })) =>
-      quotePriceAsset(asset.chainId, 'address' in asset ? asset.address : asset.nativeId === 'ETH' ? null : '', asset.decimals);
-    const inputPrice = amountInput?.kind === 'QUANTITY' ? priceOf(amountInput.value.asset) : null;
-    const outputPrice = outputInput?.kind === 'ASSET' ? priceOf(outputInput.value) : null;
+    const inputPrice = amountInput?.kind === 'QUANTITY' ? displayPriceAsset(amountInput.value.asset) : null;
+    const outputPrice = outputInput?.kind === 'ASSET' ? displayPriceAsset(outputInput.value) : null;
     const startUsd = () => {
       if (observer) return;
       try { observer = priceObserver(prices(), observedAt, [inputPrice, outputPrice]); } catch { observer = null; }
@@ -153,6 +157,16 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
         return await pending;
       } catch { return null; }
     };
+    if (node.actionType === 'asset.bridge') {
+      const result = await readBridgeBuildEstimate(workflow, node.nodeId, workflowHash, typeof owner === 'string' ? owner : null,
+        typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId, seams.signal, seams.routerExecution);
+      if (!result.ok || amountInput?.kind !== 'QUANTITY' || outputInput?.kind !== 'ASSET' || !result.estimate.bridge) return result;
+      const { discovery, selected } = result.estimate.bridge;
+      const expectedUnits = discovery.candidates[selected]?.expectedOutput;
+      if (!expectedUnits) return result;
+      const usd = await quoteUsd(amountInput.value.amount, amountInput.value.asset.decimals, expectedUnits, outputInput.value.decimals);
+      return { ok: true, estimate: { ...result.estimate, usd } };
+    }
     const solanaMainnet = node.chainId === JUPITER_SOLANA_MAINNET.chain && node.adapterConstraints.protocols.includes('jupiter');
     if ((catalogNetwork || solanaMainnet) && (seams.preview || !seams.rpc && !seams.http)) {
       const flow = catalogNetwork ? catalogNetwork.flows.swap : 'jupiter-swap';

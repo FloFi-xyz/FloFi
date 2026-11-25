@@ -9,6 +9,7 @@ import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { estimateMatchesNode } from '../domain/build-estimate';
 import { universalBridgeOfWorkflow } from '../domain/universal-bridge-authoring';
 import { createRouterNode } from '../domain/router-authoring';
+import type { PriceSource } from '../automations/price-source';
 
 const now = () => new Date('2026-10-27T01:00:00Z');
 const keys = Object.keys(UNIVERSAL_NETWORKS) as (keyof typeof UNIVERSAL_NETWORKS)[];
@@ -81,6 +82,17 @@ describe('certified Router Bridge estimate executability (MOCKED)', () => {
   };
   const routes = [{ provider: 'lifi' as const, bridge: 'stargateV2', minimum: '1990000' }, { provider: 'lifi' as const, bridge: 'across', minimum: '1980000' },
     { provider: 'across' as const, bridge: 'across', minimum: '1985000' }];
+
+  it('values the canonical USDC input and the selected output from their observed price', async () => {
+    const workflow = routerWorkflow();
+    const prices: PriceSource = { id: 'fixture', assets: ['USDC'], maxAgeMs: 60_000, observe: async asset => ({ ok: true,
+      observation: { asset, priceUsd: '0.98', observedAt: now().toISOString(), receivedAt: now().toISOString(), source: 'FIXTURE', evidence: 'MOCKED', provenance: {} } }) };
+    const seams = { now, prices, routerExecution: async () => true, discover: async () => ({ ok: true as const, value: quoted(workflow, routes) }) };
+    expect(await readBuildEstimate({ workflow, nodeId: 'bridge' }, {}, seams)).toMatchObject({ ok: true, estimate: { usd: { input: '1.96', output: '1.96', evidence: 'MOCKED' } } });
+    const unpriced = mockedBridge('base', 'solana');
+    const discover = async () => ({ ok: true as const, value: discovery(unpriced) });
+    expect(await readBuildEstimate({ workflow: unpriced, nodeId: 'bridge' }, {}, { ...seams, discover })).toMatchObject({ ok: true, estimate: { usd: { input: null, output: '1.21' } } });
+  });
 
   it('is executable through the Router flow when it allows owner execution, choosing only a Router-verified Across route', async () => {
     const workflow = routerWorkflow(), routerExecution = vi.fn(async () => true);

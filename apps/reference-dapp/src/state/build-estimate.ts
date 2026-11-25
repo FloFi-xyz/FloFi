@@ -7,7 +7,54 @@ import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { networkIdentity } from '../domain/network-registry';
 import { createJourney, reportJourney } from '../domain/journey-metrics';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
-import { isUsdEstimate, type UsdEstimate } from '../domain/usd-estimate';
+import { isUsdEstimate, type DisplayPrices, type UsdEstimate } from '../domain/usd-estimate';
+import { DISPLAY_PRICE_ASSETS } from '../domain/price-assets';
+
+const noPrices: DisplayPrices = {};
+let recentPrices: { values: DisplayPrices; refreshAt: number } | undefined;
+let readingPrices: Promise<NonNullable<typeof recentPrices>> | undefined;
+
+function readDisplayPrices() {
+  if (recentPrices && recentPrices.refreshAt > Date.now()) return Promise.resolve(recentPrices);
+  readingPrices ??= fetch('/api/build-estimate', { cache: 'no-store', signal: AbortSignal.timeout(3_500) }).then(async response => {
+    const raw = response.ok ? await response.json() as DisplayPrices | null : null;
+    const values: DisplayPrices = {};
+    const now = Date.now();
+    for (const name of DISPLAY_PRICE_ASSETS) {
+      const price = raw?.[name];
+      if (price && /^(0|[1-9][0-9]{0,29})(?:\.[0-9]{1,8})?$/.test(price.priceUsd) &&
+        Number.isFinite(Date.parse(price.observedAt)) && Number.isFinite(price.validUntil) && price.validUntil > now && price.validUntil <= now + 30_000 &&
+        (price.evidence === 'MOCKED' || price.evidence === 'PUBLIC_READ_ONLY')) values[name] = price;
+    }
+    return { values, refreshAt: Math.min(now + 30_000, ...Object.values(values).map(price => price.validUntil)) };
+  }).catch(() => ({ values: noPrices, refreshAt: Date.now() + 30_000 })).then(result => (recentPrices = result)).finally(() => { readingPrices = undefined; });
+  return readingPrices;
+}
+
+/** The same read-only prices are shared by open Build cards, without sending their quantities or accounts. */
+export function useDisplayPrices(enabled: boolean) {
+  const [prices, setPrices] = useState<DisplayPrices>(noPrices);
+  useEffect(() => {
+    if (!enabled) return;
+    let active = true;
+    let refresh: ReturnType<typeof setTimeout> | undefined;
+    function request() {
+      void readDisplayPrices().then(({ values, refreshAt }) => {
+        if (!active) return;
+        setPrices(values);
+        clearTimeout(refresh);
+        refresh = setTimeout(() => { setPrices(noPrices); if (document.visibilityState === 'visible') request(); }, Math.max(100, refreshAt - Date.now()));
+      });
+    }
+    function onVisible() {
+      if (document.visibilityState === 'visible' && (!recentPrices || recentPrices.refreshAt <= Date.now())) { clearTimeout(refresh); request(); }
+    }
+    request();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { active = false; clearTimeout(refresh); document.removeEventListener('visibilitychange', onVisible); };
+  }, [enabled]);
+  return enabled ? prices : noPrices;
+}
 
 /**
  * UX-007: the card's live quote. `calculating` from the first edit of a quotable snapshot until its own answer; `unavailable` when the

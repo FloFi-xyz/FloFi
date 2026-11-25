@@ -78,9 +78,10 @@ describe('BUILD-FIX-UX-001 swap slippage', () => {
     expect(canvasAddCommand('bridge', 0, null, '1')).toMatchObject({ input: { slippage: '100' } });
     expect(canvasAddCommand('lending', 0, '0x1111111111111111111111111111111111111111')).toMatchObject({ input: { slippage: '100' } });
   });
-  it('accepts an exact integer from 1 to 300 bps and refuses anything else (never clamped)', () => {
+  it('accepts an exact integer from 1 to 500 bps and refuses anything else (never clamped)', () => {
     expect(parseSwapSlippageEdit('75')).toBe(75); expect(parseSwapSlippageEdit(' 100 ')).toBe(100); expect(parseSwapSlippageEdit('300')).toBe(300);
-    for (const value of ['0', '301', '1000', '-1', '1.5', 'abc', '']) expect(() => parseSwapSlippageEdit(value)).toThrow();
+    expect(parseSwapSlippageEdit('500')).toBe(500);
+    for (const value of ['0', '501', '1000', '-1', '1.5', 'abc', '']) expect(() => parseSwapSlippageEdit(value)).toThrow();
   });
   it('a slippage edit applies to the canonical swap directly, changes its hash, and keeps an amount draft a draft', () => {
     const swap = baseSepoliaSwap('5'), node = swap.node;
@@ -119,6 +120,9 @@ describe('BUILD-FIX-UX-001 USD equivalents', () => {
     expect(usdLine('Base Sepolia', '5.00', { status: 'ready' })).toMatchObject({ kind: 'test-token', text: 'Test token · no USD value' });
     expect(usdLine('Base', '1.03', { status: 'ready', observedAt: '2026-10-12T10:00:00.000Z' })).toMatchObject({ kind: 'value', text: '≈ $1.03' });
     expect(usdLine('Arbitrum One', '1.03', { status: 'ready', mocked: true }).text).toBe('≈ $1.03 · test price');
+    expect(usdLine('Arbitrum One', '1234.03', { status: 'ready', mocked: true }, 'PT')).toMatchObject({
+      text: '≈ US$ 1.234,03 · preço de teste', title: 'Estimativa em USD com base em um preço de teste.',
+    });
     expect(usdLine('Base', null, { status: 'pending' })).toMatchObject({ kind: 'pending', text: 'Estimating USD…' });
     expect(usdLine('Base', null, { status: 'none' })).toMatchObject({ kind: 'unavailable', text: 'USD price unavailable' });
   });

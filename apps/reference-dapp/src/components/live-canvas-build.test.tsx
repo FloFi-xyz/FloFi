@@ -18,7 +18,7 @@ type Graph = { nodes: { id: string; position: { x: number; y: number }; data: Re
 const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow>, graph: { nodes: [], edges: [] } as Graph }));
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
 vi.mock('../state/build009-wallet-store', () => ({ useBuild009Wallet: () => ({ account: '0x1111111111111111111111111111111111111111', chainId: '0x14a34' }) }));
-vi.mock('../state/build-estimate', () => ({ useLiveQuote: () => ({ status: 'idle', estimate: null }) }));
+vi.mock('../state/build-estimate', () => ({ useLiveQuote: () => ({ status: 'idle', estimate: null }), useDisplayPrices: () => ({}) }));
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {

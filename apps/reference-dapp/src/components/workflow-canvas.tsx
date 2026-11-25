@@ -833,7 +833,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     ariaLabel: tr('Step {0}: {1}', index + 1, tr(composerSummary(workflow, node, context).action)),
     position: positions[node.nodeId]!,
     selected: selectedIds.includes(node.nodeId) || selectedId === node.nodeId,
-    data: { composer: true, connectable: true, ...(['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? liveQuoteTarget(node.nodeId) : { estimateNodeId: node.nodeId }), estimateOwner: node.chainId.startsWith('solana:') ? estimateOwner : wallet.account,
+    data: { composer: true, connectable: true, ...(['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? liveQuoteTarget(node.nodeId)
+      : { estimateNodeId: node.nodeId, ...cryptoSelections[node.nodeId] ? {} : { amountAssets: node.inputs.filter(input => input.kind === 'QUANTITY').map(input => input.value.asset) } }),
+      estimateOwner: node.chainId.startsWith('solana:') ? estimateOwner : wallet.account,
       // BUILD-FLOFI-MAINNET-EXEC-002: a read-only bridge quote to the other ecosystem uses the owner's resolved destination wallet.
       estimateEvmOwner: wallet.account ?? resolvedAddress(destinations.evm), estimateSolanaOwner: estimateOwner ?? resolvedAddress(destinations.solana),
       contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, settingsOpen: settingsId === node.nodeId, step: index + 1, selected: selectedId === node.nodeId,

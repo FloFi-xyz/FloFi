@@ -206,5 +206,8 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'Quotes are not enabled for this network.': 'As cotações não estão ativadas para esta rede.',
   'The quote did not match this swap. Try again.': 'A cotação não corresponde a este swap. Tente novamente.',
   'Estimating USD…': 'Estimando USD…', 'USD price unavailable': 'Preço USD indisponível', 'Waiting for the current estimate.': 'Aguardando a estimativa atual.',
+  '{0} test tokens have no market value.': 'Os tokens de teste de {0} não têm valor de mercado.', '{0} · test price': '{0} · preço de teste',
+  'USD estimate from a test price.': 'Estimativa em USD com base em um preço de teste.',
+  'USD estimate from a verified Chainlink price.': 'Estimativa em USD com base em um preço verificado da Chainlink.', 'Observed at {0}.': 'Observado em {0}.',
   'No verified USD price is available for this asset right now.': 'Não há um preço USD verificado disponível para este ativo neste momento.',
 };
