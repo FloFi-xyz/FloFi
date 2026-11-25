@@ -2,10 +2,11 @@
 'use client';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { requotedMessage } from '../domain/simulation-presentation';
+import { slippageRangeMessage } from '../domain/slippage-policy';
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { ROUTER_PHASES, type RouteChange, type RouterPhase } from '@defi-workflow-engine/workflow-contracts';
+import { ROUTER_MAXIMUM_SLIPPAGE_BPS, ROUTER_PHASES, type RouteChange, type RouterPhase } from '@defi-workflow-engine/workflow-contracts';
 import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworkOfInput, ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS,
   ROUTER_ROUTING_LABEL, routerDisabledCode, type RouterBridgeInput, type RouterDestination, type RouterNetwork, type RouterRouting, type RouterSource } from '../domain/router-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
@@ -88,7 +89,10 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
       propose(nodeId ? { type: 'SET_ROUTER_BRIDGE', nodeId, input: fields, source: 'CANVAS', baseRevision: state.workflow.revision }
         : { type: 'ADD_ROUTER_BRIDGE', input: fields, source: 'CANVAS', baseRevision: state.workflow.revision });
       onDone?.();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID'); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID';
+      setError(slippageRangeMessage(code, ROUTER_MAXIMUM_SLIPPAGE_BPS) ?? code);
+    }
   }
   const compact = options && Boolean(nodeId);
   // The card's draft networks that are not a certified Router pair are never replaced by another route behind these compact options.

@@ -7,8 +7,9 @@ import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } fro
 import { localizedProvider, retryAccountWallets, useDestinationWallets } from '../state/destination-wallets';
 import type { DestinationInventory } from '../domain/destination-wallet';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
-import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { ROUTER_PHASES, UNIVERSAL_NETWORKS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeFailureMessage } from '../domain/bridge-failure';
+import { slippageRangeMessage } from '../domain/slippage-policy';
 import { useLocale } from '../i18n/locale';
 import { useWorkflow } from '../state/workflow-store';
 import { useUniversalRouter } from '../state/universal-router-store';
@@ -193,7 +194,10 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
       propose(nodeId ? { type: 'SET_UNIVERSAL_BRIDGE', nodeId, input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision }
         : { type: 'ADD_UNIVERSAL_BRIDGE', input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision });
       onDone?.();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID'); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID';
+      setError(slippageRangeMessage(code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS) ?? code);
+    }
   }
   const compact = options && Boolean(nodeId);
   return <form className={`inspector-fields universal-bridge-form${compact ? ' bridge-options-form' : ''}`} aria-label={tr(nodeId ? 'Edit universal bridge' : 'Create universal bridge')} onSubmit={submit}>
@@ -292,7 +296,8 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   const canExecute = Boolean(authorized && !router.retired && !pending && fresh > 0 && router.executionEnabled);
   const canRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && ['PREPARED', 'AUTHORIZED'].includes(record.phase) &&
     !record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state)) && (record.requote || fresh === 0));
-  const message = (code: string | null | undefined) => code ? destinationWalletMessage(code) ?? walletNonceMessage(code) ?? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
+  const message = (code: string | null | undefined) => code ? destinationWalletMessage(code) ?? walletNonceMessage(code) ?? MESSAGES[code]
+    ?? slippageRangeMessage(code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS) ?? bridgeFailureMessage(code) : null;
   const info = router.error ?? record?.error;
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
   const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';

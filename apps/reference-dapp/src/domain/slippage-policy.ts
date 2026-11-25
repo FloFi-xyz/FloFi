@@ -42,3 +42,13 @@ export function percentToBps(percent: string): string | null {
 }
 /** "1%", "0.75%": a basis-point limit as people read it (the same words as the card's "Max price difference"). */
 export const priceDifferenceLabel = (bps: number | string): string => `${bpsToPercent(String(bps))}%`;
+
+/**
+ * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (beta incident: a bridge's raw "ROUTER_SLIPPAGE_OUT_OF_RANGE" shown as the message): any slippage range
+ * code of an authoring or request check, said as the action's actual supported range in the approved Canvas wording. The code itself stays
+ * for technical details and diagnostics only. Null for any other code.
+ */
+export function slippageRangeMessage(code: string, maximumBps: number): string | null {
+  if (!/(?:^|_)SLIPPAGE_(?:OUT_OF_RANGE|INVALID)$/.test(code) || !Number.isSafeInteger(maximumBps) || maximumBps < 1) return null;
+  return `Enter a max price difference from ${priceDifferenceLabel(1)} to ${priceDifferenceLabel(maximumBps)}.`;
+}
