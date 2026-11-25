@@ -81,7 +81,18 @@ Each run was against the branch after its commit:
 - Specialist review (read-only): flofi-security (5 findings, highest high) and flofi-wallet-execution (6, highest high) both found the duplicate-spend risk
   in the step-by-step offer → reverted (incident 6). flofi-security also found "50% of my USDC" read as 5% and over-broad "all" readings → fixed: whole
   percentages kept, a relative amount must name the token being asked about, the automatic answer needs a fresh read (≤30 s) and a balance no earlier step
-  touches. The EIP-5792 5750/5760 comment was corrected. Other specialists: see the PR.
+  touches. The EIP-5792 5750/5760 comment was corrected.
+- flofi-chat (13 findings, highest high) and flofi-workflow (4, highest high) both found that a step FloFi described as "funded by the previous step" was
+  never checked against the runtime's funding (a bridge to another recipient, ETH vs WETH, a different default destination token): it would have spent the
+  wallet's own balance while the notes said otherwise. Fixed: every such step must have the runtime's `fundedBy` on the step before it, or FloFi refuses
+  with a specific message (`dependentUnfunded`, PT/EN). A bridge with a recipient never binds, and ETH/WETH are no longer equated. Also fixed: a cap
+  answered in another token is asked again; a cap answer keeps its inherited network and never leaks into another request; the newest turn's relative
+  amount wins; a percentage of a native coin above its spendable amount writes nothing. Not changed (documented): the auto-sent amount shows as the
+  person's own message without a separate disclosure; Telegram has no balance shortcut, so it asks the amount.
+- flofi-mcp (3, highest low): Solana mainnet aliases are now canonical in the published strategy (one meaning, one strategy, one hash); devnet keeps
+  its exact runtime keys. Batch 3 (frontend-ux, swap, bridge): see the PR.
+- `state/supply-store.test.tsx` ("a recovered request without a hash…", untouched by this build) failed once under a 4-worker load and passed three
+  times in isolation and in the next broad run: a timing-sensitive test, recorded here, not retried in CI.
 - Toolchain: the full `pnpm check` gate runs on the pinned Node 24.21.0 (checksum-verified) and pnpm 11.22.0; earlier focused runs used Node 24.22.3. Local PostgreSQL is 16 (CI uses 18).
 - Visual: `ux-refinement-evidence.spec.ts` passed on this branch (local PostgreSQL 16 instead of CI's 18; verified headless shell 1243, Anvil 1.8.3).
 - `pnpm check`, specialist reviews, CircleCI and Vercel Preview: see the PR. They are recorded there, not here, so this file never claims a result it does
