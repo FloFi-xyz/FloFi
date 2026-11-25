@@ -137,7 +137,7 @@ describe('production Swap quote parity through cloudPreview', () => {
       };
       const result = await readBuildEstimate({ workflow: w, nodeId, owner }, production, { preview, prices: null });
       expect(result).toMatchObject({ ok: true, estimate: { provider: 'Jupiter', symbol: 'SOL', expected: expect.stringMatching(/^[0-9.]+$/) } });
-      expect(http).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: '5000000', taker: UNIVERSAL_QUOTE_SUBJECTS.SOLANA }));
+      expect(http).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: '5000000', taker: UNIVERSAL_QUOTE_SUBJECTS.SOLANA }), expect.any(AbortSignal));
       expect(harness.state.sent).toEqual([]);
     });
   it('quotes a mainnet EVM swap with Solana selected without forwarding the Solana address', async () => {

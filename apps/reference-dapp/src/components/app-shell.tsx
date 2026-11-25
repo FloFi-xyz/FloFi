@@ -838,7 +838,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedReviewExpired = Boolean(workflowRunHere.review?.validUntil && Date.parse(workflowRunHere.review.validUntil) <= Date.now());
   const groupedRunOpen = Boolean(workflowRunHere.started || workflowRunHere.following);
   const stepSwap = simulationSource.kind === 'public' ? swapProfile(stepChain) : null;
-  const stepNeedsWallet = !signer && networkTarget && actionable && !simulationDisabled && !sequenceDone && !currentExecution(executionProgress)
+  // The engineering panels expose their own wallet controls after entering Simulate.
+  const stepNeedsWallet = !engineering && !signer && networkTarget && actionable && !simulationDisabled && !sequenceDone && !currentExecution(executionProgress)
     && (simulationSource.kind !== 'public' || authorization.key || stepSwap && ownerBoundSwapReview(stepSwap));
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
     {/* A single card shows no workflow-run note (final frontend-ux review): its one action is followed like the card's own flow. */}
@@ -862,7 +863,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       </>}
     </div>
     : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
-    : surface !== 'signing' && destinationActions ? <div className="canvas-lifecycle-control">
+    : !engineering && surface !== 'signing' && destinationActions ? <div className="canvas-lifecycle-control">
       <button type="button" className="primary" onClick={() => void destinationActions.connect.run()}>{tr(destinationActions.connect.label)}</button>
       {destinationActions.retry && <button type="button" onClick={destinationActions.retry}>{tr('Try again')}</button>}
     </div>
