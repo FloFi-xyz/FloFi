@@ -67,7 +67,12 @@ describe('read-only Build estimates', () => {
     expect(Number(result.estimate.expected)).toBeGreaterThan(0); expect(Number(result.estimate.minimum)).toBeLessThan(Number(result.estimate.expected));
     for (const key of ['authorization', 'review', 'manifest', 'unsignedTransaction', 'attempt']) expect(result.estimate).not.toHaveProperty(key);
     expect(methods).not.toContain('sendTransaction'); expect(harness.state.sent).toEqual([]);
-    expect(await readBuildEstimate({ workflow, nodeId: 'swap' }, {})).toEqual({ ok: false, code: 'ESTIMATE_UNSUPPORTED' });
+    const walletFree = await readBuildEstimate({ workflow, nodeId: 'swap' }, {}, {
+      rpc: harness.rpc,
+      ...network === 'Solana' ? { http: (harness as ReturnType<typeof createMockedSolanaJupiter>).http } : {}, now: () => now,
+    });
+    if (network === 'Solana') expect(walletFree).toEqual(result);
+    else expect(walletFree).toEqual({ ok: false, code: 'ESTIMATE_UNSUPPORTED' });
   });
   it('rejects the wrong provider network without publishing financial values', async () => {
     expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-002' }, {}, { rpc: rpc(BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP.chainHex), now: () => now })).toMatchObject({ ok: false, code: 'WRONG_PROVIDER_CHAIN', correlationId: expect.any(String) });

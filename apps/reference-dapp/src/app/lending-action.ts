@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createLendingCompositionService, type LendingCompositionService } from '../server/lending-composition-service';
 import { createLendingRpc } from '../server/lending-rpc';
-import { cloudFlow } from './cloud-flow';
+import { cloudFlow, withFlightFlowAccess } from './cloud-flow';
 let service:LendingCompositionService|null=null;
 function current(){
   if(service)return service;
@@ -19,19 +19,19 @@ async function run<T>(method:string,args:readonly unknown[],action:(s:LendingCom
   try{return {ok:true,value:await action(current())};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'LENDING_SERVICE_UNAVAILABLE'};}
 }
 export async function lendingSimulate(workflow:SemanticWorkflow,account:string){
-  return withFlightAccess(async () => {return run('simulate',[workflow,account],s=>s.simulate(workflow,account));
+  return withFlightFlowAccess(async () => {return run('simulate',[workflow,account],s=>s.simulate(workflow,account));
   });
 }
 export async function lendingReview(id:string,commitment:string,workflow:SemanticWorkflow){
-  return withFlightAccess(async () => {return run('review',[id,commitment,workflow],s=>s.review(id,commitment,workflow));
+  return withFlightFlowAccess(async () => {return run('review',[id,commitment,workflow],s=>s.review(id,commitment,workflow));
   });
 }
 export async function lendingBegin(id:string,account:string,workflow:SemanticWorkflow){
-  return withFlightAccess(async () => {return run('begin',[id,account,workflow],s=>s.begin(id,account,workflow));
+  return withFlightFlowAccess(async () => {return run('begin',[id,account,workflow],s=>s.begin(id,account,workflow));
   });
 }
 export async function lendingHandoff(id:string,attempt:string){
-  return withFlightAccess(async () => {return run('handoff',[id,attempt],s=>s.handoff(id,attempt));
+  return withFlightFlowAccess(async () => {return run('handoff',[id,attempt],s=>s.handoff(id,attempt));
   });
 }
 export async function lendingReport(id:string,attempt:string,result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'}){
@@ -51,7 +51,7 @@ export async function lendingStatus(id:string){
   });
 }
 export async function lendingRefresh(id:string){
-  return withFlightAccess(async () => {return run('refresh',[id],s=>s.refreshReview(id));
+  return withFlightFlowAccess(async () => {return run('refresh',[id],s=>s.refreshReview(id));
   });
 }
 export async function lendingInvalidate(id:string){

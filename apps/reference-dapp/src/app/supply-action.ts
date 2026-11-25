@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } from '../server/supply-service';
 import { join } from 'node:path';
 import { createCatalogLendingReadRpc, createLendingReadRpcs } from '../server/supply-rpc';
-import { cloudFlow } from './cloud-flow';
+import { cloudFlow, withFlightFlowAccess } from './cloud-flow';
 import { catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkRuntime } from '../server/catalog-networks';
 import type { AaveMarketCatalog } from '@defi-workflow-engine/reference-compiler';
 let service:SupplyService|null=null;
@@ -45,15 +45,15 @@ async function run<T>(method:string,args:readonly unknown[],action:(service:Supp
 }
 
 export async function supplySimulate(workflow:SemanticWorkflow,account:string){
-  return withFlightAccess(async () => {return run('simulate',[workflow,account],service=>service.simulate(workflow,account));
+  return withFlightFlowAccess(async () => {return run('simulate',[workflow,account],service=>service.simulate(workflow,account));
   });
 }
 export async function supplyReview(id:string,commitment:string,workflow:SemanticWorkflow){
-  return withFlightAccess(async () => {return run('review',[id,commitment,workflow],service=>service.review(id,commitment,workflow));
+  return withFlightFlowAccess(async () => {return run('review',[id,commitment,workflow],service=>service.review(id,commitment,workflow));
   });
 }
 export async function supplyBegin(id:string,account:string,workflow:SemanticWorkflow){
-  return withFlightAccess(async () => {return run('begin',[id,account,workflow],service=>service.begin(id,account,workflow));
+  return withFlightFlowAccess(async () => {return run('begin',[id,account,workflow],service=>service.begin(id,account,workflow));
   });
 }
 export async function supplyReport(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'|'REJECTED';code?:string}){
@@ -83,12 +83,12 @@ export async function supplyWalletFailure(id:string,diagnostic:SupplyWalletDiagn
   });
 }
 export async function supplyWalletTrace(id:string,diagnostic:SupplyWalletDiagnostic){
-  return withFlightAccess(async () => {return run('walletTrace',[id,diagnostic],service=>service.walletTrace(id,diagnostic));
+  return withFlightFlowAccess(async () => {return run('walletTrace',[id,diagnostic],service=>service.walletTrace(id,diagnostic));
   });
 }
 
 export async function supplyHandoff(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',walletManagedNonce=false){
-  return withFlightAccess(async () => {return run('handoff',[id,step,walletManagedNonce],service=>service.handoff(id,step,walletManagedNonce));
+  return withFlightFlowAccess(async () => {return run('handoff',[id,step,walletManagedNonce],service=>service.handoff(id,step,walletManagedNonce));
   });
 }
 
@@ -97,7 +97,7 @@ export async function supplyHandoff(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|
  * owner, balances and account aggregates). Read-only: it prepares and authorizes nothing; Simulate re-reads everything it relies on.
  */
 export async function supplyReserves(chain:string,account?:string):Promise<{ok:true;value:AaveMarketCatalog}|{ok:false;code:string}>{
-  return withFlightAccess(async () => {
+  return withFlightFlowAccess(async () => {
   const network=catalogNetworkOfChain(chain);
   if(!network?.flows.lending||(account!==undefined&&!/^0x[0-9a-fA-F]{40}$/.test(account)))return{ok:false,code:'SUPPLY_NETWORK_UNAVAILABLE'};
   const args=account===undefined?[chain]:[chain,account];

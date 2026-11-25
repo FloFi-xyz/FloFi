@@ -120,13 +120,11 @@ function canonical(value: unknown): unknown {
 export const sameCommand = (a: Command, b: Command) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 
 /**
- * The one address a strategy names (beneficiary, owner or recipient): the wallet that alone may claim its handoff. A bridge from Solana, or
- * to a recipient of another ecosystem, names no claiming wallet: the recipient there cannot sign on the source network.
+ * The owner or beneficiary a strategy names and binds at claim. A bridge recipient does not identify the source signer.
  */
 export function intendedWalletOf(spec: StrategySpec): WalletRef | null {
-  const s = spec as StrategySpec & { beneficiary?: string; owner?: string; recipient?: string };
-  if (s.action === 'bridge' && (s.sourceNetwork.startsWith('solana') || s.recipient !== undefined && !/^0x/i.test(s.recipient))) return null;
-  const address = s.action === 'lending_composition' ? s.owner : s.action === 'bridge' ? s.recipient : s.action === 'supply' || s.action === 'borrow' || s.action === 'repay'
+  const s = spec as StrategySpec & { beneficiary?: string; owner?: string };
+  const address = s.action === 'lending_composition' ? s.owner : s.action === 'supply' || s.action === 'borrow' || s.action === 'repay'
     ? s.beneficiary : undefined;
   return address ? { namespace: 'eip155', address: address.toLowerCase() } : null;
 }

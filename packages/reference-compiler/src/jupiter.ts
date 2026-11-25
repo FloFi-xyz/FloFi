@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { JUPITER_SOLANA_MAINNET as profile, solanaTokenByMint, type SolanaToken } from '@defi-workflow-engine/action-registry';
-import { readExactInputSwap, EXACT_INPUT_SWAP_ACTION, type SemanticWorkflow,
+import { readExactInputSwap, EXACT_INPUT_SWAP_ACTION, isUniversalQuoteSubject, type SemanticWorkflow,
   type ArtifactSet, type SimulationBundle, type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 import { associatedTokenAddress, findProgramAddress, compileMessageV0, decodeLookupTable, decodeTokenAccount, fromBase64, parseMessageV0,
   readU16, readU64, serializeMessageV0, serializeTransaction, sha256Hex, solanaAddress, toBase64,
@@ -16,7 +16,7 @@ export type { SolanaToken, SolanaTokenSymbol } from '@defi-workflow-engine/actio
 export { assertMessageRoundTrip, estimateFee, readSolanaAccounts, setComputeUnitLimit, verifySolanaCluster } from './solana-swap.js';
 export type { SolanaBalances, SolanaRpc } from './solana-swap.js';
 
-export type JupiterHttp = (query: Record<string, string>) => Promise<unknown>;
+export type JupiterHttp = (query: Record<string, string>, signal?: AbortSignal) => Promise<unknown>;
 export type JupiterIntent = { owner: string; input: SolanaToken; output: SolanaToken; amount: string; slippageBps: number };
 export type JupiterRouteStep = SolanaRouteStep;
 export type JupiterQuote = SolanaSwapQuote;
@@ -205,6 +205,7 @@ function settledValue<T>(result: PromiseSettledResult<T>): T {
 }
 /** Read-only: Jupiter /build, chain-verified tables, exact v0 message, RPC simulation, review artifacts. Never sends. */
 export async function simulateJupiterSwap(workflow: SemanticWorkflow, ownerInput: string, http: JupiterHttp, rpc: SolanaRpc, now = Date.now()): Promise<JupiterReview> {
+  if (isUniversalQuoteSubject(ownerInput)) fail('JUPITER_OWNER_INVALID');
   const intent = jupiterIntent(workflow, ownerInput);
   const fetchedAt = new Date(now).toISOString();
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the cluster check (one RPC read) and Jupiter's /build (one HTTPS read) are independent, so they run
@@ -278,6 +279,7 @@ export function koraFeeTokenOrder(tokens: readonly KoraFeeToken[], inputMint: st
  */
 export async function simulateKoraJupiterSwap(workflow: SemanticWorkflow, ownerInput: string, http: JupiterHttp, rpc: SolanaRpc, kora: KoraPort, now = Date.now(),
   options: KoraBuildOptions = {}): Promise<JupiterReview> {
+  if (isUniversalQuoteSubject(ownerInput)) fail('JUPITER_OWNER_INVALID');
   const intent = jupiterIntent(workflow, ownerInput), owner = intent.owner;
   const fetchedAt = new Date(now).toISOString();
   const [cluster, build, tokensRead] = await Promise.allSettled([verifySolanaCluster(rpc, profile.genesisHash),

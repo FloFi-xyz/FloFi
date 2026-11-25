@@ -52,12 +52,14 @@ export function validationResultView(record: StrategyRecord, workflow: WorkflowC
 
 export function simulationView(strategyId: string, preview: SimulationPreview): SimulationBody {
   const { composition: c, view } = preview;
+  const marketOnly = view.kind === 'MARKET_QUOTE';
   return { object: 'simulation', strategyId, workflowHash: c.workflowHash, kind: view.kind, provenance: view.provenance, observedAt: view.observedAt, expiresAt: view.expiresAt,
     simulationSubject: preview.simulationSubject, subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', preview: true, persisted: false, authorizable: false,
-    evidenceLevel: view.provenance === 'MOCKED' ? 'MOCKED_SIMULATION_PREVIEW' : 'SIMULATION_PREVIEW_NOT_EXECUTION', facts: view.facts,
+    evidenceLevel: marketOnly ? 'MARKET_QUOTE_ONLY' : view.provenance === 'MOCKED' ? 'MOCKED_SIMULATION_PREVIEW' : 'SIMULATION_PREVIEW_NOT_EXECUTION', facts: view.facts,
     canonicalArtifacts: view.canonicalArtifacts, authority: 'NONE',
     notes: ['Amounts are integer native units of the named tokens.', 'Quotes and state expire; FloFi re-simulates with the owner before any Review.',
-      'A simulation is evidence of what would happen at the observed block, not a guarantee and not an execution.'] };
+      marketOnly ? 'A compatible Solana wallet is required for transaction simulation and Review.'
+        : 'A simulation is evidence of what would happen at the observed block, not a guarantee and not an execution.'] };
 }
 
 export function capabilityView(fact: CapabilityFact, environment: DeveloperEnvironment): CapabilityBody {

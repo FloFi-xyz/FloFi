@@ -18,7 +18,9 @@ export type CapabilitiesQuery = { network?: string; action?: string };
 export type CreateStrategyRequest = { strategy: StrategyInput };
 export type SimulateStrategyRequest = {
   /** The account whose PUBLIC balances the read-only simulation reads. Not an owner, not authenticated, grants nothing. */
-  simulationSubject: string;
+  simulationSubject?: string;
+  /** Public preview addresses used for the corresponding operation or implicit bridge destination. */
+  simulationSubjects?: { evm?: string; solana?: string };
 };
 export type CreateApprovalRequest = { strategyId: string; workflowHash: string; returnTarget?: { url: string; state: string } };
 export type CreateWebhookEndpointRequest = { url: string; events?: DeveloperEventType[] };
@@ -53,14 +55,14 @@ export type StrategyValidation = { object: 'strategy_validation'; strategyId: st
   validation: Validation; availability: Availability; executionPlan: ExecutionPlan; checkedAt: string; authority: Authority };
 export type Simulation = { object: 'simulation'; strategyId: string; workflowHash: string; kind: string; provenance: string; observedAt: string | null;
   expiresAt: string | null; simulationSubject: string | null; subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION'; preview: true; persisted: false;
-  authorizable: false; evidenceLevel: 'MOCKED_SIMULATION_PREVIEW' | 'SIMULATION_PREVIEW_NOT_EXECUTION'; facts: Record<string, unknown>;
+  authorizable: false; evidenceLevel: 'MOCKED_SIMULATION_PREVIEW' | 'SIMULATION_PREVIEW_NOT_EXECUTION' | 'MARKET_QUOTE_ONLY'; facts: Record<string, unknown>;
   canonicalArtifacts: Record<string, unknown> | null; notes: string[]; authority: Authority };
 
 export type EvidenceSummary = { environment: string; outcome: string; bundleHash: string };
 export type WorkflowSimulation = {
   object: 'workflow_simulation'; strategyId: string; workflowHash: string; status: 'STEP_PREVIEWS_AVAILABLE' | 'INCOMPLETE';
   steps: { index: number; workflowHash: string; state: 'SIMULATED' | 'AWAITING_PRODUCER_SETTLEMENT' | 'NOT_COMPLETED' | 'FAILED';
-    reason: string | null; amountFrom: number[]; simulationSubject: string | null; subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'NONE';
+    reason: string | null; amountFrom: number[]; simulationSubject: string | null; subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'ACCOUNT_WALLET' | 'NONE';
     provenance: string | null; observedAt: string | null; expiresAt: string | null;
     facts: Record<string, unknown> | null }[];
   executionSimulation: 'FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION'; authorizable: false; persisted: false; authority: Authority;

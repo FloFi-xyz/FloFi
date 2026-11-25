@@ -14,6 +14,7 @@ import type { SolanaWalletChain } from '../wallet/solana-wallet';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
 import { networkIdentity } from '../domain/network-registry';
+import { operationWalletEcosystem } from '../domain/wallet-inventory';
 import { activeNetworkScope, networkAllowed } from '../domain/network-scope';
 import { solanaWalletNotice, walletNoticeText, type WalletNotice } from '../wallet/wallet-errors';
 
@@ -43,7 +44,7 @@ export function connectionSolanaChain(workflowChains: readonly string[], workflo
 }
 export const evmNetworkRef = (hex: string | null) => hex && /^0x[0-9a-f]+$/i.test(hex) && BigInt(hex) > 0n ? `eip155:${BigInt(hex).toString()}` : null;
 
-export function useWalletConnection() {
+export function useWalletConnection(operationChain?: string | null) {
   const selector = useWalletSelector(), evm = useBuild009Wallet(), solana = useJupiter(), { state } = useWorkflow();
   // P0 hotfix (locale contract): a wallet notice is a catalog message and its values, rendered in the interface's current language (`notice`);
   // `error` keeps the English sentence for existing readers.
@@ -51,13 +52,14 @@ export function useWalletConnection() {
   const error = notice ? walletNoticeText(notice) : null;
   const setError = (value: string | WalletNotice | null) => setNotice(value === null ? null : typeof value === 'string' ? [value] : value);
   useEffect(() => { if (!error) return; const timer = window.setTimeout(() => setError(null), 6000); return () => window.clearTimeout(timer); }, [error]);
-  const solanaChain = connectionSolanaChain(state.workflow.nodes.map(node => node.chainId), solana.walletChain);
+  const target = walletNetworkTarget(operationChain);
+  const solanaChain = target?.ecosystem === 'solana' ? target.walletChain : connectionSolanaChain(state.workflow.nodes.map(node => node.chainId), solana.walletChain);
   const connect = useCallback(async (request: { readonly title?: string; readonly ecosystems?: readonly WalletEcosystem[] } = {}): Promise<ConnectedWallet | null> => {
     setError(null);
     const chains = state.workflow.nodes.filter(node => !node.actionType.startsWith('mock-')).map(node => node.chainId);
-    const ecosystems: readonly WalletEcosystem[] | undefined = chains.some(chain => chain.startsWith('solana:')) ? ['solana']
-      : chains.some(chain => chain.startsWith('eip155:')) ? ['evm'] : undefined;
-    const choice = await selector.choose({ ...ecosystems ? { ecosystems } : {}, ...request, solanaChain });
+    const operation = operationWalletEcosystem(operationChain);
+    const ecosystems = operation ? [operation] : [...new Set(chains.flatMap(chain => operationWalletEcosystem(chain) ?? []))];
+    const choice = await selector.choose({ ...ecosystems.length ? { ecosystems } : {}, ...request, solanaChain });
     if (!choice) return null;
     if (choice.ecosystem === 'evm') {
       const session = await evm.connectWith(choice.id);
@@ -67,7 +69,7 @@ export function useWalletConnection() {
     if (!result.ok) { setError(solanaWalletNotice(result.code, choice.name, solanaChain)); return null; }
     const session = result.session;
     return { ecosystem: 'solana', address: session.account.address, providerKey: choice.key, providerName: choice.name, network: session.chain };
-  }, [selector, evm, solana, solanaChain, state.workflow]);
+  }, [selector, evm, solana, solanaChain, state.workflow, operationChain]);
   // Explicit owner action only. Reuse the operational session; switching never accepts Review or signs a transaction.
   const switchNetwork = async (chain: string) => {
     setError(null);

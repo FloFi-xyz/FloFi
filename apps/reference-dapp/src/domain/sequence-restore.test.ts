@@ -57,7 +57,7 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     // A reader failure restores nothing and asks for a retry.
     expect(await proveCompletions([pointer], s.workflow, sequence, async () => { throw new Error('SUPPLY_SERVICE_UNAVAILABLE'); })).toEqual({ proven: [], unreadable: true });
   });
-  it('parses only well-formed pointers of restorable runtimes for the same workflow', () => {
+  it('retains well-formed pointers of sequence runtimes for the same workflow', () => {
     const item = { nodeId: 'node-002', node: '{}', kind: 'public', runKey: 'exec-0001', received: '1' };
     expect(storedCompletions({ workflowId: 'w', completed: [item] }, 'w')).toEqual([item]);
     expect(storedCompletions({ workflowId: 'other', completed: [item] }, 'w')).toEqual([]);
@@ -66,10 +66,16 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'router', runKey: 'xroute-' + 'a'.repeat(32) }] }, 'w')).toEqual([{ ...item, kind: 'router', runKey: 'xroute-' + 'a'.repeat(32) }]);
     // P0 hotfix (FIX 2): the universal Router's pointer is restorable too; a runtime with no run-id reader still is not.
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'universal' }] }, 'w')).toEqual([{ ...item, kind: 'universal' }]);
-    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'uniswap-pool' }] }, 'w')).toEqual([]);
+    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'uniswap-pool' }] }, 'w')).toEqual([{ ...item, kind: 'uniswap-pool' }]);
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, received: '-1' }] }, 'w')).toEqual([]);
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, runKey: 'x' }] }, 'w')).toEqual([]);
     expect(storedCompletions('garbage', 'w')).toEqual([]);
+  });
+  it('withholds execution if the matching completion cannot be re-proven by this runtime', async () => {
+    const { s, sequence, swapNode } = composed();
+    const pointer = { nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), kind: 'uniswap-pool', runKey: 'uniswap-0001', received: null };
+    expect(await proveCompletions([pointer], s.workflow, sequence, async () => { throw new Error('UNEXPECTED_READ'); }))
+      .toEqual({ proven: [], unreadable: true });
   });
   it('reads finality per runtime: a reconciled Aave run, never a pending one', () => {
     const supply = (verdict: string) => ({ verdict, review: { workflow: { workflowId: 'w', nodes: [{ nodeId: 'node-003' }] } } });
@@ -160,8 +166,8 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
       .toEqual({ unreadable: false, proven: [expect.objectContaining({ kind: 'universal', received: null })] });
     // Two proven amounts that disagree stay unverified (retry), never a new step and never a funded one.
     expect(await proveCompletions(pointer('5'), s.workflow, sequence, read(record(proof)))).toEqual({ unreadable: true, proven: [] });
-    // A bridge that is not reconciled is still not restored.
-    expect(await proveCompletions(pointer(null), s.workflow, sequence, read({ ...record(proof), verdict: 'PENDING' }))).toEqual({ unreadable: false, proven: [] });
+    // A bridge that is not reconciled is withheld for another status check.
+    expect(await proveCompletions(pointer(null), s.workflow, sequence, read({ ...record(proof), verdict: 'PENDING' }))).toEqual({ unreadable: true, proven: [] });
     // The proven delivery binds the Aave Supply: a below-cap delivery re-authors the Supply at exactly what arrived (same USDC, 6 decimals);
     // a zero delivery binds nothing; an unproven delivery binds nothing and the Supply keeps no runtime amount of its own.
     const supplyStep = sequence.steps[1]!, below = await proveCompletions(pointer(null), s.workflow, sequence, read(record({ ...proof, amount: '9500000' }, '9500000')));

@@ -136,9 +136,10 @@ function takeSecret(presented = typeof window === 'undefined' ? '' : window.loca
  * (a usable proposal was resolved). `onGateChange`: Simulate and Execute must stay closed (the proposal is not yet loaded for the proven
  * wallet). `onClaimedWallet`: the proven wallet the loaded proposal belongs to (null until loaded).
  */
-export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChange, onAvailabilityChange, onGateChange, onClaimedWallet }: { slot?: HTMLElement | null;
+export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChange, onAvailabilityChange, onGateChange, onClaimedWallet, onClaimedDestination }: { slot?: HTMLElement | null;
   surface?: 'signing' | 'canvas'; onSurfaceChange?: ((surface: 'signing' | 'canvas') => void) | undefined; onAvailabilityChange?: (available: boolean) => void;
-  onGateChange?: (blocked: boolean) => void; onClaimedWallet?: (wallet: string | null) => void }) {
+  onGateChange?: (blocked: boolean) => void; onClaimedWallet?: (wallet: string | null) => void;
+  onClaimedDestination?: (wallet: { workflowId: string; address: string } | null) => void }) {
   const { t: tr } = useLocale();
   const { state, restoreWorkflow } = useWorkflow();
   const [secret, setSecret] = useState<string | null>(null);
@@ -155,6 +156,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const [reload, setReload] = useState(0);
   const [copied, setCopied] = useState(false);
   const [claimedBy, setClaimedBy] = useState<string | null>(null);
+  const [claimedDestination, setClaimedDestination] = useState<{ workflowId: string; address: string } | null>(null);
   const applying = useRef<number | null>(null);
   const acting = useRef(false);
   const generation = useRef(0);
@@ -269,6 +271,8 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
     if (current !== generation.current) return;
     // BUILD-CHAT-E2E-001: a multi-step workflow's step is signed by the run's wallet of that step's own namespace.
     setView(result.view); setClaimed(true); setClaimedBy(result.view.workflowRun?.stepWallet ?? claimant);
+    const address = result.view.workflowRun?.stepDestinationWallet;
+    setClaimedDestination(address && result.workflow ? { workflowId: result.workflow.workflowId, address } : null);
     // Reuse the existing validated workflow restoration path, which invalidates prior Review authority even if the hash is unchanged.
     // Simulation, Manifest Review and transaction signatures remain separate actions. A multi-step workflow may have no step to load yet
     // (the owner chooses how to authorize it, or the previous step has not reconciled).
@@ -277,7 +281,12 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   /** BUILD-CHAT-E2E-001: a run update. Only a loaded step (continue, start, resume) enters the editor; a status poll never does. */
   const onRunProposal = useCallback((proposal: ClaimedProposal) => {
     setView(proposal.view);
-    if (proposal.workflow) { restoreWorkflow(proposal.workflow as SemanticWorkflow); setClaimedBy(proposal.view.workflowRun?.stepWallet ?? null); }
+    if (proposal.workflow) {
+      const address = proposal.view.workflowRun?.stepDestinationWallet;
+      setClaimedDestination(address ? { workflowId: proposal.workflow.workflowId, address } : null);
+      restoreWorkflow(proposal.workflow as SemanticWorkflow);
+      setClaimedBy(proposal.view.workflowRun?.stepWallet ?? null);
+    }
   }, [restoreWorkflow]);
   // A proven wallet loads an open proposal (or finishes an interrupted claim) without a further click: the proof was the owner's action and
   // the server still re-verifies the owner, the claim rule and the exact canonical workflow. Each wallet is tried once per link.
@@ -334,6 +343,8 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   };
   useEffect(() => { onClaimedWallet?.(loadedFor); }, [loadedFor, onClaimedWallet]);
   useEffect(() => () => onClaimedWallet?.(null), [onClaimedWallet]);
+  useEffect(() => { onClaimedDestination?.(loaded ? claimedDestination : null); }, [loaded, claimedDestination, onClaimedDestination]);
+  useEffect(() => () => onClaimedDestination?.(null), [onClaimedDestination]);
 
   // BUILD-DEVELOPER-001: who sent the link, where the page knows it (the resolved proposal, else the link's own tag). Only the wording
   // follows it; the route states, their headings and every check are the same for every requester.

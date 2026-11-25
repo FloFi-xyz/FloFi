@@ -9,13 +9,14 @@ import { archiveEvidence, backoffMs, createIdempotencyStore, createPostgresLease
   readVerifiedEvidence, requestHash, withSpan, type Database, type EvidenceStore, type HttpRequest, type HttpResponse, type Logger, type Route,
   type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createHash } from 'node:crypto';
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName, type FlowService, type Rpc } from './flows.ts';
 import { jupiterQuotePreview, PREVIEW_METHODS, previewStorage, type PreviewPurpose } from './preview.ts';
 import { measureQuoteRpc } from '../src/server/public-testnet-rpc.ts';
 import { assertRunOwnership, normalizePrincipal, WALLET_PRINCIPAL_HEADER } from '../src/server/run-ownership.ts';
+import type { UniversalRecord } from '../src/server/universal-router/service.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from '../src/server/test-network-flows.ts';
 import { betaAccessMode, createBetaAccessStore, type BetaPrincipal } from '../src/flight/beta-access.ts';
 import { BETA_ACCOUNT_HEADER, BETA_SESSION_HEADER, betaIdentityFrom, type BetaRequestIdentity } from '../src/flight/beta-context.ts';
@@ -51,12 +52,17 @@ export function untilAborted(rpc: Rpc, signal: AbortSignal): Rpc {
     : rpc(method, params, { signal: context?.signal ? AbortSignal.any([signal, context.signal]) : signal });
 }
 export function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
+  const http = deps.http;
   const router = deps.router ? { router: { ...deps.router, destinationRpc: untilAborted(deps.router.destinationRpc, signal) } } : {};
   const universal = deps.universal ? { universal: { ...deps.universal, solanaRpc: untilAborted(deps.universal.solanaRpc, signal),
     evmRpcs: Object.fromEntries(Object.entries(deps.universal.evmRpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
   // Per-chain read clients (Aave supply, transfers, catalog liquidity) share the same paced transports (follow-up review).
   const chains = deps.chains ? { chains: { ...deps.chains, rpcs: Object.fromEntries(Object.entries(deps.chains.rpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
   return { ...deps, ...router, ...universal, ...chains, rpc: untilAborted(deps.rpc, signal),
+    ...http ? { http: async query => {
+      if (signal.aborted) throw new Error('CLOUD_PREVIEW_TIMEOUT');
+      return http(query, signal);
+    } } : {},
     ...deps.quoteRpc ? { quoteRpc: untilAborted(observeOnly(deps.quoteRpc), signal) } : {} };
 }
 
@@ -213,14 +219,15 @@ export function createBackend(options: BackendOptions) {
     return value;
   }
 
-  async function walletRequestRefusal(flow: FlowName, method: string, args: readonly unknown[], tenantId: string, principal: string | null, live: boolean) {
+  async function walletRequestRefusal(flow: FlowName, method: string, args: readonly unknown[], tenantId: string, principal: string | null, live: boolean,
+    snapshot?: UniversalRecord) {
     const id = args[0];
     const issues = issuesWalletRequest(method);
     if ((!issues && method !== 'submitGasless') || typeof id !== 'string' || !FLOWS[flow].runId.test(id)) return null;
     const { rows: [run] } = await db.query<{ workflow_id: string; owner_account: string | null; created_at: Date }>(
       'SELECT workflow_id, owner_account, created_at FROM execution_runs WHERE tenant_id = $1 AND run_id = $2 AND flow = $3', [tenantId, id, flow]);
     if (!run) return null;
-    const load = () => service(flow, tenantId).load(id);
+    const load = () => snapshot ? Promise.resolve(snapshot) : service(flow, tenantId).load(id);
     if (issues && isExternalStepWorkflow(run.workflow_id)) {
       if (principal && ((run.owner_account && run.owner_account !== principal) || (method !== 'handoff' && normalizePrincipal(args[1]) !== principal)))
         return 'RUN_OWNER_MISMATCH';
@@ -230,7 +237,7 @@ export function createBackend(options: BackendOptions) {
     // Some catalog reviews bind their wallet on the first begin. Apply the guard before that begin can return a request.
     const claimed = issues && method !== 'handoff' && typeof args[1] === 'string' ? normalizePrincipal(args[1].toLowerCase()) : null;
     const owner = run.owner_account ?? claimed;
-    if (!owner?.startsWith('0x')) return null;
+    if (!owner || !owner.startsWith('0x') && flow !== 'crosschain-universal') return null;
     installSourceResolution();
     return loadedOwnerStepDeliveryRefusal(db, { tenantId, flow, owner,
       workflowId: run.workflow_id, createdAt: run.created_at, load });
@@ -272,9 +279,14 @@ export function createBackend(options: BackendOptions) {
     return withSpan(logger, 'flow.call', { tenant_id: tenantId, flow, action: method, run_id: runId }, async () => {
       for (let attempt = 0; ; attempt++) {
         try {
-          const walletRefusal = await walletRequestRefusal(flow, method, args, tenantId, principal, developerLive);
+          // The recipient guard and the service's locked begin must evaluate the same Review.
+          const snapshot = flow === 'crosschain-universal' && method === 'begin' && runId
+            ? await service(flow, tenantId).load(runId) as UniversalRecord : undefined;
+          if (snapshot && args[3] !== undefined && args[3] !== snapshot.review.commitment) return { ok: false, code: 'UNIVERSAL_REVIEW_CHANGED' } as const;
+          const walletRefusal = await walletRequestRefusal(flow, method, args, tenantId, principal, developerLive, snapshot);
           if (walletRefusal) return { ok: false, code: walletRefusal } as const;
-          return { ok: true, value: await service(flow, tenantId).call(method, args) } as const;
+          const boundArgs = snapshot && args.length === 3 ? [...args, snapshot.review.commitment] : args;
+          return { ok: true, value: await service(flow, tenantId).call(method, boundArgs) } as const;
         }
         catch (error) {
           const code = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode;
@@ -315,7 +327,12 @@ export function createBackend(options: BackendOptions) {
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
     if (purpose === 'QUOTE' && flow !== 'jupiter-swap' && !definition.quote) return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     if (!method) return { ok: false, code: 'PREVIEW_NOT_AVAILABLE' };
-    if (!definition.methods[method]!.validate(args) || purpose === 'QUOTE' && definition.quote && args.length !== 1) throw new HttpError(400, 'ARGUMENTS_INVALID');
+    const jupiterMarket = purpose === 'QUOTE' && flow === 'jupiter-swap';
+    const validate = definition.methods[method]!.validate;
+    const valid = jupiterMarket
+      ? (args.length === 1 || args.length === 2 && normalizePrincipal(args[1]) !== null) && validate([args[0], UNIVERSAL_QUOTE_SUBJECTS.SOLANA])
+      : validate(args) && (purpose !== 'QUOTE' || !definition.quote || args.length === 1);
+    if (!valid) throw new HttpError(400, 'ARGUMENTS_INVALID');
     const mode = flowMode(flow, env);
     if (mode === 'off') return { ok: false, code: disabledCode(flow) };
     const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
@@ -323,8 +340,11 @@ export function createBackend(options: BackendOptions) {
     if (callOptions.signal?.aborted) return { ok: false, code: 'CLOUD_PREVIEW_ABANDONED' };
     const limit = options.previewTimeoutMs ?? 80_000;
     const deadlineMs = callOptions.deadlineMs === undefined ? limit : Math.max(1, Math.min(limit, callOptions.deadlineMs));
+    // Keep accepting the deployed Jupiter preview shape during independent rollouts. Its market computation uses
+    // only the workflow, so the legacy address does not affect quote coalescing or reach the provider.
+    const previewArgs = jupiterMarket ? args.slice(0, 1) : args;
     let key: string | null;
-    try { key = `${flow}\0${purpose}\0${createHash('sha256').update(JSON.stringify(args)).digest('hex')}`; } catch { key = null; }
+    try { key = `${flow}\0${purpose}\0${createHash('sha256').update(JSON.stringify(previewArgs)).digest('hex')}`; } catch { key = null; }
     let shared = key ? inflightPreviews.get(key) : undefined;
     if (shared) logger.info('flow.preview_coalesced', { flow, action: method, purpose });
     else {
@@ -352,7 +372,7 @@ export function createBackend(options: BackendOptions) {
             const quote = definition.quote;
             if (quote) return { ok: true, value: await measureQuoteRpc(() => quote(args[0] as SemanticWorkflow, deps),
               metrics => logger.info('flow.quote_rpc', { flow, ...metrics })) };
-            return { ok: true, value: await jupiterQuotePreview(args, deps) };
+            return { ok: true, value: await jupiterQuotePreview(args[0], deps) };
           };
           return await Promise.race([deadline, gone, compute()]);
         }

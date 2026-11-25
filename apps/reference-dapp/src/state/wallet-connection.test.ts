@@ -20,6 +20,16 @@ beforeEach(() => { host = new HookHarness(); vi.resetAllMocks(); vi.stubGlobal('
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
 
 describe('in-workflow network switching', () => {
+  it('offers only the active step ecosystem when both browser wallet sessions are available', async () => {
+    const evm = host.render(() => useWalletConnection('eip155:8453'));
+    await evm.connect();
+    expect(f.choose).toHaveBeenLastCalledWith(expect.objectContaining({ ecosystems: ['evm'] }));
+    const solana = host.render(() => useWalletConnection(SOLANA_MAINNET_TRANSFER.chain));
+    await solana.connect();
+    expect(f.choose).toHaveBeenLastCalledWith(expect.objectContaining({ ecosystems: ['solana'], solanaChain: 'solana:mainnet' }));
+    expect(f.evm.switchTo).not.toHaveBeenCalled();
+    expect(f.solana.switchCluster).not.toHaveBeenCalled();
+  });
   it.each(EVM_WALLET_NETWORKS.filter(network => network.switchable))('switches only the operational EVM wallet to $label', async network => {
     await read().switchNetwork(network.chain);
     expect(f.evm.switchTo).toHaveBeenCalledExactlyOnceWith(network.hex);

@@ -28,6 +28,13 @@ import { publicStatus } from '../app/public-testnet-action';
 import { editorSingleRunRecord } from '../app/editor-workflow-execution-action';
 import { supplyStatus } from '../app/supply-action';
 import { jupiterStatus } from '../app/jupiter-action';
+import { solanaDevnetStatus } from '../app/solana-devnet-action';
+import { solanaTransferStatus } from '../app/solana-transfer-action';
+import { transferStatus } from '../app/robinhood-transfer-action';
+import { solanaLiquidityStatus } from '../app/solana-liquidity-action';
+import { solanaMainnetLiquidityStatus } from '../app/solana-mainnet-liquidity-action';
+import { uniswapLiquidityStatus } from '../app/uniswap-liquidity-action';
+import { SOLANA_DEVNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { routerStatus } from '../app/router-action';
 import { universalStatus } from '../app/universal-router-action';
 import { ROUTER_NETWORK_OPTIONS, type RouterNetwork } from '../domain/router-authoring';
@@ -193,7 +200,13 @@ async function readSequenceRecord(kind: string, runKey: string, sourceChain?: st
     const result = await universalStatus(sourceChain?.startsWith('solana:') ? 'SOLANA' : 'EVM', runKey).catch(() => null);
     return result?.ok ? result.value : null;
   }
-  const result = kind === 'public' ? await publicStatus(runKey) : kind === 'supply' ? await supplyStatus(runKey) : kind === 'solana-swap' ? await jupiterStatus(runKey) : null;
+  const devnet = sourceChain === SOLANA_DEVNET_TRANSFER.chain;
+  const result = kind === 'public' ? await publicStatus(runKey) : kind === 'supply' ? await supplyStatus(runKey)
+    : kind === 'solana-swap' ? await (devnet ? solanaDevnetStatus(runKey) : jupiterStatus(runKey))
+    : kind === 'solana-transfer' ? await solanaTransferStatus(devnet ? 'devnet' : 'mainnet', runKey)
+    : kind === 'transfer' ? await transferStatus(runKey)
+    : kind === 'solana-pool' ? await (devnet ? solanaLiquidityStatus(runKey) : solanaMainnetLiquidityStatus(runKey))
+    : kind === 'uniswap-pool' ? await uniswapLiquidityStatus(runKey) : null;
   return result && result.ok ? result.value : null;
 }
 

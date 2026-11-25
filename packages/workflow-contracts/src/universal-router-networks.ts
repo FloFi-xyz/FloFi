@@ -62,6 +62,9 @@ export const UNIVERSAL_DIRECTED_PAIRS: readonly { readonly source: UniversalNetw
  * address, which FloFi's order verifier then (correctly) refuses, hiding the provider's real availability before a wallet connects.
  */
 export const UNIVERSAL_QUOTE_SUBJECTS = Object.freeze({ EVM: '0x7e63d8d571a4793941b903ce2f445dcfb1f1090e', SOLANA: 'htEfnEL8TnmfY5huT9CdJhnRN4ze8T5brBunyuP6xXL' } as const);
+export function isUniversalQuoteSubject(value: unknown): boolean {
+  return typeof value === 'string' && (value === UNIVERSAL_QUOTE_SUBJECTS.SOLANA || value.toLowerCase() === UNIVERSAL_QUOTE_SUBJECTS.EVM);
+}
 
 // --- addresses -------------------------------------------------------------------------------------------------------
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';

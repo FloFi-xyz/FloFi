@@ -239,7 +239,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: on Robinhood Chain a connected wallet lets the quote decide how the network fee is paid
     // (its ETH first; 0x Gasless only when ETH is short). Read silently; without a wallet the quote is made as before.
     const gasOwner = profile?.kind === 'CATALOG' && profile.chainId === 4663 && !ownerBoundSwapReview(profile) ? await wallet.session() : null;
-    if (owner && owner.chainId !== profile?.chainHex) throw new Error('WRONG_WALLET_CHAIN');
+    if (owner && profile?.kind !== 'CATALOG' && owner.chainId !== profile?.chainHex) throw new Error('WRONG_WALLET_CHAIN');
     if (resumeApproval && run?.quote.ownerReview && owner?.account !== run.quote.ownerReview.account) throw new Error('OWNER_REVIEW_MISMATCH');
     // P0 hotfix (execution continuity): a confirmed approval is shown as confirmed as soon as its receipt is; on an owner-bound network the swap's
     // fresh Review still needs the approval's allowance read-back, so it is observed first (read-only; nothing is signed or sent).

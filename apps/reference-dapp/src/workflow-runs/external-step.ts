@@ -42,6 +42,15 @@ export function externalStepWorkflow(record: unknown, workflowId?: string): Work
   return recordWorkflows(record).find(w => workflowId === undefined ? isExternalStepWorkflow(w.workflowId) : w.workflowId === workflowId);
 }
 
+function destinationRefusal(flow: string, record: unknown, wallets: RunRecord['wallets']): string | null {
+  if (flow !== 'crosschain-universal') return null;
+  const review = (record as { review?: { recipientKind?: string; recipient?: string; route?: { destinationChain?: string } } } | null)?.review;
+  if (review?.recipientKind !== 'CONNECTED_DESTINATION_WALLET') return null;
+  const chain = review.route?.destinationChain;
+  const wallet = chain?.startsWith('solana:') ? wallets.solana : chain?.startsWith('eip155:') ? wallets.eip155 : null;
+  return wallet && normalizePrincipal(review.recipient) !== wallet ? 'HANDOFF_WORKFLOW_MISMATCH' : null;
+}
+
 /** Older owner proposals have an ordinary workflow ID. Apply the same wallet, flow, claim time and exact reviewed hash used by observation. */
 export async function loadedOwnerStepDeliveryRefusal(db: Database, input: {
   readonly tenantId: string; readonly flow: string; readonly owner: string; readonly createdAt: Date; readonly workflowId: string;
@@ -51,9 +60,15 @@ export async function loadedOwnerStepDeliveryRefusal(db: Database, input: {
   const store = createPgWorkflowRunStore(db, input.tenantId);
   const steps = await store.loadedBoundSteps(input.owner, input.flow, input.createdAt);
   if (!steps.length) return null;
-  const hashes = new Set(recordWorkflows(await input.load()).filter(w => w.workflowId === input.workflowId).map(stepHash));
+  const record = await input.load();
+  const hashes = new Set(recordWorkflows(record).filter(w => w.workflowId === input.workflowId).map(stepHash));
   for (const step of steps) {
     if (!step.workflowHash || !hashes.has(step.workflowHash)) continue;
+    if (input.flow === 'crosschain-universal') {
+      const run = await store.byId(step.runId);
+      const refusal = run ? destinationRefusal(input.flow, record, run.wallets) : null;
+      if (refusal) return refusal;
+    }
     const refusal = boundDeliveryRefusal(step.bound, await store.steps(step.runId));
     if (refusal) return refusal;
   }
@@ -73,8 +88,8 @@ export async function externalWalletRequestRefusal(db: Database, input: {
   if (!principal) return 'WALLET_SESSION_REQUIRED';
   const workflow = externalStepWorkflow(input.record, input.workflowId);
   if (!workflow) return 'HANDOFF_WORKFLOW_MISMATCH';
-  const { rows: [step] } = await db.query<{ active: boolean; expired: boolean; signable: boolean }>(`
-    SELECT p.status = 'ACTIVE' AS active, r.expires_at <= clock_timestamp() AS expired,
+  const { rows: [step] } = await db.query<{ active: boolean; expired: boolean; signable: boolean; wallets: RunRecord['wallets'] }>(`
+    SELECT p.status = 'ACTIVE' AS active, r.expires_at <= clock_timestamp() AS expired, r.wallets,
       (r.mode = 'CONFIRM_EACH_STEP' AND r.state IN ('RUNNING', 'ATTENTION') AND r.current_step = s.step_index
         AND (s.state = 'AWAITING_OWNER' OR (s.state = 'UNCERTAIN' AND s.outcome->>'kind' = 'OWNER_RUN'
           AND s.outcome->>'executionId' = $7))) AS signable
@@ -93,5 +108,6 @@ export async function externalWalletRequestRefusal(db: Database, input: {
   if (!step) return 'HANDOFF_WORKFLOW_MISMATCH';
   if (!step.active) return 'DEVELOPER_PROJECT_DISABLED';
   if (step.expired) return 'WORKFLOW_RUN_EXPIRED';
-  return step.signable ? null : 'WORKFLOW_RUN_NO_STEP';
+  if (!step.signable) return 'WORKFLOW_RUN_NO_STEP';
+  return destinationRefusal(input.flow, input.record, step.wallets);
 }

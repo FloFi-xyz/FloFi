@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { composeStrategy, composeWorkflow } from '../engine/strategy-engine';
 import { credential, gatewayEnv, session } from '../mcp/gateway.test-harness';
 import type { McpRuntime } from '../mcp/runtime';
+import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { activeSimulationCount, MAX_CONCURRENT_SIMULATIONS, PlatformRefusal, SIMULATION_SLOT_WAIT_MS, simulationAdmission, simulatePreview, simulateWorkflowPreview,
   waitingSimulationCount } from './index.ts';
 
@@ -84,6 +85,40 @@ describe('BUILD-DEVELOPER-001 shared simulation preview', () => {
 });
 
 describe('canonical workflow preview across surfaces', () => {
+  it('keeps independent EVM previews available while resolving or asking for a Solana wallet', async () => {
+    const strategy = { version: 2, steps: [
+      { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '5' },
+      { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' },
+    ] };
+    const composed = composeWorkflow(strategy);
+    if (!composed.ok) throw new Error(composed.code);
+    const request = { strategy, workflowHash: composed.workflowHash, simulationSubject: SUBJECT };
+    const calls: unknown[][] = [];
+    const runtime = { ...blockingRuntime().runtime, preview: async (flow, args, purpose) => {
+      calls.push([flow, ...args.slice(1), ...(purpose ? [purpose] : [])]);
+      if (purpose === 'QUOTE') return { ok: true, value: { format: 'flofi.jupiter-quote-preview.v1', amount: '5000000',
+        expectedOut: '32000000', minimumOut: '31000000', expiresAt: new Date(Date.now() + 30_000).toISOString(), provenance: 'MOCKED',
+        input: { symbol: 'USDC', decimals: 6 }, output: { symbol: 'SOL', decimals: 9 } } };
+      return { ok: false, code: 'FIXTURE_PREVIEW' };
+    } } satisfies McpRuntime;
+    const missing = await simulateWorkflowPreview(runtime, request);
+    expect(missing.steps[0]).toMatchObject({ state: 'NOT_COMPLETED', code: 'SOLANA_WALLET_REQUIRED', simulationSubject: null,
+      subjectSource: 'PUBLIC_QUOTE_SUBJECT', view: { kind: 'MARKET_QUOTE', canonicalArtifacts: null, facts: { expectedOut: '32000000' } } });
+    expect(calls).toEqual([['jupiter-swap', UNIVERSAL_QUOTE_SUBJECTS.SOLANA, 'QUOTE'], ['base-swap']]);
+    calls.length = 0;
+    const solana = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
+    const linked = await simulateWorkflowPreview(runtime, request, { simulationWallets: [{ namespace: 'solana', address: solana }] });
+    expect(linked.steps[0]).toMatchObject({ subjectSource: 'ACCOUNT_WALLET', simulationSubject: solana });
+    expect(calls).toEqual([['jupiter-swap', solana], ['base-swap']]);
+    const one = strategy.steps[0]!;
+    expect(await codeOf(simulatePreview(runtime, { strategy: one, workflowHash: hashOf(one), simulationSubject: UNIVERSAL_QUOTE_SUBJECTS.SOLANA })))
+      .toBe('SIMULATION_SUBJECT_INVALID');
+    expect(calls).toHaveLength(2);
+    for (const simulationSubject of [{}, { simulationSubject: SUBJECT }]) {
+      expect(await simulatePreview(runtime, { strategy: one, workflowHash: hashOf(one), ...simulationSubject }))
+        .toMatchObject({ simulationSubject: null, view: { kind: 'MARKET_QUOTE', canonicalArtifacts: null } });
+    }
+  });
   const strategy = { version: 2, steps: [
     { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' },
     { action: 'swap', network: 'base', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.01' },

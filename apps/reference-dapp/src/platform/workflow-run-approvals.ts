@@ -46,7 +46,7 @@ export type WorkflowRunSurface = WorkflowRunDeps & { readonly delegationOps?: Ru
  * that must sign it (a sequence may span EVM and Solana: each step is signed by the run's wallet of its own namespace).
  */
 export type WorkflowRunClaim = { readonly run: RunView; readonly plan: AuthorizationPlan; readonly step: { readonly index: number; readonly count: number } | null;
-  readonly stepWallet: string | null };
+  readonly stepWallet: string | null; readonly stepDestinationWallet?: string };
 /** What the signing surface loads for a sequence: the current step's proposal (null when no step waits for the owner) and the run. */
 export type SequentialProposal = { readonly view: ApprovalView & { readonly workflowRun: WorkflowRunClaim }; readonly command: Command | null;
   readonly workflow: Workflow | null; readonly workflowHash: string; readonly workflowId: string | null };
@@ -54,9 +54,13 @@ export type SequentialProposal = { readonly view: ApprovalView & { readonly work
 async function proposalOf(deps: WorkflowRunSurface, run: RunRecord, step: StepProposal | null, base: ApprovalView): Promise<SequentialProposal> {
   const fresh = await deps.store.byId(run.runId) ?? run;
   const network = step ? step.strategy.action === 'bridge' ? step.strategy.sourceNetwork : step.strategy.network : null;
+  const bridge = step?.strategy.action === 'bridge' ? step.strategy : null;
+  const destination = bridge && bridge.recipient === undefined && bridge.sourceNetwork.startsWith('solana') !== bridge.destinationNetwork.startsWith('solana')
+    ? fresh.wallets[bridge.destinationNetwork.startsWith('solana') ? 'solana' : 'eip155'] : null;
   const workflowRun: WorkflowRunClaim = { run: await runView(deps, fresh, { outcomes: true, owner: true }), plan: await ownerAuthorizationPlan(deps, fresh),
     step: step ? { index: step.stepIndex, count: step.stepCount } : null,
-    stepWallet: network ? fresh.wallets[network.startsWith('solana') ? 'solana' : 'eip155'] ?? null : null };
+    stepWallet: network ? fresh.wallets[network.startsWith('solana') ? 'solana' : 'eip155'] ?? null : null,
+    ...(destination ? { stepDestinationWallet: destination } : {}) };
   return { view: { ...base, workflowRun }, command: step?.composition.command ?? null, workflow: step?.composition.workflow ?? null,
     workflowHash: step?.workflowHash ?? fresh.workflowHash, workflowId: step?.composition.workflow.workflowId ?? null };
 }

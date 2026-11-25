@@ -6,8 +6,8 @@
  * requests; MCP, channels and the Developer API call the runtime directly and record nothing.
  */
 import { observeSimulations } from '../server/simulation-observer';
-import { cloudFlow as runtimeFlow } from '../server/flow-runtime';
-import { requireFlightMethodAccess } from '../server/flight-access';
+import { cloudFlow as runtimeFlow, flowRuntimeKind } from '../server/flow-runtime';
+import { isFlightRecoveryMethod, requireFlightMethodAccess, requireFlightProductAccess, walletPrincipalOf, withFlightAccess, withFlightProductAccess } from '../server/flight-access';
 import { guardFlowExecution } from '../server/execution-guard';
 import { readDeveloperConfig } from '../developer/config';
 import { issuesWalletRequest } from '../workflow-runs/external-step';
@@ -23,6 +23,17 @@ if (!(globalThis as Record<symbol, unknown>)[REGISTERED]) {
 }
 
 export { cloudFlowMode, cloudRuns } from '../server/flow-runtime';
+const durableRuntime = (env: Readonly<Record<string, string | undefined>>) => {
+  const kind = flowRuntimeKind(env);
+  return kind === 'remote' || kind === 'embedded';
+};
+
+/** The durable backend checks the exact named and recorded run owners for wallet-specific operations. */
+export async function withFlightFlowAccess<T>(work: () => Promise<T>): Promise<T> {
+  if (!durableRuntime(process.env)) return withFlightAccess(work);
+  return withFlightProductAccess(work);
+}
+
 export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
   const [flow, method, values, options] = args;
   try { guardFlowExecution(method); } catch (error) {
@@ -37,7 +48,11 @@ export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
     const { currentSolanaSession, currentWalletSession } = await import('../server/session-principal.ts');
     principal = (await (solana ? currentSolanaSession() : currentWalletSession()).catch(() => null))?.account ?? null;
   }
-  const identity = await requireFlightMethodAccess(method,
-    principal ? { namespace: principal.startsWith('0x') ? 'eip155' : 'solana', address: principal } : undefined);
+  const env = options?.env ?? process.env;
+  const proven = walletPrincipalOf(principal);
+  // In the durable runtime, a run's owner is checked even for methods taking only a run ID.
+  const identity = !proven && !isFlightRecoveryMethod(method) && durableRuntime(env)
+    ? await requireFlightProductAccess(env)
+    : await requireFlightMethodAccess(method, proven ?? undefined, env);
   return runtimeFlow<T>(flow, method, values, { ...options, principal, betaIdentity: identity, developerLive });
 }

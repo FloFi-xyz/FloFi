@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountWallet } from '../accounts/account-model';
 import type { SavedWallet } from './credentials';
-import { walletInventory, walletStatus, type ActiveWallet } from './wallet-inventory';
+import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
+import { resolveOperationWallet, walletInventory, walletStatus, type ActiveWallet } from './wallet-inventory';
 
 // Synthetic addresses only.
 const EVM = '0x' + '4'.repeat(40), SOL = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV', MM = '0x' + '5'.repeat(40);
@@ -12,6 +13,23 @@ const account = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWa
 const saved = (ecosystem: 'evm' | 'solana', address: string, providerKey: string, label = 'Main'): SavedWallet => ({ id: `${ecosystem}:${providerKey}:${address}`,
   ecosystem, address, providerKey, providerName: providerKey, label, lastNetwork: null, addedAt: '2026-11-01T00:00:00.000Z' });
 const active = (ecosystem: 'evm' | 'solana', address: string, providerKey: string): ActiveWallet => ({ ecosystem, address, providerKey, providerName: providerKey, network: null });
+
+describe('operation wallet selection', () => {
+  it('selects only a compatible account from the admitted inventory', () => {
+    expect(resolveOperationWallet('solana', [EVM, SOL])).toEqual({ kind: 'RESOLVED', address: SOL });
+    expect(resolveOperationWallet('evm', [SOL, EVM])).toEqual({ kind: 'RESOLVED', address: EVM });
+    expect(resolveOperationWallet('solana', [])).toEqual({ kind: 'MISSING' });
+    expect(resolveOperationWallet('solana', [EVM])).toEqual({ kind: 'UNSUPPORTED' });
+    expect(resolveOperationWallet('solana', [UNIVERSAL_QUOTE_SUBJECTS.SOLANA])).toEqual({ kind: 'UNSUPPORTED' });
+  });
+
+  it('honors an admitted override and refuses ambiguity, another account, or a wrong-chain override', () => {
+    expect(resolveOperationWallet('evm', [EVM, MM])).toEqual({ kind: 'AMBIGUOUS' });
+    expect(resolveOperationWallet('evm', [EVM, MM], MM)).toEqual({ kind: 'RESOLVED', address: MM });
+    expect(resolveOperationWallet('evm', [EVM], MM)).toEqual({ kind: 'UNAUTHORIZED' });
+    expect(resolveOperationWallet('evm', [EVM], SOL)).toEqual({ kind: 'UNSUPPORTED' });
+  });
+});
 
 describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 one Wallets section (P1-03, T09)', () => {
   it('lists Privy EVM and Solana wallets and a connected Phantom once each, with their designation and an honest status', () => {

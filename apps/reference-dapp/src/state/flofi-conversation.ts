@@ -87,6 +87,7 @@ export type ConversationBridge = LifecycleView & {
    * itself when the read settles — never with a wallet request: a simulation that may ask for a sign-in waits for the owner's Review.
    */
   readonly destinationLoading?: { readonly network: string; readonly reason: string } | null | undefined;
+  readonly destinationWalletAction?: { readonly label: string; run(): Promise<boolean>; readonly retry: (() => void) | null } | null | undefined;
   /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: amounts typed on Canvas cards and never applied (they block every simulation), and the existing card actions that
    * apply (`apply: true`) or discard one. The returned text is why an apply was refused (nothing changed), else null.
@@ -416,13 +417,25 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   }
 
   // ── Review ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  function offerReviewNetwork(scope: number, language: ConversationLanguage, view: ConversationBridge): boolean {
+    const offer = view.networkAction;
+    if (!offer) return false;
+    if (!offer.disabled) resume.current = { scope, language, until: 'NETWORK', error: view.networkError ?? null };
+    const offered = (language: ConversationLanguage) => offer.labelIn?.(language) ?? translate(language, offer.label);
+    say(scope, language, (shown, c) => [c.switchNetworkFor(view.walletNetwork ?? null, offer.network ?? offered(shown)),
+      offer.disabled ? {} : { options: [offered(shown)] }]);
+    return true;
+  }
+
   function presentReview(scope: number, language: ConversationLanguage, continuation = false) {
     const view = latest.current.bridge, review = conversationReview(view), binding = reviewBinding(view);
     if (!binding || !review.canConfirm) {
+      if (!review.simulationProblem && offerReviewNetwork(scope, language, view)) return;
       // A simulation that failed or was refused says why in its own words (a retired earlier Review would only say the workflow changed).
       const about = (text: string) => currentExecution(view.progress)?.started ? aboutNextRequest(text) : text;
       say(scope, language, (language, c) => [about(review.simulationProblem ? c.reviewFailed(translate(language, review.simulationProblem)) : c.reviewNotApprovable(translate(language, review.message))),
-        { ...review.steps.length && !review.simulationProblem ? { review } : {}, options: [c.review] }]);
+        { ...review.steps.length && !review.simulationProblem ? { review } : {},
+          options: [view.wallet.account ? c.review : translate(language, 'Connect wallet')] }]);
       return;
     }
     const sequence = view.sequence, workflow = view.workflow, previous = lastReview.current;
@@ -523,13 +536,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (currentExecution(view.progress) && action.kind !== 'simulate') { follow(scope, language); return; }
     // The wallet is on another network than the workflow: the existing wallet network request comes first (nothing is simulated on the wrong chain).
     // The existing wallet network switch is offered in the chat; once the wallet reports the step's network, the Review continues by itself.
-    if (view.networkAction) {
-      if (!view.networkAction.disabled) resume.current = { scope, language, until: 'NETWORK', error: view.networkError ?? null };
-      const offer = view.networkAction;
-      const offered = (language: ConversationLanguage) => offer.labelIn?.(language) ?? translate(language, offer.label);
-      say(scope, language, (language, c) => [c.switchNetworkFor(view.walletNetwork ?? null, offer.network ?? offered(language)), offer.disabled ? {} : { options: [offered(language)] }]);
-      return;
-    }
+    if (offerReviewNetwork(scope, language, view)) return;
     if (view.simulationBlocked || (action.kind !== 'simulate' && !refresh) || action.disabled) {
       // P0 hotfix (production 2026-11-12: "the Assistant said it cannot start Review while the owner was executing"): a workflow that is executing
       // (a run, or a step-by-step workflow between its steps) is described with its status and next action, never refused as a Review.
@@ -546,7 +553,10 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // Each piece in the message's own language: the blocked reason is a catalog key, never an English sentence inside Portuguese copy.
       const blocked = view.simulationBlocked, label = action.label, blockedIn = view.simulationBlockedIn, connect = !view.wallet.account;
       const reason = (language: ConversationLanguage) => blocked ? blockedIn?.(language) ?? translate(language, blocked) : translate(language, label);
-      say(scope, language, (language, c) => [c.reviewBlocked(reason(language)), connect ? { options: [translate(language, 'Connect wallet')] } : {}]);
+      const destination = view.destinationWalletAction;
+      say(scope, language, (language, c) => [c.reviewBlocked(reason(language)), destination
+        ? { options: [translate(language, destination.label), ...destination.retry ? [translate(language, 'Try again')] : []] }
+        : connect ? { options: [translate(language, 'Connect wallet')] } : {}]);
       return;
     }
     // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (wallet-execution, chat and workflow reviews): a review FloFi continues by itself — after the
@@ -1066,6 +1076,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (request) { lifecycle(scope, request, language); return; }
       if (bridge.networkAction && offeredNetwork(text)) { bridge.networkAction.request(); return; }
       // Offered options are matched in either language (the interface language may have changed since they were offered).
+      if (bridge.destinationWalletAction) {
+        const destination = bridge.destinationWalletAction;
+        if (text === translate('EN', destination.label) || text === translate('PT', destination.label)) { void destination.run(); return; }
+        if (destination.retry && (text === translate('EN', 'Try again') || text === translate('PT', 'Try again'))) { destination.retry(); return; }
+      }
       if (text === translate('PT', 'Connect wallet') || text === 'Connect wallet') { bridge.connectWallet(); return; }
       if (text === conversationCopy('EN').checkStatus || text === conversationCopy('PT').checkStatus) { lifecycle(scope, 'STATUS', language); return; }
       // The option is matched in either language: its label carries no word that tells the reply language.

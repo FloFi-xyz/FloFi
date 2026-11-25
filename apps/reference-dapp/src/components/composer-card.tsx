@@ -19,6 +19,7 @@ import { usePoolContributionInputs } from './canvas-card-inputs';
 import type { CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { featuredStockSymbols, ROBINHOOD_CHAIN } from '../domain/asset-catalogs';
 import { networkIdentity } from '../domain/network-registry';
+import { operationWalletAddress, operationWalletEcosystem } from '../domain/wallet-inventory';
 import type { CryptoSelection } from '../domain/crypto-action-picker';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { universalKeyOfCanvasLabel } from '../domain/universal-bridge-authoring';
@@ -589,8 +590,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const { t: tr } = useLocale();
   // UX-007: the shared live quote for swap cards (Swap and the Stocks swap): calculating at once, then this exact amount's estimate or none.
   const quoteNode = card.estimateWorkflow?.nodes.find(n => n.nodeId === card.estimateNodeId);
-  const quoteOwner = quoteNode?.chainId.startsWith('solana:') ? card.estimateSolanaOwner ?? card.estimateOwner : card.estimateEvmOwner ?? card.estimateOwner;
-  const quoteDestination = quoteNode?.chainId.startsWith('solana:') ? card.estimateEvmOwner : card.estimateSolanaOwner;
+  const ecosystem = operationWalletEcosystem(quoteNode?.chainId);
+  const quoteOwner = ecosystem ? operationWalletAddress(ecosystem,
+    (ecosystem === 'solana' ? card.estimateSolanaOwner : card.estimateEvmOwner) ?? card.estimateOwner) : null;
+  const quoteDestination = ecosystem === 'solana' ? operationWalletAddress('evm', card.estimateEvmOwner) : operationWalletAddress('solana', card.estimateSolanaOwner);
   // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: once this step executes, its estimate is kept as shown and never asked again.
   const quoteFrozen = Boolean(card.quoteFrozen || card.execution && card.execution.visual !== 'waiting');
   const quote = useLiveQuote(['Swap', 'Stocks', 'Bridge'].includes(card.summary.action) ? card.estimateWorkflow : undefined,

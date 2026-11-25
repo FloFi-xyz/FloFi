@@ -24,7 +24,7 @@ vi.mock('../state/workflow-store', async original => ({ ...await original<typeof
 vi.mock('../state/jupiter-store', () => ({ useJupiter: () => ({ session: { chain: 'solana:mainnet', account: { address: OWNER } } }) }));
 vi.mock('../wallet/position-mint-signer', () => ({ createPositionMintSigner: async () => ({ address: '9'.repeat(43), sign: async () => new Uint8Array() }),
   signOrcaLiquidityTransaction: async () => { throw new Error('NEVER_SIGNED_HERE'); } }));
-const refused = async () => ({ ok: false as const, code: 'UNUSED' });
+const refused = vi.hoisted(() => async () => ({ ok: false as const, code: 'UNUSED' }));
 vi.mock('../app/solana-liquidity-action', () => ({ solanaLiquidityInfo: refused, solanaLiquidityPrice: refused, solanaLiquidityPositions: refused,
   solanaLiquiditySimulate: async (...args: unknown[]) => { f.devnet.push(args); return { ok: false, code: 'DEVNET_MUST_NOT_BE_USED' }; },
   solanaLiquidityReview: refused, solanaLiquidityInvalidate: refused, solanaLiquidityBegin: refused, solanaLiquidityWalletFailure: refused, solanaLiquiditySubmit: refused,

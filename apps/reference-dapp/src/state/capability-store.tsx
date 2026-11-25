@@ -14,6 +14,7 @@ import { usePublicTestnet } from './public-testnet-store';
 import { walletChainRef } from '../wallet/evm-networks';
 import { classifyWalletEnvironment, walletExecutionEnvironment, type WalletEnvironment } from '../wallet/environment';
 import { activeNetworkScope } from '../domain/network-scope';
+import { operationWalletEcosystem } from '../domain/wallet-inventory';
 
 import {isLendingComposition, isSolanaTransferNode} from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from './lending-store';
@@ -23,7 +24,7 @@ import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
 import { useSolanaTransfer } from './solana-transfer-store';
 
-export function useExecutionEnvironment() {
+export function useExecutionEnvironment(operationChain?: string | null) {
   const wallet = useBuild009Wallet(), jupiter = useJupiter();
   const workflow = useWorkflow().state.workflow;
   const solanaWorkflow = workflow.nodes.some(node => node.chainId.startsWith('solana:')) ||
@@ -32,7 +33,7 @@ export function useExecutionEnvironment() {
   // stands in for its signer. BUILD-FLOFI-UNIVERSAL-E2E-001: the same holds the other way: an EVM workflow is reviewed against the EVM
   // wallet (or none), never against a Solana session that happens to be the only connected wallet.
   const evmWorkflow = !solanaWorkflow && workflow.nodes.some(node => node.chainId.startsWith('eip155:'));
-  const walletKind = solanaWorkflow || !evmWorkflow && jupiter.session && !wallet.account ? 'solana' : 'evm';
+  const walletKind = operationWalletEcosystem(operationChain) ?? (solanaWorkflow || !evmWorkflow && jupiter.session && !wallet.account ? 'solana' : 'evm');
   const walletChain = walletKind === 'solana'
     ? jupiter.session?.account.chains.includes(jupiter.session.chain) ? jupiter.session.chain : null
     : wallet.account ? wallet.chainId : null;

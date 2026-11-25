@@ -11,7 +11,7 @@ import { createSolanaSwapRun, prepareSolanaSwapAttempt, recordSolanaSwapRelay, r
   createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaSwapProvenance, type SolanaSwapRun } from '@defi-workflow-engine/reference-executor';
 import { reconcileSolanaSwapAttempt, buildSolanaSwapEvidence, classifySolanaSwapEvidence, recoverKoraTransaction, type JupiterObservation,
   type SolanaSwapEvidenceClass } from '@defi-workflow-engine/reference-reconciler';
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { isUniversalQuoteSubject, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { solanaTransactionClaim } from './solana-transaction-claim.ts';
 import { assertKoraStillSelected, withKoraFallback, type KoraGas, type KoraRelayOutcome } from '../gas-abstraction/kora/runtime.ts';
 
@@ -119,6 +119,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
     load,
     executionEnabled: input.executionEnabled,
     async simulate(workflowInput: unknown, owner: string): Promise<JupiterRecord> {
+      if (isUniversalQuoteSubject(owner)) throw new Error(`${X}_OWNER_INVALID`);
       const workflow = validateAuthoringWorkflow(workflowInput, createBaseSepoliaReviewContext());
       const review = await input.adapter.simulate(workflow, solanaAddress(owner), input.rpc, now());
       const id = `${runtime.idPrefix}-` + randomBytes(16).toString('hex');
@@ -126,6 +127,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
     },
     async review(id: string, commitment: string, workflow: SemanticWorkflow): Promise<JupiterRecord> { return locked(idCheck(id), async () => {
       const record = await load(id);
+      if (isUniversalQuoteSubject(record.review.owner)) throw new Error(`${X}_OWNER_INVALID`);
       if (record.attempt || record.review.commitment !== commitment) throw new Error(`${X}_AUTHORIZATION_REPLACED`);
       input.adapter.assertReview(record.review, workflow, record.review.owner, await blockHeight('confirmed'), now());
       return save({ ...record, authorization: commitment, error: null });
@@ -138,6 +140,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
       if (!input.executionEnabled) throw new Error(runtime.realFunds ? `${X}_MAINNET_EXECUTION_NOT_ENABLED` : `${X}_EXECUTION_NOT_ENABLED`);
       const record = await load(id);
       if (record.authorization !== record.review.commitment) throw new Error(`${X}_REVIEW_REQUIRED`);
+      if (isUniversalQuoteSubject(owner) || isUniversalQuoteSubject(record.review.owner)) throw new Error(`${X}_OWNER_INVALID`);
       if (record.attempt) throw new Error(`${X}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
       const height = await blockHeight('confirmed');
       input.adapter.assertReview(record.review, workflow, solanaAddress(owner), height, now());
@@ -164,6 +167,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
     async submit(id: string, signedTransaction: string): Promise<JupiterRecord> { return locked(idCheck(id), async () => {
       assertExecutionEnabled();
       const record = await load(id);
+      if (isUniversalQuoteSubject(record.review.owner)) throw new Error(`${X}_OWNER_INVALID`);
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment) throw new Error(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
       let signed: SignedSolanaTransaction;
       try {

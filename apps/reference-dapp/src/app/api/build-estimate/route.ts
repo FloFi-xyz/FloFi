@@ -4,12 +4,13 @@ import { quoteFailure } from '../../../server/quote-failure';
 import { readBuildEstimate } from '../../../server/build-estimate';
 import { randomUUID } from 'node:crypto';
 import { createLogger, parseTraceparent, withSpan } from '@defi-workflow-engine/cloud-runtime';
-import { withFlightAccess } from '../../../server/flight-access';
+import { requireFlightProductAccess } from '../../../server/flight-access';
+import { withBetaIdentity } from '../../../flight/beta-context';
 import { BUILD_ESTIMATE_STREAM } from '../../../domain/build-estimate';
 import type { UsdEstimate } from '../../../domain/usd-estimate';
 export const maxDuration = 45;
 export async function POST(request: Request) {
-  try { return await withFlightAccess(() => estimate(request)); }
+  try { return await withBetaIdentity(await requireFlightProductAccess(), () => estimate(request)); }
   catch (error) { return Response.json({ ok: false, code: error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message)
     ? error.message : 'BETA_ACCESS_UNAVAILABLE' }, { status: 403, headers: { 'cache-control': 'no-store' } }); }
 }

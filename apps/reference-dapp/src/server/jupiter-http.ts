@@ -13,27 +13,42 @@ function retryDelay(retryAfter: string | null): number {
 }
 
 export function createJupiterHttp(buildEndpoint: string, apiKey: string | undefined): JupiterHttp {
-  return async query => {
+  return async (query, callerSignal) => {
     const url = buildEndpoint + '?' + new URLSearchParams(query);
+    const cancelled = () => { if (callerSignal?.aborted) throw new Error('JUPITER_QUOTE_CANCELLED'); };
+    const wait = (ms: number) => new Promise<void>(resolve => {
+      const finish = () => {
+        clearTimeout(timer);
+        callerSignal?.removeEventListener('abort', finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, ms);
+      if (callerSignal?.aborted) finish();
+      else callerSignal?.addEventListener('abort', finish, { once: true });
+    });
     // One retry within the existing request budget, only for the read-only /build GET.
     for (let attempt = 0; attempt < 2; attempt++) {
-      const signal = AbortSignal.timeout(ATTEMPT_TIMEOUT_MS);
+      cancelled();
+      const timeout = AbortSignal.timeout(ATTEMPT_TIMEOUT_MS);
+      const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
       let response: Response;
       let body: string;
       try {
         response = await fetch(url, { cache: 'no-store', signal, headers: apiKey ? { 'x-api-key': apiKey } : {} });
         body = await response.text();
       } catch {
-        if (attempt) throw new Error(signal.aborted ? 'JUPITER_QUOTE_TIMEOUT' : 'JUPITER_UNAVAILABLE');
-        await new Promise(resolve => setTimeout(resolve, retryDelay(null)));
+        cancelled();
+        if (attempt) throw new Error(timeout.aborted ? 'JUPITER_QUOTE_TIMEOUT' : 'JUPITER_UNAVAILABLE');
+        await wait(retryDelay(null));
         continue;
       }
+      cancelled();
       if (body.length > 1_048_576) throw new Error('JUPITER_RESPONSE_TOO_LARGE');
       const transient = [429, 502, 503, 504].includes(response.status);
       if (!attempt && transient) {
-        const wait = retryDelay(response.headers.get('retry-after'));
-        if (wait <= RETRY_WAIT_LIMIT_MS) {
-          await new Promise(resolve => setTimeout(resolve, wait));
+        const ms = retryDelay(response.headers.get('retry-after'));
+        if (ms <= RETRY_WAIT_LIMIT_MS) {
+          await wait(ms);
           continue;
         }
       }

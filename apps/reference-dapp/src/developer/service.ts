@@ -17,7 +17,7 @@ import { MAINNET_POLICY, SANDBOX_POLICY, type DeveloperConfig } from './config.t
 import { exactRunProgress } from './events.ts';
 import { classify, DeveloperError, fail, publicReason } from './errors.ts';
 import type { PlanLimits } from './limits.ts';
-import type { ApprovalBody, CapabilityListBody, CreateApprovalRequestBody, DeletedBody, EvidenceBody, ExecutionBody, SimulationBody, StrategyBody, StrategyValidationBody,
+import type { ApprovalBody, CapabilityListBody, CreateApprovalRequestBody, DeletedBody, EvidenceBody, ExecutionBody, SimulateStrategyRequestBody, SimulationBody, StrategyBody, StrategyValidationBody,
   WebhookEndpointBody, WorkflowSimulationBody } from './schemas.ts';
 import { developerRequesterRef, type DeveloperEventType, type DeveloperPrincipal, type DeveloperStore, type ProjectScope, type StrategyRecord } from './store.ts';
 import { approvalView, capabilityView, endpointView, evidenceView, executionView, simulationView, strategyView, validationResultView } from './views.ts';
@@ -91,11 +91,11 @@ export async function validateStoredStrategy(ctx: DeveloperContext, strategyId: 
 }
 
 /** FloFi's own read-only simulation of the stored strategy: nothing is persisted, signed or sent, and it is never authorizable. */
-export async function simulateStoredStrategy(ctx: DeveloperContext, strategyId: string, body: { simulationSubject: string }): Promise<SimulationBody> {
+export async function simulateStoredStrategy(ctx: DeveloperContext, strategyId: string, body: SimulateStrategyRequestBody): Promise<SimulationBody> {
   const record = await storedStrategy(ctx, strategyId);
   recomposed(record);
   try {
-    const preview = await simulatePreview(ctx.runtime, { strategy: record.strategy, workflowHash: record.workflowHash, simulationSubject: body.simulationSubject },
+    const preview = await simulatePreview(ctx.runtime, { ...body, strategy: record.strategy, workflowHash: record.workflowHash },
       { ...(ctx.signal ? { signal: ctx.signal } : {}), ...(ctx.scope.environment === 'production' ? { scope: 'PUBLIC_MAINNET' as const } : {}),
         budget: () => ctx.allow(limitBucket(ctx.scope, 'simulations'), ctx.limits.simulationsPerHour, 3_600, ctx.now) });
     return simulationView(record.strategyId, preview);
@@ -103,13 +103,13 @@ export async function simulateStoredStrategy(ctx: DeveloperContext, strategyId: 
 }
 
 /** Read-only previews of each step of the same canonical workflow. */
-export async function simulateStoredWorkflow(ctx: DeveloperContext, strategyId: string, body: { simulationSubject: string }): Promise<WorkflowSimulationBody> {
+export async function simulateStoredWorkflow(ctx: DeveloperContext, strategyId: string, body: SimulateStrategyRequestBody): Promise<WorkflowSimulationBody> {
   const record = await storedStrategy(ctx, strategyId);
   recomposed(record);
   const admitted = await ctx.allow(limitBucket(ctx.scope, 'simulations'), ctx.limits.simulationsPerHour, 3_600, ctx.now);
   if (!admitted) return fail('RATE_LIMITED', 'SIMULATIONS_PER_HOUR');
   try {
-    const preview = await simulateWorkflowPreview(ctx.runtime, { strategy: record.strategy, workflowHash: record.workflowHash, simulationSubject: body.simulationSubject }, {
+    const preview = await simulateWorkflowPreview(ctx.runtime, { ...body, strategy: record.strategy, workflowHash: record.workflowHash }, {
       ...(ctx.signal ? { signal: ctx.signal } : {}), ...(ctx.scope.environment === 'production' ? { scope: 'PUBLIC_MAINNET' as const } : {}),
     });
     return { object: 'workflow_simulation', strategyId, workflowHash: preview.workflowHash, status: preview.status,

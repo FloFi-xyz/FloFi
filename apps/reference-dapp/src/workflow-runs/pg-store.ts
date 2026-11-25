@@ -174,7 +174,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     },
     async loadedBoundSteps(wallet: string, flow: string, createdAt: Date): Promise<readonly RunStepRecord[]> {
       return (await db.query(`SELECT s.* FROM workflow_runs r JOIN workflow_run_steps s USING (tenant_id, run_id)
-        WHERE r.tenant_id = $1 AND r.wallets->>'eip155' = $2 AND s.flow = $3 AND s.bound IS NOT NULL
+        WHERE r.tenant_id = $1
+          AND r.wallets->>(CASE WHEN left($2::text, 2) = '0x' THEN 'eip155' ELSE 'solana' END) = $2
+          AND s.flow = $3 AND (s.bound IS NOT NULL OR s.flow = 'crosschain-universal')
           AND r.mode IN ('CONFIRM_EACH_STEP', 'USER_FUNDED') AND s.claimed_at <= $4::timestamptz + interval '1 second'
           AND (r.current_step = s.step_index AND r.state IN ('RUNNING', 'ATTENTION') AND s.state IN ('AWAITING_OWNER', 'UNCERTAIN')
             OR $4::timestamptz <= LEAST(r.expires_at, s.updated_at))`, [tenantId, wallet, flow, createdAt])).rows.map(stepOf);

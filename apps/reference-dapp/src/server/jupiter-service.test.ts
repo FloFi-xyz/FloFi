@@ -7,7 +7,7 @@ import { LIGHTHOUSE_PROGRAM, appendMockedWalletGuards, applyMockedPhantomLightho
   type MockedJupiterOptions } from '@defi-workflow-engine/reference-compiler';
 import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createJupiterService } from './jupiter-service';
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 const workflow = (amount = '10', from: 'USDC' | 'SOL' = 'USDC', to: 'SOL' | 'USDC' = 'SOL'): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 1, resourceEdges: [],
   nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from, to, amount, slippage: '50' })] });
@@ -24,6 +24,14 @@ async function reviewed(s: Awaited<ReturnType<typeof setup>>, wf = workflow()) {
   return s.service.review(simulated.id, simulated.review.commitment, wf);
 }
 describe('Jupiter service lifecycle (MOCKED loopback, no public submission)', () => {
+  it('refuses the public quote subject as a financial owner even when it has a fixture balance', async () => {
+    const s = await setup(), owner = UNIVERSAL_QUOTE_SUBJECTS.SOLANA;
+    s.env.fund(owner, 3_000_000_000n, { USDC: 100_000_000n });
+    await expect(s.service.simulate(workflow('5'), owner)).rejects.toThrow('JUPITER_OWNER_INVALID');
+    const w = workflow('5'), run = await reviewed(s, w);
+    await expect(s.service.begin(run.id, owner, w)).rejects.toThrow('JUPITER_OWNER_INVALID');
+    expect(s.env.state.sent).toEqual([]);
+  });
   it('simulates read-only, binds Review, persists before signing, broadcasts once and reconciles with MOCKED evidence', async () => {
     const s = await setup();
     const simulated = await s.service.simulate(workflow(), s.wallet.owner);

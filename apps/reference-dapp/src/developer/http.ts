@@ -31,7 +31,7 @@ import { apiKeyDigest, presentedKey } from './keys.ts';
 import { limitsOf } from './limits.ts';
 import { createPgDeveloperStore } from './pg-store.ts';
 import { CapabilitiesQuery, CreateApprovalRequest, CreateStrategyRequest, CreateWebhookEndpointRequest, SimulateStrategyRequest, ValidateStrategyRequest,
-  type ApprovalBody, type CreateApprovalRequestBody, type WebhookEndpointBody } from './schemas.ts';
+  type ApprovalBody, type CreateApprovalRequestBody, type SimulateStrategyRequestBody, type WebhookEndpointBody } from './schemas.ts';
 import { createApproval, createStrategy, createWebhookEndpoint, deleteWebhookEndpoint, getApproval, getEvidence, getExecution, limitBucket, listCapabilities,
   replayApproval, simulateStoredStrategy, simulateStoredWorkflow, validateStoredStrategy, type DeveloperContext, type DeveloperWrite } from './service.ts';
 
@@ -78,10 +78,10 @@ const ROUTES: readonly Route[] = [
     status: 200, run: (ctx, i) => validateStoredStrategy(ctx, i.params[0]!) },
   { method: 'POST', path: new RegExp(`^/strategies/${ID('str')}/simulate$`), template: '/strategies/{id}/simulate', scope: 'strategies', input: SimulateStrategyRequest,
     status: 200, metric: body => ({ metric: 'simulation.run', dimension: String((body as { kind?: unknown }).kind ?? '') }),
-    run: (ctx, i) => simulateStoredStrategy(ctx, i.params[0]!, i.body as { simulationSubject: string }) },
+    run: (ctx, i) => simulateStoredStrategy(ctx, i.params[0]!, i.body as SimulateStrategyRequestBody) },
   { method: 'POST', path: new RegExp(`^/strategies/${ID('str')}/simulate-workflow$`), template: '/strategies/{id}/simulate-workflow', scope: 'strategies',
     input: SimulateStrategyRequest, status: 200, metric: () => ({ metric: 'simulation.run', dimension: 'WORKFLOW' }),
-    run: (ctx, i) => simulateStoredWorkflow(ctx, i.params[0]!, i.body as { simulationSubject: string }) },
+    run: (ctx, i) => simulateStoredWorkflow(ctx, i.params[0]!, i.body as SimulateStrategyRequestBody) },
   { method: 'POST', path: /^\/approvals$/, template: '/approvals', scope: 'approvals', input: CreateApprovalRequest, status: 201,
     // The approval link is a credential to SEE the proposal: never stored; a replay mints a fresh short-lived one.
     idempotent: { operation: 'approvals.create', stored: body => ({ ...body as ApprovalBody, approvalUrl: null, approvalUrlExpiresAt: null }),

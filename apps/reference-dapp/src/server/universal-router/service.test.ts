@@ -20,7 +20,7 @@ import type { DashboardRunDetail } from '../../lib/dashboard/types';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
 import { applyMockedPhantomLighthouseGuards, compileMessageV0, parseMessageV0, decompileMessageV0, serializeMessageV0, RELAY_SOLANA_VAULT } from '@defi-workflow-engine/reference-compiler';
-import { createUniversalBridgeNode, UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalAssetRef, type UniversalBridgeFields, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { createUniversalBridgeNode, UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow, type UniversalAssetRef, type UniversalBridgeFields, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { createRelayProvider } from './relay-provider.ts';
 import { createUniversalRouterService, universalNeedsObservation, validateUniversalLog, type UniversalRecord } from './service.ts';
 import { createEvmMockChain, createRelayMock, createSolanaMock, mockedUniversalDeployment, solanaTestWallet, type EvmMock } from './universal.test-harness.ts';
@@ -382,6 +382,28 @@ describe('direct destination executor settlement', () => {
 });
 
 describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified delivery', () => {
+  it('binds a bridge begin to the displayed Review and ignores an invalidation of an older commitment', async () => {
+    const c = await setup();
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain,
+      inputAsset: token('solana'), outputAsset: token('base'), amount: '25000000', recipient: EVM_RECIPIENT });
+    const run = await reviewed(c, w, c.wallet.publicKey);
+    const stale = '0x' + '9'.repeat(64);
+    await expect(c.service.invalidate(run.id, 'WALLET_CHANGED', stale)).resolves.toMatchObject({ authorization: run.review.commitment });
+    await expect(c.service.begin(run.id, c.wallet.publicKey, w, stale)).rejects.toThrow('UNIVERSAL_REVIEW_CHANGED');
+    expect((await c.service.load(run.id)).attempts).toEqual([]);
+    await expect(c.service.begin(run.id, c.wallet.publicKey, w, run.review.commitment)).resolves.toMatchObject({
+      attempt: { reviewCommitment: run.review.commitment, state: 'PREPARED' },
+    });
+  });
+  it('refuses the quote subjects as owner and as an explicit or implicit destination', async () => {
+    const c = await setup();
+    const input = { sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain,
+      inputAsset: token('base'), outputAsset: token('solana'), amount: '5000000' };
+    const implicit = workflow({ ...input, recipient: 'CONNECTED_DESTINATION_WALLET' });
+    await expect(c.service.simulate(implicit, UNIVERSAL_QUOTE_SUBJECTS.EVM, c.wallet.publicKey)).rejects.toThrow('UNIVERSAL_OWNER_INVALID');
+    await expect(c.service.simulate(implicit, EVM_OWNER, UNIVERSAL_QUOTE_SUBJECTS.SOLANA)).rejects.toThrow('UNIVERSAL_DESTINATION_WALLET_INVALID');
+    await expect(c.service.simulate(workflow({ ...input, recipient: UNIVERSAL_QUOTE_SUBJECTS.SOLANA }), EVM_OWNER)).rejects.toThrow('UNIVERSAL_RECIPIENT_INVALID');
+  });
   it('A. Solana USDC → Base USDC: one Solana signature, FloFi broadcasts once, Base delivery proven, evidence', async () => {
     const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'),
       outputAsset: token('base'), amount: '25000000', recipient: EVM_RECIPIENT });

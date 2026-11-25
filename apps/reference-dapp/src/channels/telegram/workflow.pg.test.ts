@@ -7,9 +7,10 @@
  * never restarts a running workflow. Evidence MOCKED; nothing leaves the process.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { applyApproval, claimApproval, workflowRunContinue, type WalletRef } from '../../platform/index.ts';
+import { applyApproval, claimApproval, workflowRunContinue, type EngineRuntime, type WalletRef } from '../../platform/index.ts';
+import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { approvalSurface } from '../../server/approval-surface.ts';
 import { createPgWorkflowRunStore } from '../../workflow-runs/pg-store.ts';
 import { advanceRun } from '../../workflow-runs/runner.ts';
@@ -30,6 +31,7 @@ afterAll(async () => { await t?.drop(); });
 const evm = (address: string): WalletRef => ({ namespace: 'eip155', address });
 
 async function deployment(options: { interpreter?: ChannelInterpreter; flows?: readonly FlowName[]; env?: Record<string, string | undefined>;
+  preview?: EngineRuntime['preview'];
   /** The deployment's user-funded execution facts (none: user-funded groups are not enabled here). */ userFunded?: UserFundedFacts } = {}) {
   const tenantId = `wf-${randomBytes(6).toString('hex')}`;
   await t.db.query('INSERT INTO tenants (tenant_id) VALUES ($1)', [tenantId]);
@@ -41,7 +43,8 @@ async function deployment(options: { interpreter?: ChannelInterpreter; flows?: r
   // The harness reports the deployment's workflow-run facts as given; user-funded facts ride along exactly as a deployment's runtime reports them.
   const sequences = { enabled: true, delegation: null, ...options.userFunded ? { userFunded: options.userFunded } : {} };
   const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'crosschain-router-testnet'], sequences, now);
-  const common = { env, host, runtime: flows.runtime, interpreter: options.interpreter ?? null, now, sleep: async () => undefined, random: () => 0.5 };
+  const runtime = options.preview ? { ...flows.runtime, preview: options.preview } : flows.runtime;
+  const common = { env, host, runtime, interpreter: options.interpreter ?? null, now, sleep: async () => undefined, random: () => 0.5 };
   const say = async (text: string) => { const r = await handleTelegramWebhook(telegramRequest(textUpdate(text), tg.webhookSecret), { ...common, fetch: api.fetch }); expect(r.status).toBe(200); };
   const sweep = async () => { const r = await handleChannelDispatch(new Request('http://127.0.0.1:3100/api/channels/dispatch', { headers: { authorization: `Bearer ${token}` } }),
     { ...common, seams: { telegramFetch: api.fetch } }); expect(r.status).toBe(200); };
@@ -53,6 +56,20 @@ async function deployment(options: { interpreter?: ChannelInterpreter; flows?: r
 }
 
 describe('BUILD-CHAT-E2E-001 Telegram multi-step workflow (PostgreSQL, Bot API double, MOCKED flows)', () => {
+  it('quotes 5 USDC to SOL before any wallet proof and keeps the original approval handoff', async () => {
+    const preview = vi.fn<EngineRuntime['preview']>().mockResolvedValue({ ok: true, value: {
+      format: 'flofi.jupiter-quote-preview.v1', expectedOut: '32000000', minimumOut: '31000000', amount: '5000000',
+      input: { symbol: 'USDC', decimals: 6 }, output: { symbol: 'SOL', decimals: 9 },
+      expiresAt: new Date(Date.now() + 30_000).toISOString(), provenance: 'MOCKED',
+    } });
+    const d = await deployment({ flows: ['jupiter-swap'], preview, env: { FLOFI_NETWORK_SCOPE: undefined,
+      FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana', FLOFI_TELEGRAM_ACCESS_MODE: undefined } });
+    await d.say('swap 5 USDC to SOL on Solana slippage 50 bps');
+    expect(preview).toHaveBeenCalledExactlyOnceWith('jupiter-swap', [expect.any(Object), UNIVERSAL_QUOTE_SUBJECTS.SOLANA], 'QUOTE', expect.any(AbortSignal));
+    expect(d.api.texts().at(-1)).toContain('Market quote (MOCKED) estimates 0.032 SOL');
+    expect(d.api.texts().at(-1)).toContain('Connect a Solana wallet in FloFi');
+    expect(d.api.lastLink()).toBeTruthy();
+  });
   it('retains a naturally planned mainnet goal as the complete canonical sequence when LINK renews the approval', async () => {
     const interpreter: ChannelInterpreter = async () => ({ ok: true, intent: intent.goal({ network: 'BASE', asset: 'USDC', amount: '10' },
       { network: 'ARBITRUM', use: 'SUPPLY' }, { recipient: OWNER }) });

@@ -151,7 +151,7 @@ describe('BUILD-DEVELOPER-001 one engine: discovery, composition, validation and
     // A Solana key is no subject for an EVM flow; the hourly simulation budget is per project.
     expect(errorOf(await api('POST', `/strategies/${created.id}/simulate`, { simulationSubject: 'So11111111111111111111111111111111111111112' })))
       .toMatchObject({ code: 'INVALID_REQUEST', reason: 'SIMULATION_SUBJECT_INVALID' });
-    expect(errorOf(await api('POST', `/strategies/${created.id}/simulate`, {}))).toMatchObject({ code: 'INVALID_REQUEST', reason: 'SCHEMA_INVALID' });
+    expect(errorOf(await api('POST', `/strategies/${created.id}/simulate`, {}))).toMatchObject({ code: 'INVALID_REQUEST', reason: 'EVM_WALLET_REQUIRED' });
     const now = new Date(), hour = new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000);
     await t.db.query(`INSERT INTO mcp_rate_limits (tenant_id, bucket, window_start, count) VALUES ('default', $1, $2, 30)
       ON CONFLICT (tenant_id, bucket, window_start) DO UPDATE SET count = 30`, [`dev:${p.projectId}:sandbox:simulations`, hour]);

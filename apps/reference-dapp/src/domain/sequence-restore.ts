@@ -9,7 +9,7 @@
  * step that cannot be proven ends the restored history, so a completed financial action is never offered again and nothing unproven is ever
  * treated as done. Pure apart from the injected reader.
  */
-import { deliveredByRecord, fundingAllocations, stepNodeKey, type CompletedStep, type WorkflowSequence } from './workflow-sequence';
+import { deliveredByRecord, fundingAllocations, SEQUENCE_RUNTIMES, stepNodeKey, type CompletedStep, type WorkflowSequence } from './workflow-sequence';
 import type { Workflow } from './initial-workflow';
 
 /**
@@ -19,7 +19,7 @@ import type { Workflow } from './initial-workflow';
  * (2026-11-13, FIX 2): the universal Router too — a reconciled Swap → universal Bridge reloaded after the bridge settled re-proves the bridge from
  * its own record (verdict, workflow, owner, proven `received`) instead of making it the current step again.
  */
-export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap', 'router', 'universal',
+export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze([...SEQUENCE_RUNTIMES,
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card the Editor ran as a one-step workflow run (its record is proven server-side for exactly
   // this card: one step, the card's own canonical hash, its state; `editorSingleRunRecord`).
   'workflow-run']);
@@ -32,21 +32,30 @@ export type RecordReader = (kind: string, runKey: string, sourceChain?: string |
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const RUN_KEY = /^[A-Za-z0-9._:-]{8,160}$/;
 const sameEcosystem = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === 'string' && a.split(':')[0] === b.split(':')[0];
-/** The pointers worth re-proving: well-formed, in order, from a runtime whose record can be read back. */
+/** A well-formed pointer is retained for verification against its runtime. */
 export function storedCompletions(value: unknown, workflowId: string): readonly StoredCompletion[] {
   if (!isObject(value) || value.workflowId !== workflowId || !Array.isArray(value.completed)) return [];
   const out: StoredCompletion[] = [];
   for (const item of value.completed.slice(0, 64)) {
-    if (!isObject(item) || typeof item.nodeId !== 'string' || typeof item.node !== 'string' || typeof item.kind !== 'string' || !RESTORABLE_RUNTIMES.includes(item.kind) ||
+    if (!isObject(item) || typeof item.nodeId !== 'string' || typeof item.node !== 'string' || typeof item.kind !== 'string' ||
+        !RESTORABLE_RUNTIMES.includes(item.kind) ||
         typeof item.runKey !== 'string' || !RUN_KEY.test(item.runKey) || !(item.received === null || typeof item.received === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(item.received))) break;
     out.push({ nodeId: item.nodeId, node: item.node, kind: item.kind, runKey: item.runKey, received: item.received as string | null });
   }
   return out;
 }
 /** A runtime's durable record is final, reconciled and is the run of this workflow's node. */
+const sequenceRecordFormat: Readonly<Record<string, string>> = {
+  transfer: 'gryloo.native-transfer-run.v1',
+  'solana-transfer': 'gryloo.solana-transfer-run.v1',
+  'uniswap-pool': 'flofi.uniswap-liquidity-run.v1',
+  'solana-pool': 'gryloo.orca-liquidity-run.v1',
+};
 export function completedByRecord(kind: string, record: unknown, workflowId: string, nodeId: string): boolean {
   if (!isObject(record)) return false;
-  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : ['supply', 'solana-swap', 'router', 'universal', 'workflow-run'].includes(kind) && record.verdict === 'RECONCILED';
+  const format = sequenceRecordFormat[kind];
+  if (format && record.format !== format) return false;
+  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : RESTORABLE_RUNTIMES.includes(kind) && record.verdict === 'RECONCILED';
   const workflow = isObject(record.workflow) ? record.workflow : isObject(record.review) && isObject(record.review.workflow) ? record.review.workflow : null;
   return final && Boolean(workflow) && workflow!.workflowId === workflowId && Array.isArray(workflow!.nodes) &&
     workflow!.nodes.some(node => isObject(node) && node.nodeId === nodeId);
@@ -54,9 +63,13 @@ export function completedByRecord(kind: string, record: unknown, workflowId: str
 /** The wallet that executed a step, from the runtime's own durable record (lower-case EVM address or Solana key); null when not recorded. */
 export function ownerByRecord(kind: string, record: unknown): string | null {
   if (!isObject(record)) return null;
-  const value = kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
-    : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner
-    : kind === 'router' || kind === 'workflow-run' ? record.owner
+  const gasless = kind === 'public' && isObject(record.quote) && isObject(record.quote.gas) && record.quote.gas.mechanism === 'ZEROX_GASLESS_SWAP'
+    && Array.isArray(record.gasless) ? record.gasless.findLast(attempt => isObject(attempt) && attempt.state === 'CONFIRMED' && attempt.final === true) : null;
+  const value = isObject(gasless) ? gasless.account
+    : kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
+    : (kind === 'supply' || kind === 'transfer') && isObject(record.review) ? record.review.account
+    : ['solana-swap', 'solana-pool', 'solana-transfer'].includes(kind) && isObject(record.review) ? record.review.owner
+    : kind === 'router' || kind === 'workflow-run' || kind === 'uniswap-pool' ? record.owner
     // A universal route's owner deposited on the source chain. Review (round 2): across ecosystems the funds land with the wallet the Review bound
     // as recipient (the owner's wallet of the other ecosystem, possibly resolved from the account or Credentials): a later step that spends that
     // delivery continues only with that wallet (never "nobody", which skipped the wallet-continuity check).
@@ -76,10 +89,11 @@ export async function proveCompletions(stored: readonly StoredCompletion[], work
   for (const [index, item] of stored.entries()) {
     const step = sequence.steps[index], node = step && workflow.nodes.find(candidate => candidate.nodeId === step.nodeId);
     if (!step || !node || step.nodeId !== item.nodeId || stepNodeKey(node) !== item.node) break;
+    if (!RESTORABLE_RUNTIMES.includes(item.kind)) return { proven, unreadable: true };
     let record: unknown;
-    try { record = await read(item.kind, item.runKey, step.input?.chainId ?? null, step.projection); } catch { return { proven, unreadable: true }; }
+    try { record = await read(item.kind, item.runKey, step.chainId, step.projection); } catch { return { proven, unreadable: true }; }
     if (record === null || record === undefined) return { proven, unreadable: true };
-    if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) break;
+    if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) return { proven, unreadable: true };
     const received = deliveredByRecord(item.kind, record, step.output), owner = ownerByRecord(item.kind, record);
     const funds = sequence.steps.some(later => later.funding.some(funding => funding.fundedBy === index));
     const mismatch = item.received !== null && received !== item.received;
@@ -89,7 +103,7 @@ export async function proveCompletions(stored: readonly StoredCompletion[], work
       // an amount it no longer proves). It is restored as completed with no provable amount, so the dependent step shows DELIVERY_NOT_PROVEN
       // and the bridge is never offered again. Only two proven amounts that disagree stay unverified (retry; never a new step).
       if (item.kind === 'universal' && mismatch && received !== null) return { proven, unreadable: true };
-      if (item.kind !== 'universal') break;
+      if (item.kind !== 'universal') return { proven, unreadable: true };
     }
     proven.push({ nodeId: item.nodeId, node: item.node, received, runKey: item.runKey, kind: item.kind, ...owner ? { owner } : {}, allocations: fundingAllocations(step, proven) });
   }
