@@ -896,8 +896,9 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   EDITOR_REVIEW_RATE_LIMITED: 'Too many reviews in a short time. Wait a few minutes and review again.',
   WITHDRAW_UNSAFE_HEALTH_FACTOR: 'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.',
   REPAY_PARTIAL_DEBT_REQUIRED: 'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.',
-  WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.',
-  WALLET_BATCH_STANDARD_REVIEW: 'Your wallet refused this batch before sending anything. Nothing was sent. Review the operation again to continue with the standard path.',
+  WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). FloFi keeps following the prepared request until it can no longer execute, then you can review the operation again. Nothing is sent again.',
+  WALLET_BATCH_STANDARD_REVIEW: 'The refused batch was proven never sent. Review the operation again to continue with the standard path.',
+  WORKFLOW_RUN_DECLINE_NOT_PROVEN: 'FloFi cannot yet prove this batch was never sent. Wait until the prepared wallet request expires, then choose Review operation again. Nothing is sent again.',
   WALLET_WRONG_NETWORK: 'Switch your wallet to the network of this group, then try again.',
   WALLET_ACCOUNT_MISMATCH: 'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.',
   // P0 universal execution: what the chain's own contracts say about a token, or what the network lacks, in plain words.
@@ -1550,7 +1551,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed && u.kind !== 'fee') ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}
       {resumable && !busy && <button type="button" className="primary" onClick={() => void state.resume()}>{tr('Resume the workflow')}</button>}
       {run && approvalSlotHref(run) && <p><a className="secondary" href={approvalSlotHref(run)!}>{tr('Continue step {0} on the signing page', String(run.currentStep + 1))}</a></p>}
-      {state.reviewRefusedTransfer ? <button type="button" className="primary" disabled={busy} onClick={() => void state.reviewRefusedTransfer?.()}>{tr('Review operation')}</button>
+      {state.reviewRefusedTransfer ? <button type="button" className="primary" disabled={busy} onClick={() => void state.reviewRefusedTransfer?.()}>{tr('Review operation after the batch expires')}</button>
         : due && !mechanismChanged && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{run?.stepCount === 1 ? tr('Authorize workflow') : tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
       {(run?.nextAction === 'OWNER_CONFIRMS_BATCH' || state.unrecorded) && !['wallet', 'confirming'].includes(phase) && <button type="button" className="secondary" onClick={() => void state.checkWallet()}>{tr('Check my wallet for the batch')}</button>}
       {endable && !['wallet', 'confirming'].includes(phase) && <>

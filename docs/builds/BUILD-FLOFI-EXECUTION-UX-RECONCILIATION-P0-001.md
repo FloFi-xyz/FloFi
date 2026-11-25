@@ -105,10 +105,14 @@ run `xuni-02c5ec75ce6546413be3ceb55364d970`.
 | --- | --- | --- |
 | 2026-11-25 ~14:45 | `a68969f7` | Takeover inventory + ledger; commit + push; PR #252 opened |
 | 2026-11-25 ~14:46 | `a68969f7` | Re-verified: storage.pg 14/14; bridge-batch-run.pg 7/7 |
-| (in progress) | `a68969f7` | api-failover recheck; typecheck; specialist batch 1 (workflow/security/wallet-execution) |
+| 2026-11-25 ~14:48 | `9b9059fa` | api-failover 5/5; typecheck ok; specialist batch 1 |
+| 2026-11-25 ~14:53 | (pending) | Security finding: refuse-close no longer trusts client `rpcCode`; requires proof or post-expiry end |
 
 **PR:** https://github.com/FloFi-xyz/FloFi/pull/252  
-**HEAD:** `a68969f74ced20dc466163fad5b5a9d127dc8b17`
+
+### Specialist: flofi-security
+
+High: client-trusted `rpcCode` closed PREPARED batches without chain proof. **Fixed:** `closeRefusedTransferBatch` treats RPC code as telemetry; proven closes use `proveDeclinedBatchUnsent` + `onlyIfDeclineVerified`; unprovable native-value batches end only after `groupInFlight` clears as outcome-unknown. Tests: `close-refused-transfer.test.ts` 2/2.
 
 ## 8. Exact next action
 

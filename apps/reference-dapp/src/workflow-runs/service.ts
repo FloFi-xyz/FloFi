@@ -29,7 +29,7 @@ import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { amountsAvailable, boundDeliveryRefusal } from './received-amounts.ts';
 import { preparedGroupDeliveryRefusal, stopRunFromCurrent } from './user-funded-pass.ts';
-import { BATCH_PRE_SEND_REFUSALS, CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_NOT_SENT, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
+import { BATCH_PRE_SEND_REFUSALS, CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_NOT_SENT, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, groupInFlight, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
@@ -423,20 +423,45 @@ function handedTo(g: GroupRecord, handout: string | undefined): boolean {
 /** What the owner's browser is shown of a prepared artifact: never the hand-out token's hash. */
 const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Object.entries(prepared).filter(([key]) => key !== 'handoutHash')) as Prepared;
 
-/** Close an exact single native-transfer handout after the wallet definitively refused the batch. */
+/**
+ * Close an exact single native-transfer handout after a reported pre-send batch refusal.
+ * The client's RPC code is telemetry only — never authority to assert "nothing was sent" while the
+ * prepared batch may still execute. Prefer a chain decline proof (`proveDeclinedBatchUnsent`); when
+ * the batch shape is unprovable (native value), end only after `groupInFlight` clears, as outcome unknown.
+ */
 export async function closeRefusedTransferBatch(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[],
   requestId: unknown, handout: unknown, rpcCode: unknown): Promise<void> {
   assertRunWallets(run, wallets);
   if (typeof rpcCode !== 'number' || !BATCH_PRE_SEND_REFUSALS.has(rpcCode) || typeof handout !== 'string' || typeof requestId !== 'string')
     return refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  if (run.mode !== 'USER_FUNDED' || run.state !== 'RUNNING' || run.stepCount !== 1 || !deps.userFunded)
+    return refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
   const [group] = await deps.store.groups(run.runId);
   const prepared = group?.prepared as { readonly group?: EvmGroupCalls; readonly request?: { readonly id?: string };
-    readonly handoutHash?: string; readonly superseded?: readonly unknown[] } | null | undefined;
+    readonly preparedAt?: string; readonly handoutHash?: string; readonly superseded?: readonly unknown[] } | null | undefined;
   const calls = prepared?.group?.calls;
-  if (!group || group.state !== 'PREPARED' || group.strategy !== 'EVM_WALLET_BATCH' || !prepared?.handoutHash || !handedTo(group, handout)
-    || prepared.request?.id !== requestId || prepared.superseded?.length || calls?.length !== 2
-    || calls[0]?.kind !== 'DEADLINE_GUARD' || calls[1]?.kind !== 'NATIVE_TRANSFER') return refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
-  await deps.store.cancel(run.runId, run.version, WALLET_BATCH_NOT_SENT, deps.now(), { refusedTransferBatch: { version: group.version, rpcCode } });
+  if (!group || group.state !== 'PREPARED' || group.strategy !== 'EVM_WALLET_BATCH' || !group.validUntil || !prepared?.handoutHash
+    || typeof prepared.preparedAt !== 'string' || !handedTo(group, handout) || prepared.request?.id !== requestId
+    || prepared.superseded?.length || calls?.length !== 2 || calls[0]?.kind !== 'DEADLINE_GUARD'
+    || calls[1]?.kind !== 'NATIVE_TRANSFER' || !walletBatchUnanswered(group)) return refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  const now = deps.now();
+  const settledAt = new Date(new Date(group.validUntil).getTime() + WALLET_BATCH_SETTLE_MS);
+  const proof = await proveDeclinedBatchUnsent(deps.userFunded.evm(group.chain), group.prepared, settledAt, now);
+  if (proof.proven) {
+    const verified = new Map<number, VerifiedDecline>([[group.groupIndex, {
+      requestId, preparedAt: prepared.preparedAt, ownerNonce: proof.ownerNonce, fromBlock: proof.fromBlock, toBlock: proof.toBlock }]]);
+    await deps.store.cancel(run.runId, run.version, WALLET_BATCH_NOT_SENT, now, {
+      verifiedDeclines: verified, onlyIfDeclineVerified: true });
+    deps.log('workflow_run.batch_pre_send_closed', { runId: run.runId, group: group.groupIndex, rpcCode, proven: true });
+    return;
+  }
+  // Native-value batches cannot be proven from logs. Never trust the client code to bypass in-flight rules.
+  if (groupInFlight(group, now)) {
+    deps.log('workflow_run.batch_pre_send_unproven', { runId: run.runId, group: group.groupIndex, rpcCode, reason: proof.reason });
+    return refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+  }
+  await deps.store.cancel(run.runId, run.version, 'OWNER_CANCELLED', now);
+  deps.log('workflow_run.batch_pre_send_closed', { runId: run.runId, group: group.groupIndex, rpcCode, proven: false, reason: proof.reason });
 }
 /**
  * Builds what the owner's wallet signs for one group, from fresh chain facts: an UPFRONT group at any time while the run is open; a WHEN_DUE
