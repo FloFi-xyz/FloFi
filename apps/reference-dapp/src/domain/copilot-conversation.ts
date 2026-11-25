@@ -123,7 +123,9 @@ type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: Swap
    * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: FloFi asked for the cap of this (0-based) step of a sequence request, which spends what the earlier step
    * delivers in another asset ("troque 1 USDC por ETH e depois troque o ETH recebido por USDC"). Only FloFi sets it; a bare amount answers it.
    */
-  readonly capStep?: number };
+  readonly capStep?: number;
+  /** The (0-based) steps whose cap the user gave in answer to FloFi's `capStep` question: they must still be funded by the step before them. */
+  readonly capFunded?: readonly number[] };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -1281,11 +1283,16 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       // A deposit FloFi asked for fills a slot of the request: progress, like any other answer to its own question.
       // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: the cap FloFi asked for a dependent step of a sequence request fills exactly that step's amount.
       if (!option && amount && draft.intent.kind === 'COMPOSITION' && extras.capStep !== undefined && draft.intent.actions[extras.capStep]) {
-        const index = extras.capStep, patched: CopilotIntentV2 = { ...draft.intent, actions: draft.intent.actions.map((action, at) => at === index && action.type !== 'LIQUIDITY'
+        const index = extras.capStep, capped = draft.intent.actions[index]!;
+        // "0.0004 USDC" never answers "the most ETH step 2 may use" (chat review M4): an amount in another token is asked again.
+        const written = amountUnit(text), spent = inputAssetOf(capped);
+        if (written && spent && !sameWrittenAsset(written, spent))
+          return { kind: 'LOCAL', ...question(withUser(state, text), m, m.amountUnitMismatch(written, displayAsset(spent)), [], draft) };
+        const patched: CopilotIntentV2 = { ...draft.intent, actions: draft.intent.actions.map((action, at) => at === index && action.type !== 'LIQUIDITY'
           ? { ...action, amount } as CopilotAction : action) };
         const { capStep: _asked, ...rest } = extras;
         void _asked;
-        return local(resolveIntent(patched, answeredDraft(state, patched, picked), env, null, rest));
+        return local(resolveIntent(patched, answeredDraft(state, patched, picked), env, null, { ...rest, capFunded: [...rest.capFunded ?? [], index] }));
       }
       if (!option && draft.depositFill) {
         const patched = patchDeposit(draft.intent, draft.depositFill, amount!);
@@ -1374,10 +1381,12 @@ const operationsOf = (intent: CopilotIntentV2): string => intent.kind === 'ACTIO
  */
 function carriedOver(draft: Draft | null, intent: CopilotIntentV2): Extras {
   if (!draft?.extras) return {};
-  const { target, savedRecipient, ...rest } = draft.extras;
+  const { target, savedRecipient, capStep, capFunded, ...rest } = draft.extras;
   const unnamed = (intent.kind === 'EDIT' || intent.kind === 'REPEAT') && intent.target.step === null && intent.target.ordinal === null;
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (workflow review): a cap question or answer belongs to the same steps only (never another request's).
+  const same = operationsOf(draft.intent) === operationsOf(intent);
   return { ...rest, ...target && unnamed && draft.intent.kind === intent.kind ? { target } : {},
-    ...savedRecipient && operationsOf(draft.intent) === operationsOf(intent) ? { savedRecipient } : {} };
+    ...savedRecipient && same ? { savedRecipient } : {}, ...capStep !== undefined && same ? { capStep } : {}, ...capFunded && same ? { capFunded } : {} };
 }
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: a model that copied FloFi's masked saved-recipient marker into an address field wrote no address: that field is
@@ -1709,12 +1718,18 @@ function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: 
  * Several plan steps → one `ADD_SEQUENCE` proposal: each step planned and grounded exactly like a typed request at the revision the steps before it
  * produce, then the whole workflow must be FloFi's reviewed sequence with the funding the plan expects (a later step spends the earlier step's output).
  */
+/** The relative amount of the newest user turn of the open request that states one about `asset` (chat review M2), or null. */
+function newestRelative(state: CopilotConversation, asset: string | null): RelativeAmount | null {
+  // Answered turns are kept joined by line breaks in one segment entry: each line is one user turn.
+  for (const turn of state.segment.flatMap(entry => entry.split('\n')).reverse()) { const found = relativeAmountIn(turn, asset); if (found) return found; }
+  return null;
+}
 /** The asset a new step spends as the user (or the model) wrote it, and the network it spends on. */
 const inputAssetOf = (action: CopilotAction): string | null => action.type === 'SWAP' ? action.inputAsset : action.type === 'LIQUIDITY' ? null : action.asset;
 const inputNetworkOf = (action: CopilotAction): CopilotNetwork | null => action.type === 'BRIDGE' ? action.sourceNetwork : action.network;
-/** One token identity for comparing written references: case-insensitive, "Solana" is SOL, and ETH is WETH (a swap delivers the wrapped token). */
+/** One token identity for comparing written references: case-insensitive and "Solana" is SOL. ETH and WETH stay distinct (FIX-04; a swap delivers native ETH). */
 const sameWrittenAsset = (a: string | null | undefined, b: string | null | undefined): boolean => {
-  const key = (value: string) => { const upper = value.toUpperCase(); return upper === 'SOLANA' ? 'SOL' : upper === 'WETH' ? 'ETH' : upper; };
+  const key = (value: string) => { const upper = value.toUpperCase(); return upper === 'SOLANA' ? 'SOL' : upper; };
   return Boolean(a && b && a !== 'OTHER' && b !== 'OTHER' && key(a) === key(b));
 };
 /**
@@ -1726,14 +1741,16 @@ const sameWrittenAsset = (a: string | null | undefined, b: string | null | undef
  *  - OTHER_ASSET: a conversion; the delivered amount is only known after settlement, so the user states the cap (FloFi never guesses it).
  * A step without a network takes the earlier step's delivery network. Nothing else is filled; every value is still validated as usual.
  */
-function bindDependentSteps(actions: readonly CopilotAction[]): { readonly actions: readonly CopilotAction[]; readonly funded: ReadonlyMap<number, 'SAME_ASSET' | 'OTHER_ASSET'>;
-  readonly networkFrom: ReadonlySet<number> } {
+function bindDependentSteps(actions: readonly CopilotAction[], capFunded: readonly number[] = []): { readonly actions: readonly CopilotAction[];
+  readonly funded: ReadonlyMap<number, 'SAME_ASSET' | 'OTHER_ASSET'>; readonly networkFrom: ReadonlySet<number> } {
   const funded = new Map<number, 'SAME_ASSET' | 'OTHER_ASSET'>(), networkFrom = new Set<number>();
   const out = actions.map((action, index) => {
     const producer = index > 0 ? actions[index - 1]! : null;
-    if (!producer || action.type === 'LIQUIDITY' || action.amount !== null) return action;
+    // A step with the user's own amount is bound only when that amount answered FloFi's cap question (it keeps the network it inherited then).
+    if (!producer || action.type === 'LIQUIDITY' || action.amount !== null && !capFunded.includes(index)) return action;
     const delivered = producer.type === 'SWAP' ? { asset: producer.outputAsset, network: producer.network, same: false, amount: producer.amount }
-      : producer.type === 'BRIDGE' ? { asset: producer.outputAsset ?? producer.asset, network: producer.destinationNetwork,
+      // A bridge to someone else delivers nothing the owner can spend next (the runtime check below would refuse it too).
+      : producer.type === 'BRIDGE' && producer.recipient === null ? { asset: producer.outputAsset ?? producer.asset, network: producer.destinationNetwork,
         same: !producer.outputAsset || sameWrittenAsset(producer.outputAsset, producer.asset), amount: producer.amount } : null;
     if (!delivered || !sameWrittenAsset(inputAssetOf(action), delivered.asset)) return action;
     const network = inputNetworkOf(action);
@@ -1743,7 +1760,7 @@ function bindDependentSteps(actions: readonly CopilotAction[]): { readonly actio
       next = (next.type === 'BRIDGE' ? { ...next, sourceNetwork: delivered.network } : { ...next, network: delivered.network }) as CopilotAction;
       networkFrom.add(index);
     }
-    if (delivered.same && delivered.amount !== null) { funded.set(index, 'SAME_ASSET'); return { ...next, amount: delivered.amount } as CopilotAction; }
+    if (action.amount === null && delivered.same && delivered.amount !== null) { funded.set(index, 'SAME_ASSET'); return { ...next, amount: delivered.amount } as CopilotAction; }
     funded.set(index, 'OTHER_ASSET');
     return next;
   });
@@ -1769,7 +1786,7 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
   let workflow = env.workflow;
   const steps: Command[] = [], sentences: string[] = [], stepNotes: string[] = [];
   // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: a step the user described as spending what the earlier step of the same request delivers.
-  const bound = plan ? null : bindDependentSteps(actions);
+  const bound = plan ? null : bindDependentSteps(actions, extras.capFunded);
   const sequenceActions_ = bound?.actions ?? actions;
   if (bound?.funded.size) notes.push(c.goalReasons.FUNDED_BY_PREVIOUS_STEP, ...[...bound.funded.values()].some(kind => kind === 'SAME_ASSET') ? [c.goalReasons.CAP_IS_YOUR_AMOUNT] : []);
   for (const [index, action] of sequenceActions_.entries()) {
@@ -1799,6 +1816,12 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
   const offset = (sequence?.steps.length ?? 0) - steps.length;
   if (!sequence || added.length !== steps.length || plan?.steps.some((step, index) => step.fundedBy !== null && added[index]!.fundedBy !== step.fundedBy + offset)) {
     return refused(state, m, m.compositionUnsupported);
+  }
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (chat review H1): a step FloFi read as spending the earlier step's delivery must be funded by it in the
+  // runtime too (same chain, token and decimals, delivered to the owner). Otherwise it would spend the wallet's own balance while the notes said
+  // the opposite (a bridge to another recipient, ETH vs WETH, another destination token): FloFi says so and asks for an explicit amount instead.
+  for (const index of bound?.funded.keys() ?? []) {
+    if (added[index]?.fundedBy !== offset + index - 1) return refused(state, m, c.dependentUnfunded(index + 1, index));
   }
   // BUILD AAVE-V3-EXPANSION-001: a step funded by a conversion of another asset whose cap repeats the earlier step's number ("swap 100 USDC to WETH
   // then supply it", read as 100 WETH) is a copied number, not the user's cap: FloFi says so instead of proposing it.
@@ -2302,8 +2325,9 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [...actionFills(intent, outcome.missing, suggested.options), ...retry], snapshot: snapshotOf(env), extras: kept,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     // The relative amount must be about the very token FloFi asks the amount of ("todo o USDC" for a USDC question; never "toda a Base").
-    ...intent.kind === 'ACTION' && outcome.missing.length === 1 && outcome.missing[0] === 'amount' && relativeAmountIn(segmentText(state), inputAssetOf(intent.action))
-      ? { relative: relativeAmountIn(segmentText(state), inputAssetOf(intent.action))! } : {},
+    // The newest user turn that states one wins ("metade do meu USDC", then "não, todo o USDC": all of it).
+    ...intent.kind === 'ACTION' && outcome.missing.length === 1 && outcome.missing[0] === 'amount' && newestRelative(state, inputAssetOf(intent.action))
+      ? { relative: newestRelative(state, inputAssetOf(intent.action))! } : {},
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
   return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes, ...followOn ? [followOn.note] : []],
     { ...outcome.code ? { code: outcome.code } : {}, ...outcome.pool ? { pool: outcome.pool } : {} });

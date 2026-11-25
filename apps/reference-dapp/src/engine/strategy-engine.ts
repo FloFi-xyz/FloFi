@@ -154,7 +154,13 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
       return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: spec.asset.includes('@') ? bridgeSymbol(spec.sourceNetwork, spec.asset) : symbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
         routing: spec.routing ?? 'auto', slippageBps: slippage!, ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
-    case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: symbol(spec.network, spec.inputAsset), outputAsset: symbol(spec.network, spec.outputAsset), amount: spec.amount, slippageBps: slippage! } };
+    case 'swap': {
+      // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (MCP review F1/F2): ChatGPT/Claude pass the user's words. On Solana mainnet "Solana"/"sol" is the coin SOL
+      // and "usdc"/"usdt" are USDC/USDT, canonical in the published strategy itself (one meaning, one strategy, one hash). Devnet is unchanged.
+      const canonical = (written: string) => { if (spec.network !== 'solana') return symbol(spec.network, written);
+        const upper = written.toUpperCase(); return upper === 'SOLANA' ? 'SOL' : ['SOL', 'USDC', 'USDT'].includes(upper) ? upper : symbol(spec.network, written); };
+      return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: canonical(spec.inputAsset), outputAsset: canonical(spec.outputAsset), amount: spec.amount, slippageBps: slippage! } };
+    }
     // BUILD AAVE-V3-EXPANSION-001: a lending asset is canonical as its Aave market's reserve label (exact identity, independent of whether the
     // network's token catalog is loaded); anything that is not a reserve keeps the catalog resolution and its refusals.
     case 'supply': case 'borrow': case 'repay':
@@ -232,11 +238,7 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
         return { command: { ...base, type: 'ADD_CRYPTO_ACTION', input }, check: () => createCryptoActionNode('node-preview', input) };
       }
       if (spec.network === 'solana' || spec.network === 'solana-devnet') {
-        // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: MCP clients pass the user's words; "Solana"/"sol" is the coin SOL, "usdc" is USDC (exact runtime keys).
-        const solanaToken = (written: string) => { const upper = written.trim().toUpperCase();
-          return upper === 'SOLANA' ? 'SOL' : upper === 'DEVUSDC' ? 'devUSDC' : ['SOL', 'USDC', 'USDT'].includes(upper) ? upper : written; };
-        const input = { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', from: solanaToken(spec.inputAsset) as never, to: solanaToken(spec.outputAsset) as never,
-          amount: spec.amount, slippage };
+        const input = { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', from: spec.inputAsset as never, to: spec.outputAsset as never, amount: spec.amount, slippage };
         return { command: { ...base, type: 'ADD_SOLANA_SWAP', input }, check: () => createSolanaSwapNode('node-preview', input) };
       }
       const pair = `${spec.inputAsset.toUpperCase()}>${spec.outputAsset.toUpperCase()}`;

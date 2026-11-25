@@ -205,8 +205,14 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
 describe('BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: the coin named by its network (ChatGPT / Claude MCP)', () => {
   it.each(['Solana', 'sol', 'SOL'])('a Solana swap of %s is a swap of native SOL', written => {
     const c = composed({ action: 'swap', network: 'solana', inputAsset: written, outputAsset: 'usdc', amount: '0.001' });
-    expect(c.strategy).toMatchObject({ action: 'swap', network: 'solana', amount: '0.001' });
+    // Canonical in the published strategy (MCP review F1): one meaning, one strategy and one workflow hash.
+    expect(c.strategy).toMatchObject({ action: 'swap', network: 'solana', inputAsset: 'SOL', outputAsset: 'USDC', amount: '0.001' });
+    expect(c.workflowHash).toBe(composed({ action: 'swap', network: 'solana', inputAsset: 'SOL', outputAsset: 'USDC', amount: '0.001' }).workflowHash);
     expect(c.steps.map(step => step.kind)).toEqual(['SWAP']);
+  });
+  it('devnet keeps its exact runtime keys (MCP review F2) and a mainnet devUSDC stays refused', () => {
+    expect(refused({ action: 'swap', network: 'solana', inputAsset: 'devUSDC', outputAsset: 'SOL', amount: '1' }).code).toBe('SOLANA_MINT_UNSUPPORTED');
+    expect(refused({ action: 'swap', network: 'solana', inputAsset: 'solanas', outputAsset: 'USDC', amount: '1' }).code).toBe('SOLANA_MINT_UNSUPPORTED');
   });
   it('"Solana" as a bridge asset is native SOL, never a verified SPL token with that display name', async () => {
     const { resolveUniversalAsset } = await import('../domain/universal-bridge-authoring');

@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { act, CopilotSession, intent } from '../copilot-session.test-harness';
+import { OTHER_ADDRESS } from '../copilot-test-fixtures';
 import { awaitingAmount } from '../copilot-conversation';
 import { setActiveNetworkScope } from '../network-scope';
 import { workflowSequence } from '../workflow-sequence';
@@ -102,5 +103,38 @@ describe('incident 4 · "Troque 1 USDC por ETH e depois troque o ETH recebido po
     expect(first).toMatchObject({ fundedBy: null, input: { amount: '1000000' }, output: { chainId: 'eip155:8453', address: null, decimals: 18 } });
     // The second swap spends only what the first actually delivers (reconciled), at most the user's own 0.0004 ETH: never the same funds twice.
     expect(second).toMatchObject({ fundedBy: 0, input: { chainId: 'eip155:8453', address: null, amount: '400000000000000' } });
+  });
+});
+
+describe('specialist review: FloFi never claims funding the runtime does not give', () => {
+  it('a bridge delivered to someone else does not fund the next step (chat review H1a): refused, never the wallet\'s own balance', () => {
+    const s = session();
+    const reply = s.say(`Levar 1 USDC da Ethereum para a Base para ${OTHER_ADDRESS} e emprestar na Aave.`, intent.composition([
+      act.bridge({ sourceNetwork: 'ETHEREUM', destinationNetwork: 'BASE', asset: 'USDC', amount: '1', recipient: OTHER_ADDRESS }),
+      act.lending('SUPPLY', { network: 'BASE', asset: 'USDC' })], 'PT'))!;
+    expect(reply.kind).not.toBe('PROPOSAL');
+    expect(s.pending).toBeNull();
+  });
+  it('native ETH delivered by a bridge never funds a WETH Supply by name (workflow review): the Supply\'s amount is asked, never copied', () => {
+    const s = session();
+    const reply = s.say('Levar 0.01 ETH da Ethereum para a Base e depositar WETH na Aave.', intent.composition([
+      act.bridge({ sourceNetwork: 'ETHEREUM', destinationNetwork: 'BASE', asset: 'ETH', amount: '0.01' }), act.lending('SUPPLY', { network: 'BASE', asset: 'WETH' })], 'PT'))!;
+    expect(reply.kind).not.toBe('PROPOSAL');
+    expect(JSON.stringify(reply)).not.toContain('O passo seguinte gasta o que o anterior realmente entregou');
+  });
+  it('the cap of a dependent step must be written in that step\'s token (chat review M4)', () => {
+    const s = session();
+    s.say('Troque 1 USDC por ETH na Base e depois troque o ETH recebido por USDC.', intent.composition([
+      act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }), act.swap({ inputAsset: 'ETH', outputAsset: 'USDC' })], 'PT'));
+    expect(s.say('0.0004 USDC')).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(s.pending).toBeNull();
+    expect(s.say('0.0004 ETH')).toMatchObject({ kind: 'PROPOSAL' });
+  });
+  it('the newest turn\'s relative amount wins (chat review M2)', () => {
+    const s = session();
+    s.say('Troque metade do meu USDC por ETH', intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH' }), 'PT'));
+    s.say('não, todo o USDC', intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH' }), 'PT'));
+    s.say('Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH' }), 'PT'));
+    expect(awaitingAmount(s.state)?.relative).toEqual({ kind: 'ALL' });
   });
 });

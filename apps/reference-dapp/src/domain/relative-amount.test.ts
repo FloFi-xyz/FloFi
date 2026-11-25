@@ -40,6 +40,8 @@ describe('relative amounts (BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001)', () => {
     // A balance under the reserve writes nothing: FloFi never proposes an amount the wallet cannot spend with its fees.
     expect(relativeShortcut(400_000_000_000_000n, eth, { kind: 'ALL' }).amount).toBeNull();
     expect(relativeShortcut(0n, usdc, { kind: 'ALL' }).amount).toBeNull();
+    // Half of 0.012 ETH on Ethereum is above what its 0.01 ETH reserve leaves: nothing is written (chat review M3), never a silently smaller share.
+    expect(relativeShortcut(12_000_000_000_000_000n, { decimals: 18, native: true, chain: 'eip155:1' }, { kind: 'PERCENT', percent: '50' }).amount).toBeNull();
     // A native coin without a defined reserve has no "all".
     expect(relativeShortcut(10n ** 18n, { decimals: 18, native: true, chain: 'eip155:999999' }, { kind: 'ALL' }).amount).toBeNull();
   });

@@ -152,6 +152,8 @@ export function relativeShortcut(units: bigint, source: Pick<AmountSource, 'deci
   if (reserve === null) return { key: 'MAX', units: 0n, amount: null };
   const spendable = units > reserve ? units - reserve : 0n;
   const share = relativeBasisPoints(relative) === 10_000n && !source.native ? spendable : floor(units * relativeBasisPoints(relative) / 10_000n);
+  // A percentage the fee reserve does not leave room for is not shrunk silently (chat review M3): nothing is written and the person types it.
+  if (relative.kind === 'PERCENT' && share > spendable) return { key: '50', units: 0n, amount: null };
   const value = share <= spendable ? share : floor(spendable);
   return { key: relative.kind === 'ALL' ? 'MAX' : '50', units: value, amount: shortcutAnswer(value, source.decimals) };
 }
