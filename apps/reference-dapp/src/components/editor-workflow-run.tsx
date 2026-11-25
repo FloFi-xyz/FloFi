@@ -382,7 +382,12 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     try { await work(); } catch (cause) { setError(codeOf(cause)); setPhase(p => p === 'wallet' || p === 'confirming' ? 'running' : p === 'reviewing' ? 'idle' : p === 'authorizing' || p === 'proving' ? runRef.current ? 'running' : 'reviewed' : p); }
     finally { acting.current = false; setActingNow(false); }
   }
-  const profileFor = async (chains: readonly string[]) => walletProfile(evmAccount, chains, false);
+  const profileFor = async (chains: readonly string[]) => {
+    const profile = await walletProfile(evmAccount, chains, false);
+    // A definitive pre-send batch refusal on this revision: never re-offer EVM_WALLET_BATCH from a capability report that just lied.
+    if (standardTransfer.current !== currentKey.current || !profile.eip155) return profile;
+    return { ...profile, eip155: { ...profile.eip155, atomic: Object.fromEntries(chains.map(chain => [chain, 'unsupported' as const])) } };
+  };
 
   const runReview = () => guard(async () => {
     // Never while a run is shown (this workflow's or a followed earlier one): the Review would be read against another run's facts.
@@ -396,7 +401,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // The wallet is asked what it can do on FloFi's EVM mainnets (`wallet_getCapabilities` shows no prompt); the server keeps only this workflow's.
     const key = currentKey.current, reviewing = workflowSnapshot.current;
     failedFor.current = null;
-    const result = await reviewEditorWorkflow(reviewing, evmAccount, await profileFor(evmChains.length ? evmChains : EVM_MAINNETS));
+    const chains = evmChains.length ? evmChains : EVM_MAINNETS;
+    const result = await reviewEditorWorkflow(reviewing, evmAccount, await profileFor(chains));
     // A Review of a revision (or wallet) that changed while it was made describes nothing current: it is dropped, never authorized.
     if (currentKey.current !== key) { setPhase('idle'); return; }
     if (!result.ok) { failedFor.current = key; throw new Error(result.code); }

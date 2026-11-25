@@ -146,7 +146,11 @@ export async function observeBridgeDelivery(deps: { readonly evm: (chain: string
           const receipt = hash && HASH.test(hash) ? await canonicalReceipt(dt, hash) : null;
           if (!receipt || !hash || receipt.blockNumber < BigInt(call.destinationFromBlock) || receipt.blockNumber > latest) throw error;
           const check = fillMatches(pair, source, route, receipt.logs);
-          if (!check.ok) throw error;
+          if (!check.ok) {
+            // Same fail-closed rule as the log-scan path: a mismatched fill is ATTENTION, never a silent UNREADABLE retry.
+            if (check.divergent) return { status: 'DIVERGENT', code: check.divergent, progress };
+            throw error;
+          }
           fill = { transactionHash: hash, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash,
             outputAmount: check.fill.updatedOutputAmount.toString(), relayer: check.fill.relayer };
           break;

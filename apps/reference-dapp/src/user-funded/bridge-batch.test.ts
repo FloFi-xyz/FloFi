@@ -305,9 +305,22 @@ describe('P0 hotfix E1: the bridge step reconciles only with its verified delive
   it('a transport failure decides nothing (UNREADABLE), and a deposit that is not the one signed is divergent', async () => {
     const { d, p, r } = await executed();
     const down = { ...d.deps, evm: (chain: string) => chain === BASE ? guarded(BASE, 'read', 'MOCKED', async () => { throw new Error('DELEGATION_RPC_UNAVAILABLE'); }) : d.transport(chain) };
-    expect(await observeBridgeDelivery(down, p.group, r.receipts ?? [], null)).toEqual({ status: 'UNREADABLE' });
+    expect(await observeBridgeDelivery(down, p.group, r.receipts ?? [], null)).toMatchObject({ status: 'UNREADABLE' });
     const other = { ...p.group, calls: p.group.calls.map(c => c.kind === 'ACROSS_DEPOSIT' ? { ...c, outputAmount: '1' } : c) };
     expect(await observeBridgeDelivery(d.deps, other, r.receipts ?? [], null)).toMatchObject({ status: 'DIVERGENT', code: 'BRIDGE_DEPOSIT_EVENT_MISMATCH' });
+  });
+
+  it('Across status hint with eth_getLogs down: a divergent fill is DIVERGENT, never UNREADABLE', async () => {
+    const { d, p, hash, r, call } = await executed();
+    const fillHash = fill(d, call, 7n, { updatedOutputAmount: 1n, outputAmount: 1n });
+    d.across.controls.status.set(hash, { source: 'across.deposit-status', status: 'FILLED', destinationTxHash: fillHash, refundTxHash: null, rawHash: '0x' + '0'.repeat(64) });
+    const base = d.transport(BASE)!;
+    const logsDown = { ...d.deps, evm: (chain: string) => chain !== BASE ? d.transport(chain) : guarded(BASE, 'read', 'MOCKED', async (method, params) => {
+      if (method === 'eth_getLogs') throw new Error('ETH_GETLOGS_RANGE_REFUSED');
+      return base.rpc(method, params);
+    }) };
+    const o = await observeBridgeDelivery(logsDown, p.group, r.receipts ?? [], null);
+    expect(o).toMatchObject({ status: 'DIVERGENT', code: 'ROUTER_FILL_BELOW_MINIMUM' });
   });
 });
 

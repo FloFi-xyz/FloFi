@@ -1997,6 +1997,10 @@
     "app.server.build-estimate-latency": {
       "path": "apps/reference-dapp/src/server/build-estimate-latency.test.ts",
       "stage": "unit"
+    },
+    "app.workflow-runs.bridge-batch-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/bridge-batch-run.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -8496,6 +8500,7 @@
         "app.user-funded.bundler",
         "app.user-funded.solana-nonce-codec",
         "app.workflow-runs.user-funded-run.pg",
+        "app.workflow-runs.bridge-batch-run.pg",
         "app.user-funded.universal-batch",
         "app.user-funded.arbitrum-batch",
         "app.workflow-runs.user-funded-due-refusal.pg",
@@ -8550,7 +8555,7 @@
         "app.components.user-funded-browser"
       ],
       "gaps": [
-        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md §3.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
+        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md \u00a73.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
       ]
     },
     {
@@ -8959,6 +8964,7 @@
         "app.workflow-runs.execution-groups",
         "app.workflow-runs.received-amounts",
         "app.workflow-runs.user-funded-run.pg",
+        "app.workflow-runs.bridge-batch-run.pg",
         "app.workflow-runs.delegated-run.pg",
         "app.editor.single-card-run.pg",
         "app.editor.single-card-strategy"

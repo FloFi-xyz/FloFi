@@ -114,6 +114,14 @@ run `xuni-02c5ec75ce6546413be3ceb55364d970`.
 
 High: client-trusted `rpcCode` closed PREPARED batches without chain proof. **Fixed:** `closeRefusedTransferBatch` treats RPC code as telemetry; proven closes use `proveDeclinedBatchUnsent` + `onlyIfDeclineVerified`; unprovable native-value batches end only after `groupInFlight` clears as outcome-unknown. Tests: `close-refused-transfer.test.ts` 2/2.
 
+### Specialist: flofi-workflow
+
+Medium: Across `eth_getLogs` fallback mapped divergent fills to `UNREADABLE`. **Fixed:** return `DIVERGENT` when `fillMatches` reports divergent (same as log-scan path). Test: `bridge-batch.test.ts` hint+logs-down case. Low: mapped `app.workflow-runs.bridge-batch-run.pg` in coverage.json.
+
+### Specialist: flofi-wallet-execution
+
+Medium (rpcCode): already fixed with security. Medium (capability lie loop): after `standardTransfer`, Review forces `atomic: unsupported` so batching is not re-offered. Low copy: already updated.
+
 ## 8. Exact next action
 
 1. ~~Commit / push / open PR~~ done (`a68969f7`, PR #252).
