@@ -32,7 +32,7 @@ export type ConversationCopy = {
   readonly workflowCompleted: (total: number) => string; readonly awaitingDelivery: (current: number) => string;
   readonly stepStopped: (current: number, total: number) => string;
   readonly editPending: (step: number, action: string, value: string) => string; readonly applyEdit: string; readonly discardEdit: string;
-  readonly editApplied: string; readonly editDiscarded: string; readonly editRefused: (reason: string) => string; readonly editQuestion: string;
+  readonly editApplied: string; readonly editDiscarded: string; readonly proposalDiscarded: string; readonly proposalGone: string; readonly editRefused: (reason: string) => string; readonly editQuestion: string;
   readonly switchNetworkFor: (wallet: string | null, network: string) => string; readonly switchFailed: (reason: string) => string; readonly switched: (network: string) => string;
   readonly checkingProviders: string;
   /**
@@ -134,7 +134,7 @@ const en: ConversationCopy = {
   statusUnavailable: 'There is no execution to check right now.',
   executionStartFailed: 'The wallet request could not start, and nothing was sent.',
   checkStatus: 'Check status',
-  destructive: steps => `This change would also remove ${steps}. Review it on the Canvas before applying; nothing changed yet.`,
+  destructive: steps => `This change would also remove ${steps}. Nothing changed yet: apply it, or discard it to keep your workflow as it is.`,
   busy: 'FloFi is still working on the previous step. Wait for it to finish.',
   connectWallet: 'Connect the wallet that will sign this workflow, then ask me to review it.',
   switchNetwork: network => `Switch your wallet to ${network}, then ask me to review the workflow again.`,
@@ -154,6 +154,7 @@ const en: ConversationCopy = {
   stepStopped: (current, total) => `Step ${current} of ${total} did not complete, so the steps after it were not started. Steps before it stay executed.`,
   editPending: (step, action, value) => `Step ${step} (${action}) has an amount you typed but did not apply: ${value}.`,
   applyEdit: 'Apply it', discardEdit: 'Discard it',
+  proposalDiscarded: 'Discarded. Your workflow is unchanged.', proposalGone: 'This change is no longer pending. Your workflow is as shown on the Canvas.',
   editApplied: 'Applied. Any earlier simulation or review of this workflow no longer applies.', editDiscarded: 'Discarded. The step keeps its previous amount.',
   editRefused: reason => `That amount cannot be applied: ${reason}`, editQuestion: 'Should I apply it before reviewing the workflow?',
   switchNetworkFor: (wallet, network) => `Your wallet is on ${wallet ?? 'another network'}, but this step runs on ${network}. Switch your wallet to ${network}; I will continue the review once it is done.`,
@@ -263,7 +264,7 @@ const pt: ConversationCopy = {
   statusUnavailable: 'Não há execução para verificar agora.',
   executionStartFailed: 'Não foi possível iniciar o pedido na carteira e nada foi enviado.',
   checkStatus: 'Verificar status',
-  destructive: steps => `Esta alteração também removeria ${steps}. Revise-a no Canvas antes de aplicar; nada mudou ainda.`,
+  destructive: steps => `Esta alteração também removeria ${steps}. Nada mudou ainda: aplique-a ou descarte-a para manter o seu fluxo como está.`,
   busy: 'A FloFi ainda está cuidando do passo anterior. Aguarde terminar.',
   connectWallet: 'Conecte a carteira que vai assinar este fluxo e depois peça para eu revisá-lo.',
   switchNetwork: network => `Mude a sua carteira para ${network} e depois peça para eu revisar o fluxo novamente.`,
@@ -283,6 +284,7 @@ const pt: ConversationCopy = {
   stepStopped: (current, total) => `A etapa ${current} de ${total} não foi concluída, então as etapas seguintes não foram iniciadas. As etapas anteriores continuam executadas.`,
   editPending: (step, action, value) => `A etapa ${step} (${action}) tem um montante digitado que não foi aplicado: ${value}.`,
   applyEdit: 'Aplicar', discardEdit: 'Descartar',
+  proposalDiscarded: 'Descartado. O seu fluxo não mudou.', proposalGone: 'Esta alteração já não está pendente. O seu fluxo está como aparece no Canvas.',
   editApplied: 'Aplicado. Qualquer simulação ou revisão anterior deste fluxo deixou de valer.', editDiscarded: 'Descartado. A etapa mantém o montante anterior.',
   editRefused: reason => `Esse montante não pode ser aplicado: ${reason}`, editQuestion: 'Devo aplicá-lo antes de revisar o fluxo?',
   switchNetworkFor: (wallet, network) => `A sua carteira está em ${wallet ?? 'outra rede'}, mas esta etapa é executada em ${network}. Mude a sua carteira para ${network}; eu continuo a revisão assim que terminar.`,

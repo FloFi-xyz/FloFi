@@ -62,7 +62,12 @@ export type PendingQuestion =
    */
   | { readonly kind: 'CONFIRM_CONTINUE_REVIEW'; readonly binding: ReviewBinding; readonly runKey: string | null }
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: a Canvas card has a typed amount that was never applied; apply it (YES) or discard it (NO) before the Review. */
-  | { readonly kind: 'RESOLVE_EDIT'; readonly nodeId: string; readonly workflowId: string; readonly revision: number; readonly draft?: string | undefined };
+  | { readonly kind: 'RESOLVE_EDIT'; readonly nodeId: string; readonly workflowId: string; readonly revision: number; readonly draft?: string | undefined }
+  /**
+   * BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (CTO: no mandatory Canvas navigation): a chat change that would also remove steps is held as a
+   * proposal; the owner applies (YES) or discards (NO) exactly that proposed command, in the chat or on the Canvas.
+   */
+  | { readonly kind: 'RESOLVE_PROPOSAL'; readonly workflowId: string; readonly revision: number; readonly command: string };
 export type Answer = 'YES' | 'NO' | 'UNCLEAR';
 
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();
@@ -153,7 +158,7 @@ const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo las
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
   const value = normalize(text);
-  if (question === 'RESOLVE_EDIT') return DISCARD_EDIT.test(value) ? 'NO' : APPLY_EDIT.test(value) ? 'YES' : NO_WORDS.test(value) ? 'NO' : 'UNCLEAR';
+  if (question === 'RESOLVE_EDIT' || question === 'RESOLVE_PROPOSAL') return DISCARD_EDIT.test(value) ? 'NO' : APPLY_EDIT.test(value) ? 'YES' : NO_WORDS.test(value) ? 'NO' : 'UNCLEAR';
   if (NO_WORDS.test(value)) return 'NO';
   if (question === 'CONFIRM_CONTINUE_REVIEW') return ACCEPT_CONTINUE.test(value) || CONTINUE.test(value) || CONFIRM_EXECUTION.test(value) ? 'YES' : 'UNCLEAR';
   const yes = question === 'CONFIRM_WORKFLOW' ? CONFIRM_WORKFLOW : question === 'CONFIRM_EXECUTION' ? CONFIRM_EXECUTION : question === 'CONFIRM_CONTINUE' ? CONTINUE : null;
