@@ -1284,6 +1284,7 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
         const index = extras.capStep, patched: CopilotIntentV2 = { ...draft.intent, actions: draft.intent.actions.map((action, at) => at === index && action.type !== 'LIQUIDITY'
           ? { ...action, amount } as CopilotAction : action) };
         const { capStep: _asked, ...rest } = extras;
+        void _asked;
         return local(resolveIntent(patched, answeredDraft(state, patched, picked), env, null, rest));
       }
       if (!option && draft.depositFill) {
