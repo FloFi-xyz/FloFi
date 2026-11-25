@@ -232,7 +232,11 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
         return { command: { ...base, type: 'ADD_CRYPTO_ACTION', input }, check: () => createCryptoActionNode('node-preview', input) };
       }
       if (spec.network === 'solana' || spec.network === 'solana-devnet') {
-        const input = { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', from: spec.inputAsset as never, to: spec.outputAsset as never, amount: spec.amount, slippage };
+        // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: MCP clients pass the user's words; "Solana"/"sol" is the coin SOL, "usdc" is USDC (exact runtime keys).
+        const solanaToken = (written: string) => { const upper = written.trim().toUpperCase();
+          return upper === 'SOLANA' ? 'SOL' : upper === 'DEVUSDC' ? 'devUSDC' : ['SOL', 'USDC', 'USDT'].includes(upper) ? upper : written; };
+        const input = { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', from: solanaToken(spec.inputAsset) as never, to: solanaToken(spec.outputAsset) as never,
+          amount: spec.amount, slippage };
         return { command: { ...base, type: 'ADD_SOLANA_SWAP', input }, check: () => createSolanaSwapNode('node-preview', input) };
       }
       const pair = `${spec.inputAsset.toUpperCase()}>${spec.outputAsset.toUpperCase()}`;

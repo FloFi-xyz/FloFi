@@ -201,3 +201,15 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
     expect(lending.findings.map(f => f.code)).toContain('DEBT_REMAINS');
   });
 });
+
+describe('BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: the coin named by its network (ChatGPT / Claude MCP)', () => {
+  it.each(['Solana', 'sol', 'SOL'])('a Solana swap of %s is a swap of native SOL', written => {
+    const c = composed({ action: 'swap', network: 'solana', inputAsset: written, outputAsset: 'usdc', amount: '0.001' });
+    expect(c.strategy).toMatchObject({ action: 'swap', network: 'solana', amount: '0.001' });
+    expect(c.steps.map(step => step.kind)).toEqual(['SWAP']);
+  });
+  it('"Solana" as a bridge asset is native SOL, never a verified SPL token with that display name', async () => {
+    const { resolveUniversalAsset } = await import('../domain/universal-bridge-authoring');
+    expect(resolveUniversalAsset('solana', 'Solana')).toEqual({ asset: { kind: 'NATIVE', decimals: 9 }, symbol: 'SOL' });
+  });
+});

@@ -70,7 +70,10 @@ export function resolveUniversalAsset(key: UniversalNetworkKey, reference: strin
     return { asset: { kind: 'TOKEN', address: network.ecosystem === 'EVM' ? address.toLowerCase() : address, decimals }, symbol: known?.symbol ?? 'TOKEN' };
   }
   const symbol = text.toUpperCase();
-  if (symbol === network.native.symbol) return { asset: { kind: 'NATIVE', decimals: network.native.decimals }, symbol: network.native.symbol };
+  // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: "Solana" written as a token (ChatGPT/Claude MCP clients pass the user's words) is the native coin SOL,
+  // never a verified SPL token that happens to carry that display name.
+  if (symbol === network.native.symbol || network.ecosystem === 'SOLANA' && symbol === 'SOLANA')
+    return { asset: { kind: 'NATIVE', decimals: network.native.decimals }, symbol: network.native.symbol };
   if (network.ecosystem === 'SOLANA') {
     const token = Object.values(SOLANA_MAINNET_TOKENS).find(t => t.symbol === symbol && !t.native) ?? resolveSolanaCatalogAsset(text);
     return token ? { asset: { kind: 'TOKEN', address: token.mint, decimals: token.decimals }, symbol: token.symbol } : fail('UNIVERSAL_ASSET_UNKNOWN');
