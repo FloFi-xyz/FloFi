@@ -11,6 +11,19 @@ describe('relative amounts (BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001)', () => {
     ['troque metade do meu SOL por USDC', { kind: 'PERCENT', percent: '50' }], ['swap 25% of my SOL to USDC', { kind: 'PERCENT', percent: '25' }],
     ['troque 12,5% do meu USDC por ETH', { kind: 'PERCENT', percent: '12.5' }], ['100% do meu USDC', { kind: 'ALL' }],
   ])('%s', (text, expected) => expect(relativeAmountIn(text)).toEqual(expected));
+  it.each([['swap 50% of my USDC to ETH', '50'], ['troque 10% do meu SOL', '10'], ['swap 90% of my USDC', '90'], ['troque 12,50% do meu USDC', '12.5'],
+    ['troque 20 por cento do meu USDC', '20']])('%s keeps the whole number (review: "50" was read as 5)', (text, percent) =>
+    expect(relativeAmountIn(text)).toEqual({ kind: 'PERCENT', percent }));
+  it('is bound to the token FloFi asks the amount of (specialist review)', () => {
+    expect(relativeAmountIn('Converta todo o USDC que tenho em ETH.', 'USDC')).toEqual({ kind: 'ALL' });
+    expect(relativeAmountIn('troque metade do meu Solana por USDC', 'SOL')).toEqual({ kind: 'PERCENT', percent: '50' });
+    expect(relativeAmountIn('quero trocar tudo que tenho de SOL', 'SOL')).toEqual({ kind: 'ALL' });
+    expect(relativeAmountIn('Troque todo o USDC em ETH', 'ETH')).toBeNull();
+    expect(relativeAmountIn('Troque USDC por ETH em toda a Base', 'USDC')).toBeNull();
+    expect(relativeAmountIn('bridge USDC all the way to Arbitrum', 'USDC')).toBeNull();
+    expect(relativeAmountIn('Troque USDC por ETH na Base com o máximo de 1% de slippage', 'USDC')).toBeNull();
+    expect(relativeAmountIn('swap 25% of my SOL to USDC', 'USDC')).toBeNull();
+  });
   it.each(['swap 1 USDC to ETH with 1% of slippage', 'troque 1 USDC por ETH com slippage de 2%', 'compre ETH todo dia às 9h', 'toda semana compre 10 USDC de ETH',
     'swap 10 USDC to ETH', 'troque 150% do meu USDC', '0% of my USDC'])('%s is not relative', text => expect(relativeAmountIn(text)).toBeNull());
   it('reads percentages as integer hundredths', () => {

@@ -2301,8 +2301,9 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   const kept: Extras = outcome.code === 'COPILOT_RANGE_REQUIRED' ? { ...extras, rangeAsked: true } : extras;
   const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [...actionFills(intent, outcome.missing, suggested.options), ...retry], snapshot: snapshotOf(env), extras: kept,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
-    ...intent.kind === 'ACTION' && outcome.missing.length === 1 && outcome.missing[0] === 'amount' && relativeAmountIn(segmentText(state))
-      ? { relative: relativeAmountIn(segmentText(state))! } : {},
+    // The relative amount must be about the very token FloFi asks the amount of ("todo o USDC" for a USDC question; never "toda a Base").
+    ...intent.kind === 'ACTION' && outcome.missing.length === 1 && outcome.missing[0] === 'amount' && relativeAmountIn(segmentText(state), inputAssetOf(intent.action))
+      ? { relative: relativeAmountIn(segmentText(state), inputAssetOf(intent.action))! } : {},
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
   return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes, ...followOn ? [followOn.note] : []],
     { ...outcome.code ? { code: outcome.code } : {}, ...outcome.pool ? { pool: outcome.pool } : {} });

@@ -62,10 +62,11 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
   const relativeAnswer = source && relative && read.status === 'ready' ? relativeShortcut(read.units, source, relative) : null;
   const answered = useRef<string | null>(null);
   useEffect(() => {
-    if (!relativeAnswer?.amount || disabled || working || answered.current === request.question || !stillOpen()) return;
+    // Only a fresh read of a balance no earlier step of the workflow spends or delivers (as for a click); otherwise the person picks or types.
+    if (!relativeAnswer?.amount || follows || disabled || working || answered.current === request.question || Date.now() - readAt.current > FRESH_MS || !stillOpen()) return;
     answered.current = request.question;
     onPick(relativeAnswer.amount);
-  }, [relativeAnswer?.amount, disabled, working, request.question, stillOpen, onPick]);
+  }, [relativeAnswer?.amount, follows, disabled, working, request.question, stillOpen, onPick]);
   if (!source || follows) return null;
   const shortcuts: readonly AmountShortcut[] = read.status === 'ready' ? amountShortcuts(read.units, source) : [];
   async function pick(key: AmountShortcutKey) {

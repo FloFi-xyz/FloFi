@@ -156,7 +156,7 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSendi
       const code = codeOf(cause);
       if (request.id && code === eip5792.DUPLICATE_ID) return request.id;
       // Refusals the wallet returns BEFORE sending anything (EIP-5792 5700 unsupported capability, 5710 unsupported chain, 5740 batch too large,
-      // 5750 atomic batching unsupported, 5760 upgrade rejected; EIP-1193 4100 unauthorized, 4200 unsupported method; JSON-RPC -32601/-32602): nothing
+      // 5750 atomic-ready wallet rejected the upgrade, 5760 atomicity not supported; EIP-1193 4100 unauthorized, 4200 unsupported method; JSON-RPC -32601/-32602): nothing
       // was sent, so the group can be offered again. Any other error stays "may have been sent" (fail closed).
       if (typeof code === 'number' && NOT_SENT_CODES.has(code)) return fail('WALLET_BATCH_NOT_SENT');
       return rejected(cause);
