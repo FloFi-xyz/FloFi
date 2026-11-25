@@ -277,6 +277,31 @@ test('declined in the wallet (EIP-1193 4001): nothing executes, the one request 
   networkGuard.assertClean();
 });
 
+test('an atomicity refusal stays on the same run after a reload and requires a chain check before separate confirmations', async ({ page, networkGuard }) => {
+  const { owner, log } = await begin(page, { sendCalls: 'unsupported' });
+  await simulateAndReview(page, log);
+  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  const refusal = () => panel(page).getByRole('status').filter({ hasText: 'Your wallet refused the batch.' });
+  await expect(refusal()).toContainText('FloFi can check the network for separate confirmations after', { timeout: 90_000 });
+  const before = await stored(owner);
+  expect(before.runs).toHaveLength(1);
+  expect(before.groups.map(g => g.state)).toEqual(['PREPARED']);
+  expect(log.asking()).toEqual(['wallet_sendCalls']);
+
+  await page.reload();
+  await openEditorSection(page, 'Execute');
+  const load = panel(page).getByRole('button', { name: 'Load workflow progress', exact: true });
+  await expect(refusal().or(load)).toBeVisible({ timeout: 30_000 });
+  if (await load.isVisible()) await load.click();
+  await expect(refusal()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Confirm the batch steps separately' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  expect((await stored(owner)).runs.map(run => run.run_id)).toEqual(before.runs.map(run => run.run_id));
+  expect(log.asking()).toEqual(['wallet_sendCalls']);
+  expect(await control<number>('MOCK_batches')).toBe(0);
+  networkGuard.assertClean();
+});
+
 test('a wallet without atomic batching on Base: no wallet_sendCalls; the card keeps its own flow and nothing prompts by itself', async ({ page, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const { owner, log } = await begin(page, { capabilities: { [BASE]: { atomic: { status: 'unsupported' } } } });

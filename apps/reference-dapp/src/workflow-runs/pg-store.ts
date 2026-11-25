@@ -430,6 +430,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
           const run = await lockRun(tx, runId);
           if (!run || run.state === 'CANCELLED') return null;
           const scope: RunScope = {
+            run,
+            appendEvent: (kind, code, detail) => event(tx, runId, null, kind, code, detail).then(() => undefined),
             steps: async id => (await tx.query('SELECT * FROM workflow_run_steps WHERE tenant_id = $1 AND run_id = $2 ORDER BY step_index', [tenantId, id])).rows.map(stepOf),
             groups: async id => (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index', [tenantId, id])).rows.map(groupOf),
             stepTransition: (id, stepIndex, from, to, patch, kind = 'STEP_STATE') => id === runId ? stepUpdate(tx, id, stepIndex, from, to, patch, kind) : Promise.resolve(null),
@@ -488,6 +490,8 @@ export async function singleStepRunsSupported(db: Queryable): Promise<boolean> {
 }
 /** What `WorkflowRunStore.atomically` hands its work: one run's reads and compare-and-sets, all inside one transaction under the run lock. */
 export type RunScope = {
+  readonly run: RunRecord;
+  readonly appendEvent: (kind: string, code: string, detail: Readonly<Record<string, unknown>>) => Promise<void>;
   readonly steps: (runId: string) => Promise<readonly RunStepRecord[]>;
   readonly groups: (runId: string) => Promise<readonly GroupRecord[]>;
   readonly stepTransition: (runId: string, stepIndex: number, from: readonly StepState[], to: StepState, patch: StepPatch, kind?: string) => Promise<RunStepRecord | null>;

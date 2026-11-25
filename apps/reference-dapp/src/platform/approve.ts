@@ -28,7 +28,7 @@ import { authorizationReviewSequential, authorizeSequential, cancelSequential, c
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
-import { recordWalletDecline } from '../workflow-runs/service.ts';
+import { recordWalletBatchRefusal, recordWalletDecline } from '../workflow-runs/service.ts';
 
 /** A requester kind's own rule for who may claim its handoffs (e.g. only an intended wallet). Evaluated on the handoff's immutable data. */
 export type ClaimPolicy = (handoff: HandoffRecord, wallet: WalletRef) => Promise<ClaimVerdict> | ClaimVerdict;
@@ -260,10 +260,17 @@ export async function workflowRunUserFundedWalletRejected(surface: ApprovalSurfa
   const c = await runContext(surface, approvalId, wallets);
   await recordWalletDecline(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof requestId === 'string' ? requestId : refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST'));
 }
+/** Report the originating wallet's refusal of this specific preparation so it can be checked before using per-step confirmation. */
+export async function workflowRunUserFundedWalletRefused(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
+  requestId: unknown, preparedAt: unknown, handout: unknown, walletCode: unknown): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  await recordWalletBatchRefusal(c.runs, c.run, wallets, groupIndexOf(groupIndex), requestId, preparedAt, handout, walletCode);
+  return statusSequential(c.runs, c.run, wallets, c.base);
+}
 /** The owner resumes a halted run whose stopped step submitted nothing. */
-export async function workflowRunResume(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+export async function workflowRunResume(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], loadStep = true): Promise<ClaimedProposal> {
   const c = await runContext(surface, approvalId, wallets, true);
-  return resumeSequential(c.runs, c.run, wallets, c.base);
+  return resumeSequential(c.runs, c.run, wallets, c.base, loadStep);
 }
 /** The Universal Workflow Authorization Review of the run: the exact workflow grants the owner's wallet signs ONCE (delegated mode). */
 export async function workflowRunReview(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]) {

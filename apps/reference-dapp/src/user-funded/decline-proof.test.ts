@@ -21,7 +21,7 @@ type Filter = { fromBlock: string; toBlock: string; topics: (string | null)[] };
  * A read-only transport double: nonces, the head block (number, hash, timestamp) and the logs answering each filter (every call recorded).
  * `headTime`: the head's own block timestamp (default well past the deadline). `reorged`: the scanned head is replaced by another block afterwards.
  */
-function chain(o: { latest?: bigint; pending?: bigint; head?: bigint; headTime?: bigint; reorged?: boolean; logs?: (f: Filter) => unknown[]; fail?: string;
+function chain(o: { latest?: bigint; pending?: bigint; head?: bigint; headTime?: bigint; reorged?: boolean; anchorHash?: string; logs?: (f: Filter) => unknown[]; fail?: string;
   nonceAfterScan?: bigint } = {}) {
   const calls: { method: string; params: unknown[] }[] = [];
   let scans = 0;
@@ -29,6 +29,7 @@ function chain(o: { latest?: bigint; pending?: bigint; head?: bigint; headTime?:
     calls.push({ method, params });
     if (method === o.fail) throw new Error('ECONNRESET');
     if (method === 'eth_getBlockByNumber') {
+      if (o.anchorHash && params[0] === '0x3e8') return { number: '0x3e8', hash: o.anchorHash, timestamp: '0x1' };
       const head = o.head ?? 1500n, replaced = o.reorged && params[0] !== 'latest';
       return { number: '0x' + head.toString(16), hash: '0x' + (replaced ? 'ee' : 'bb').repeat(32), timestamp: '0x' + (o.headTime ?? DEADLINE + 3_600n).toString(16) };
     }
@@ -82,6 +83,17 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: proof that a rejected wa
 
   it('not proven when the scanned head was replaced while the range was scanned (a reorg)', async () => {
     expect(await proveDeclinedBatchUnsent(chain({ reorged: true }).t, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_CHAIN_REORG' });
+  });
+
+  it('fallback verifies the original preparation block and scans only later blocks through the safe head', async () => {
+    const anchorHash = '0x' + 'cc'.repeat(32), p = prepared({ fromBlockHash: anchorHash });
+    const { t, calls } = chain({ anchorHash });
+    expect(await proveDeclinedBatchUnsent(t, p, SETTLED, AFTER, true)).toMatchObject({ proven: true });
+    expect(calls.filter(c => c.method === 'eth_getBlockByNumber').map(c => c.params[0])).toEqual(['safe', '0x5dc', '0x3e8']);
+    expect(calls.filter(c => c.method === 'eth_getLogs').every(c => (c.params[0] as Filter).fromBlock === '0x3e9')).toBe(true);
+    expect(await proveDeclinedBatchUnsent(t, prepared(), SETTLED, AFTER, true)).toEqual({ proven: false, reason: 'DECLINE_PROOF_NOT_RECORDED' });
+    expect(await proveDeclinedBatchUnsent(chain({ anchorHash: '0x' + 'ee'.repeat(32) }).t, p, SETTLED, AFTER, true))
+      .toEqual({ proven: false, reason: 'DECLINE_PROOF_CHAIN_REORG' });
   });
 
   it('not proven when the owner transacted: a mined or pending transaction, or one appearing while the range was scanned', async () => {

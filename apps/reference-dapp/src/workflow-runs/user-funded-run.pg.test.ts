@@ -8,7 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve.ts';
+import { workflowRunResume, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart,
+  workflowRunUserFundedWalletRefused } from '../platform/approve.ts';
 import { ownedRun } from '../platform/workflow-run-approvals.ts';
 import { workflowRunHarness, type RunHarness } from './workflow-run.test-harness.ts';
 import { authorizeGroup, opOf, type Prepared } from '../user-funded/groups.ts';
@@ -31,6 +32,28 @@ async function setup(t: Awaited<ReturnType<typeof createTestDatabase>>, nativeWe
 }
 
 describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQL, MOCKED chain)', () => {
+  it('a wallet refusal report cannot replace a batch that reached the chain or has a recorded answer', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, approval } = await setup(t), wallets = [h.evm, h.sol], id = approval.approvalId;
+      await workflowRunUserFundedStart(h.surface, id, wallets, METAMASK);
+      const { prepared, handout } = await workflowRunUserFundedPrepare(h.surface, id, wallets, 0);
+      const requestId = (prepared.request as { id: string }).id;
+      const report = () => workflowRunUserFundedWalletRefused(h.surface, id, wallets, 0, requestId, prepared.preparedAt, handout, 5760);
+      const recorded = (await report()).view.workflowRun!.run;
+      const hash = h.d.evm.control.walletBatch(h.evm.address, evmCallsOf(prepared.group as EvmGroupCalls));
+      h.d.advance(Date.parse(recorded.groups[0]!.batchFallbackAt!) + 1_000 - h.d.now().getTime());
+      await expect(workflowRunResume(h.surface, id, wallets)).rejects.toThrow('WORKFLOW_RUN_FALLBACK_UNPROVEN');
+      expect((await h.store.groups(recorded.workflowRunId))[0]).toMatchObject({ state: 'PREPARED', strategy: 'EVM_WALLET_BATCH' });
+      expect((await h.store.steps(recorded.workflowRunId)).map(step => step.state)).toEqual(['DELEGATED', 'DELEGATED']);
+      await workflowRunUserFundedAuthorize(h.surface, id, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: requestId });
+      await expect(report()).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+      const done = await workflowRunUserFundedReport(h.surface, id, wallets, 0, [hash]);
+      expect(done.view.workflowRun!.run).toMatchObject({ state: 'COMPLETED', groups: [{ strategy: 'EVM_WALLET_BATCH', state: 'RECONCILED' }] });
+      expect((await h.store.events(recorded.workflowRunId)).some(e => e.kind === 'GROUP_WALLET_FALLBACK_VERIFIED')).toBe(false);
+    } finally { await t.drop(); }
+  });
+
   it('one wallet batch executes the whole same-chain workflow from the owner\'s own account; the owner pays the gas; FloFi reconciles from the chain', async () => {
     const t = await createTestDatabase();
     try {

@@ -24,6 +24,23 @@ export type StepState = (typeof STEP_STATES)[number];
 export const RUN_MODES = ['CONFIRM_EACH_STEP', 'DELEGATED', 'USER_FUNDED'] as const;
 export type RunMode = (typeof RUN_MODES)[number];
 
+export const WALLET_BATCH_REFUSAL_RECORDED = 'WALLET_BATCH_REFUSAL_RECORDED';
+export const WALLET_BATCH_FALLBACK_VERIFIED = 'WALLET_BATCH_FALLBACK_VERIFIED';
+const WALLET_BATCH_REFUSAL_CODES: ReadonlySet<number> = new Set([5700, 5710, 5740, 5750, 5760, 4100, 4200, -32601, -32602]);
+export function isWalletBatchRefusalCode(code: unknown): code is number {
+  return typeof code === 'number' && WALLET_BATCH_REFUSAL_CODES.has(code);
+}
+/** Declining an atomicity upgrade is the owner's decision, like declining the batch itself. */
+export function isWalletBatchFallbackCode(code: unknown): code is number {
+  return isWalletBatchRefusalCode(code) && code !== 5750;
+}
+
+export function walletBatchRefusalCode(cause: unknown): number | null {
+  if (!(cause instanceof Error) || cause.message !== 'WALLET_BATCH_NOT_SENT') return null;
+  const code = (cause as Error & { walletCode?: unknown }).walletCode;
+  return isWalletBatchFallbackCode(code) ? code : null;
+}
+
 const RUN: Readonly<Record<RunState, readonly RunState[]>> = Object.freeze({
   PENDING: ['RUNNING', 'FAILED', 'CANCELLED', 'EXPIRED'],
   RUNNING: ['RUNNING', 'COMPLETED', 'HALTED', 'FAILED', 'ATTENTION', 'CANCELLED'],

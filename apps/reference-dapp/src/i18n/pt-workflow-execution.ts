@@ -204,6 +204,21 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.': 'Este Withdraw deixaria seu fator de saúde da Aave abaixo de 2,0 após o lote. Retire menos ou pague parte da dívida antes.',
   'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.': 'Um Repay precisa ser menor que sua dívida atual (o pagamento total não é oferecido aqui). Reduza o valor do Repay.',
   'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.': 'Sua carteira recusou este lote antes de enviar qualquer coisa (talvez não o suporte nesta rede). Nada foi enviado; você pode tentar de novo.',
+  'FloFi recorded the refusal. It needs to check the network before you can confirm the steps separately.':
+    'A FloFi registrou a recusa. Ela precisa verificar a rede antes que você possa confirmar as etapas separadamente.',
+  'This batch cannot switch to separate confirmations. Check your wallet activity before trying again.':
+    'Este lote não pode passar para confirmações separadas. Confira a atividade da sua carteira antes de tentar novamente.',
+  'FloFi is still waiting for the network to confirm the wallet request expired. Try again in a minute.':
+    'A FloFi ainda aguarda a confirmação da rede de que a solicitação da carteira expirou. Tente de novo em um minuto.',
+  'FloFi could not verify that the batch stayed off-chain. Check your wallet activity before continuing.':
+    'A FloFi não conseguiu verificar se o lote ficou fora da rede. Confira a atividade da sua carteira antes de continuar.',
+  'The workflow changed while FloFi checked the batch. Check its latest status.':
+    'O fluxo mudou enquanto a FloFi verificava o lote. Confira o status mais recente.',
+  'Your wallet refused the batch. FloFi can check the network for separate confirmations after {0}.':
+    'Sua carteira recusou o lote. Após {0}, a FloFi pode verificar a rede para permitir confirmações separadas.',
+  'Your wallet refused the batch. FloFi will check the network before you review and confirm each step separately.':
+    'Sua carteira recusou o lote. A FloFi vai verificar a rede antes que você revise e confirme cada etapa separadamente.',
+  'Confirm the batch steps separately': 'Confirmar as etapas do lote separadamente',
   'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.':
     'Sua carteira está bloqueada ou outra conta está selecionada. Desbloqueie a carteira, selecione a conta a que esta execução pertence e tente de novo; nada foi enviado.',
   'A token in this batch does not deliver the full amount the swap sends (it charges a fee on transfer or changes balances), so it cannot be batched. Nothing was sent.':

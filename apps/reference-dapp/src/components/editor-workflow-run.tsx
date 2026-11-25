@@ -21,8 +21,8 @@ import { TokenAmountText } from './token-amount-text';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
-import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, reportUserFundedRejection, resumeWorkflowRunHandoff,
-  workflowRunStatusHandoff } from '../app/approve-action';
+import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, reportUserFundedRefusal,
+  reportUserFundedRejection, resumeWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
 import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_ON_APPROVAL, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED,
   EDITOR_MECHANISM_CHANGED_NOT_STARTED, feeAmountText, KORA_RECOVERY_INCOMPLETE, KORA_RECOVERY_INCOMPLETE_TEXT,
   nativeLaterMessage } from '../domain/token-fee';
@@ -37,7 +37,7 @@ import { StepSummaryCard } from './operation-summary';
 import { TokenUnitsText } from './token-amount-text';
 import { CopyValue } from './copy-value';
 import { TechnicalBody, TechnicalGroup } from './technical-body';
-import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
+import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs, walletBatchRefusalCode } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import { batchHandout, batchSponsorshipOf, evmWalletKind, isCirclePaid, keepBatchHandout, sendWalletBatch, signCirclePaidGroup, signSolanaGroup, signUserOperation,
   walletBatchHashes, walletProfile } from './user-funded-browser';
@@ -438,6 +438,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
         };
         try { batchId = await sendWalletBatch(request, handOver, batchSponsorshipOf(p)); }
         catch (cause) {
+          const refusal = walletBatchRefusalCode(cause), handout = batchHandout(id, index);
+          const ownsAttempt = storedRun(id)?.sent?.nonce === nonce;
           // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the wallet's explicit rejection (EIP-1193 4001) of exactly this request
           // is reported to FloFi as a fact; FloFi proves it against the chain before an ended attempt may be deleted from History. It never blocks
           // or changes this answer (a failed report only leaves the attempt archive-only).
@@ -449,6 +451,11 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
             const now = storedRun(id);
             if (now?.sent?.nonce === nonce) { const { sent: _sent, ...rest } = now; void _sent; putStored(rest); }
             setUnrecorded(handedOver(id, index));
+          }
+          if (refusal !== null && ownsAttempt && handout && request.id && typeof p.preparedAt === 'string') {
+            const result = await reportUserFundedRefusal(id, index, request.id, p.preparedAt, handout, refusal).catch(() => null);
+            if (result?.ok) { adopt(result.value); setPhase('running'); return; }
+            if (result?.code === 'WORKFLOW_RUN_FALLBACK_UNAVAILABLE') throw new Error(result.code, { cause });
           }
           throw cause;
         }
@@ -720,7 +727,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   });
   const resume = () => guard(async () => {
     if (!approvalId) return;
-    const r = await resumeWorkflowRunHandoff(approvalId);
+    // Only the signing page can display an individual step's Review. Leave it READY until that page loads it.
+    const r = await resumeWorkflowRunHandoff(approvalId, false);
     if (!r.ok) throw new Error(r.code);
     adopt(r.value); setPhase('running');
   });
@@ -868,6 +876,11 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   WITHDRAW_UNSAFE_HEALTH_FACTOR: 'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.',
   REPAY_PARTIAL_DEBT_REQUIRED: 'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.',
   WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.',
+  WALLET_BATCH_REFUSAL_RECORDED: 'FloFi recorded the refusal. It needs to check the network before you can confirm the steps separately.',
+  WORKFLOW_RUN_FALLBACK_UNAVAILABLE: 'This batch cannot switch to separate confirmations. Check your wallet activity before trying again.',
+  WORKFLOW_RUN_FALLBACK_NOT_READY: 'FloFi is still waiting for the network to confirm the wallet request expired. Try again in a minute.',
+  WORKFLOW_RUN_FALLBACK_UNPROVEN: 'FloFi could not verify that the batch stayed off-chain. Check your wallet activity before continuing.',
+  WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST: 'The workflow changed while FloFi checked the batch. Check its latest status.',
   WALLET_WRONG_NETWORK: 'Switch your wallet to the network of this group, then try again.',
   WALLET_ACCOUNT_MISMATCH: 'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.',
   // P0 universal execution: what the chain's own contracts say about a token, or what the network lacks, in plain words.
@@ -1070,6 +1083,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
   const runStep = (index: number) => run?.steps.find(s => s.index === index) ?? null;
   const plannedOf = (index: number) => run?.groups.flatMap(g => g.planned?.steps ?? []).find(s => s.index === index) ?? null;
   const currentGroup = run?.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
+  const fallbackAt = currentGroup?.batchFallbackAt;
   const dueGroup = run && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && !state.unrecorded && !['wallet', 'confirming', 'authorizing', 'confirm-update'].includes(phase)
     ? currentGroup : null;
   // A wallet batch group is offered only while the server would hand out a request for it rather than refuse WORKFLOW_RUN_EXPIRED: a fresh
@@ -1451,6 +1465,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         : u.kind === 'recipient' ? <>{tr('Step {0} pays', String(u.index + 1))} <code className="editor-run-recipient">{u.now}</code></>
         : tr('Step {0}: minimum {1}', String(u.index + 1), u.now)}</li>)}</ul></div>}
     {errorText && !(fresh && !feeBlocked) && <p className="error-banner" role="alert">{errorText}</p>}
+    {fallbackAt && <p role="status">{Date.parse(fallbackAt) > now
+      ? tr('Your wallet refused the batch. FloFi can check the network for separate confirmations after {0}.', fmtTime(fallbackAt, language))
+      : tr('Your wallet refused the batch. FloFi will check the network before you review and confirm each step separately.')}</p>}
     {run && run.stepCount > 1 && <p className="editor-run-progress" role="status" data-completed={progress!.completed}>{tr('{0} of {1} steps completed', String(progress!.completed), String(progress!.total))}</p>}
     {awaited && <p className="editor-run-delivery" role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
       tr(awaited.source), tr(awaited.destination))}</p>}
@@ -1482,6 +1499,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         {tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>}
       {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed && u.kind !== 'fee') ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}
       {resumable && !busy && <button type="button" className="primary" onClick={() => void state.resume()}>{tr('Resume the workflow')}</button>}
+      {fallbackAt && Date.parse(fallbackAt) <= now && <button type="button" className="primary" disabled={busy}
+        onClick={() => void state.resume()}>{tr('Confirm the batch steps separately')}</button>}
       {run && approvalSlotHref(run) && <p><a className="secondary" href={approvalSlotHref(run)!}>{tr('Continue step {0} on the signing page', String(run.currentStep + 1))}</a></p>}
       {due && !mechanismChanged && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{run?.stepCount === 1 ? tr('Authorize workflow') : tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
       {(run?.nextAction === 'OWNER_CONFIRMS_BATCH' || state.unrecorded) && !['wallet', 'confirming'].includes(phase) && <button type="button" className="secondary" onClick={() => void state.checkWallet()}>{tr('Check my wallet for the batch')}</button>}

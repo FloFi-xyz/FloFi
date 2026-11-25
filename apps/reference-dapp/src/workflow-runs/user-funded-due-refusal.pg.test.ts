@@ -12,8 +12,8 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
-import { workflowRunContinue, workflowRunResume, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport,
-  workflowRunUserFundedStart } from '../platform/approve.ts';
+import { workflowRunContinue, workflowRunResume, workflowRunStatus, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport,
+  workflowRunUserFundedStart, workflowRunUserFundedWalletRefused } from '../platform/approve.ts';
 import { ownedRun } from '../platform/workflow-run-approvals.ts';
 import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
@@ -31,6 +31,73 @@ const RESERVES = [{ ...reserve(WETH), price: 2_500n * 10n ** 8n, ltvBps: 8_000n,
 const METAMASK = { eip155: { wallet: 'INJECTED', atomic: { [CHAIN]: 'supported' }, typedData: true } };
 
 describe('P0: a due group that can never be batched halts the run at once, and resumes step by step', () => {
+  it('a wallet refusal is durable and a proved unsent later batch resumes after the reconciled prefix', async () => {
+    const t = await createTestDatabase();
+    try {
+      let clock: () => Date = () => new Date();
+      const chain = createEvmDouble(42161, () => Math.floor(clock().getTime() / 1000), { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
+      const h = await workflowRunHarness(t.db, { flows: ['arbitrum-swap', 'arbitrum-liquidity', 'arbitrum-aave'], policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one' },
+        userFundedChains: CHAINS, userFundedRpc: c => c === CHAIN ? chain.rpc : null });
+      clock = h.d.now;
+      const owner = h.evm.address, wallets = [h.evm, h.sol];
+      chain.control.fundToken(owner, USDC, 10_000_000n); chain.control.fundNative(owner, 10n ** 17n);
+      const supply = { action: 'supply', network: 'arbitrum-one', asset: 'WETH', amount: '0.0003', beneficiary: owner };
+      const { approvalId, secret } = await h.request({ version: 2, steps: [
+        { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 },
+        { ...supply, amount: '0.0005' }, { action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '1', WETH: '0.0004' }, range: { unit: 'full' } },
+        supply, { ...supply, amount: '0.0002' }] });
+      await claimApproval(h.surface, secret, wallets, true, h.d.now());
+      const started = await workflowRunUserFundedStart(h.surface, approvalId, wallets, METAMASK);
+      const runId = started.view.workflowRun!.run.workflowRunId;
+      const first = await workflowRunUserFundedPrepare(h.surface, approvalId, wallets, 0);
+      const sent = chain.control.walletBatch(owner, evmCallsOf(first.prepared.group as EvmGroupCalls));
+      await workflowRunUserFundedAuthorize(h.surface, approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: 'first-batch' });
+      await workflowRunUserFundedReport(h.surface, approvalId, wallets, 0, [sent]);
+      const liquidity = await workflowRunContinue(h.surface, approvalId, wallets);
+      h.flows.ownerExecutes('arbitrum-liquidity', owner, liquidity.workflow, 'RECONCILED');
+      await h.drain(runId);
+      const prefix = (await h.store.steps(runId)).slice(0, 3);
+      expect(prefix.map(s => s.state)).toEqual(['RECONCILED', 'RECONCILED', 'RECONCILED']);
+
+      const { prepared, handout } = await workflowRunUserFundedPrepare(h.surface, approvalId, wallets, 2);
+      const requestId = (prepared.request as { id: string }).id;
+      const report = (code: number, token = handout, at = prepared.preparedAt) =>
+        workflowRunUserFundedWalletRefused(h.surface, approvalId, wallets, 2, requestId, at, token, code);
+      for (const code of [4001, 5720, 5730, 5750, -32603]) await expect(report(code)).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+      await expect(report(5760, '0'.repeat(43))).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+      await expect(report(5760, handout, '2026-01-01T00:00:00.000Z')).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
+      await expect(workflowRunUserFundedWalletRefused(h.surface, approvalId, [{ namespace: 'eip155', address: '0x' + '77'.repeat(20) }],
+        2, requestId, prepared.preparedAt, handout, 5760)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
+      await report(5760);
+      await report(5760);
+      const reloaded = (await workflowRunStatus(h.surface, approvalId, wallets)).view.workflowRun!.run;
+      expect(reloaded).toMatchObject({ state: 'RUNNING', currentStep: 3, nextAction: 'OWNER_DECIDES' });
+      expect(reloaded.groups[2]).toMatchObject({ state: 'PREPARED', code: 'WALLET_BATCH_REFUSAL_RECORDED', batchFallbackAt: expect.any(String) });
+      expect((await h.store.events(runId)).filter(e => e.kind === 'GROUP_WALLET_REFUSAL_REPORTED')).toHaveLength(1);
+      await expect(workflowRunUserFundedPrepare(h.surface, approvalId, wallets, 2, handout)).rejects.toThrow('WALLET_BATCH_REFUSAL_RECORDED');
+      await expect(workflowRunResume(h.surface, approvalId, wallets)).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_READY');
+      h.d.advance(Date.parse(reloaded.groups[2]!.batchFallbackAt!) + 1_000 - h.d.now().getTime());
+      chain.control.mineBlocks(1);
+      const resumed = (await workflowRunResume(h.surface, approvalId, wallets, false)).view.workflowRun!;
+      expect(resumed.step).toBeNull();
+      expect(resumed.run).toMatchObject({ workflowRunId: runId, currentStep: 3, nextAction: 'OWNER_SIGNS_STEP' });
+      expect(resumed.run.groups[2]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', code: 'WALLET_BATCH_FALLBACK_VERIFIED' });
+      expect((await h.store.steps(runId)).slice(0, 3)).toEqual(prefix);
+      expect((await h.store.events(runId)).filter(e => e.kind === 'GROUP_WALLET_FALLBACK_VERIFIED')).toHaveLength(1);
+      await expect(workflowRunUserFundedAuthorize(h.surface, approvalId, wallets, 2, { kind: 'EVM_WALLET_BATCH', batchId: requestId }))
+        .rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      for (const index of [3, 4]) {
+        const next = await workflowRunContinue(h.surface, approvalId, wallets);
+        expect(next.view.workflowRun!.step).toEqual({ index, count: 5 });
+        h.flows.ownerExecutes('arbitrum-aave', owner, next.workflow, 'RECONCILED');
+        await h.drain(runId);
+      }
+      expect(await h.store.byId(runId)).toMatchObject({ state: 'COMPLETED' });
+      expect((await h.store.steps(runId)).map(s => s.outcome?.kind)).toEqual(['USER_FUNDED_GROUP', 'USER_FUNDED_GROUP', 'OWNER_RUN', 'OWNER_RUN', 'OWNER_RUN']);
+      expect(chain.control.sends()).toBe(0);
+    } finally { await t.drop(); }
+  });
+
   it('USER_FUNDED_SIMULATION_UNAVAILABLE at due time: run HALTED (executed steps kept), Resume runs the Supply through its own flow, run COMPLETED', async () => {
     const t = await createTestDatabase();
     try {

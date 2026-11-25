@@ -47,7 +47,7 @@ export type DeclineProof =
   | { readonly proven: true; readonly ownerNonce: string; readonly fromBlock: string; readonly toBlock: string }
   | { readonly proven: false; readonly reason: string };
 
-type PreparedBatch = { readonly kind?: unknown; readonly owner?: unknown; readonly fromBlock?: unknown; readonly ownerNonce?: unknown; readonly sponsorship?: unknown;
+type PreparedBatch = { readonly kind?: unknown; readonly owner?: unknown; readonly fromBlock?: unknown; readonly fromBlockHash?: unknown; readonly ownerNonce?: unknown; readonly sponsorship?: unknown;
   readonly superseded?: unknown; readonly group?: { readonly calls?: readonly { readonly kind?: unknown; readonly deadline?: unknown }[] };
   readonly request?: { readonly id?: unknown; readonly atomicRequired?: unknown; readonly calls?: readonly { readonly value?: unknown }[] } };
 
@@ -58,7 +58,8 @@ const hex = (n: bigint) => '0x' + n.toString(16);
 const no = (reason: string): DeclineProof => ({ proven: false, reason });
 
 /** The facts of a prepared wallet batch this proof needs, or the reason it can never be proven. */
-export function declineProofFacts(prepared: unknown): { readonly owner: string; readonly fromBlock: bigint; readonly ownerNonce: bigint; readonly deadline: bigint }
+export function declineProofFacts(prepared: unknown, anchored = false): { readonly owner: string; readonly fromBlock: bigint; readonly fromBlockHash: string | null;
+  readonly ownerNonce: bigint; readonly deadline: bigint }
   | { readonly reason: string } {
   const p = (prepared ?? {}) as PreparedBatch;
   if (p.kind !== 'EVM_WALLET_BATCH') return { reason: 'DECLINE_PROOF_NOT_A_WALLET_BATCH' };
@@ -70,6 +71,10 @@ export function declineProofFacts(prepared: unknown): { readonly owner: string; 
   if (!ADDRESS.test(owner)) return { reason: 'DECLINE_PROOF_OWNER_UNKNOWN' };
   if (typeof p.fromBlock !== 'string' || !DECIMAL.test(p.fromBlock) || typeof p.ownerNonce !== 'string' || !DECIMAL.test(p.ownerNonce))
     return { reason: 'DECLINE_PROOF_NOT_RECORDED' };
+  // Fallback resumes a run with settled steps whose transactions may already be in the sampled block. Its hash proves that block
+  // existed before the wallet had the batch. History retains its original inclusive scan and can verify older preparations.
+  const fromBlockHash = anchored && typeof p.fromBlockHash === 'string' && /^0x[0-9a-f]{64}$/.test(p.fromBlockHash) ? p.fromBlockHash : null;
+  if (anchored && !fromBlockHash) return { reason: 'DECLINE_PROOF_NOT_RECORDED' };
   const calls = p.request?.calls;
   if (!Array.isArray(calls) || calls.length === 0) return { reason: 'DECLINE_PROOF_NOT_A_WALLET_BATCH' };
   // Native value moves without any log: a batch that sends any is never proven.
@@ -83,7 +88,7 @@ export function declineProofFacts(prepared: unknown): { readonly owner: string; 
   const deadlines = built.filter(c => c.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE' || c.kind === 'DEADLINE_GUARD').map(c => c.deadline);
   if (!deadlines.length || deadlines.some(d => typeof d !== 'string' || !DECIMAL.test(d))) return { reason: 'DECLINE_PROOF_NO_DEADLINE' };
   const deadline = deadlines.map(d => BigInt(d as string)).reduce((a, b) => b < a ? b : a);
-  return { owner, fromBlock: BigInt(p.fromBlock), ownerNonce: BigInt(p.ownerNonce), deadline };
+  return { owner, fromBlock: BigInt(p.fromBlock), fromBlockHash, ownerNonce: BigInt(p.ownerNonce), deadline };
 }
 type Block = { readonly number: bigint; readonly hash: string; readonly timestamp: bigint };
 async function blockOf(t: ChainTransport, tag: string): Promise<Block> {
@@ -94,26 +99,28 @@ async function blockOf(t: ChainTransport, tag: string): Promise<Block> {
 
 /**
  * Proves, with FloFi's own read-only transport, that the rejected batch `prepared` was never sent. `settledAt`: the time after which the batch
- * can no longer execute (its validity plus the settle margin); before it nothing is proven.
+ * can no longer execute (its validity plus the settle margin); before it nothing is proven. Fallback checks the safe head and verifies the
+ * sampled preparation block still belongs to its history, then scans only later blocks.
  */
-export async function proveDeclinedBatchUnsent(t: ChainTransport | null, prepared: unknown, settledAt: Date, now: Date): Promise<DeclineProof> {
+export async function proveDeclinedBatchUnsent(t: ChainTransport | null, prepared: unknown, settledAt: Date, now: Date, anchored = false): Promise<DeclineProof> {
   if (!t) return no('DECLINE_PROOF_RPC_UNAVAILABLE');
   if (now.getTime() < settledAt.getTime()) return no('DECLINE_PROOF_NOT_SETTLED');
-  const facts = declineProofFacts(prepared);
+  const facts = declineProofFacts(prepared, anchored);
   if ('reason' in facts) return no(facts.reason);
   try {
     const [latestNonce, pendingNonce, head] = await Promise.all([t.rpc('eth_getTransactionCount', [facts.owner, 'latest']),
-      t.rpc('eth_getTransactionCount', [facts.owner, 'pending']), blockOf(t, 'latest')]);
+      t.rpc('eth_getTransactionCount', [facts.owner, 'pending']), blockOf(t, anchored ? 'safe' : 'latest')]);
     if (BigInt(String(latestNonce)) !== facts.ownerNonce || BigInt(String(pendingNonce)) !== facts.ownerNonce) return no('DECLINE_PROOF_OWNER_TRANSACTED');
     // The chain's own clock: its head must be past the batch's deadline by the margin, else blocks able to execute it may still come.
     if (head.timestamp <= facts.deadline + CHAIN_DEADLINE_MARGIN_S) return no('DECLINE_PROOF_NOT_SETTLED');
     const toBlock = head.number;
-    if (toBlock < facts.fromBlock) return no('DECLINE_PROOF_CHAIN_BEHIND');
+    const first = facts.fromBlockHash ? facts.fromBlock + 1n : facts.fromBlock;
+    if (toBlock < first) return no('DECLINE_PROOF_CHAIN_BEHIND');
     if (toBlock - facts.fromBlock > MAX_SCAN_BLOCKS) return no('DECLINE_PROOF_RANGE_TOO_WIDE');
     const owner = topicOf(facts.owner);
     const filters: readonly (readonly (string | null)[])[] = [
       [TRANSFER_TOPIC, owner], [APPROVAL_TOPIC, owner], [TRANSFER_TOPIC, null, owner], [erc4337.USER_OPERATION_EVENT_TOPIC, null, owner]];
-    for (let from = facts.fromBlock; from <= toBlock; from += SCAN_CHUNK_BLOCKS) {
+    for (let from = first; from <= toBlock; from += SCAN_CHUNK_BLOCKS) {
       const to = from + SCAN_CHUNK_BLOCKS - 1n < toBlock ? from + SCAN_CHUNK_BLOCKS - 1n : toBlock;
       for (const topics of filters) {
         const logs = await t.rpc('eth_getLogs', [{ fromBlock: hex(from), toBlock: hex(to), topics }]);
@@ -122,10 +129,11 @@ export async function proveDeclinedBatchUnsent(t: ChainTransport | null, prepare
       }
     }
     // Read again at the end: a transaction mined or broadcast while the range was scanned is never missed, and the scanned head is still the chain's.
-    const [after, afterPending, scanned] = await Promise.all([t.rpc('eth_getTransactionCount', [facts.owner, 'latest']),
-      t.rpc('eth_getTransactionCount', [facts.owner, 'pending']), blockOf(t, hex(toBlock))]);
+    const [after, afterPending, scanned, anchor] = await Promise.all([t.rpc('eth_getTransactionCount', [facts.owner, 'latest']),
+      t.rpc('eth_getTransactionCount', [facts.owner, 'pending']), blockOf(t, hex(toBlock)),
+      facts.fromBlockHash ? blockOf(t, hex(facts.fromBlock)) : null]);
     if (BigInt(String(after)) !== facts.ownerNonce || BigInt(String(afterPending)) !== facts.ownerNonce) return no('DECLINE_PROOF_OWNER_TRANSACTED');
-    if (scanned.hash !== head.hash) return no('DECLINE_PROOF_CHAIN_REORG');
+    if (scanned.hash !== head.hash || anchor && (anchor.number !== facts.fromBlock || anchor.hash !== facts.fromBlockHash)) return no('DECLINE_PROOF_CHAIN_REORG');
     return { proven: true, ownerNonce: facts.ownerNonce.toString(), fromBlock: facts.fromBlock.toString(), toBlock: toBlock.toString() };
   } catch {
     return no('DECLINE_PROOF_RPC_UNAVAILABLE');

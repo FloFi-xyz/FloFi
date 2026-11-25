@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, consentUserFundedGroupUpgrade, continueWorkflowRunHandoff,
   declineUserFundedGroupCircle, permitUserFundedGroup, prepareUserFundedGroup, upgradeUserFundedGroup,
-  reportUserFundedBatch, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
+  reportUserFundedBatch, reportUserFundedRefusal, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
@@ -25,7 +25,7 @@ import { askCircleFirst, circlePaidGroup, floFiWalletCircleGroup, type CircleCon
 import { CircleConsentCard } from './circle-consent-card';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
-import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
+import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs, walletBatchRefusalCode } from '../workflow-runs/state-machine';
 import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
 import { awaitedDelivery, runProgress, runStepPhase } from '../workflow-runs/run-step-phase';
 import { useLocale } from '../i18n/locale';
@@ -152,7 +152,7 @@ const stepText = (run: WorkflowRunClaim['run'], step: WorkflowRunClaim['run']['s
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
   onProposal: (proposal: ClaimedProposal) => void; onError: (code: string) => void }) {
-  const { t: tr } = useLocale();
+  const { language, t: tr } = useLocale();
   const [review, setReview] = useState<WalletWorkflowReviewView | null>(null);
   // Signatures already given (kept so a retry after the one-time smart-account upgrade never asks the wallet again).
   const signed = useRef(new Map<string, string>());
@@ -307,7 +307,13 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           }, batchSponsorshipOf(p));
         } catch (cause) {
           // Nothing was sent by THIS call: only its own attempt is forgotten (another tab's stays, whatever this call's failure).
-          if (cause instanceof Error && NOTHING_SENT.has(cause.message) && batchAttempts()[attemptKey]?.nonce === nonce) putBatchAttempt(attemptKey, null);
+          const ownsAttempt = batchAttempts()[attemptKey]?.nonce === nonce;
+          if (cause instanceof Error && NOTHING_SENT.has(cause.message) && ownsAttempt) putBatchAttempt(attemptKey, null);
+          const refusal = walletBatchRefusalCode(cause);
+          if (refusal !== null && ownsAttempt && prepared.value.handout && request.id && typeof p.preparedAt === 'string') {
+            const result = await reportUserFundedRefusal(approvalId, index, request.id, p.preparedAt, prepared.value.handout, refusal).catch(() => null);
+            if (result?.ok || result?.code === 'WORKFLOW_RUN_FALLBACK_UNAVAILABLE') return result;
+          }
           throw cause;
         }
         putBatchAttempt(attemptKey, { at: new Date().toISOString(), batchId, nonce });
@@ -359,6 +365,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       : workflowRunStatusHandoff(approvalId);
   });
   const currentGroup = run.groups?.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
+  const fallbackAt = currentGroup?.batchFallbackAt, fallbackReady = fallbackAt !== undefined && Date.parse(fallbackAt) <= Date.now();
   // "Try this step again" is offered exactly when the server would accept it (`run.resumable`, its own `resumeRefusal`: inside the run's
   // window, a confirm-mode or owner-step group's step only while BLOCKED, any other group only while BLOCKED and unsigned). Only a view without
   // that field falls back to this page's own reading: a confirm-mode step, an owner-step group's step, or a group stopped before anything was signed.
@@ -502,6 +509,13 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     {/* Owner requirement (FloFi Wallet + Circle): FloFi's own consent card, before FloFi Wallet is asked anything for a Circle-paid group. */}
     {consentOffer && <CircleConsentCard offer={consentOffer} network={NETWORK[`eip155:${consentOffer.chainId}`] ?? `eip155:${consentOffer.chainId}`} onAnswer={answerConsent}/>}
     {declinedStep !== null && <p role="status">{tr(CIRCLE_CONSENT_DECLINE.DONE, String(declinedStep))}</p>}
+    {fallbackAt && <div className="workflow-run-choice">
+      <p role="status">{fallbackReady ? tr('Your wallet refused the batch. FloFi will check the network before you review and confirm each step separately.')
+        : tr('Your wallet refused the batch. FloFi can check the network for separate confirmations after {0}.',
+          new Date(fallbackAt).toLocaleTimeString(language, { hour: 'numeric', minute: '2-digit' }))}</p>
+      {fallbackReady && <button type="button" disabled={busy} onClick={() => void act(() => resumeWorkflowRunHandoff(approvalId))}>
+        {tr('Confirm the batch steps separately')}</button>}
+    </div>}
     {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && <div className="approval-actions">
       <button type="button" disabled={busy} onClick={() => void authorizeGroup(currentGroup.index)}>
         {tr('Authorize {0} now', stepsOf(tr, currentGroup.steps[0], currentGroup.steps[1]))}</button>

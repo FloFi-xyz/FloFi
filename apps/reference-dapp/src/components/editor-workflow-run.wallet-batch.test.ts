@@ -21,13 +21,13 @@ vi.mock('react', async importOriginal => {
     useRef: (v: unknown) => slot(() => ({ current: v })), useCallback: (f: unknown) => { hooks.at++; return f; },
     useEffect: (f: () => unknown) => { hooks.effects[hooks.at++] = f; } };
 });
-const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn() }));
+const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn(), refusal: vi.fn(), resume: vi.fn() }));
 vi.mock('../app/editor-workflow-execution-action', () => ({ editorWorkflowExecutionAvailability: async () => ({ enabled: true, code: null }),
   reviewEditorWorkflow: server.review, authorizeEditorWorkflow: server.authorize }));
 vi.mock('../app/approve-action', () => ({ workflowRunStatusHandoff: server.status, prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorizeGroup,
-  reportUserFundedBatch: server.report, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: vi.fn() }));
-const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn() }));
-vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
+  reportUserFundedBatch: server.report, reportUserFundedRefusal: server.refusal, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: server.resume }));
+const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn(), handout: vi.fn() }));
+vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: browser.handout, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
   signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
 const { useEditorWorkflowRun, EXECUTION_REFUSAL, EXECUTION_REASON, STEP_REFUSAL, reviewOffersStepByStep, BATCH_PREPARATION_VALIDITY_MS } = await import('./editor-workflow-run');
@@ -42,7 +42,8 @@ const runView = { workflowRunId: 'wfr_' + 'b'.repeat(26), approvalId: APPROVAL, 
   groups: [{ index: 0, chain: 'eip155:8453', strategy: 'EVM_WALLET_BATCH', signing: 'UPFRONT', steps: [0, 1], state: 'PREPARED', batchId: GROUP_ID, signed: false,
     validUntil: null, feePayer: OWNER, planned: { steps: [{ index: 0 }, { index: 1 }], calls: 1, approvals: 0, healthFactorAfter: null } }] };
 const proposal = { view: { workflowRun: { run: runView } } };
-const prepared = { feePayer: OWNER, prepared: { kind: 'EVM_WALLET_BATCH', request: { version: '2.0.0', id: GROUP_ID, chainId: '0x2105', from: OWNER, atomicRequired: true,
+const PREPARED_AT = '2026-11-25T16:00:00.000Z', HANDOUT = 'a'.repeat(43);
+const prepared = { feePayer: OWNER, prepared: { kind: 'EVM_WALLET_BATCH', preparedAt: PREPARED_AT, request: { version: '2.0.0', id: GROUP_ID, chainId: '0x2105', from: OWNER, atomicRequired: true,
   calls: [{ to: '0x' + '56'.repeat(20), value: '0x0', data: '0x095ea7b3' }] } } };
 const review = { owner: OWNER, workflowHash: '0x' + '1'.repeat(64), validUntil: '2999-01-01T00:00:00.000Z', mode: 'ONE_WALLET_CONFIRMATION', refusal: null,
   steps: [{ index: 0 }, { index: 1 }], groups: [{ strategy: 'EVM_WALLET_BATCH', steps: [0, 1], chain: 'eip155:8453' }] };
@@ -91,6 +92,28 @@ beforeEach(() => {
 });
 
 describe('Editor batch send: the attempt is kept only once the wallet is asked to send', () => {
+  it('reports a capability refusal from this tab and switches only after an explicit action on the same run', async () => {
+    browser.handout.mockReturnValue(HANDOUT);
+    browser.send.mockImplementationOnce(sendThen(async onSending => {
+      asked(onSending);
+      throw Object.assign(new Error('WALLET_BATCH_NOT_SENT'), { walletCode: 5760 });
+    }));
+    const refused = { ...runView, nextAction: 'OWNER_DECIDES', groups: [{ ...runView.groups[0], batchFallbackAt: '2026-11-25T16:12:00.000Z' }] };
+    server.refusal.mockResolvedValue({ ok: true, value: { view: { workflowRun: { run: refused } } } });
+    const state = await authorizeOnce();
+    expect(server.refusal).toHaveBeenCalledExactlyOnceWith(APPROVAL, 0, GROUP_ID, PREPARED_AT, HANDOUT, 5760);
+    expect(state.run?.nextAction).toBe('OWNER_DECIDES');
+    expect(state.unrecorded).toBe(false);
+    expect(server.resume).not.toHaveBeenCalled();
+    expect(server.authorizeGroup).not.toHaveBeenCalled();
+
+    const resumed = { ...runView, nextAction: 'OWNER_SIGNS_STEP', groups: [{ ...runView.groups[0], strategy: 'EVM_OWNER_STEP', state: 'PLANNED', batchId: null }] };
+    server.resume.mockResolvedValue({ ok: true, value: { view: { workflowRun: { run: resumed } } } });
+    await state.resume();
+    expect(server.resume).toHaveBeenCalledExactlyOnceWith(APPROVAL, false);
+    expect(render().run?.nextAction).toBe('OWNER_SIGNS_STEP');
+    expect(walletSent).toBe(1);
+  });
   it('a failure before wallet_sendCalls keeps nothing: the group can be authorized again and is sent then', async () => {
     for (const code of ['WALLET_WRONG_NETWORK', 'WALLET_ACCOUNT_MISMATCH']) {
       hooks.slots = []; storage.clear();
