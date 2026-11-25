@@ -2010,6 +2010,14 @@
       "path": "apps/reference-dapp/src/domain/slippage-range-message.test.ts",
       "stage": "unit"
     },
+    "app.domain.flofi-wallet-bridge": {
+      "path": "apps/reference-dapp/src/domain/flofi-wallet-bridge.test.ts",
+      "stage": "unit"
+    },
+    "app.components.router-panel": {
+      "path": "apps/reference-dapp/src/components/router-panel.test.tsx",
+      "stage": "unit"
+    },
     "app.components.account.sign-in-methods": {
       "path": "apps/reference-dapp/src/components/account/sign-in-methods.test.tsx",
       "stage": "unit"
@@ -2210,7 +2218,8 @@
     "app.domain.relative-amount",
     "app.domain.intelligence.beta-critical-recovery",
     "app.domain.slippage-range-message",
-    "app.components.account.sign-in-methods"
+    "app.components.account.sign-in-methods",
+    "app.domain.flofi-wallet-bridge"
   ],
   "modules": [
     {
@@ -2343,7 +2352,8 @@
         "apps/reference-dapp/src/accounts/page-exit.ts",
         "apps/reference-dapp/src/app/(account)/account/sign-in-methods/page.tsx",
         "apps/reference-dapp/src/components/account/sign-in-methods.tsx",
-        "apps/reference-dapp/src/app/api/account/presence/route.ts"
+        "apps/reference-dapp/src/app/api/account/presence/route.ts",
+        "apps/reference-dapp/src/domain/flofi-wallet-bridge.ts"
       ],
       "suites": [
         "app.accounts.account-csp",
@@ -2398,7 +2408,8 @@
         "app.accounts.account-store-schema19.pg",
         "app.components.account.account-shell",
         "app.app.api.account.presence.route",
-        "app.components.account.sign-in-methods"
+        "app.components.account.sign-in-methods",
+        "app.domain.flofi-wallet-bridge"
       ],
       "gaps": [
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
@@ -2422,6 +2433,7 @@
         "packages/action-registry/src/universal-router.ts"
       ],
       "suites": [
+        "app.components.router-panel",
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
@@ -5216,6 +5228,7 @@
         "apps/reference-dapp/src/domain/simulation-unavailable.ts",
         "apps/reference-dapp/src/domain/solana-refusal.ts",
         "apps/reference-dapp/src/domain/usd-estimate.ts",
+        "apps/reference-dapp/src/domain/price-assets.ts",
         "apps/reference-dapp/src/domain/workflow-edits.ts",
         "apps/reference-dapp/src/domain/workflow-sequence.ts",
         "apps/reference-dapp/src/domain/workflow-steps.ts",

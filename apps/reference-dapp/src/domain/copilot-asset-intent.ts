@@ -60,7 +60,7 @@ export function explicitOutputAsset(text: string, receiving = false, sent?: stri
 }
 export function explicitInputAsset(text: string, receiving = false, sent?: string | null): string | null {
   // BUILD-FLOFI-UX-FIX-003: "bridge ETH to 1 USD" names 1 USD as what the user wants to receive; that clause never names the asset sent.
-  const clauses = [...text.matchAll(/(?<![\w@.])\d+(?:[.,]\d+)*\s+([^\n]+?)(?=\s+(?:from|on|in|into|to|for|da|do|de|na|no|para|pra|por|using|usando)\s+|$)/gi)]
+  const clauses = [...text.matchAll(/(?<![\w@.])\d+(?:[.,]\d+)*\s+([^\n]+?)(?=\s+(?:from|on|in|into|to|for|da|do|de|na|no|em|para|pra|por|using|usando)\s+|$)/gi)]
     .filter(clause => !receiving || !destinationAmounts(text, sent).some(found => found.index === clause.index));
   // Multiple amounts/deposits need the model's action-specific interpretation.
   return clauses.length === 1 ? reference(clauses[0]![1]!) : null;

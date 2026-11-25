@@ -8,6 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HookHarness } from '../test-utils/hook-harness';
+import { createRouterNode } from '../domain/router-authoring';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const OWNER = '0x' + 'ab'.repeat(20);
@@ -18,10 +20,12 @@ const f = vi.hoisted(() => ({
   selected: null as { account: string; chainId: string } | null,
   /** FloFi's HttpOnly wallet session (`walletSessionStatus`), or none. */
   floFiSession: null as { account: string; expiresAt: string } | null,
+  nodes: [] as SemanticWorkflow['nodes'],
+  status: null as { owner: string; review: { intent: { sourceChain: string; destinationChain: string } } } | null,
   calls: { connect: 0, challenge: 0, signIn: 0, simulate: 0, personalSign: 0 },
 }));
 vi.mock('../i18n/locale', () => ({ useLocale: () => ({ t: (text: string) => text }) }));
-vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ runtimeWorkflow: { schemaVersion: '1.0.0', workflowId: 'wf-router', revision: 1, nodes: [], resourceEdges: [] } }) }));
+vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ runtimeWorkflow: { schemaVersion: '1.0.0', workflowId: 'wf-router', revision: 1, nodes: f.nodes, resourceEdges: [] } }) }));
 vi.mock('./settlement-sync', () => ({ useSettlementSync: () => undefined }));
 vi.mock('./wallet-request-lifecycle', () => ({ watchWalletResponse: vi.fn(), walletResultStorage: () => null, rememberWalletReport: vi.fn(), forgetWalletReport: vi.fn(),
   readWalletReports: () => [], walletReportRecorded: () => false }));
@@ -38,7 +42,8 @@ vi.mock('../app/wallet-session-action', () => ({
 }));
 vi.mock('../app/router-action', () => {
   const refused = async () => ({ ok: false, code: 'ROUTER_TEST_DOUBLE' });
-  return { crossChainRouterMode: async () => 'off', routerInfo: refused, routerRuns: async () => ({ ok: true, value: [] }), routerStatus: refused, routerBegin: refused,
+  return { crossChainRouterMode: async () => 'off', routerInfo: refused, routerRuns: async () => ({ ok: true, value: [] }),
+    routerStatus: async () => f.status ? { ok: true, value: f.status } : refused(), routerBegin: refused,
     routerHandoff: refused, routerInvalidate: refused, routerObserve: refused, routerRefresh: refused, routerReport: refused, routerReview: refused, routerWalletFailure: refused,
     routerSimulate: async () => { f.calls.simulate++; return { ok: false, code: 'ROUTER_SIMULATION_DOUBLE' }; } };
 });
@@ -53,6 +58,8 @@ async function act(action: () => Promise<void>) { await action(); await settle()
 beforeEach(() => {
   host = new HookHarness();
   f.connected = null; f.selected = null; f.floFiSession = null; f.calls = { connect: 0, challenge: 0, signIn: 0, simulate: 0, personalSign: 0 };
+  f.nodes = [createRouterNode('bridge', { source: 'Base', destination: 'Arbitrum', token: 'USDC', amount: '1', recipient: '', slippage: '100', routing: 'AUTO' })];
+  f.status = null;
   vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => undefined } });
 });
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
@@ -85,5 +92,28 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the Router store simulat
     await act(() => store.simulate({ interactive: false }));
     expect(f.calls).toEqual({ connect: 0, challenge: 0, signIn: 0, simulate: 1, personalSign: 0 });
     expect(store.error).toBe('ROUTER_SIMULATION_DOUBLE');
+  });
+});
+
+describe('Router network selection', () => {
+  it('an idle store defaults to mainnet presentation and never asks for permission or simulates an unauthored pair', async () => {
+    f.nodes = [];
+    read(); await settle();
+    expect(store.network).toBe('mainnet');
+    await act(() => store.simulate());
+    expect(store.error).toBe('ROUTER_PAIR_UNSUPPORTED');
+    expect(f.calls.simulate).toBe(0);
+    expect(f.calls.connect).toBe(0);
+  });
+  it.each([
+    ['an unknown pair', 'eip155:10', 'eip155:8453'],
+    ['another registered pair', 'eip155:1', 'eip155:42161'],
+  ])('does not adopt a saved run reporting %s', async (_label, sourceChain, destinationChain) => {
+    f.floFiSession = { account: OWNER, expiresAt: '2999-01-01T00:00:00.000Z' };
+    f.status = { owner: OWNER, review: { intent: { sourceChain, destinationChain } } };
+    read(); await settle();
+    await act(() => store.open('xroute-' + '11'.repeat(16)));
+    expect(store.record).toBeNull();
+    expect(store.recovered).toBe(false);
   });
 });

@@ -85,6 +85,8 @@ import { ReviewAuthorizationDetails } from './review-workspace';
 import { workflowBoundAuthorization } from '../domain/review-presentation';
 import { useReviewAuthorization } from '../state/review-authorization';
 import { useWalletConnection, walletNetworkTarget } from '../state/wallet-connection';
+import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
+import { floFiWalletBridgeIssue } from '../domain/flofi-wallet-bridge';
 import { SummaryBar } from './summary-bar';
 import type { SimulationSource } from '../domain/simulation-presentation';
 import { SimulateWorkspace } from './simulate-workspace';
@@ -606,22 +608,23 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     await simulation;
   };
   const walletConnection = useWalletConnection(stepChain);
-  const walletIssueIn = (shown: 'EN' | 'PT') => approvalWallet && signer && !sameAccount(approvalWallet, signer)
-    ? translate(shown, 'This proposal was loaded for {0}. Switch your wallet to that account to authorize it.', shortAccount(approvalWallet)) : null;
-  const walletIssue = walletIssueIn(language === 'PT' ? 'PT' : 'EN');
   const requiredSigningChain = !('retired' in simulationSource.state && simulationSource.state.retired) && authorization.chain
     || runtimeWorkflow.nodes.find(node => !node.actionType.startsWith('mock-'))?.chainId;
   const networkTarget = walletNetworkTarget(requiredSigningChain);
+  // The proposal's own account: known before the run path is chosen (the FloFi Wallet check below joins it once it is).
+  const accountIssueIn = (shown: 'EN' | 'PT') => approvalWallet && signer && !sameAccount(approvalWallet, signer)
+    ? translate(shown, 'This proposal was loaded for {0}. Switch your wallet to that account to authorize it.', shortAccount(approvalWallet)) : null;
+  const accountIssue = accountIssueIn(language === 'PT' ? 'PT' : 'EN');
   const canReadAcrossEvmNetworks = networkTarget?.ecosystem === 'evm' && (simulationSource.kind === 'universal' ||
     simulationSource.kind === 'public' && publicTestnet.catalogAvailable(requiredSigningChain ?? ''));
   const networkAction = signer && requiredSigningChain && networkTarget && reviewBinding.wallet.chain !== requiredSigningChain &&
     (!canReadAcrossEvmNetworks || authorization.key && !reviewBinding.wallet.changed) ? {
-    label: tr('Switch to {0}', networkTarget.label), labelIn: (shown: 'EN' | 'PT') => translate(shown, 'Switch to {0}', networkTarget.label), network: networkTarget.label, disabled: Boolean(simulationSource.state.busy || approvalGate || walletIssue),
+    label: tr('Switch to {0}', networkTarget.label), labelIn: (shown: 'EN' | 'PT') => translate(shown, 'Switch to {0}', networkTarget.label), network: networkTarget.label, disabled: Boolean(simulationSource.state.busy || approvalGate || accountIssue),
     request: () => void walletConnection.switchNetwork(requiredSigningChain),
   } : undefined;
   const lifecycleState = { workflow: runtimeWorkflow, context, source: simulationSource, authorization: authorization,
     wallet: reviewBinding.wallet, execution: executionStart, progress: executionProgress, recovery: executionProgress.recovery,
-    invalidWorkflow: Boolean(reviewError || authoringIncomplete || approvalGate || testNetworkWorkflow || walletIssue || autoPrepare && !approvalWallet) };
+    invalidWorkflow: Boolean(reviewError || authoringIncomplete || approvalGate || testNetworkWorkflow || accountIssue || autoPrepare && !approvalWallet) };
   const lifecycleControls = useExecutionControls(lifecycleState);
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: "Run workflow" — a multi-step Canvas workflow that has not started here, valid and simulated at its
   // current revision, starts the shared workflow run on /approve (the server re-reads and re-gates it). The revision whose simulation last made it
@@ -660,6 +663,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // A run of this workflow (started here, or followed after a reload) always dominates: whatever the deployment's availability answers (an expired
   // account session, before the answer arrives), the workflow is never offered again through its per-step or own-card path.
   const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
+  // Incident 9 (`domain/flofi-wallet-bridge.ts`): a bridge on its own flow is never handed to FloFi Wallet, which cannot sign it yet.
+  const floFiBridgeIssue = floFiWalletBridgeIssue({ kind: simulationSource.kind, signerIsFloFiWallet: Boolean(signer && usesFloFiWallet(signer)),
+    groupedRun: groupedPrimary, executing: Boolean(currentExecution(executionProgress)), ecosystem: networkTarget?.ecosystem });
+  const walletIssueIn = (shown: 'EN' | 'PT') => accountIssueIn(shown) ?? (floFiBridgeIssue ? translate(shown, floFiBridgeIssue) : null);
+  const walletIssue = walletIssueIn(language === 'PT' ? 'PT' : 'EN');
   // A single card back on its own flow shows only that flow (its own Review and wording): never the whole-workflow Review or a second primary action
   // beside it (final frontend-ux review). A started run of it always stays shown.
   const groupedShown = workflowRunHere.visible && !singleCardFallback;
@@ -840,11 +848,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const stepSwap = simulationSource.kind === 'public' ? swapProfile(stepChain) : null;
   const stepNeedsWallet = !engineering && sequence && !signer && networkTarget && actionable && !simulationDisabled && !sequenceDone && !currentExecution(executionProgress)
     && (simulationSource.kind !== 'public' || authorization.key || stepSwap && ownerBoundSwapReview(stepSwap));
-  // Keep the stage action available. In a sequence the header can show a different wallet from the one the active card needs.
-  const stepWalletAction = stepNeedsWallet ? <div className="canvas-lifecycle-control">
-    <button type="button" className="secondary" onClick={() => void walletConnection.connect()}>{tr(networkTarget.ecosystem === 'solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet')}</button>
+  // Execute keeps the wallet prerequisite in the same action slot as Simulate, Refresh and Authorize.
+  const stepWalletAction = (inExecute: boolean) => stepNeedsWallet ? <div className="canvas-lifecycle-control">
+    <button type="button" data-lifecycle-action="connect-wallet" className={inExecute ? 'primary' : 'secondary'} onClick={() => void walletConnection.connect()}>
+      {tr(networkTarget.ecosystem === 'solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet')}</button>
     {walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}
   </div> : null;
+  const executeWalletAction = canvasAction.kind === 'simulate' && !simulationSource.state.busy ? stepWalletAction(true) : null;
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
     {/* A single card shows no workflow-run note (final frontend-ux review): its one action is followed like the card's own flow. */}
     {workflowRunHere.started && !singleCardRun && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
@@ -858,7 +868,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       {tr(groupedRunOpen ? 'Open workflow progress' : workflowRunHere.phase === 'reviewing' ? 'Simulating workflow…' : 'Simulate workflow')}</button>
     {!groupedRunOpen && authoringIncomplete && <p role="status">{tr('Configure the action amount on the Canvas first')}</p>}
   </div>;
-  const simulateActionFor = (note: string | null, options: { readonly stay?: boolean; readonly labelFor?: (action: CanvasAction) => string } = {}) => groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
+  const simulateActionFor = (note: string | null, options: { readonly stay?: boolean; readonly inExecute?: boolean; readonly labelFor?: (action: CanvasAction) => string } = {}) => groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
       <p role="status">{sequenceIssue}</p>
       {sequenceRestore.status === 'UNVERIFIED' && <>
         <button type="button" onClick={sequenceRestore.retry}>{tr('Check again')}</button>
@@ -867,11 +877,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       </>}
     </div>
     : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
-    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" className="primary canvas-network-switch" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div> : <>
+    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" className="primary canvas-network-switch" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div>
+    : options.inExecute && executeWalletAction ? executeWalletAction : <>
       <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
         simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={note}
         simulate={() => { if (!options.stay) setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')} labelFor={options.labelFor}/>
-      {stepWalletAction}
+      {!options.inExecute && stepWalletAction(false)}
     </>;
   const simulateAction = simulateActionFor(sequenceNote);
   // P0 hotfix (execution continuity): in Execute, a step-by-step workflow (its run, or its next step) and an owner-bound swap's approval → swap
@@ -879,13 +890,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // offers only "Create new workflow" (never a simulation of its last step again).
   const inlineExecute = sequenceContinuing || Boolean(liveStep && (sequence || ownerBoundContinuation));
   const executeAction = sequenceFinishedIdle ? <button type="button" className="primary execute-new-workflow" onClick={startNewWorkflow}>{tr('Create new workflow')}</button>
-    : inlineExecute && !sequenceRestore && !walletIssue && !networkAction ? <>
+    : inlineExecute && !sequenceRestore && !walletIssue && !networkAction ? executeWalletAction ??
       <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
         simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={sequenceContinuing ? null : sequenceNote}
         simulate={() => simulateAgain()} onExecute={() => setTab('Execute')}/>
-      {stepWalletAction}
-    </>
-    : simulateAction;
+    : simulateActionFor(sequenceNote, { inExecute: true });
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat lives here, above the stage switch, so Build, Simulate and Execute share one conversation. It reaches
   // the same lifecycle the Canvas CTA uses (this Simulate, these controls); on /approve it keeps its earlier proposal-only behaviour.
   // BUILD-FLOFI-CHAT-E2E-FIX-002: amounts typed on Canvas cards and never applied block every simulation. The chat names each one (step, action,
@@ -1128,7 +1137,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const wholeWorkflowReview = !sequence && !liveExecution;
   const executeLabel = (action: CanvasAction) => (action.kind === 'approve' || action.kind === 'execute') ? wholeWorkflowReview ? 'Authorize workflow' : action.label
     : action.kind === 'simulate' && action.label === 'Simulate again' && !liveExecution ? 'Refresh review' : action.label;
-  const reviewFooterAction = groupedPrimary ? <EditorWorkflowRunPrimaryAction state={workflowRunHere}/> : simulateActionFor(null, { stay: true, labelFor: executeLabel });
+  const reviewFooterAction = groupedPrimary ? <EditorWorkflowRunPrimaryAction state={workflowRunHere}/> : simulateActionFor(null, { stay: true, inExecute: true, labelFor: executeLabel });
   // B2: Simulate's ONE primary action is inside its panel until the simulation is valid; then the footer's "Review operation" opens Execute (no
   // authorization from Simulate). A wallet, network or restore control the lifecycle needs first stays in the panel too.
   const simulatePanelAction = groupedPrimary ? <EditorWorkflowSimulateAction state={workflowRunHere} disabled={Boolean(authoringIncomplete || networkQuestion && !actionable)}
@@ -1151,9 +1160,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : placement !== 'footer' ? null
     : reviewBlock ? reviewFooterAction
     : sequenceFinishedIdle ? <button type="button" className="primary execute-new-workflow" onClick={startNewWorkflow}>{tr('Create new workflow')}</button>
-    : inlineExecute && !sequenceRestore && !walletIssue && !networkAction ? <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
+    : inlineExecute && !sequenceRestore && !walletIssue && !networkAction ? executeWalletAction ?? <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
       simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} simulate={() => simulateAgain()} onExecute={() => setTab('Execute')} labelFor={executeLabel}/>
-    : simulateActionFor(null, { stay: Boolean(authorization.key) || canvasAction.label === 'Simulate again', labelFor: executeLabel });
+    : simulateActionFor(null, { stay: Boolean(authorization.key) || canvasAction.label === 'Simulate again', inExecute: true, labelFor: executeLabel });
   // C1/C2 (step-by-step and single-action path): the Review the owner authorizes, before any execution exists, at the top of the status panel.
   // It is shown whenever a Review of this step can be accepted (also while a run continues, e.g. a Review refreshed in place, and beside the
   // whole-workflow block of a step-by-step workflow), so the Review accepted is always the one on screen.

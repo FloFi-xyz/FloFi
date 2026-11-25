@@ -59,6 +59,13 @@ describe('incident 2 · "Quero trocar Solana por USDC na Solana", then "0.001"',
     const asked = session().say('Quero trocar 1 solana por USDC', intent.action(act.swap({ network: 'SOLANA', inputAsset: 'SOL', outputAsset: 'USDC', amount: '1' }), 'PT'))!;
     expect(asked.kind).not.toBe('PROPOSAL');
   });
+  it.each([
+    ['EN', 'Swap 1 USDC to Solana on Solana'],
+    ['PT', 'Converta 1 USDC em Solana na Solana'],
+  ] as const)('uses Solana as the received asset when a separate network is named (%s)', (language, text) => {
+    const reply = session(language).say(text, intent.action(act.swap({ network: 'SOLANA', inputAsset: 'USDC', outputAsset: 'Solana', amount: '1' }), language));
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SOLANA_SWAP', input: { from: 'USDC', to: 'SOL' } } });
+  });
   it('USDC spelled "Solana" is never read as SOL: a token the user did not write is still asked about', () => {
     const asked = session().say('Quero trocar USDC por USDT na Solana', intent.action(act.swap({ network: 'SOLANA', inputAsset: 'SOL', outputAsset: 'USDT', amount: '1' }), 'PT'))!;
     expect(asked.kind).not.toBe('PROPOSAL');
@@ -107,6 +114,32 @@ describe('incident 4 · "Troque 1 USDC por ETH e depois troque o ETH recebido po
 });
 
 describe('specialist review: FloFi never claims funding the runtime does not give', () => {
+  it.each([[null, ''], ['RELAY', ' via Relay']] as const)('uses Robinhood USDG as the delivered token (%s), with a separate cap for the next step', (routing, via) => {
+    const s = session('EN');
+    const bridge = act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ROBINHOOD', asset: 'USDC', amount: '1', routing });
+    const swap = act.swap({ network: 'ROBINHOOD', inputAsset: 'USDG', outputAsset: 'ETH' });
+    const reply = s.say(`Bridge 1 USDC from Base to Robinhood${via}, then swap the USDG received to ETH on Robinhood.`, intent.composition([bridge, swap]))!;
+    expect(reply.kind).toBe('CLARIFICATION');
+    expect(reply.text).toContain('Step 2 spends the USDG');
+    expect(s.say('1 USDG')).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE', steps: [
+      { type: routing === 'RELAY' ? 'ADD_UNIVERSAL_BRIDGE' : 'ADD_ROUTER_BRIDGE' }, {},
+    ] } });
+    s.apply();
+    const [first, second] = sequenceOf(s).steps;
+    const usdg = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+    expect(first).toMatchObject({ output: { chainId: 'eip155:4663', address: usdg } });
+    expect(second).toMatchObject({ fundedBy: 0, input: { chainId: 'eip155:4663', address: usdg, amount: '1000000' } });
+  });
+  it('does not offer a downstream USDC step the USDC amount sent when the bridge delivers USDG', () => {
+    const s = session('EN');
+    const reply = s.say('Bridge 1 USDC from Base to Robinhood, then swap USDC to ETH on Robinhood.', intent.composition([
+      act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ROBINHOOD', asset: 'USDC', amount: '1' }),
+      act.swap({ network: 'ROBINHOOD', inputAsset: 'USDC', outputAsset: 'ETH' }),
+    ]))!;
+    expect(reply.kind).not.toBe('PROPOSAL');
+    expect(reply.text).not.toContain('Step 2 spends the USDC');
+    expect(s.pending).toBeNull();
+  });
   it('a bridge delivered to someone else does not fund the next step (chat review H1a): refused, never the wallet\'s own balance', () => {
     const s = session();
     const reply = s.say(`Levar 1 USDC da Ethereum para a Base para ${OTHER_ADDRESS} e emprestar na Aave.`, intent.composition([

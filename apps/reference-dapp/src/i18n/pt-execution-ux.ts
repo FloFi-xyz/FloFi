@@ -45,6 +45,8 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
   'Authorize in wallet': 'Autorizar na carteira',
   // The /approve signing surface and its compact proposal notice.
   'This proposal was loaded for {0}. Switch your wallet to that account to authorize it.': 'Esta proposta foi carregada para {0}. Mude a carteira para essa conta para a autorizar.',
+  'FloFi Wallet can’t sign bridges yet. Use MetaMask or another EVM wallet for this bridge.': 'A FloFi Wallet ainda não assina bridges. Use a MetaMask ou outra carteira EVM nesta bridge.',
+  'FloFi Wallet can’t sign bridges yet. Use Phantom, Solflare or another Solana wallet for this bridge.': 'A FloFi Wallet ainda não assina bridges. Use a Phantom, a Solflare ou outra carteira Solana nesta bridge.',
   'FloFi prepares a fresh simulation for this wallet. Check it, then authorize in your wallet.': 'A FloFi prepara uma simulação nova para esta carteira. Verifique-a e autorize na sua carteira.',
   'This proposal is already in a FloFi workflow for your wallet. Restore it to continue. An interrupted run stays in Your runs: reconcile it before starting again.':
     'Esta proposta já está num fluxo FloFi da sua carteira. Restaure-a para continuar. Uma execução interrompida fica em As suas execuções: reconcilie-a antes de recomeçar.',
