@@ -272,8 +272,9 @@ export function evmStepBuildable(step: StepRequirement, chains: readonly string[
   }
   return `USER_FUNDED_ACTION_NOT_BUILDABLE:${step.action.toUpperCase()}`;
 }
-/** The widest slippage a batched swap may be signed with (its minimum is fixed in the batch). */
-export const MAX_BATCH_SLIPPAGE_BPS = 300;
+/** The widest slippage a batched swap or bridge may be signed with (its minimum is fixed in the batch); defined beside the bridge builder. */
+export { MAX_BATCH_SLIPPAGE_BPS } from './bridge-calls.ts';
+import { MAX_BATCH_SLIPPAGE_BPS } from './bridge-calls.ts';
 /** `allowance(address,address)` of an ERC-20 (selector). */
 const ALLOWANCE_SELECTOR = '0xdd62ed3e';
 /** `balanceOf(address)` (selector): an Aave variable-debt token's balance is the owner's current debt, interest included. */

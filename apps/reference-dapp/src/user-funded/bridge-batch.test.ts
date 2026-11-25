@@ -90,6 +90,9 @@ describe('P0 hotfix E1: a certified Router bridge is buildable in a user-funded 
     // Only Across direct deposits (never the LI.FI Diamond); only the owner as recipient (known, and equal).
     expect(evmStepBuildable(bridgeOf({ version: 2, steps: [{ ...BRIDGE, routing: 'lifi' }] }), FACTS.chains, OWNER, [ROUTE])).toBe('USER_FUNDED_BRIDGE_PROVIDER_UNSUPPORTED');
     expect(evmStepBuildable(bridgeOf({ version: 2, steps: [{ ...BRIDGE, routing: 'across' }] }), FACTS.chains, OWNER, [ROUTE])).toBeNull();
+    // Recovery build: a single Router bridge accepts up to 5% (CTO decision); in a batch its minimum is fixed at preparation, so above 3% it is an owner step.
+    for (const [slippageBps, code] of [[300, null], [301, 'WORKFLOW_SLIPPAGE_UNSUPPORTED'], [500, 'WORKFLOW_SLIPPAGE_UNSUPPORTED']] as const)
+      expect(evmStepBuildable({ ...bridgeOf({ version: 2, steps: [{ ...BRIDGE, routing: 'across' }] }), slippageBps }, FACTS.chains, OWNER, [ROUTE])).toBe(code);
     const other = bridgeOf({ version: 2, steps: [{ ...BRIDGE, recipient: '0x' + '44'.repeat(20) }] });
     expect(evmStepBuildable(other, FACTS.chains, OWNER, [ROUTE])).toBe('USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER');
     expect(evmStepBuildable(bridgeOf({ version: 2, steps: [{ ...BRIDGE, recipient: OWNER }] }), FACTS.chains, OWNER, [ROUTE])).toBeNull();

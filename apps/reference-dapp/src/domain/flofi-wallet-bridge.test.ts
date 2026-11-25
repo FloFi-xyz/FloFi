@@ -12,6 +12,16 @@ describe('FloFi Wallet and bridges (BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001, inci
     expect(floFiWalletBridgeIssue({ ...base, kind: 'universal' })).toBe(FLOFI_WALLET_BRIDGE_ISSUE.evm);
     expect(floFiWalletBridgeIssue({ ...base, kind: 'universal', ecosystem: 'solana' })).toBe(FLOFI_WALLET_BRIDGE_ISSUE.solana);
   });
+  it('names a later bridge of a step-by-step workflow before its first step (wallet-execution review)', () => {
+    const later = [{ kind: 'public', chainId: 'eip155:8453' }, { kind: 'router', chainId: 'eip155:8453' }];
+    expect(floFiWalletBridgeIssue({ ...base, kind: 'public', laterSteps: later })).toBe(FLOFI_WALLET_BRIDGE_ISSUE.laterEvm);
+    expect(floFiWalletBridgeIssue({ ...base, kind: 'solana-swap', ecosystem: 'solana', laterSteps: [{ kind: 'universal', chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' }] }))
+      .toBe(FLOFI_WALLET_BRIDGE_ISSUE.laterSolana);
+    // A bridge signed from the other ecosystem is not signed by this FloFi Wallet; unknown kinds and grouped runs stay silent.
+    expect(floFiWalletBridgeIssue({ ...base, kind: 'public', laterSteps: [{ kind: 'universal', chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' }] })).toBeNull();
+    expect(floFiWalletBridgeIssue({ ...base, kind: 'public', laterSteps: [{ kind: null, chainId: 'eip155:8453' }] })).toBeNull();
+    expect(floFiWalletBridgeIssue({ ...base, kind: 'public', groupedRun: true, laterSteps: later })).toBeNull();
+  });
   it('mirrors the server: bridges are not a flow FloFi Wallet can bind', () => {
     expect(Object.keys(SIGNING_FLOWS).filter(flow => /router|bridge|universal|across|relay/i.test(flow))).toEqual([]);
   });

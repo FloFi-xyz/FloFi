@@ -33,7 +33,7 @@ import { CONFIRM_RUN_SECONDS, isWalletBatchFallbackCode, MAYBE_SUBMITTED, WALLET
   WALLET_BATCH_SETTLE_MS, WALLET_REQUEST_REJECTED, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
-import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
+import { evmStepBuildable, MAX_BATCH_SLIPPAGE_BPS, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, koraGroupNativeCovers, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
@@ -362,8 +362,11 @@ const preparedHorizonMs = (strategy: GroupRecord['strategy']) => strategy === 'E
   : strategy === 'SOLANA_SIGN_ALL' ? solanaPreparedTtlMs(1) : 0;
 /** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
 /** Whether a step can join a user-funded batch: true, or the builder's own closed reason why not (shown as the group's downgrade). */
+// Swap review (recovery build): a Solana sign-all or durable-nonce group fixes each minimum when it is prepared, like an EVM batch, so a Solana
+// swap above the batch limit runs as its own owner step (the single-step limit is 5%).
 export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]): boolean | string =>
-  st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, evmOwner, facts.bridgeRoutes) ?? true);
+  st.namespace === 'solana' ? st.action !== 'swap' || (st.slippageBps ?? 0) <= MAX_BATCH_SLIPPAGE_BPS || 'WORKFLOW_SLIPPAGE_UNSUPPORTED'
+    : (evmStepBuildable(st, facts.chains, evmOwner, facts.bridgeRoutes) ?? true);
 /**
  * The owner chose user-funded execution with the wallets their browser reported (EIP-5792 capabilities, Wallet Standard features): the run's
  * groups are planned for exactly those wallets and stored with the mode, in one transaction (the database checks every group's fee payer is
@@ -458,6 +461,13 @@ export async function recordWalletBatchRefusal(deps: WorkflowRunDeps, run: RunRe
   if (!recorded) return refuse('WORKFLOW_RUN_CHANGED');
 }
 
+/** The refused preparation as evidence: everything the wallet was given, never the hand-out secret's hash. */
+function refusedBatchEvidence(prepared: GroupRecord['prepared']): Record<string, unknown> | null {
+  if (!prepared || typeof prepared !== 'object') return null;
+  const evidence: Record<string, unknown> = { ...prepared as Record<string, unknown> };
+  delete evidence.handoutHash;
+  return evidence;
+}
 /** Same run, same current step. A browser report becomes usable only after independent chain evidence and a locked comparison. */
 async function resumeRefusedWalletBatch(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord): Promise<RunRecord> {
   const now = deps.now(), preparation = batchPreparation(g);
@@ -466,8 +476,14 @@ async function resumeRefusedWalletBatch(deps: WorkflowRunDeps, run: RunRecord, g
   if (paused) return refuse(paused);
   const settledAt = new Date(g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS);
   if (now < settledAt) return refuse('WORKFLOW_RUN_FALLBACK_NOT_READY');
+  // Security review (recovery build): one chain proof per preparation per minute and process, as for History's decline proofs. A repeat inside
+  // the window is answered "not ready yet" without reading the chain again.
+  const key = `fallback:${run.runId}:${g.groupIndex}:${preparation.preparedAt}`, last = recentUnproven.get(key);
+  if (last !== undefined && now.getTime() - last < DECLINE_PROOF_RETRY_MS) return refuse('WORKFLOW_RUN_FALLBACK_NOT_READY');
   const proof = await proveDeclinedBatchUnsent(deps.userFunded?.evm(g.chain) ?? null, g.prepared, settledAt, now, true);
   if (!proof.proven) {
+    if (recentUnproven.size >= 1_000) recentUnproven.clear();
+    recentUnproven.set(key, now.getTime());
     deps.log('workflow_run.batch_fallback_unproven', { runId: run.runId, group: g.groupIndex, reason: proof.reason });
     return refuse(proof.reason === 'DECLINE_PROOF_NOT_SETTLED' || proof.reason === 'DECLINE_PROOF_CHAIN_BEHIND'
       ? 'WORKFLOW_RUN_FALLBACK_NOT_READY' : 'WORKFLOW_RUN_FALLBACK_UNPROVEN');
@@ -482,7 +498,9 @@ async function resumeRefusedWalletBatch(deps: WorkflowRunDeps, run: RunRecord, g
       if (!await scope.stepTransition(run.runId, index, ['BLOCKED'], 'PENDING', { code: null }, 'STEP_RESUMED')) return null;
     }
     const changed = await scope.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'PLANNED', { strategy: 'EVM_OWNER_STEP', signing: 'WHEN_DUE',
-      prepared: { kind: WALLET_BATCH_FALLBACK_VERIFIED, ...preparation }, validUntil: null, code: WALLET_BATCH_FALLBACK_VERIFIED }, 'GROUP_RESUMED', g.version);
+      // Security review: the exact batch the wallet refused stays in the record (without its hand-out hash) for reconciliation and evidence.
+      prepared: { kind: WALLET_BATCH_FALLBACK_VERIFIED, ...preparation, refused: refusedBatchEvidence(g.prepared) }, validUntil: null, code: WALLET_BATCH_FALLBACK_VERIFIED },
+      'GROUP_RESUMED', g.version);
     if (!changed) return null;
     const { ownerNonce, fromBlock, toBlock } = proof;
     await scope.appendEvent('GROUP_WALLET_FALLBACK_VERIFIED', WALLET_BATCH_FALLBACK_VERIFIED, { group: g.groupIndex, ...preparation, ownerNonce, fromBlock, toBlock });

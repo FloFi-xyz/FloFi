@@ -77,6 +77,11 @@ describe('P0: a due group that can never be batched halts the run at once, and r
       await expect(workflowRunUserFundedPrepare(h.surface, approvalId, wallets, 2, handout)).rejects.toThrow('WALLET_BATCH_REFUSAL_RECORDED');
       await expect(workflowRunResume(h.surface, approvalId, wallets)).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_READY');
       h.d.advance(Date.parse(reloaded.groups[2]!.batchFallbackAt!) + 1_000 - h.d.now().getTime());
+      // Security review (recovery build): an unproven fallback proof (no block past the deadline yet) is not repeated within a minute.
+      await expect(workflowRunResume(h.surface, approvalId, wallets, false)).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_READY');
+      chain.control.mineBlocks(1);
+      await expect(workflowRunResume(h.surface, approvalId, wallets, false)).rejects.toThrow('WORKFLOW_RUN_FALLBACK_NOT_READY');
+      h.d.advance(61_000);
       chain.control.mineBlocks(1);
       const resumed = (await workflowRunResume(h.surface, approvalId, wallets, false)).view.workflowRun!;
       expect(resumed.step).toBeNull();
@@ -84,6 +89,10 @@ describe('P0: a due group that can never be batched halts the run at once, and r
       expect(resumed.run.groups[2]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', code: 'WALLET_BATCH_FALLBACK_VERIFIED' });
       expect((await h.store.steps(runId)).slice(0, 3)).toEqual(prefix);
       expect((await h.store.events(runId)).filter(e => e.kind === 'GROUP_WALLET_FALLBACK_VERIFIED')).toHaveLength(1);
+      // Security review: the exact refused batch stays as evidence, without the hand-out secret's hash.
+      const evidence = (await h.store.groups(runId))[2]!.prepared as { kind?: unknown; refused?: Record<string, unknown> & { request?: { id?: unknown } } };
+      expect(evidence).toMatchObject({ kind: 'WALLET_BATCH_FALLBACK_VERIFIED', refused: { kind: 'EVM_WALLET_BATCH', request: { id: requestId } } });
+      expect(evidence.refused).not.toHaveProperty('handoutHash');
       await expect(workflowRunUserFundedAuthorize(h.surface, approvalId, wallets, 2, { kind: 'EVM_WALLET_BATCH', batchId: requestId }))
         .rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
       for (const index of [3, 4]) {

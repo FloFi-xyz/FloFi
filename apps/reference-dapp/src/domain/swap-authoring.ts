@@ -34,7 +34,7 @@ export function formatHumanAmount(units: string, symbol: Symbol, context: Review
   const fractional = padded.slice(-decimals).replace(/0+$/, '');
   return fractional ? `${whole}.${fractional}` : whole;
 }
-/** BUILD-FIX-UX-001: the slippage limit a newly created swap starts with: 100 bps (1%), the highest limit Review accepts without a warning.
+/** BUILD-FIX-UX-001: the slippage limit a newly created swap starts with: 100 bps (1%). Review warns only above 3% (CTO decision, 2026-11-25).
  * BUILD-FLOFI-PRODUCT-UX-001: the shared product default (`slippage-policy.ts`). */
 export const SWAP_DEFAULT_SLIPPAGE_BPS = DEFAULT_SLIPPAGE_BPS;
 /** Direct owner-wallet swaps accept this interval. Individual composition runtimes can require a smaller limit. */

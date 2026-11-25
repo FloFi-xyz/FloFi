@@ -665,7 +665,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
   // Incident 9 (`domain/flofi-wallet-bridge.ts`): a bridge on its own flow is never handed to FloFi Wallet, which cannot sign it yet.
   const floFiBridgeIssue = floFiWalletBridgeIssue({ kind: simulationSource.kind, signerIsFloFiWallet: Boolean(signer && usesFloFiWallet(signer)),
-    groupedRun: groupedPrimary, executing: Boolean(currentExecution(executionProgress)), ecosystem: networkTarget?.ecosystem });
+    groupedRun: groupedPrimary, executing: Boolean(currentExecution(executionProgress)), ecosystem: networkTarget?.ecosystem,
+    laterSteps: sequence && !sequence.finished ? sequence.steps.slice(sequence.cursor + 1).map((step, index) => ({ kind: sequenceKinds[sequence.cursor + 1 + index] ?? null, chainId: step.chainId })) : [] });
   const walletIssueIn = (shown: 'EN' | 'PT') => accountIssueIn(shown) ?? (floFiBridgeIssue ? translate(shown, floFiBridgeIssue) : null);
   const walletIssue = walletIssueIn(language === 'PT' ? 'PT' : 'EN');
   // A single card back on its own flow shows only that flow (its own Review and wording): never the whole-workflow Review or a second primary action

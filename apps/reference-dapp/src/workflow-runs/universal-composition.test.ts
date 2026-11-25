@@ -399,6 +399,10 @@ describe('P0 universal composition: representative workflows, their groups and t
         .toEqual([['EVM_OWNER_STEP', ['WORKFLOW_SLIPPAGE_UNSUPPORTED']], ['EVM_WALLET_BATCH', []]]);
     }
     expect(compose(workflow([swap('arbitrum-one', 'USDC', 'WETH', '5', { slippageBps: 501 })]))).toEqual({ ok: false, code: 'CATALOG_SWAP_SLIPPAGE_INVALID' });
+    // Swap review (recovery build): a Solana group fixes each minimum when prepared too, so a Solana swap above 3% runs as its own owner step.
+    const solanaWide = planned([swap('solana', 'SOL', 'USDC', '0.05', { slippageBps: 500 }), send('solana', 'SOL', '0.01')]);
+    expect(solanaWide.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.downgrades]))
+      .toEqual([['SOLANA_OWNER_STEP', 0, 0, ['WORKFLOW_SLIPPAGE_UNSUPPORTED']], ['SOLANA_SIGN_ALL', 1, 1, []]]);
     // A chain the deployment did not opt in: every step through its own flow, each a group of its own.
     const off = planned([swap('arbitrum-one', 'USDC', 'WETH', '3'), after], { ...FACTS, chains: FACTS.chains.filter(c => c !== 'eip155:42161') });
     expect(off.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.downgrades])).toEqual([['EVM_OWNER_STEP', 0, 0, ['USER_FUNDED_CHAIN_DISABLED']],
