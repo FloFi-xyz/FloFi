@@ -275,10 +275,13 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') {
       await expect(page, path).toHaveURL(path);
       await expect(page.locator('.app-shell')).toBeVisible();
     }
-    // Every operation still checks every wallet this browser proved: the unlinked wallet is refused, and nothing was quoted for it.
-    const refused = await post(page, '/api/build-estimate', {});
-    expect(refused.status).toBe(403);
-    expect(refused.body).toMatchObject({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    // A wallet-independent estimate reaches input validation. A wallet-specific preflight still refuses the unlinked signer.
+    const estimate = await post(page, '/api/build-estimate', {});
+    expect(estimate).toMatchObject({ status: 200, body: { ok: false, correlationId: expect.any(String) } });
+    const preflight = await page.evaluate(async ({ id, address }) => (await fetch('/app', { method: 'POST',
+      headers: { 'next-action': id, accept: 'text/x-component', 'content-type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify([address]) })).text(), { id: serverAction('flightWalletAccess', 'flight-wallet-action'), address: proof.address });
+    expect(preflight).toContain('"ok":false,"code":"BETA_WALLET_NOT_LINKED"');
     // Board now admits the account (the product layout's own decision) and binds nothing the account never proved.
     const boarded = await post(page, '/api/board/board', {});
     expect(boarded).toMatchObject({ status: 200, body: { ok: true, flight: { access: { kind: 'eligible' } } } });

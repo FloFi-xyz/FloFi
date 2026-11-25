@@ -838,9 +838,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedReviewExpired = Boolean(workflowRunHere.review?.validUntil && Date.parse(workflowRunHere.review.validUntil) <= Date.now());
   const groupedRunOpen = Boolean(workflowRunHere.started || workflowRunHere.following);
   const stepSwap = simulationSource.kind === 'public' ? swapProfile(stepChain) : null;
-  // The engineering panels expose their own wallet controls after entering Simulate.
-  const stepNeedsWallet = !engineering && !signer && networkTarget && actionable && !simulationDisabled && !sequenceDone && !currentExecution(executionProgress)
+  const stepNeedsWallet = !engineering && sequence && !signer && networkTarget && actionable && !simulationDisabled && !sequenceDone && !currentExecution(executionProgress)
     && (simulationSource.kind !== 'public' || authorization.key || stepSwap && ownerBoundSwapReview(stepSwap));
+  // Keep the stage action available. In a sequence the header can show a different wallet from the one the active card needs.
+  const stepWalletAction = stepNeedsWallet ? <div className="canvas-lifecycle-control">
+    <button type="button" className="secondary" onClick={() => void walletConnection.connect()}>{tr(networkTarget.ecosystem === 'solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet')}</button>
+    {walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}
+  </div> : null;
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
     {/* A single card shows no workflow-run note (final frontend-ux review): its one action is followed like the card's own flow. */}
     {workflowRunHere.started && !singleCardRun && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
@@ -863,26 +867,24 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       </>}
     </div>
     : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
-    : !engineering && surface !== 'signing' && destinationActions ? <div className="canvas-lifecycle-control">
-      <button type="button" className="primary" onClick={() => void destinationActions.connect.run()}>{tr(destinationActions.connect.label)}</button>
-      {destinationActions.retry && <button type="button" onClick={destinationActions.retry}>{tr('Try again')}</button>}
-    </div>
-    : stepNeedsWallet ? <div className="canvas-lifecycle-control">
-      <button type="button" className="primary" onClick={() => void walletConnection.connect()}>{tr(networkTarget.ecosystem === 'solana' ? 'Connect a Solana wallet' : 'Connect an EVM wallet')}</button>
-      {walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}
-    </div>
-    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" className="primary canvas-network-switch" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
-    simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={note}
-    simulate={() => { if (!options.stay) setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')} labelFor={options.labelFor}/>;
+    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" className="primary canvas-network-switch" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div> : <>
+      <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
+        simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={note}
+        simulate={() => { if (!options.stay) setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')} labelFor={options.labelFor}/>
+      {stepWalletAction}
+    </>;
   const simulateAction = simulateActionFor(sequenceNote);
   // P0 hotfix (execution continuity): in Execute, a step-by-step workflow (its run, or its next step) and an owner-bound swap's approval → swap
   // continuation continue in place: a fresh simulation asked for here stays in Execute (never the Simulate stage), and a finished workflow
   // offers only "Create new workflow" (never a simulation of its last step again).
   const inlineExecute = sequenceContinuing || Boolean(liveStep && (sequence || ownerBoundContinuation));
   const executeAction = sequenceFinishedIdle ? <button type="button" className="primary execute-new-workflow" onClick={startNewWorkflow}>{tr('Create new workflow')}</button>
-    : inlineExecute && !sequenceRestore && !walletIssue && !networkAction && !stepNeedsWallet && !destinationActions ? <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
-      simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={sequenceContinuing ? null : sequenceNote}
-      simulate={() => simulateAgain()} onExecute={() => setTab('Execute')}/>
+    : inlineExecute && !sequenceRestore && !walletIssue && !networkAction ? <>
+      <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
+        simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={sequenceContinuing ? null : sequenceNote}
+        simulate={() => simulateAgain()} onExecute={() => setTab('Execute')}/>
+      {stepWalletAction}
+    </>
     : simulateAction;
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat lives here, above the stage switch, so Build, Simulate and Execute share one conversation. It reaches
   // the same lifecycle the Canvas CTA uses (this Simulate, these controls); on /approve it keeps its earlier proposal-only behaviour.

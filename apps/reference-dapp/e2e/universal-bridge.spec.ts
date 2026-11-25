@@ -236,7 +236,8 @@ test('chat authors Base → Solana receiving SOL through Relay; the Review needs
   await page.getByLabel('Describe your flow').fill('Review workflow');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message:not(.you):not(.conversation-execution-message)').last();
-  await expect(answer).toContainText('I can’t start the review yet: No Solana wallet can receive on Solana yet. Connect one on the Bridge card or enter its public address.');
+  await expect(answer).toContainText('To receive the tokens on Solana, connect a Solana wallet here.');
+  await expect(answer.getByRole('button', { name: 'Connect a Solana wallet', exact: true })).toBeVisible();
   await expect(answer).not.toContainText('will sign');
   expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
   // A typed public address resolves it at once: the warning clears and Simulate opens (the recipient is the address as written).
