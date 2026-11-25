@@ -270,7 +270,7 @@
     "Put 2 USDC into Aave on Base Sepolia"
    ],
    "answer": {
-    "delayMs": 3000,
+    "delayMs": 8000,
     "output": {
      "intent": {
       "version": "1",
