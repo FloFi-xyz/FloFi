@@ -207,7 +207,7 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'The quote did not match this swap. Try again.': 'A cotação não corresponde a este swap. Tente novamente.',
   'Estimating USD…': 'Estimando USD…', 'USD price unavailable': 'Preço USD indisponível', 'Waiting for the current estimate.': 'Aguardando a estimativa atual.',
   '{0} test tokens have no market value.': 'Os tokens de teste de {0} não têm valor de mercado.', '{0} · test price': '{0} · preço de teste',
-  'USD estimate from a test price.': 'Estimativa em USD com base em um preço de teste.',
-  'USD estimate from a verified Chainlink price.': 'Estimativa em USD com base em um preço verificado da Chainlink.', 'Observed at {0}.': 'Observado em {0}.',
+  'Estimated from the verified test (MOCKED) USD price.': 'Estimativa a partir do preço em USD de teste (MOCKED) verificado.',
+  'Estimated from the verified Chainlink USD price.': 'Estimativa a partir do preço em USD verificado da Chainlink.', 'Not a quote.': 'Não é uma cotação.', 'Observed at {0}.': 'Observado em {0}.',
   'No verified USD price is available for this asset right now.': 'Não há um preço USD verificado disponível para este ativo neste momento.',
 };

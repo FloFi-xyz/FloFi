@@ -57,8 +57,9 @@ export function usdLine(network: string, usd: string | null | undefined, estimat
   const identity = networkIdentity(network.replace(/ \(\d+\)$/, ''));
   if (identity && identity.environment !== 'MAINNET') return { kind: 'test-token', text: t('Test token · no USD value'), title: t('{0} test tokens have no market value.', identity.name) };
   if (usd) return { kind: 'value', text: estimate.mocked ? t('{0} · test price', formatUsd(usd, language)) : formatUsd(usd, language),
-    title: [t(estimate.mocked ? 'USD estimate from a test price.' : 'USD estimate from a verified Chainlink price.'),
-      estimate.observedAt ? t('Observed at {0}.', new Date(estimate.observedAt).toLocaleString(language === 'PT' ? 'pt-BR' : 'en-US')) : ''].filter(Boolean).join(' ') };
+    // CI review: the tooltip keeps its original honesty wording (verified source, observation time, "Not a quote."), now in PT too.
+    title: [t(estimate.mocked ? 'Estimated from the verified test (MOCKED) USD price.' : 'Estimated from the verified Chainlink USD price.'),
+      estimate.observedAt ? t('Observed at {0}.', new Date(estimate.observedAt).toLocaleString(language === 'PT' ? 'pt-BR' : 'en-US')) : '', t('Not a quote.')].filter(Boolean).join(' ') };
   if (estimate.status === 'pending') return { kind: 'pending', text: t('Estimating USD…'), title: t('Waiting for the current estimate.') };
   return { kind: 'unavailable', text: t('USD price unavailable'), title: t('No verified USD price is available for this asset right now.') };
 }

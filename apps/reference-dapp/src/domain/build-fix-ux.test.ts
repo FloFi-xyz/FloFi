@@ -121,7 +121,7 @@ describe('BUILD-FIX-UX-001 USD equivalents', () => {
     expect(usdLine('Base', '1.03', { status: 'ready', observedAt: '2026-10-12T10:00:00.000Z' })).toMatchObject({ kind: 'value', text: '≈ $1.03' });
     expect(usdLine('Arbitrum One', '1.03', { status: 'ready', mocked: true }).text).toBe('≈ $1.03 · test price');
     expect(usdLine('Arbitrum One', '1234.03', { status: 'ready', mocked: true }, 'PT')).toMatchObject({
-      text: '≈ US$ 1.234,03 · preço de teste', title: 'Estimativa em USD com base em um preço de teste.',
+      text: '≈ US$ 1.234,03 · preço de teste', title: 'Estimativa a partir do preço em USD de teste (MOCKED) verificado. Não é uma cotação.',
     });
     expect(usdLine('Base', null, { status: 'pending' })).toMatchObject({ kind: 'pending', text: 'Estimating USD…' });
     expect(usdLine('Base', null, { status: 'none' })).toMatchObject({ kind: 'unavailable', text: 'USD price unavailable' });
