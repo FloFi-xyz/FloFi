@@ -141,7 +141,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
         {/* Incident 8: a token permission and the swap it enables are two transactions of ONE financial step: the approval is named as such
             ("Approve USDC"), never as a second identical "Swap · Confirmed". */}
-        {operations.length > 0 && !final && <ul className="signing-receipt" aria-label={tr('Transactions')}>
+        {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
           {operations.map(({ step, operation }) => <li key={operation.id} data-operation-kind={operation.approval ? 'approval' : 'action'}>
             <span>{tr(operation.approval ? operation.title : step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
             {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}

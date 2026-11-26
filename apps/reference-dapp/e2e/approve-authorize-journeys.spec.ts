@@ -152,6 +152,9 @@ test('external fallback: Open FloFi → minimal signing surface → one Authoriz
   await authorizeAndComplete(journey, surface);
   await expect(surface.locator('.signing-status')).toContainText('Execution completed', { timeout: 45_000 });
   await expect(surface.getByRole('list', { name: 'Transactions' }).getByRole('listitem')).toHaveCount(2);
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incident 8): the token approval and the swap are never two identical rows.
+  const rows = await surface.getByRole('list', { name: 'Transactions' }).getByRole('listitem').allTextContents();
+  expect(new Set(rows).size).toBe(rows.length);
   await expect(surface).toContainText('You can return to your conversation.');
   await surface.getByText('Transaction and reconciliation evidence', { exact: true }).click();
   const link = await surface.getByRole('link', { name: 'View receipt and evidence', exact: true }).getAttribute('href');
