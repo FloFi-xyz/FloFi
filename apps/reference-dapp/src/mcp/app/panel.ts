@@ -98,7 +98,7 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     steps: Step[]; authority: string; requires?: string[]; summary?: string; walletNamespace?: string; nativeSigning?: { wallets?: string[] } };
   // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the approval's native wallet signing session, as get_execution_progress reports it (public facts only).
   type WalletSigning = { sessionId: string; wallet: string; state: string; review: { lines?: { EN?: string[]; PT?: string[] } } | null;
-    outcome: { code?: string | null; text?: { EN?: string; PT?: string } } | null };
+    outcome: { code?: string | null; afterSignature?: boolean; text?: { EN?: string; PT?: string } } | null };
   const WALLET_NAMES: Record<string, string> = { phantom: 'Phantom', solflare: 'Solflare' };
   // Only the wallets' own official universal-link hosts (the server chose the method): anything else from a tool result is refused.
   const walletRequestUrl = (value: unknown): string | null => typeof value === 'string' && value.length <= 8_000
@@ -487,7 +487,10 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       }
       if (view.walletNote) root.append(el('p', view.walletNote, 'muted'));
     }
-    if (wallets.length && shown.actionable && !terminal(status) && !signingFrame && (!signing || signing.state === 'ENDED')) {
+    // A new try is offered while the approval is open, and also after a wallet session that ended before anything was signed (the approval is then
+    // already in this owner's signing flow: APPLIED). Never after a signature: that outcome is the flow's to report.
+    const retry = signing?.state === 'ENDED' && signing.outcome?.afterSignature !== true;
+    if (wallets.length && !terminal(status) && !signingFrame && (shown.actionable && (!signing || retry) || status === 'APPLIED' && retry)) {
       const native = el('div', undefined, 'actions');
       native.append(el('span', L('In your wallet app:', 'No app da sua carteira:'), 'muted'));
       for (const wallet of wallets) native.append(button(L(`Sign with ${WALLET_NAMES[wallet]}`, `Assinar com ${WALLET_NAMES[wallet]}`), () => void walletStart(wallet), true));
