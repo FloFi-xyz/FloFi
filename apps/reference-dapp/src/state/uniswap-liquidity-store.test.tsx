@@ -28,7 +28,7 @@ const f = vi.hoisted(() => ({
   simulated: [] as SemanticWorkflow[],
   // Stable, as the real store's callbacks are (useCallback with no dependencies).
   track: (read: Promise<unknown>) => read,
-  refreshes: 0, failures: [] as string[],
+  refreshes: 0, failures: [] as string[], invalidations: 0, afterHandoff: null as null | (() => void), busyWalletFailures: 0, onSession: null as null | (() => void),
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: observations made, observations that still find no receipt (scripted), and the follow's delays.
   observes: 0, pendingObservations: 0, sleeps: [] as number[],
 }));
@@ -42,7 +42,7 @@ vi.mock('../domain/observation-schedule', async original => {
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.canonical ?? f.workflow }, runtimeWorkflow: f.workflow, restoreLiquidityCanvas: f.restore,
   trackCanvasRestoration: f.track }) }));
 vi.mock('./build009-wallet-store', () => ({
-  useBuild009Wallet: () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34', session: async () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34' }),
+  useBuild009Wallet: () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34', session: async () => { f.onSession?.(); return { account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34' }; },
     connect: async () => null, switchTo: async () => undefined }),
   injected: () => f.provider,
 }));
@@ -55,11 +55,13 @@ vi.mock('../app/uniswap-liquidity-action', () => {
     uniswapLiquiditySimulate: (workflow: SemanticWorkflow, owner: string) => { f.simulated.push(workflow); return wrap(() => svc().simulate(workflow, owner)); },
     uniswapLiquidityRefresh: (id: string) => { f.refreshes++; return wrap(() => svc().refresh(id)); },
     uniswapLiquidityReview: (id: string, commitment: string, workflow: SemanticWorkflow) => wrap(() => svc().review(id, commitment, workflow)),
-    uniswapLiquidityInvalidate: (id: string) => wrap(() => svc().invalidate(id)),
+    uniswapLiquidityInvalidate: (id: string) => { f.invalidations++; return wrap(() => svc().invalidate(id)); },
     uniswapLiquidityBegin: (id: string, owner: string, workflow: SemanticWorkflow) => wrap(() => svc().begin(id, owner, workflow)),
-    uniswapLiquidityHandoff: (id: string) => wrap(() => svc().handoff(id)),
+    uniswapLiquidityHandoff: async (id: string) => { const result = await wrap(() => svc().handoff(id)); f.afterHandoff?.(); return result; },
     uniswapLiquidityReport: (id: string, result: Parameters<UniswapLiquidityService['report']>[1]) => wrap(() => svc().report(id, result)),
-    uniswapLiquidityWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['walletFailure']>[1]) => { f.failures.push(diagnostic.code); return wrap(() => svc().walletFailure(id, diagnostic)); },
+    uniswapLiquidityWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['walletFailure']>[1]) => { f.failures.push(diagnostic.code);
+      if (f.busyWalletFailures > 0) { f.busyWalletFailures--; return Promise.resolve({ ok: false as const, code: 'UNISWAP_LIQUIDITY_BUSY' }); }
+      return wrap(() => svc().walletFailure(id, diagnostic)); },
     uniswapLiquidityObserve: (id: string) => {
       f.observes++;
       // A scripted observation that finds no receipt yet: the durable record as it stands (its submitted attempt still PENDING), read-only.
@@ -75,6 +77,14 @@ const { UniswapLiquidityProvider, useUniswapLiquidity } = await import('./uniswa
 function workflow(): SemanticWorkflow {
   const band = uniswapBandInput((sqrtRatioAtTick(225_600) + 123_456_789n).toString(), 1_000);
   const result = editorReducer(initialEditor(), { type: 'ADD_UNISWAP_LIQUIDITY', input: { network: 'Base Sepolia', maxUsdc: '10', maxWeth: '0.005',
+    rangeUnit: band.rangeUnit, lower: band.lower, upper: band.upper, slippage: '100' }, source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext());
+  if (result.error) throw new Error(result.error);
+  return structuredClone(result.workflow) as unknown as SemanticWorkflow;
+}
+/** The same pool with a different USDC maximum: a semantic edit of the Canvas. */
+function workflow2(): SemanticWorkflow {
+  const band = uniswapBandInput((sqrtRatioAtTick(225_600) + 123_456_789n).toString(), 1_000);
+  const result = editorReducer(initialEditor(), { type: 'ADD_UNISWAP_LIQUIDITY', input: { network: 'Base Sepolia', maxUsdc: '9', maxWeth: '0.005',
     rangeUnit: band.rangeUnit, lower: band.lower, upper: band.upper, slippage: '100' }, source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext());
   if (result.error) throw new Error(result.error);
   return structuredClone(result.workflow) as unknown as SemanticWorkflow;
@@ -98,7 +108,7 @@ async function act(action: () => Promise<void>) { const done = action(); await s
 
 beforeEach(async () => {
   host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0; f.canonical = null; f.simulated = [];
-  f.observes = 0; f.pendingObservations = 0; f.sleeps = [];
+  f.observes = 0; f.pendingObservations = 0; f.sleeps = []; f.invalidations = 0; f.afterHandoff = null; f.busyWalletFailures = 0; f.onSession = null;
   chain = createUniswapLiquidityChain();
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unilp-store-'));
   f.service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: chain.rpc, provenance: 'MOCKED',
@@ -146,6 +156,88 @@ describe('PR #254 follow-up: a pool step of a step-by-step sequence is simulated
     expect(store.retired).toBe(false);
     // The whole Canvas, as this store used to send it, is refused by the server for the Router bridge it carries (production: ROUTER_ISOLATED_ONLY).
     await expect((f.service as UniswapLiquidityService).simulate(f.canonical as SemanticWorkflow, UNI_OWNER)).rejects.toThrow('ROUTER_ISOLATED_ONLY');
+  });
+});
+
+describe('post-#254 hotfix: an edit ends the authorization, never the transaction in flight', () => {
+  it('asks once while the approval is pending: the run keeps its attempt and state, its authorization ends, and the next step needs a new Review', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    const id = store.record!.id, service = f.service as UniswapLiquidityService, w = f.workflow as SemanticWorkflow;
+    // The owner's approval is handed to the wallet and broadcast; it is still pending when the Canvas is edited.
+    const begun = await service.begin(id, UNI_OWNER, w); await service.handoff(id);
+    await service.report(id, { kind: 'HASH', hash: chain.wallet.send(begun.transaction, { hold: true }) });
+    f.pendingObservations = 1;
+    await act(() => store.observe());
+    expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'PENDING']]);
+    const pendingError = store.record!.error;
+    f.workflow = workflow2();
+    read(); await settle(); await settle();
+    expect(store.retired).toBe(true);
+    expect(f.invalidations).toBe(1);
+    expect(store.record?.authorization).toBeNull();
+    expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'PENDING']]);
+    expect(store.record?.error).toBe(pendingError);
+    // The approval lands and is reconciled from the same run; nothing asks again, and the mint is never prepared on the old authorization.
+    chain.wallet.release();
+    await act(() => store.observe());
+    expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'CONFIRMED']]);
+    await settle();
+    expect(f.invalidations).toBe(1);
+    await expect(service.begin(id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_REVIEW_REQUIRED');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('an edit made while the wallet answers its nonce read never reaches the wallet; the unsent attempt is concluded as not submitted', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    const request = (f.provider as { request: (input: { method: string; params?: unknown[] }) => Promise<unknown> }).request;
+    let edited = false;
+    f.provider = { request: async (input: { method: string; params?: unknown[] }) => {
+      const result = await request(input);
+      // The owner edits the Canvas right after the wallet's last nonce answer (after the store's final session check).
+      if (input.method === 'eth_getTransactionCount' && !edited) { edited = true; f.workflow = workflow2(); read(); }
+      return result;
+    } };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(store.record?.authorization).toBeNull();
+    expect(store.record?.attempts.map(a => [a.state, a.note])).toEqual([['CANCELLED', 'UNISWAP_SEMANTIC_REVISION_CHANGED']]);
+  });
+
+  it('flofi-liquidity/security review: an edit made during the hand-off stops the request before the wallet is asked', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // The hand-off has made SUBMITTING durable when the owner edits; only the store's last check can still keep the wallet from being asked.
+    f.afterHandoff = () => { f.afterHandoff = null; f.workflow = workflow2(); read(); };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(store.error).toBe('UNISWAP_SEMANTIC_REVISION_CHANGED');
+    // Concluded as unsent (never left SUBMITTING, which would hold the owner's nonce reservation).
+    expect(store.record?.attempts.map(a => a.state)).toEqual(['CANCELLED']);
+    expect(store.record?.authorization).toBeNull();
+  });
+
+  it('flofi-wallet-execution review: concluding an unsent attempt survives a moment when another operation holds the run lease', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // The worker (or another tab) holds the run's lease when the store concludes the attempt: the first conclusion is refused BUSY.
+    f.busyWalletFailures = 1;
+    f.afterHandoff = () => { f.afterHandoff = null; f.workflow = workflow2(); read(); };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(f.failures.length).toBeGreaterThanOrEqual(2);
+    expect(store.record?.attempts.map(a => a.state)).toEqual(['CANCELLED']);
+  });
+
+  it('flofi-wallet-execution review: an edit made while the wallet session prompt is open stops the request too', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // The wallet's session prompt (connect / account) answers after the owner edited the Canvas.
+    f.onSession = () => { f.onSession = null; f.workflow = workflow2(); read(); };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(store.error).toBe('UNISWAP_SEMANTIC_REVISION_CHANGED');
   });
 });
 

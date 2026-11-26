@@ -139,6 +139,15 @@ export function createPgOAuthStore(db: Database, tenantId: string): McpOAuthStor
     async accountActive(accountId) {
       return (await db.query(`SELECT 1 FROM mcp_accounts WHERE tenant_id = $1 AND account_id = $2 AND status = 'ACTIVE'`, [tenantId, accountId])).rowCount === 1;
     },
+    async connectedClients(accountId, now) {
+      const rows = (await db.query(`SELECT DISTINCT g.client_id, c.redirect_uris FROM mcp_oauth_grants g
+        JOIN mcp_accounts a ON a.tenant_id = g.tenant_id AND a.account_id = g.account_id AND a.status = 'ACTIVE'
+        LEFT JOIN mcp_oauth_clients c ON c.tenant_id = g.tenant_id AND c.client_id = g.client_id
+        WHERE g.tenant_id = $1 AND g.account_id = $2 AND g.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM mcp_oauth_tokens t WHERE t.tenant_id = g.tenant_id
+          AND t.grant_id = g.grant_id AND t.kind = 'REFRESH' AND t.revoked_at IS NULL AND t.used_at IS NULL AND t.expires_at > $3 AND t.family_expires_at > $3)`,
+      [tenantId, accountId, now])).rows;
+      return rows.map(row => ({ clientId: String(row.client_id), redirectUris: Array.isArray(row.redirect_uris) ? row.redirect_uris.map(String) : [] }));
+    },
     // BUILD-DEVELOPER-001: the shared fixed-window limiter (same SQL and buckets as before).
     allow: (bucket, limit, windowSeconds, now) => fixedWindow(db, tenantId).allow(bucket, limit, windowSeconds, now),
     async purge(now) {

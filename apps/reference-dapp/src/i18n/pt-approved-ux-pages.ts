@@ -103,9 +103,22 @@ export const portugueseApprovedUxPages: Readonly<Record<string, string>> = {
     'Registre primeiro uma passkey (Passkeys). Cada Credencial fica vinculada à passkey que vai autorizar seus fluxos.',
 
   // Agents (board 14).
-  'Connect AI assistants to FloFi. They suggest, and you approve each step here.': 'Conecte assistentes de IA à FloFi. Eles sugerem, e você aprova cada passo aqui.',
   'Connect an assistant': 'Conectar um assistente', 'Connect with {0}': 'Conectar com {0}', 'Use FloFi from inside {0}.': 'Use a FloFi de dentro do {0}.',
   'API clients': 'Clientes de API', 'For people who integrate FloFi through code': 'Para quem integra a FloFi por código',
+  // Post-#254 hotfix: the Claude and ChatGPT connection steps (Agents).
+  'Connect Claude or ChatGPT to FloFi. Describe what you want there; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet in FloFi.':
+    'Conecte o Claude ou o ChatGPT à FloFi. Descreva lá o que você quer; a FloFi prepara e simula o fluxo, e você revisa e assina cada transação com a sua própria carteira na FloFi.',
+  'Connected to FloFi': 'Conectado à FloFi', 'Connect {0} to FloFi': 'Conectar o {0} à FloFi', 'FloFi MCP server URL': 'URL do servidor MCP da FloFi',
+  'FloFi MCP server URL copied.': 'URL do servidor MCP da FloFi copiada.', 'Copy the URL above by hand.': 'Copie a URL acima manualmente.',
+  'Copy FloFi MCP server URL': 'Copiar a URL do servidor MCP da FloFi', 'Manage FloFi connections': 'Gerenciar conexões da FloFi',
+  'In Claude, open Settings › Connectors and choose Add custom connector.': 'No Claude, abra Configurações › Conectores e escolha Adicionar conector personalizado.',
+  'Name it FloFi, paste the FloFi MCP server URL below and choose Add.': 'Dê a ele o nome FloFi, cole a URL do servidor MCP da FloFi abaixo e escolha Adicionar.',
+  "Choose Connect, then allow the connection on FloFi's page.": 'Escolha Conectar e depois permita a conexão na página da FloFi.',
+  'In ChatGPT, open Settings › Apps › Advanced settings and turn on Developer mode (available on eligible plans).':
+    'No ChatGPT, abra Configurações › Apps › Configurações avançadas e ative o Modo de desenvolvedor (disponível nos planos elegíveis).',
+  'Choose Create, name it FloFi, paste the FloFi MCP server URL below and choose OAuth.': 'Escolha Criar, dê a ele o nome FloFi, cole a URL do servidor MCP da FloFi abaixo e escolha OAuth.',
+  'Your assistant drafts and previews workflows and asks for your approval. Nothing runs until you review it in FloFi and sign with your own wallet.':
+    'Seu assistente monta e pré-visualiza fluxos e pede a sua aprovação. Nada é executado até você revisar na FloFi e assinar com a sua própria carteira.',
 
   // Passkeys (board 15).
   'Sign in with your fingerprint or face': 'Entrar com a digital ou o rosto',

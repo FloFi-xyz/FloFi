@@ -13,6 +13,7 @@ import { unsealValue } from '../mcp/oauth/crypto';
 import { ACCOUNT_COOKIE } from '../mcp/oauth/server';
 import { mcpState, type McpState } from '../mcp/oauth/state';
 import { currentWalletPrincipals, type WalletPrincipal } from '../server/session-principal';
+import { assistantProvidersOf, type AssistantProvider } from '../domain/assistant-connections';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -81,5 +82,19 @@ export async function withdrawApproval(approvalId: string): Promise<Result<Conne
     return { ok: true, value: await viewOf(state, account) };
   } catch (cause) { return failure(cause); }
 
+  });
+}
+/**
+ * Post-#254 hotfix (Agents page): the MCP endpoint this deployment serves and which assistants THIS browser's FloFi connection account is
+ * connected to right now (a live OAuth grant; see `connectedClients`). Read-only: it creates no account, link, grant or token.
+ */
+export type AssistantConnections = { readonly endpoint: string; readonly connected: readonly AssistantProvider[] };
+export async function assistantConnections(): Promise<Result<AssistantConnections>> {
+  return withFlightAccess(async () => {
+  try {
+    const { config, state, account } = await context();
+    const clients = account ? await state.oauth.connectedClients(account, new Date()) : [];
+    return { ok: true, value: { endpoint: config.resource, connected: assistantProvidersOf(clients) } };
+  } catch (cause) { return failure(cause); }
   });
 }

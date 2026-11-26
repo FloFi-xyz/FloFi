@@ -178,6 +178,66 @@ describe('BUILD-MCP-002 OAuth store (PostgreSQL)', () => {
   });
 });
 
+describe('post-#254 hotfix: the clients an account is connected to (Agents page, read-only)', () => {
+  it('lists a client only while its grant, account and an unused refresh token are live; rotation keeps it; revocation, expiry or a disabled account end it', async () => {
+    const store = createPgOAuthStore(t.db, 'tenant-a'), now = at(0), c = await consent(store, now), first = issue(['flofi.strategy'], now);
+    await store.saveClient({ clientId: CLIENT, kind: 'CIMD', clientName: 'Claude', redirectUris: [REDIRECT], metadataSha256: 'a'.repeat(64), expiresAt: at(60 * MIN) }, now);
+    // Consent alone (no code redeemed, no token) is not a connection.
+    expect(await store.connectedClients(c.accountId, now)).toEqual([]);
+    expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => first.tokens)).ok).toBe(true);
+    expect(await store.connectedClients(c.accountId, now)).toEqual([{ clientId: CLIENT, redirectUris: [REDIRECT] }]);
+    // Another tenant or account sees nothing.
+    expect(await createPgOAuthStore(t.db, 'tenant-b').connectedClients(c.accountId, now)).toEqual([]);
+    expect(await store.connectedClients(newId('mcpacct'), now)).toEqual([]);
+    // A rotated refresh token keeps the connection (its successor is the unused one), and reading it changes nothing.
+    let second!: ReturnType<typeof issue>;
+    expect((await store.rotateRefresh(credentialDigest(KEY, first.refresh), CLIENT, at(MIN), 10_000, { scopes: null, resource: null },
+      (scopes, _r, family, cap) => (second = issue(scopes, at(MIN), family, cap)).tokens)).ok).toBe(true);
+    expect(await store.connectedClients(c.accountId, at(MIN))).toEqual([{ clientId: CLIENT, redirectUris: [REDIRECT] }]);
+    expect(await store.authenticate(credentialDigest(KEY, second.access), at(MIN))).not.toBeNull();
+    // Its registration cached past expiry still names the client; once the refresh token's family expires, nothing is connected.
+    expect(await store.connectedClients(c.accountId, at(2 * DAY))).toEqual([{ clientId: CLIENT, redirectUris: [REDIRECT] }]);
+    expect(await store.connectedClients(c.accountId, at(31 * DAY))).toEqual([]);
+    // Revoking the refresh token (the client disconnected) ends the connection.
+    await store.revoke(credentialDigest(KEY, second.refresh), CLIENT, at(2 * MIN));
+    expect(await store.connectedClients(c.accountId, at(2 * MIN))).toEqual([]);
+    // A disabled account is never connected, even with a live token.
+    const d = await consent(store, now), minted = issue(['flofi.strategy'], now);
+    expect((await store.redeemCode(credentialDigest(KEY, d.code), now, verifyWith(VERIFIER), () => minted.tokens)).ok).toBe(true);
+    expect(await store.connectedClients(d.accountId, now)).toHaveLength(1);
+    await t.db.query(`UPDATE mcp_accounts SET status = 'DISABLED' WHERE tenant_id = 'tenant-a' AND account_id = $1`, [d.accountId]);
+    expect(await store.connectedClients(d.accountId, now)).toEqual([]);
+  });
+
+  it('flofi-mcp review: revoking an access token alone keeps the connection; two grants of one client are one; a replayed code ends it', async () => {
+    const store = createPgOAuthStore(t.db, 'tenant-a'), now = at(0), c = await consent(store, now), minted = issue(['flofi.strategy'], now);
+    expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => minted.tokens)).ok).toBe(true);
+    await store.revoke(credentialDigest(KEY, minted.access), CLIENT, now);
+    expect(await store.connectedClients(c.accountId, now)).toHaveLength(1);
+    // A second consent of the same client by the same account (a reconnect): still one client.
+    const requestId = newId('oar'), csrf = newCredential('csrf'), code = newCredential('code');
+    await store.createAuthorization({ requestId, clientId: CLIENT, clientName: 'Claude', redirectUri: REDIRECT, state: 'st-2', codeChallenge: CHALLENGE,
+      scopes: ['flofi.strategy'], resource: RESOURCE, csrfDigest: credentialDigest(CSRF, csrf), expiresAt: at(10 * MIN) });
+    expect(await store.decide(requestId, credentialDigest(CSRF, csrf), { decision: 'APPROVE', accountId: c.accountId, createAccount: false, grantId: newId('grt'),
+      codeDigest: credentialDigest(KEY, code), codeExpiresAt: at(MIN) }, now)).not.toBeNull();
+    const second = issue(['flofi.strategy'], now);
+    expect((await store.redeemCode(credentialDigest(KEY, code), now, verifyWith(VERIFIER), () => second.tokens)).ok).toBe(true);
+    expect(await store.connectedClients(c.accountId, now)).toHaveLength(1);
+    // Replaying either code revokes that grant and everything issued from it; the other grant alone keeps the client connected.
+    expect((await store.redeemCode(credentialDigest(KEY, code), now, verifyWith(VERIFIER), () => issue(['flofi.strategy'], now).tokens)).ok).toBe(false);
+    expect(await store.connectedClients(c.accountId, now)).toHaveLength(1);
+    expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => issue(['flofi.strategy'], now).tokens)).ok).toBe(false);
+    expect(await store.connectedClients(c.accountId, now)).toEqual([]);
+  });
+
+  it('a live grant whose client registration is gone is still listed by its id, with no redirect URIs', async () => {
+    const store = createPgOAuthStore(t.db, 'tenant-a'), now = at(0), c = await consent(store, now), minted = issue(['flofi.strategy'], now);
+    expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => minted.tokens)).ok).toBe(true);
+    await t.db.query(`DELETE FROM mcp_oauth_clients WHERE tenant_id = 'tenant-a' AND client_id = $1`, [CLIENT]);
+    expect(await store.connectedClients(c.accountId, now)).toEqual([{ clientId: CLIENT, redirectUris: [] }]);
+  });
+});
+
 describe('BUILD-MCP-002 handoff state machine (database-enforced)', () => {
   async function handoff(status = 'PENDING') {
     const store = createPgOAuthStore(t.db, 'tenant-a'), c = await consent(store, at(0)), id = newId('apr');

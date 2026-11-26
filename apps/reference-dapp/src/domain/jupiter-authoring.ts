@@ -33,6 +33,8 @@ export function parseTokenAmount(text: string, decimals: number): string {
 }
 export function formatTokenAmount(units: string, decimals: number): string {
   if (!/^(0|[1-9][0-9]*)$/.test(units)) return '--';
+  // A token with no decimals has no fractional part: its base units are the amount itself (`slice(-0)` would read the whole string as fraction).
+  if (decimals === 0) return units;
   const padded = units.padStart(decimals + 1, '0'), fraction = padded.slice(-decimals).replace(/0+$/, '');
   return padded.slice(0, -decimals) + (fraction ? '.' + fraction : '');
 }
