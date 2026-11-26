@@ -53,6 +53,8 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment node', (
     expect(() => createBatchPaymentNode('n', { ...fields, payments: many })).toThrow('BATCH_PAYMENT_TOO_MANY_RECIPIENTS');
     expect(() => createBatchPaymentNode('n', { ...fields, payments: many.slice(0, BATCH_PAYMENT_MAX_RECIPIENTS) })).not.toThrow();
     expect(() => createBatchPaymentNode('n', { ...fields, chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' })).toThrow('BATCH_PAYMENT_FIELDS_INVALID');
+    // An official id names an issuer-registered asset (a Robinhood Chain Stock Token): never carried by a Batch Payment, whichever channel wrote the IR.
+    expect(() => createBatchPaymentNode('n', { ...fields, chain: 'eip155:4663', asset: { ...USDC, decimals: 18, officialId: '0x' + 'ab'.repeat(32) } })).toThrow('BATCH_PAYMENT_ASSET_UNSUPPORTED');
   });
 
   it('refuses any declaration beyond its own: a hidden extra payment, a mixed asset, a lock, a dependency or another authorization class', () => {

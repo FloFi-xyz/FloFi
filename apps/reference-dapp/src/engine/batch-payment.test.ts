@@ -15,9 +15,14 @@ import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '.
 import { exactBoundAmount } from './workflow-bindings';
 import { composeWorkflow, workflowSequenceHash, type WorkflowComposition } from './strategy-engine';
 import { isStrategyInput } from './strategy-spec';
+import { toChecksumAddress } from '@defi-workflow-engine/action-registry';
+import { checkBatchPaymentDraft } from '../domain/batch-payment-authoring';
 
 const A = '0x' + 'a1'.repeat(20), B = '0x' + 'b2'.repeat(20), C = '0x' + 'c3'.repeat(20);
-const MIXED = '0xAbCdEf0123456789aBcDeF0123456789ABCDEF01';
+// EIP-55: a mixed-case recipient must be its exact checksum encoding (the Send card's rule); a mistyped letter is refused.
+const MIXED = toChecksumAddress('0xabcdef0123456789abcdef0123456789abcdef01');
+const letter = MIXED.slice(2).search(/[a-fA-F]/) + 2, flipped = MIXED[letter]!;
+const MISTYPED = MIXED.slice(0, letter) + (flipped === flipped.toUpperCase() ? flipped.toLowerCase() : flipped.toUpperCase()) + MIXED.slice(letter + 1);
 const BATCH = { action: 'batch_payment', network: 'base', asset: 'USDC', recipients: [{ recipient: A, amount: '25' }, { recipient: B, amount: '50' }, { recipient: C, amount: '75' }] };
 const SWAP = { action: 'swap', network: 'base', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.1', slippageBps: 100 };
 const compose = (input: unknown): WorkflowComposition => { const w = composeWorkflow(input); if (!w.ok) throw new Error(`${w.code} ${JSON.stringify(w.issues)}`); return w; };
@@ -75,7 +80,16 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment composit
     expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '1' }] })).toBe('STRATEGY_SCHEMA_INVALID');
     const nine = Array.from({ length: 9 }, (_, i) => ({ recipient: '0x' + String(i + 1).repeat(40).slice(0, 40), amount: '1' }));
     expect(isStrategyInput({ ...BATCH, recipients: nine })).toBe(false);
-    expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '0' }, { recipient: B, amount: '1' }] })).not.toBe('OK');
+    expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '0' }, { recipient: B, amount: '1' }] })).toBe('BATCH_PAYMENT_AMOUNT_INVALID');
+    // A checksummed address with a mistyped letter is refused, never lower-cased into another wallet.
+    expect(refusal({ ...BATCH, recipients: [{ recipient: MISTYPED, amount: '1' }, { recipient: B, amount: '1' }] })).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+    // An ETH payment above the network's per-payment maximum (uint256 on mainnets: no USD cap) is named as such (never "enter a positive amount").
+    expect(refusal({ ...BATCH, asset: 'ETH', recipients: [{ recipient: A, amount: '1' + '0'.repeat(60) }, { recipient: B, amount: '0.001' }] })).toBe('STRATEGY_SCHEMA_INVALID');
+    expect(checkBatchPaymentDraft({ network: 'Base', asset: 'ETH', payments: [{ recipient: A, amount: '1' + '0'.repeat(60) }, { recipient: B, amount: '0.001' }] }).code)
+      .toBe('BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM');
+    expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '1.0000001' }, { recipient: B, amount: '1' }] })).toBe('BATCH_PAYMENT_AMOUNT_TOO_PRECISE');
+    // A Stock Token (Robinhood Chain) never rides in a Batch Payment.
+    expect(refusal({ ...BATCH, network: 'robinhood', asset: 'TSLA' })).not.toBe('OK');
     expect(refusal({ ...BATCH, network: 'solana' })).toBe('STRATEGY_SCHEMA_INVALID');
     expect(refusal({ ...BATCH, network: 'base-sepolia' })).toBe('STRATEGY_SCHEMA_INVALID');
   });

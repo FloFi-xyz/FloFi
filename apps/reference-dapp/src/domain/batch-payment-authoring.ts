@@ -11,7 +11,7 @@
  */
 import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, createBatchPaymentNode, isBatchPaymentNode, readBatchPaymentNode, batchPaymentTotal,
   type BatchPaymentFields, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { formatAssetAmount, parseAssetAmount, transferAllowsRecipients, transferAllowsTokens, transferEnvironment } from '@defi-workflow-engine/action-registry';
+import { formatAssetAmount, isChecksumAddress, parseAssetAmount, transferAllowsRecipients, transferAllowsTokens, transferEnvironment } from '@defi-workflow-engine/action-registry';
 import { authoringAssetSymbol, declaredNetworkSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { ownDeclaration } from './node-declaration';
 import { formatEth, parseTransferAmount, transferProfileFor, TRANSFER_NETWORKS, type EvmTransferNetwork, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
@@ -27,6 +27,21 @@ export type BatchPaymentLineInput = { readonly recipient: string; readonly amoun
 /** `asset`: 'ETH' or a symbol / whole name of the network's validated catalog; amounts are decimal strings in that asset. */
 export type BatchPaymentInput = { readonly network: EvmTransferNetwork; readonly asset: string; readonly payments: readonly BatchPaymentLineInput[] };
 const RECIPIENT = /^0x[0-9a-fA-F]{40}$/;
+/** EIP-55, the Send card's rule: a single-case address carries no checksum; a mixed-case one must be its exact checksum encoding (a mistyped letter fails). */
+export function batchRecipientValid(value: unknown): value is string {
+  if (typeof value !== 'string' || !RECIPIENT.test(value)) return false;
+  const body = value.slice(2);
+  return body === body.toLowerCase() || body === body.toUpperCase() || isChecksumAddress(value);
+}
+const DECIMAL = /^(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
+/** A well-formed decimal with more fraction digits than the asset has (named, never "enter a positive amount"). */
+const tooPrecise = (value: unknown, decimals: number) => typeof value === 'string' && (DECIMAL.exec(value)?.[2]?.length ?? 0) > decimals;
+/** A well-formed ETH amount above the network's per-payment maximum. */
+function aboveNativeMaximum(value: unknown, maximumWei: bigint): boolean {
+  const m = typeof value === 'string' ? DECIMAL.exec(value) : null;
+  if (!m || (m[2]?.length ?? 0) > 18) return false;
+  return BigInt(m[1]!) * 10n ** 18n + BigInt((m[2] ?? '').padEnd(18, '0') || '0') > maximumWei;
+}
 
 /** The canonical node of a Batch Payment input, or a closed refusal. */
 export function createAuthoredBatchPayment(nodeId: string, input: BatchPaymentInput): Node {
@@ -36,14 +51,15 @@ export function createAuthoredBatchPayment(nodeId: string, input: BatchPaymentIn
   if (input.payments.length > BATCH_PAYMENT_MAX_RECIPIENTS) throw new Error('BATCH_PAYMENT_TOO_MANY_RECIPIENTS');
   const profile = transferProfileFor(input.network);
   const recipients = input.payments.map(p => {
-    if (!p || typeof p.recipient !== 'string' || !RECIPIENT.test(p.recipient)) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
+    if (!p || !batchRecipientValid(p.recipient)) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
     return p.recipient.toLowerCase();
   });
   const symbol = authoringAssetSymbol(profile.chain, input.asset);
   if (symbol === 'ETH') {
     const payments = input.payments.map((p, i) => {
       let amount: string;
-      try { amount = parseTransferAmount(p.amount, profile); } catch { throw new Error('BATCH_PAYMENT_AMOUNT_INVALID'); }
+      try { amount = parseTransferAmount(p.amount, profile); }
+      catch { throw new Error(aboveNativeMaximum(p.amount, BigInt(profile.maximumValueWei)) ? 'BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM' : 'BATCH_PAYMENT_AMOUNT_INVALID'); }
       return { recipient: recipients[i]!, amount };
     });
     return createBatchPaymentNode(nodeId, { chain: profile.chain, asset: { kind: 'NATIVE' }, payments });
@@ -53,10 +69,11 @@ export function createAuthoredBatchPayment(nodeId: string, input: BatchPaymentIn
   if (!token) throw new Error('ASSET_CATALOG_UNAVAILABLE');
   if (token.kind !== 'ERC20') throw new Error('BATCH_PAYMENT_ASSET_UNSUPPORTED');
   // A Stock Token is paid only through its own transfer flow: FloFi's atomic batches never carry one.
-  if (token.stock) throw new Error('BATCH_PAYMENT_ASSET_UNSUPPORTED');
+  if (token.stock || (token as { assetClass?: string }).assetClass === 'STOCK_TOKEN') throw new Error('BATCH_PAYMENT_ASSET_UNSUPPORTED');
   const payments = input.payments.map((p, i) => {
     let amount: string;
-    try { amount = parseAssetAmount(p.amount, token.decimals); } catch { throw new Error('BATCH_PAYMENT_AMOUNT_INVALID'); }
+    try { amount = parseAssetAmount(p.amount, token.decimals); }
+    catch { throw new Error(tooPrecise(p.amount, token.decimals) ? 'BATCH_PAYMENT_AMOUNT_TOO_PRECISE' : 'BATCH_PAYMENT_AMOUNT_INVALID'); }
     if (!/^[1-9][0-9]*$/.test(amount)) throw new Error('BATCH_PAYMENT_AMOUNT_INVALID');
     return { recipient: recipients[i]!, amount };
   });
@@ -109,9 +126,11 @@ export type BatchPaymentDraftCheck = { readonly valid: boolean; readonly count: 
 const DRAFT_PROBLEM: Readonly<Record<string, string>> = {
   BATCH_PAYMENT_TOO_FEW_RECIPIENTS: 'Add at least 2 recipients.',
   BATCH_PAYMENT_TOO_MANY_RECIPIENTS: 'A Batch Payment pays at most 8 recipients.',
-  BATCH_PAYMENT_RECIPIENT_INVALID: 'Enter a valid 0x address for every recipient.',
+  BATCH_PAYMENT_RECIPIENT_INVALID: 'Enter a valid 0x address for every recipient (a mixed-case address must match its checksum).',
   BATCH_PAYMENT_DUPLICATE_RECIPIENT: 'An address appears more than once. Remove the repeated recipient: payments are never merged.',
   BATCH_PAYMENT_AMOUNT_INVALID: 'Enter a positive amount for every recipient.',
+  BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM: 'An ETH amount is above the per-payment maximum FloFi sends on this network. Lower it or split the payment.',
+  BATCH_PAYMENT_AMOUNT_TOO_PRECISE: 'An amount has more decimal places than this asset allows.',
   BATCH_PAYMENT_NETWORK_UNSUPPORTED: 'Batch Payment is available on Base, Arbitrum One, Ethereum and Robinhood Chain.',
 };
 const ASSET_PROBLEM = 'Choose an asset available for Batch Payment on this network.';

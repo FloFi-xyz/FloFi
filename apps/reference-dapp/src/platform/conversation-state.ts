@@ -241,6 +241,20 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
       'Ethereum and Robinhood Chain (never Stock Tokens, never Solana in this version).',
     PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens, nunca Solana ' +
       'nesta versão).' }],
+  [/^BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM$/, { EN: 'An ETH amount in this Batch Payment is above the per-payment maximum FloFi sends on this network. Nothing was signed or sent. '
+      + 'Lower the amount or split the payment.',
+    PT: 'Um valor em ETH neste Pagamento em lote está acima do máximo por pagamento que o FloFi envia nesta rede. Nada foi assinado nem enviado. Diminua o valor ou '
+      + 'divida o pagamento.' }],
+  [/^BATCH_PAYMENT_AMOUNT_TOO_PRECISE$/, { EN: 'An amount in this Batch Payment has more decimal places than the asset allows. Nothing was rounded, signed or sent.',
+    PT: 'Um valor neste Pagamento em lote tem mais casas decimais do que o ativo permite. Nada foi arredondado, assinado nem enviado.' }],
+  [/^BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN$/, { EN: 'FloFi cannot yet prove from the chain that the earlier request of this Batch Payment never executed, so it does not '
+      + 'ask your wallet again (that could pay every recipient twice). Check your wallet\u2019s activity; you can end the run at any time.',
+    PT: 'O FloFi ainda não consegue provar pela rede que o pedido anterior deste Pagamento em lote nunca executou, então não pede de novo à sua carteira (isso poderia '
+      + 'pagar cada destinatário duas vezes). Confira a atividade da sua carteira; você pode encerrar a execução a qualquer momento.' }],
+  [/^WALLET_BATCH_PARTIALLY_EXECUTED$/, { EN: 'Your wallet sent this batch as several transactions and only some of them succeeded, so part of it executed. FloFi records '
+      + 'it for review and never sends it again; check each transaction before doing anything else.',
+    PT: 'Sua carteira enviou este lote como várias transações e só algumas deram certo, então parte dele foi executada. O FloFi registra isso para revisão e nunca o '
+      + 'envia de novo; confira cada transação antes de fazer qualquer outra coisa.' }],
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): balance reads that this FloFi deployment has not turned on (an operator setting), before the
   // generic portfolio family: re-linking the wallet cannot change it, and it is never a zero balance.
   [/^PORTFOLIO_READS_NOT_ENABLED$/, { EN: 'This FloFi deployment does not read wallet balances through this connection yet. Linking your wallet again does not change ' +

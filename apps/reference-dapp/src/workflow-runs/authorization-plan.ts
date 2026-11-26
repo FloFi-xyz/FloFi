@@ -151,7 +151,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   // (`summarize` counts it as a minimum), and the plan says how many signatures Circle needs.
   if (userFundedAvailable && groupsPlan?.groups.some(g => g.tokenGas)) notes.push('When your ETH cannot pay a group\'s network fee, FloFi may offer to pay it from your '
     + 'USDC through Circle: that group then needs two signatures (a USDC permit, then the operation) instead of one.');
-  if (bindingCodes.length) notes.push(userFundedAvailable
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment's legs are bound EXACTLY (never capped down): the plan says so, never "up to its amount".
+  if (workflow.bindings.some(b => b.exact)) notes.push('A Batch Payment funded by an earlier step pays every recipient exactly its amount from what that step actually '
+    + 'delivered (after reconciliation); if that is not enough, nothing is paid and a new Review is needed.');
+  if (workflow.bindings.some(b => !b.exact)) notes.push(userFundedAvailable
     ? 'A dependent step in the same group spends the earlier step\'s signed guaranteed minimum, fixed when you sign (anything above it stays in your wallet); '
       + 'a dependent step in a later group spends what was actually delivered after reconciliation, capped by its own amount, and is signed when it becomes due.'
     : 'A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.');

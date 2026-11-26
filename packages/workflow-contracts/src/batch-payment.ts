@@ -56,6 +56,8 @@ export function validateBatchPaymentFields(fields: BatchPaymentFields): void {
   if (!a || (a.kind !== 'NATIVE' && a.kind !== 'TOKEN')) fail('BATCH_PAYMENT_FIELDS_INVALID');
   if (a.kind === 'TOKEN' && (typeof a.address !== 'string' || !ADDRESS.test(a.address) || !Number.isSafeInteger(a.decimals) || a.decimals < 0 || a.decimals > 36 ||
       (a.officialId !== null && (typeof a.officialId !== 'string' || !OFFICIAL_ID.test(a.officialId))))) fail('BATCH_PAYMENT_FIELDS_INVALID');
+  // An official id names an issuer-registered asset (a Robinhood Chain Stock Token): FloFi's atomic batches never carry one, whichever channel wrote it.
+  if (a.kind === 'TOKEN' && a.officialId !== null) fail('BATCH_PAYMENT_ASSET_UNSUPPORTED');
   if (!Array.isArray(fields.payments) || fields.payments.length < BATCH_PAYMENT_MIN_RECIPIENTS) fail('BATCH_PAYMENT_TOO_FEW_RECIPIENTS');
   if (fields.payments.length > BATCH_PAYMENT_MAX_RECIPIENTS) fail('BATCH_PAYMENT_TOO_MANY_RECIPIENTS');
   const seen = new Set<string>();

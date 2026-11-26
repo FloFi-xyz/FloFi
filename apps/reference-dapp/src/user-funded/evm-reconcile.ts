@@ -191,6 +191,10 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
   if (!batchCarriesCalls(group.owner, txs, evmCallsOf(group)))
     return { status: 'MISMATCH', code: 'RECONCILIATION_CALLS_MISMATCH', gasPaid: null, transactions: [...hashes] };
   const gasPaid: GasPaidFact = { payer: group.owner, amount: gas.toString(), unit: 'wei', source: 'RECEIPT' };
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a batch the wallet split into several transactions (it ignored `atomicRequired`) that did not all
+  // succeed executed in part. It is never FAILED (which says nothing irreversible happened): it is unmatched, observed and never resent.
+  if (receipts.length > 1 && receipts.some(r => r.status === '0x1') && receipts.some(r => r.status !== '0x1'))
+    return { status: 'MISMATCH', code: 'WALLET_BATCH_PARTIALLY_EXECUTED', gasPaid, transactions: [...hashes] };
   if (receipts.some(r => r.status !== '0x1')) return { status: 'REVERTED', code: 'SUBMISSION_REVERTED', gasPaid, transactions: [...hashes] };
   const attributed = attributeLegs(group, receipts.flatMap(r => r.logs ?? []));
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions: [...hashes] };

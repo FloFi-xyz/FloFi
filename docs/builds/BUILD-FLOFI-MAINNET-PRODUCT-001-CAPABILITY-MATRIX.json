@@ -338,12 +338,12 @@
       "protocols": [
         "evm.batch-payment"
       ],
-      "flow": null,
-      "webRuntime": null,
+      "flow": "workflow-run",
+      "webRuntime": "per group",
       "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
-        "approve": false,
+        "canvas": true,
+        "approve": true,
         "copilot": true,
         "mcp": true,
         "telegram": true,
@@ -353,8 +353,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "BROKEN",
-      "reason": "Implemented and handed off, but no web runtime serves it."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
       "id": "bridge-arbitrum-base",
@@ -446,12 +446,12 @@
       "protocols": [
         "evm.batch-payment"
       ],
-      "flow": null,
-      "webRuntime": null,
+      "flow": "workflow-run",
+      "webRuntime": "per group",
       "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
-        "approve": false,
+        "canvas": true,
+        "approve": true,
         "copilot": true,
         "mcp": true,
         "telegram": true,
@@ -461,8 +461,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "BROKEN",
-      "reason": "Implemented and handed off, but no web runtime serves it."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
       "id": "supply-base",
@@ -743,12 +743,12 @@
       "protocols": [
         "evm.batch-payment"
       ],
-      "flow": null,
-      "webRuntime": null,
+      "flow": "workflow-run",
+      "webRuntime": "per group",
       "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
-        "approve": false,
+        "canvas": true,
+        "approve": true,
         "copilot": true,
         "mcp": true,
         "telegram": true,
@@ -758,8 +758,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "BROKEN",
-      "reason": "Implemented and handed off, but no web runtime serves it."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
       "id": "add-liquidity-arbitrum",
@@ -959,12 +959,12 @@
       "protocols": [
         "evm.batch-payment"
       ],
-      "flow": null,
-      "webRuntime": null,
+      "flow": "workflow-run",
+      "webRuntime": "per group",
       "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
-        "approve": false,
+        "canvas": true,
+        "approve": true,
         "copilot": true,
         "mcp": true,
         "telegram": true,
@@ -974,8 +974,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "BROKEN",
-      "reason": "Implemented and handed off, but no web runtime serves it."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
       "id": "add-liquidity-ethereum",

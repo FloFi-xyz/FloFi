@@ -29,7 +29,7 @@ import { networkIdentity } from '../domain/network-registry';
 import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
 import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
-import { createAuthoredBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
+import { batchRecipientValid, createAuthoredBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
 import { solanaTransferProfileFor } from '../domain/solana-transfer-authoring';
 import { solanaTransferAsset } from '@defi-workflow-engine/action-registry';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
@@ -203,12 +203,14 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
     case 'batch_payment': {
       // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: recipients lower-cased, in the person's order; a recipient named twice is refused (never merged).
       const recipients = spec.recipients.map(line => {
-        if (!/^0x[0-9a-fA-F]{40}$/.test(line.recipient)) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
+        if (!batchRecipientValid(line.recipient)) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
         return { recipient: lower(line.recipient), amount: line.amount };
       });
       if (new Set(recipients.map(line => line.recipient)).size !== recipients.length) throw new Error('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
       notes.push(`Batch Payment of ${recipients.length} recipients: it runs only as one atomic authorization of your own wallet (every payment settles, or none does); ` +
-        'a wallet or deployment that cannot do that refuses it instead of splitting it into separate transfers.');
+        'a wallet or deployment that cannot do that refuses it instead of splitting it into separate transfers.',
+        'Network fees are paid by your own wallet on top of the total; if your balance cannot cover every payment and the fees, the whole batch is refused before anything is sent.');
+      if (/^eth$/i.test(spec.asset)) notes.push('ETH is paid only to plain wallet addresses (not contracts or smart accounts); such a recipient is refused before anything is sent.');
       return { notes, strategy: { version: 1, action: 'batch_payment', network: spec.network, asset: symbol(spec.network, spec.asset), recipients } };
     }
     case 'lending_composition': return { notes, strategy: { version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: spec.supplyAmount,
@@ -434,16 +436,18 @@ export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFa
   // A binding names strategy steps: a Batch Payment consumer binds each of its legs (each spends exactly its own amount, never less); a batch
   // delivers nothing to the owner, so it is never a producer.
   const batchAt = (index: number) => batches.find(b => b.step === index) ?? null;
-  const legBindings: (WorkflowBindingInput & { readonly exact?: true })[] = [];
+  const legBindings: (WorkflowBindingInput & { readonly exact?: true })[] = [], rawIndexOf: number[] = [];
   for (const [i, b] of rawBindings.entries()) {
     if (batchAt(b.amountFrom)) return { ok: false, code: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED', issues: [{ path: `/bindings/${i}/amountFrom`, rule: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED' }] };
     const consumer = batchAt(b.step), producer = legStart[b.amountFrom], target = legStart[b.step];
     if (producer === undefined || target === undefined) return { ok: false, code: 'WORKFLOW_BINDING_INVALID', issues: [{ path: `/bindings/${i}`, rule: 'WORKFLOW_BINDING_INVALID' }] };
-    if (consumer) for (let leg = consumer.from; leg <= consumer.to; leg++) legBindings.push({ step: leg, amountFrom: producer, exact: true });
-    else legBindings.push({ step: target, amountFrom: producer });
+    if (consumer) for (let leg = consumer.from; leg <= consumer.to; leg++) { legBindings.push({ step: leg, amountFrom: producer, exact: true }); rawIndexOf.push(i); }
+    else { legBindings.push({ step: target, amountFrom: producer }); rawIndexOf.push(i); }
   }
   const checked = validateBindings(steps, legBindings);
-  if (!checked.ok) return { ok: false, code: checked.code, issues: checked.issues };
+  // A refusal names the binding the caller wrote (`/bindings/<its index>`), never an index of the expanded legs.
+  if (!checked.ok) return { ok: false, code: checked.code, issues: checked.issues.map(issue => ({ ...issue,
+    path: issue.path.replace(/^\/bindings\/(\d+)/, (_, leg: string) => `/bindings/${rawIndexOf[Number(leg)] ?? leg}`) })) };
   const exactLegs = new Set(legBindings.filter(b => b.exact).map(b => b.step));
   const bindings = checked.bindings.map(b => exactLegs.has(b.step) ? { ...b, exact: true as const } : b);
   const notes = [...semantic.flatMap((c, i) => c.notes.map(note => `Step ${i + 1}: ${note}`)),
@@ -506,6 +510,9 @@ export function reviewComposition(composed: Composition): StrategyReview {
     message: 'This strategy uses a mainnet: real funds. Nothing executes without the owner\'s Review and wallet signature in the FloFi app.' });
   if ((s.action === 'bridge' || s.action === 'transfer') && s.recipient) findings.push({ level: 'WARNING', code: 'EXPLICIT_RECIPIENT', source: 'STRATEGY', nodeId: null,
     message: `Funds are delivered to ${s.recipient}, not necessarily the signing wallet. Confirm this address belongs to the intended recipient.` });
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: every recipient of a Batch Payment is named, exactly like one transfer's.
+  if (s.action === 'batch_payment') for (const line of s.recipients) findings.push({ level: 'WARNING', code: 'EXPLICIT_RECIPIENT', source: 'STRATEGY', nodeId: null,
+    message: `${line.amount} ${s.asset} is delivered to ${line.recipient}, not necessarily the signing wallet. Confirm this address belongs to the intended recipient.` });
   if ((s.action === 'supply' || s.action === 'borrow' || s.action === 'repay') && s.beneficiary) {
     // BUILD AAVE-V3-EXPANSION-001: Borrow and Repay always act for the signer, and every expansion reserve (and the Ethereum/Arbitrum USDC
     // profiles) credits only the signer: say so instead of "the signer may differ", so an approval is not claimed by another wallet in vain.

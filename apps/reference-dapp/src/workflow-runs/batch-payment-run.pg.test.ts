@@ -11,8 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
-import { workflowRunResume, workflowRunStart, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport,
-  workflowRunUserFundedStart, workflowRunUserFundedWalletRefused } from '../platform/approve.ts';
+import { workflowRunCancel, workflowRunResume, workflowRunStart, workflowRunStatus, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare,
+  workflowRunUserFundedReport, workflowRunUserFundedStart, workflowRunUserFundedWalletRefused } from '../platform/approve.ts';
 import { ownedRun } from '../platform/workflow-run-approvals.ts';
 import { BASE_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
@@ -26,16 +26,16 @@ const ATOMIC = { eip155: { wallet: 'INJECTED', atomic: { [BASE]: 'supported' }, 
 const PLAIN = { eip155: { wallet: 'INJECTED', atomic: { [BASE]: 'unsupported' }, typedData: true } };
 type Batch = { group: EvmGroupCalls; request: { calls: { to: string; data: string }[]; atomicRequired: boolean; from: string; id: string }; preparedAt: string };
 
-async function start(db: Awaited<ReturnType<typeof createTestDatabase>>['db'], usdc = 200_000_000n) {
+async function start(db: Awaited<ReturnType<typeof createTestDatabase>>['db'], usdc = 200_000_000n, batch: unknown = BATCH) {
   let clock: () => Date = () => new Date();
   const base = createEvmDouble(8453, () => Math.floor(clock().getTime() / 1000), { profile: BASE_MAINNET_SWAP });
   const h = await workflowRunHarness(db, { flows: ['base-mainnet-transfer'] as never, policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base' }, userFundedChains: [BASE],
     userFundedRpc: c => c === BASE ? base.rpc : null, sequencesUserFunded: true });
-  clock = h.d.now;
+  clock = () => h.d.now();
   const owner = h.d.evmOwner.address.toLowerCase(), wallets = [h.evm, h.sol];
   base.control.fundNative(owner, 10n ** 17n);
   base.control.fundToken(owner, USDC, usdc);
-  const approval = await h.request(BATCH);
+  const approval = await h.request(batch);
   const claimed = await claimApproval(h.surface, approval.secret, wallets, true, h.d.now());
   return { h, base, owner, wallets, approval, claimed };
 }
@@ -99,11 +99,75 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment run (Pos
       const { prepared, handout } = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
       const requestId = (prepared.request as { id: string }).id;
       const recorded = (await workflowRunUserFundedWalletRefused(h.surface, approval.approvalId, wallets, 0, requestId, prepared.preparedAt, handout, 5760)).view.workflowRun!.run;
-      h.d.advance(Date.parse(recorded.groups[0]!.batchFallbackAt!) + 1_000 - h.d.now().getTime());
+      // No step-by-step fallback is offered for a Batch Payment (its view carries no `batchFallbackAt`); the owner's Resume is refused even past it.
+      expect(recorded.groups[0]).not.toHaveProperty('batchFallbackAt');
+      h.d.advance(Date.parse(recorded.groups[0]!.validUntil!) + 3 * 60_000 - h.d.now().getTime());
       await expect(workflowRunResume(h.surface, approval.approvalId, wallets)).rejects.toThrow('BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION');
       const run = await ownedRun(h.runs, approval.approvalId, wallets);
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH' });
       expect((await h.store.steps(run.runId)).every(s => s.state !== 'PENDING' && s.state !== 'AWAITING_OWNER')).toBe(true);
+      // Ending it is closed as "not sent" (never "may have executed") once the chain proves the refused request never ran.
+      expect((await workflowRunStatus(h.surface, approval.approvalId, wallets)).view.workflowRun!.run.groups[0]).not.toHaveProperty('batchFallbackAt');
+      await workflowRunCancel(h.surface, approval.approvalId, wallets);
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED', code: 'WALLET_REQUEST_REJECTED' });
+    } finally { await t.drop(); }
+  });
+
+  it('a Batch Payment stopped for good is never offered a Resume: nothing was sent, and it never continues payment by payment', async () => {
+    const t = await createTestDatabase();
+    try {
+      // Native ETH is paid only to plain wallets: a recipient with code (a contract or smart account) is a permanent refusal at due time.
+      const ETH = { ...BATCH, asset: 'ETH', recipients: [{ recipient: A, amount: '0.001' }, { recipient: B, amount: '0.002' }] };
+      const { h, base, wallets, approval } = await start(t.db, 200_000_000n, ETH);
+      base.control.setCode(A, '0x6080604052');
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, wallets, ATOMIC);
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_TRANSFER_RECIPIENT_NOT_EOA');
+      const view = (await workflowRunStatus(h.surface, approval.approvalId, wallets)).view.workflowRun!.run;
+      expect(view).toMatchObject({ state: 'HALTED', halted: 'NOTHING_SENT', resumable: false });
+      expect(view.note).toMatch(/only as one atomic wallet request, never payment by payment/);
+      expect(view.note).not.toMatch(/its own flow/);
+      await expect(workflowRunResume(h.surface, approval.approvalId, wallets)).rejects.toThrow('BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION');
+      expect(base.control.sends()).toBe(0);
+    } finally { await t.drop(); }
+  });
+
+  it('a batch the wallet split into transactions that did not all succeed is never FAILED: part was paid, so it is held for attention and never resent', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, base, owner, wallets, approval } = await start(t.db);
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, wallets, ATOMIC);
+      const p = (await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).prepared as unknown as Batch;
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: p.request.id });
+      // A wallet that ignores `atomicRequired`: one transaction per payment, and the last one reverts (the owner's USDC ran short meanwhile).
+      base.control.fund(owner, 'USDC', 75_000_000n);
+      const calls = evmCallsOf(p.group);
+      const hashes = [base.control.walletBatch(h.d.evmOwner.address, calls.slice(0, 2)), base.control.walletBatch(h.d.evmOwner.address, [calls[2]!]),
+        base.control.walletBatch(h.d.evmOwner.address, [calls[3]!])];
+      await workflowRunUserFundedReport(h.surface, approval.approvalId, wallets, 0, hashes);
+      await h.drain((await ownedRun(h.runs, approval.approvalId, wallets)).runId);
+      const run = await ownedRun(h.runs, approval.approvalId, wallets);
+      expect(run.state).not.toBe('FAILED');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ code: 'WALLET_BATCH_PARTIALLY_EXECUTED' });
+      expect([A, B, C].map(r => base.control.tokenBalance(USDC, r))).toEqual([25_000_000n, 50_000_000n, 0n]);
+      expect(base.control.sends()).toBe(0);
+    } finally { await t.drop(); }
+  });
+
+  it('an unanswered Batch Payment request is handed out again only when the chain proves it never executed (never a second, overlapping payment)', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, base, wallets, approval } = await start(t.db);
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, wallets, ATOMIC);
+      const first = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const p = first.prepared as unknown as Batch;
+      // The wallet executed it, but its answer never reached FloFi (a crashed browser). After the request's validity the same browser asks again.
+      base.control.walletBatch(h.d.evmOwner.address, evmCallsOf(p.group));
+      const run = await ownedRun(h.runs, approval.approvalId, wallets);
+      const group = (await h.store.groups(run.runId))[0]!;
+      h.d.advance(group.validUntil!.getTime() + 5 * 60_000 - h.d.now().getTime());
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, first.handout)).rejects.toThrow('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
+      expect([A, B, C].map(r => base.control.tokenBalance(USDC, r))).toEqual([25_000_000n, 50_000_000n, 75_000_000n]);
+      expect(base.control.sends()).toBe(0);
     } finally { await t.drop(); }
   });
 });
