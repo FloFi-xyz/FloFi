@@ -2021,6 +2021,18 @@
     "app.components.account.sign-in-methods": {
       "path": "apps/reference-dapp/src/components/account/sign-in-methods.test.tsx",
       "stage": "unit"
+    },
+    "app.platform.external-single-step": {
+      "path": "apps/reference-dapp/src/platform/external-single-step.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.app.panel": {
+      "path": "apps/reference-dapp/src/mcp/app/panel.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.approval-notice": {
+      "path": "apps/reference-dapp/src/domain/approval-notice.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2219,7 +2231,10 @@
     "app.domain.intelligence.beta-critical-recovery",
     "app.domain.slippage-range-message",
     "app.components.account.sign-in-methods",
-    "app.domain.flofi-wallet-bridge"
+    "app.domain.flofi-wallet-bridge",
+    "app.platform.external-single-step",
+    "app.mcp.app.panel",
+    "app.domain.approval-notice"
   ],
   "modules": [
     {
@@ -3750,7 +3765,8 @@
         "app.channels.whatsapp.learning.pg",
         "app.platform.intelligence-parity",
         "app.channels.telegram.universal-actions",
-        "app.channels.telegram.universal-actions.pg"
+        "app.channels.telegram.universal-actions.pg",
+        "app.platform.external-single-step"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -4883,7 +4899,8 @@
         "apps/reference-dapp/src/domain/conversation-persistence.ts",
         "apps/reference-dapp/src/domain/amount-shortcuts.ts",
         "apps/reference-dapp/src/components/amount-shortcuts.tsx",
-        "apps/reference-dapp/src/domain/relative-amount.ts"
+        "apps/reference-dapp/src/domain/relative-amount.ts",
+        "apps/reference-dapp/src/domain/approval-notice.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -4923,7 +4940,8 @@
         "app.domain.catalog-copilot-parity",
         "app.e2e.chat-liquidity-positions",
         "app.domain.relative-amount",
-        "app.domain.intelligence.beta-critical-recovery"
+        "app.domain.intelligence.beta-critical-recovery",
+        "app.domain.approval-notice"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -5592,7 +5610,8 @@
         "apps/reference-dapp/src/i18n/pt-ux-refinement.ts",
         "apps/reference-dapp/src/i18n/pt-editor-fidelity.ts",
         "apps/reference-dapp/src/i18n/pt-global-precision.ts",
-        "apps/reference-dapp/src/i18n/pt-beta-ux-intelligence.ts"
+        "apps/reference-dapp/src/i18n/pt-beta-ux-intelligence.ts",
+        "apps/reference-dapp/src/i18n/pt-channel-execution-parity.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -5601,7 +5620,8 @@
         "app.i18n.catalog",
         "app.i18n.flofi-fee-copy",
         "app.i18n.locale",
-        "app.e2e.ux-polish-004"
+        "app.e2e.ux-polish-004",
+        "app.domain.approval-notice"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -5777,7 +5797,10 @@
         "app.platform.intelligence-parity",
         "app.mcp.gateway-deadline",
         "app.mcp.beta-access.pg",
-        "app.mcp.account-tools"
+        "app.mcp.account-tools",
+        "app.mcp.app.panel",
+        "app.platform.external-single-step",
+        "app.server.embedded-approval"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -5928,7 +5951,8 @@
         "apps/reference-dapp/src/platform/strategy.ts",
         "apps/reference-dapp/src/platform/workflow-run-approvals.ts",
         "apps/reference-dapp/src/platform/workflow-visual-layout.ts",
-        "apps/reference-dapp/src/platform/workflow-visual.ts"
+        "apps/reference-dapp/src/platform/workflow-visual.ts",
+        "apps/reference-dapp/src/platform/external-single-step.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5942,7 +5966,10 @@
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
         "app.platform.settlement-regression-matrix",
-        "app.platform.conversation-state"
+        "app.platform.conversation-state",
+        "app.platform.external-single-step",
+        "app.editor.single-card-run.pg",
+        "app.editor.single-card-strategy"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
