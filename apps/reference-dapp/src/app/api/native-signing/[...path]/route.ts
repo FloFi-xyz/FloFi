@@ -10,11 +10,11 @@
  *   GET  <approval>/<session>/confirm/<ref>   the conversation's single-use confirmation of its Review → the wallet's signing request (the same request
  *                                      again for the same confirmation)
  *
- * Off with `FLOFI_NATIVE_SIGNING=disabled`. Nothing here signs: the wallet signs, and the flow verifies and broadcasts the exact reviewed bytes.
+ * Off unless `FLOFI_NATIVE_SIGNING` is unset or `enabled`. Nothing here signs: the wallet signs, and the flow verifies and broadcasts the exact reviewed bytes.
  */
-import { NextResponse, type NextRequest } from 'next/server';
+import { after, NextResponse, type NextRequest } from 'next/server';
 import { nativeSigningEnabled, nativeSigningService, startFromChannelToken } from '../../../../server/native-signing/runtime';
-import { nativeMessage } from '../../../../server/native-signing/messages';
+import { nativeMessage, nativeRefusalText } from '../../../../server/native-signing/messages';
 import { startPage, statusPage, walletPage, type PageLanguage } from '../../../../server/native-signing/pages';
 import { DEEPLINK_WALLETS } from '../../../../server/native-signing/deeplink/protocol';
 import { publicOrigin } from '../../../../server/deployment';
@@ -49,6 +49,9 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Res
     }
     if (path.length !== 3) return html(statusPage('IGNORED', null, language));
     const outcome = await service.callback(handoffId, sessionId, step, request.nextUrl.searchParams);
+    // Just sent: a bounded follow-up after this response observes the run and posts its verified receipt to the conversation.
+    if (outcome.kind === 'PAGE' && outcome.page === 'RETURN' && outcome.session?.state === 'SUBMITTED')
+      after(() => service.follow(handoffId, sessionId, { attempts: 9, intervalMs: 5_000 }).then(() => undefined).catch(() => undefined));
     if (outcome.kind === 'WALLET') { const session = await service.latestById(handoffId, sessionId);
       return html(walletPage(outcome.url, session ? DEEPLINK_WALLETS[session.wallet].name : 'wallet', language)); }
     return html(statusPage(outcome.page, outcome.session, language, { telegramBot: telegramBot(), ended: endedLine(outcome.session, language) }));
@@ -56,6 +59,9 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Res
     const session = await nativeSigningService(process.env).then(s => s.latestById(handoffId, sessionId)).catch(() => null);
     // After the signed bytes arrived, never "nothing changed": the page says it was signed and the status follows in the conversation.
     if (session && (session.state === 'SUBMITTING' || session.state === 'SUBMITTED')) return html(statusPage('RETURN', session, language, { telegramBot: telegramBot() }));
+    // A wallet request is still out (it may yet be signed): say why this step did not go on, never "nothing was signed or sent".
+    if (session && session.state === 'AWAITING_SIGNATURE') return html(statusPage('NOTICE', session, language, { telegramBot: telegramBot(),
+      ended: nativeRefusalText(codeOf(error), DEEPLINK_WALLETS[session.wallet].name)[language] }));
     return html(statusPage(session?.state === 'ENDED' ? 'ENDED' : 'IGNORED', session, language, { telegramBot: telegramBot(),
       ended: session?.state === 'ENDED' ? endedLine(session, language) : codeOf(error) }));
   }
@@ -75,8 +81,10 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Re
       { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     const code = codeOf(error);
-    const message = code === 'NATIVE_START_INVALID' ? (language === 'PT' ? 'Este botão expirou. Peça uma nova proposta na conversa.' : 'This button has expired. Ask for a new proposal in your conversation.')
-      : language === 'PT' ? 'Não foi possível iniciar a assinatura agora. Nada foi assinado. Tente de novo pela conversa.' : 'Could not start signing right now. Nothing was signed. Try again from your conversation.';
+    // A known refusal in plain words (already sent, a request still open, status not shared, the approval ended); anything else: try again later.
+    const known = code !== 'NATIVE_SIGNING_UNAVAILABLE' && code !== 'CLOUD_RUNTIME_UNAVAILABLE' && code !== 'NATIVE_SIGNING_BUSY' ? nativeRefusalText(code, language === 'PT' ? 'carteira' : 'wallet')[language] : null;
+    const message = code === 'NATIVE_START_INVALID' ? (language === 'PT' ? 'Este botão não vale mais. Peça uma nova proposta na conversa.' : 'This button is no longer valid. Ask for a new proposal in your conversation.')
+      : known ?? (language === 'PT' ? 'Não foi possível iniciar a assinatura agora. Nada foi assinado. Tente de novo pela conversa.' : 'Could not start signing right now. Nothing was signed. Try again from your conversation.');
     return NextResponse.json({ ok: false, code, message }, { status: 400, headers: { 'cache-control': 'no-store' } });
   }
 }

@@ -12,18 +12,21 @@
  *   confirm    the conversation confirms that exact Review (its single-use reference) → the flow's Review acceptance and `begin` (fresh checks,
  *              durable PREPARED, the exact unsigned bytes) → the wallet's `signTransaction` deeplink with those bytes
  *   sign       the wallet returns the signed bytes → the flow's `submit` (exact reviewed bytes and owner signature verified, signature durable,
- *              one broadcast by FloFi) → automatic observation and reconciliation as for every run; the receipt reaches the conversation through
- *              the approval's existing status notifications
+ *              one broadcast by FloFi) → automatic observation and reconciliation as for every run
+ *   follow     right after the broadcast, a bounded follow-up observes the run and tells the conversation whenever its status may have changed, so
+ *              the verified receipt reaches it through the approval's existing status notifications without anyone opening FloFi
  *
  * Each wallet returns to `/api/native-signing/<approval>/<session>/<tag>`; the tag is an HMAC of the session, its step and a stored nonce (never
  * stored itself). A step is recorded as used (compare-and-swap) BEFORE its effect, so of concurrent answers exactly one acts. An answer that does
  * not open under this session's key, or a proof that does not verify, is refused without ending the session. A wallet REFUSAL is plain text by
- * protocol: whoever holds a callback URL can end that session (nothing more), and nothing is ever sent by it. One approval is sent at most once:
- * no new session or confirmation while another may have sent it or holds an open wallet request. FloFi never holds or uses a key that can sign for
- * the owner: the wallet signs, and the flow broadcasts only the exact reviewed bytes it verified.
+ * protocol: whoever holds a callback URL can end that session (nothing more), and nothing is ever sent by it. Native signing never sends an
+ * approval that may already have been sent: no new session or confirmation while another session, or a run of this approval started on FloFi's
+ * signing page (bound or not, shared or not), may have sent it or holds an open wallet request. Signing in the conversation shares this operation's
+ * status with it (said before the wallet is opened and in the Review); an approval its owner claimed on FloFi's page without sharing is not taken
+ * over. FloFi never holds or uses a key that can sign for the owner: the wallet signs, and the flow broadcasts only the exact reviewed bytes it verified.
  */
-import { randomBytes } from 'node:crypto';
-import { claimApproval, applyApproval, isNativeSigningFlow, nativeSigningEligible, openApprovalSession, typedId, verifyHandoff, type ApprovalRequester,
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { approvalRunIds, claimApproval, applyApproval, isNativeSigningFlow, nativeSigningEligible, openApprovalSession, typedId, verifyHandoff, type ApprovalRequester,
   type ApprovalSurface, type HandoffRecord, type RequesterScope } from '../../platform/index.ts';
 import { issueWalletChallenge, solanaChallengeMessage, verifySolanaSignIn } from '../wallet-session.ts';
 import type { BetaRequestIdentity } from '../../flight/beta-context.ts';
@@ -75,8 +78,11 @@ export function noWorse(confirmed: NativeReview, fresh: NativeReview): boolean {
 
 export type NativeFlowPort = <T>(flow: NativeFlow, method: string, args: readonly unknown[], context: { readonly principal: string;
   readonly betaIdentity: BetaRequestIdentity | null }) => Promise<Result<T>>;
-/** `REVIEW_RENEWED`: FloFi simulated again at the confirmation and asked the wallet with those (no worse) terms. */
-export type NativeEvent = 'REVIEW_READY' | 'REVIEW_RENEWED' | 'SUBMITTED' | 'ENDED';
+/**
+ * `REVIEW_RENEWED`: FloFi simulated again at the confirmation and asked the wallet with those (no worse) terms. `PROGRESS`: after the broadcast, the
+ * run's status may have changed (no message of its own: the approval's status notifications follow).
+ */
+export type NativeEvent = 'REVIEW_READY' | 'REVIEW_RENEWED' | 'SUBMITTED' | 'ENDED' | 'PROGRESS';
 export type NativeDeps = {
   readonly env: Env; readonly origin: string; readonly store: NativeSessionStore; readonly sealer: Sealer;
   readonly surface: () => Promise<ApprovalSurface>; readonly flow: NativeFlowPort;
@@ -99,10 +105,23 @@ const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const codeOf = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
 const nonce = () => randomBytes(16).toString('base64url');
 const unwrap = <T,>(result: Result<T>): T => result.ok ? result.value : fail(result.code);
+/** Constant-time equality of two step tags or references (never `===` on a secret-derived value). */
+const sameTag = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 const TERMINAL: readonly NativeState[] = ['SUBMITTED', 'ENDED'];
 const SENT: readonly NativeState[] = ['SUBMITTING', 'SUBMITTED'];
 type RunFacts = { readonly attempt?: { readonly state?: string; readonly signature?: string | null } | null; readonly verdict?: string; readonly error?: string | null;
-  readonly review?: { readonly expiresAt?: string } };
+  readonly notSubmitted?: boolean; readonly review?: { readonly expiresAt?: string } };
+/** A run's wallet attempt proven never sent: cancelled before signing, or proven not executed. */
+const notSent = (run: RunFacts) => !run.attempt || run.attempt.state === 'CANCELLED' || run.verdict === 'NOT_EXECUTED' || run.notSubmitted === true;
+/**
+ * Until when a session's wallet request can still be answered and broadcast: a request sent to the wallet stays open while its Review can still be
+ * submitted (the flow refuses after the Review's validity; LAPSED_MS covers clock skew), even past the session's own validity — never "nothing was sent"
+ * while a late signature could still go out.
+ */
+export function openUntil(s: Pick<NativeSession, 'state' | 'expiresAt' | 'review'>): number {
+  const own = Date.parse(s.expiresAt);
+  return s.state === 'AWAITING_SIGNATURE' && s.review ? Math.max(own, Date.parse(s.review.expiresAt) + LAPSED_MS) : own;
+}
 
 export function createNativeSigning(deps: NativeDeps) {
   const now = deps.now ?? (() => new Date());
@@ -148,39 +167,63 @@ export function createNativeSigning(deps: NativeDeps) {
     if (!check.ok) return fail(check.code);
     return { h, workflow: check.composition.workflow };
   }
-  /** No other session of this approval may have sent it, or hold a wallet request that still can be signed. */
+  /**
+   * No other session of this approval is sending it or holds a wallet request that still can be signed. A session that ended after a signature is
+   * judged by its run (`assertNothingSent`, at the proof and the confirmation): a refusal proven before any broadcast does not lock the approval.
+   */
   async function assertNoOtherSession(h: Pick<HandoffRecord, 'handoffId'>, self: string | null) {
     for (const { session: other } of await deps.store.forHandoff(h.handoffId)) {
       if (other.id === self) continue;
-      if (SENT.includes(other.state) || other.outcome?.afterSignature) fail('NATIVE_SIGNING_ALREADY_SENT');
-      if ((other.state === 'PREPARING_SIGNATURE' || other.state === 'AWAITING_SIGNATURE') && now().getTime() < Date.parse(other.expiresAt))
+      if (SENT.includes(other.state)) fail('NATIVE_SIGNING_ALREADY_SENT');
+      if ((other.state === 'PREPARING_SIGNATURE' || other.state === 'AWAITING_SIGNATURE') && now().getTime() < openUntil(other))
         fail('NATIVE_SIGNING_WALLET_REQUEST_OPEN');
     }
   }
   /**
-   * None of the approval's runs (here, on FloFi's signing page or in another session) has a wallet attempt that could have executed: each is cancelled
-   * before signing, proven never executed, or a prepared request long past its Review (the flow can no longer broadcast it).
+   * None of the approval's runs has a wallet attempt that could have executed: the runs bound to it AND the claimant's runs of this exact workflow
+   * on FloFi's signing page (bound only while status is shared). Each must be cancelled before signing, proven never executed, or a prepared request
+   * long past its Review (the flow can no longer broadcast it; it is then observed, which closes it as never sent). An incomplete read refuses.
    */
-  async function assertNothingSent(s: NativeSession, h: Pick<HandoffRecord, 'runIds'>) {
-    for (const runId of h.runIds) {
+  async function assertNothingSent(s: NativeSession, h: HandoffRecord, surface: ApprovalSurface) {
+    const runs = await approvalRunIds(h, surface.runtime);
+    if (!runs.complete) fail('CLOUD_RUNTIME_UNAVAILABLE');
+    for (const runId of runs.runIds) {
       const run = await flowCall<RunFacts>(s, 'status', [runId]), attempt = run.attempt;
-      if (!attempt || attempt.state === 'CANCELLED' || run.verdict === 'NOT_EXECUTED') continue;
-      const lapsed = attempt.state === 'PREPARED' && !attempt.signature && run.review?.expiresAt && now().getTime() > Date.parse(run.review.expiresAt) + LAPSED_MS;
-      if (!lapsed) fail('NATIVE_SIGNING_ALREADY_SENT');
+      if (notSent(run)) continue;
+      const prepared = attempt!.state === 'PREPARED' && !attempt!.signature;
+      const lapsed = prepared && run.review?.expiresAt && now().getTime() > Date.parse(run.review.expiresAt) + LAPSED_MS;
+      if (lapsed) { await flowCall(s, 'observe', [runId]).catch(() => undefined); continue; }
+      // A prepared request the owner may still sign (here or on the signing page) is open, not sent; anything further may have been sent.
+      fail(prepared ? 'NATIVE_SIGNING_WALLET_REQUEST_OPEN' : 'NATIVE_SIGNING_ALREADY_SENT');
     }
+  }
+  /**
+   * Before anything has an effect: the approval is open, its status is (or will be) shared with the conversation, and the requester's own claim rule
+   * accepts this proven wallet (read from the approval's immutable data, as the claim does) — so a refusal simulates nothing and rotates no session.
+   */
+  async function assertTakeable(surface: ApprovalSurface, h: HandoffRecord, owner: string | null) {
+    if (h.status !== 'PENDING' && h.status !== 'CLAIMED' && h.status !== 'APPLIED') fail(`APPROVAL_${h.status}`);
+    // The owner chose on FloFi's signing page not to share this approval's status: the conversation cannot carry its Review and receipt.
+    if ((h.status === 'CLAIMED' || h.status === 'APPLIED') && !h.shareStatus) fail('NATIVE_SIGNING_STATUS_NOT_SHARED');
+    if (!owner) return;
+    // A refresh (or a claim this owner already holds): never another wallet's approval.
+    if ((h.status === 'APPLIED' || h.claimed) && (h.claimed?.namespace !== 'solana' || h.claimed.address !== owner)) fail('HANDOFF_ALREADY_CLAIMED');
+    const rule = h.status === 'PENDING' ? await surface.profiles[h.requesterKind]?.claimPolicy?.(h, { namespace: 'solana', address: owner }) : null;
+    if (rule && !rule.ok) fail(rule.code);
   }
 
   /**
    * The flow's own fresh simulation for the proven owner, then the approval taken exactly as the signing page does (claim with the requester's own
-   * rule, then apply the canonical workflow). Simulating first means a refusal (balances, the Flight beta) leaves the approval as it was. Status
-   * sharing with the originating conversation is part of this in-conversation flow (its Review says so).
+   * rule, then apply the canonical workflow). Checking the claim rule and simulating first means a refusal (another wallet, balances, the Flight
+   * beta) leaves the approval as it was. Status sharing with the originating conversation is part of this in-conversation flow (said before the
+   * wallet opens, on the signer's page and in the Review).
    */
   async function prepareReview(s: NativeSession): Promise<NativeReview> {
     const surface = await deps.surface(), { h, workflow } = await verified(surface, s), owner = s.owner ?? fail('NATIVE_OWNER_UNPROVEN');
     const wallets = [{ namespace: 'solana' as const, address: owner }];
-    // A refresh (or a claim this owner already holds): never another wallet's approval.
-    if ((h.status === 'APPLIED' || h.claimed) && (h.claimed?.namespace !== 'solana' || h.claimed.address !== owner)) fail('HANDOFF_ALREADY_CLAIMED');
-    await assertNothingSent(s, h);
+    await assertTakeable(surface, h, owner);
+    await assertNoOtherSession(h, s.id);
+    await assertNothingSent(s, h, surface);
     const record = await flowCall<{ id: string }>(s, 'simulate', [workflow, owner]);
     const review = nativeReviewOf(s.flow, record);
     if (review.owner !== owner) fail('NATIVE_REVIEW_OWNER_MISMATCH');
@@ -205,7 +248,7 @@ export function createNativeSigning(deps: NativeDeps) {
 
   /** A confirmation of `s` with this reference: its Review's (unused) or the one already used (the same wallet request again), else null. */
   const confirmationOf = (s: NativeSession, ref: string): 'NEW' | 'REPEATED' | null =>
-    s.confirmNonce && ref === tagOf(s, 'confirm', s.confirmNonce) ? 'NEW' : s.confirmedNonce && ref === tagOf(s, 'confirm', s.confirmedNonce) ? 'REPEATED' : null;
+    s.confirmNonce && sameTag(ref, tagOf(s, 'confirm', s.confirmNonce)) ? 'NEW' : s.confirmedNonce && sameTag(ref, tagOf(s, 'confirm', s.confirmedNonce)) ? 'REPEATED' : null;
 
   const service = {
     /** A new session for one of the requester's open native-eligible approvals; the wallet's `connect` deeplink. */
@@ -215,22 +258,25 @@ export function createNativeSigning(deps: NativeDeps) {
       if (!Object.hasOwn(DEEPLINK_WALLETS, input.wallet)) fail('NATIVE_WALLET_UNSUPPORTED');
       const surface = await deps.surface();
       const { h } = await verified(surface, { handoffId: input.handoffId, requester: input.requester as NativeSession['requester'] });
-      // An applied approval may be signed again after a rejection or a failure before anything was sent (checked again at the proof).
-      if (h.status !== 'PENDING' && h.status !== 'CLAIMED' && h.status !== 'APPLIED') fail(`APPROVAL_${h.status}`);
-      await assertNoOtherSession(h, null);
-      if ((await deps.store.forHandoff(h.handoffId)).length >= MAX_SESSIONS_PER_APPROVAL) fail('NATIVE_SESSION_LIMIT');
-      const flow = h.plan.flow as NativeFlow, at = now(), id = typedId('nsg'), pair = boxKeyPair();
-      const expiresAt = new Date(Math.min(h.expiresAt.getTime(), at.getTime() + NATIVE_SESSION_SECONDS * 1000));
-      if (expiresAt.getTime() - at.getTime() < 60_000) fail('APPROVAL_EXPIRED');
-      const step = nonce();
-      const session: NativeSession = { v: 1, id, wallet: input.wallet, handoffId: h.handoffId, requester: { kind: input.requester.kind as NativeSession['requester']['kind'], ref: input.requester.ref },
-        flow, returnTo: input.returnTo, language: input.language, createdAt: at.toISOString(), expiresAt: expiresAt.toISOString(), dappPublicKey: base58Encode(pair.publicKey),
-        dappSecret: deps.sealer.seal(id, 'dapp', pair.secretKey), challenge: null, state: 'AWAITING_CONNECT', step: { kind: 'connect', nonce: step },
-        connected: null, owner: null, review: null, confirmNonce: null, confirmedNonce: null, outcome: null, walletRequest: null, updatedAt: at.toISOString() };
-      const url = connectUrl({ wallet: input.wallet, appUrl: deps.origin, dappPublicKey: pair.publicKey, redirectLink: callbackUrl(session, 'connect', step),
-        cluster: NATIVE_FLOWS[flow].cluster });
-      await deps.store.create({ ...session, walletRequest: url });
-      return { sessionId: id, expiresAt: session.expiresAt, wallet: DEEPLINK_WALLETS[input.wallet].name, connectUrl: url };
+      // An applied approval may be signed again after a rejection or a failure before anything was sent (its runs are checked at the proof).
+      await assertTakeable(surface, h, null);
+      // One start at a time per approval, so the session cap is exact.
+      return lock(`${h.handoffId}.start`, async () => {
+        await assertNoOtherSession(h, null);
+        if ((await deps.store.forHandoff(h.handoffId)).length >= MAX_SESSIONS_PER_APPROVAL) fail('NATIVE_SESSION_LIMIT');
+        const flow = h.plan.flow as NativeFlow, at = now(), id = typedId('nsg'), pair = boxKeyPair();
+        const expiresAt = new Date(Math.min(h.expiresAt.getTime(), at.getTime() + NATIVE_SESSION_SECONDS * 1000));
+        if (expiresAt.getTime() - at.getTime() < 60_000) fail('APPROVAL_EXPIRED');
+        const step = nonce();
+        const session: NativeSession = { v: 1, id, wallet: input.wallet, handoffId: h.handoffId, requester: { kind: input.requester.kind as NativeSession['requester']['kind'], ref: input.requester.ref },
+          flow, returnTo: input.returnTo, language: input.language, createdAt: at.toISOString(), expiresAt: expiresAt.toISOString(), dappPublicKey: base58Encode(pair.publicKey),
+          dappSecret: deps.sealer.seal(id, 'dapp', pair.secretKey), challenge: null, state: 'AWAITING_CONNECT', step: { kind: 'connect', nonce: step },
+          connected: null, owner: null, review: null, confirmNonce: null, confirmedNonce: null, outcome: null, walletRequest: null, updatedAt: at.toISOString() };
+        const url = connectUrl({ wallet: input.wallet, appUrl: deps.origin, dappPublicKey: pair.publicKey, redirectLink: callbackUrl(session, 'connect', step),
+          cluster: NATIVE_FLOWS[flow].cluster });
+        await deps.store.create({ ...session, walletRequest: url });
+        return { sessionId: id, expiresAt: session.expiresAt, wallet: DEEPLINK_WALLETS[input.wallet].name, connectUrl: url };
+      });
     },
 
     /**
@@ -256,7 +302,7 @@ export function createNativeSigning(deps: NativeDeps) {
       // After the signed bytes arrived, every later answer only learns that: never "nothing was sent".
       if (TERMINAL.includes(s.state) || s.state === 'SUBMITTING')
         return { kind: 'PAGE', page: s.state === 'ENDED' ? 'ENDED' : 'RETURN', code: s.outcome?.code ?? null, session: s };
-      if (!s.step || stepTag !== tagOf(s, s.step.kind, s.step.nonce)) return { kind: 'PAGE', page: 'IGNORED', code: 'NATIVE_STEP_ALREADY_HANDLED', session: s };
+      if (!s.step || !sameTag(stepTag, tagOf(s, s.step.kind, s.step.nonce))) return { kind: 'PAGE', page: 'IGNORED', code: 'NATIVE_STEP_ALREADY_HANDLED', session: s };
       if (now().getTime() >= Date.parse(s.expiresAt) && s.state !== 'AWAITING_SIGNATURE')
         return { kind: 'PAGE', page: 'ENDED', code: 'NATIVE_SESSION_EXPIRED', session: await ended(version, s, 'NATIVE_SESSION_EXPIRED') };
       const step = s.step.kind, method = step === 'connect' ? 'connect' as const : step === 'signIn' ? 'signMessage' as const : 'signTransaction' as const;
@@ -324,9 +370,13 @@ export function createNativeSigning(deps: NativeDeps) {
         .catch(error => ({ ok: false as const, code: codeOf(error, 'NATIVE_SUBMISSION_UNKNOWN') }));
       const observe = async () => { await deps.flow(s.flow, 'observe', [review.runId], { principal: s.owner!, betaIdentity: await beta(s) }).catch(() => undefined); };
       if (!submitted.ok) {
-        // A failed call is not proof that nothing was broadcast: the flow's own journal decides, and the run is observed.
+        // A failed call is not proof that nothing was broadcast: the run is observed, then the flow's own journal decides (a refusal before any
+        // broadcast — paused execution, an unavailable runtime, a cancelled attempt — reads as never sent; anything else may have been sent).
         await observe();
-        return { kind: 'PAGE', page: 'ENDED', code: submitted.code, session: await ended(at, submitting, submitted.code, { afterSignature: true }) };
+        const facts = await deps.flow<RunFacts>(s.flow, 'status', [review.runId], { principal: s.owner!, betaIdentity: await beta(s) }).catch(() => null);
+        const proven = facts?.ok === true && notSent(facts.value);
+        return { kind: 'PAGE', page: 'ENDED', code: submitted.code, session: await ended(at, submitting, submitted.code,
+          { afterSignature: !proven, attemptState: facts?.ok ? facts.value.attempt?.state ?? null : null }) };
       }
       const attempt = submitted.value.attempt ?? null, attemptState = attempt?.state ?? null, signature = attempt?.signature ?? null;
       // The flow refused the bytes before any broadcast (changed, mis-signed or stale), or proved it never executed: nothing was sent.
@@ -368,8 +418,10 @@ export function createNativeSigning(deps: NativeDeps) {
         const kind = typeof input.confirmRef === 'string' ? confirmationOf(s, input.confirmRef) : null;
         if (!kind) fail('NATIVE_CONFIRMATION_INVALID');
         if (kind === 'REPEATED') {
-          if (s.state === 'AWAITING_SIGNATURE' && s.walletRequest && now().getTime() < Date.parse(s.expiresAt)) return { kind: 'WALLET' as const, url: s.walletRequest };
-          return fail(s.state === 'PREPARING_SIGNATURE' ? 'NATIVE_CONFIRMATION_IN_PROGRESS' : 'NATIVE_CONFIRMATION_USED');
+          // The same request again only while its Review can still be broadcast (a lapsed one would be signed for nothing).
+          if (s.state === 'AWAITING_SIGNATURE' && s.walletRequest && s.review && now().getTime() < Date.parse(s.review.expiresAt)) return { kind: 'WALLET' as const, url: s.walletRequest };
+          return fail(s.state === 'PREPARING_SIGNATURE' ? 'NATIVE_CONFIRMATION_IN_PROGRESS' : s.state === 'AWAITING_SIGNATURE' && now().getTime() < openUntil(s)
+            ? 'NATIVE_CONFIRMATION_LAPSED' : 'NATIVE_CONFIRMATION_USED');
         }
         if (s.state !== 'REVIEW_READY' || !s.review) fail('NATIVE_REVIEW_NOT_READY');
         if (now().getTime() >= Date.parse(s.expiresAt)) { await ended(version, s, 'NATIVE_SESSION_EXPIRED'); fail('NATIVE_SESSION_EXPIRED'); }
@@ -390,7 +442,7 @@ export function createNativeSigning(deps: NativeDeps) {
               return { kind: 'REFRESHED' as const, session: again };
             }
             review = fresh;
-          } else await assertNothingSent(preparing, h);
+          } else { await assertTakeable(surface, h, s.owner); await assertNothingSent(preparing, h, surface); }
           await flowCall(preparing, 'review', [review.runId, review.commitment, workflow]);
           const begun = await flowCall<{ unsignedTransaction: string; walletChain: string }>(preparing, 'begin', [review.runId, s.owner, workflow]);
           const transaction = new Uint8Array(Buffer.from(begun.unsignedTransaction, 'base64')), next = nonce();
@@ -407,12 +459,34 @@ export function createNativeSigning(deps: NativeDeps) {
       });
     },
 
+    /**
+     * After a broadcast: observes the run up to `attempts` times, `intervalMs` apart (bounded, so it fits the request that scheduled it; the
+     * deployment's worker keeps observing as for every run), and tells the conversation once the run's outcome is known (or at the end), so its
+     * verified receipt is posted without anyone opening FloFi. Reads and observes only: it never signs, sends or changes the session. Returns the
+     * flow's verdict, or null while still pending.
+     */
+    async follow(handoffId: string, sessionId: string, options: { readonly attempts?: number; readonly intervalMs?: number;
+      readonly sleep?: (ms: number) => Promise<void> } = {}): Promise<string | null> {
+      const s = (await deps.store.read(handoffId, sessionId))?.session;
+      if (!s || s.state !== 'SUBMITTED' || !s.review || !s.owner) return null;
+      const attempts = Math.max(1, Math.min(options.attempts ?? 8, 12)), sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
+      let verdict: string | null = null;
+      for (let i = 0; i < attempts && !verdict; i++) {
+        if (i > 0) await sleep(options.intervalMs ?? 5_000);
+        const run = await deps.flow<RunFacts>(s.flow, 'observe', [s.review.runId], { principal: s.owner, betaIdentity: await beta(s) }).catch(() => null);
+        verdict = run?.ok && run.value.verdict && run.value.verdict !== 'PENDING' ? run.value.verdict : null;
+      }
+      await deps.notify(s, 'PROGRESS', null).catch(() => undefined);
+      return verdict;
+    },
+
     /** The wallet request the requester's own session waits for now (an idempotent re-open from its panel), or null. Changes nothing. */
     async reopen(handoffId: string, sessionId: string, requester: RequesterScope): Promise<string | null> {
       const s = (await deps.store.read(handoffId, sessionId))?.session;
       if (!s || s.requester.kind !== requester.kind || s.requester.ref !== requester.ref) return null;
-      return s.walletRequest && (s.state === 'AWAITING_CONNECT' || s.state === 'AWAITING_PROOF' || s.state === 'AWAITING_SIGNATURE')
-        && now().getTime() < Date.parse(s.expiresAt) ? s.walletRequest : null;
+      if (!s.walletRequest) return null;
+      if (s.state === 'AWAITING_SIGNATURE') return s.review && now().getTime() < Date.parse(s.review.expiresAt) ? s.walletRequest : null;
+      return (s.state === 'AWAITING_CONNECT' || s.state === 'AWAITING_PROOF') && now().getTime() < Date.parse(s.expiresAt) ? s.walletRequest : null;
     },
 
     /** One session by its ids (server-side presentation only: never returned to a client as it is). */
@@ -436,7 +510,7 @@ export type NativeSigning = ReturnType<typeof createNativeSigning>;
 function current(s: NativeSession, now: Date): NativeSession {
   const waiting = s.state === 'AWAITING_CONNECT' || s.state === 'AWAITING_PROOF' || s.state === 'PREPARING_REVIEW' || s.state === 'REVIEW_READY'
     || s.state === 'PREPARING_SIGNATURE' || s.state === 'AWAITING_SIGNATURE';
-  return waiting && now.getTime() >= Date.parse(s.expiresAt)
+  return waiting && now.getTime() >= openUntil(s)
     ? { ...s, state: 'ENDED', outcome: { code: 'NATIVE_SESSION_EXPIRED', signature: null, attemptState: null, afterSignature: false } } : s;
 }
 /**
@@ -459,6 +533,6 @@ export function panelNativeSession(stored: NativeSession, now: Date = new Date()
   return { sessionId: s.id, reviewRef: s.state === 'REVIEW_READY' ? reviewRef : null,
     review: r ? { executionId: r.runId, flow: r.flow, action: r.action, network: r.network, owner: r.owner, recipient: r.recipient, pay: r.pay, receive: r.receive,
       maximumNetworkCostLamports: r.maximumNetworkCostLamports, feeToken: r.feeToken, expiresAt: r.expiresAt,
-      lines: { EN: nativeReviewLines(r, 'EN'), PT: nativeReviewLines(r, 'PT') } } : null,
+      lines: { EN: nativeReviewLines(r, 'EN', { shortOwner: true }), PT: nativeReviewLines(r, 'PT', { shortOwner: true }) } } : null,
     transactionId: s.outcome?.signature ?? null };
 }

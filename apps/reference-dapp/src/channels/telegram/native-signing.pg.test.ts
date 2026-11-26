@@ -56,8 +56,12 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 Telegram native wallet signing 
       expect(keyboard.inline_keyboard[1]).toEqual([{ text: 'Sign with Phantom', url: expect.stringMatching(/^https:\/\/flofi\.test\/api\/native-signing\/start#ns1\./) },
         { text: 'Sign with Solflare', url: expect.stringMatching(/^https:\/\/flofi\.test\/api\/native-signing\/start#ns1\./) }]);
       expect(textOf(approval)).toContain('sign in your wallet app with the Phantom or Solflare button');
+      // The note follows the authorization line (and says the status is shared with this conversation when signed that way).
+      expect(textOf(approval).indexOf('Nothing is authorized yet')).toBeLessThan(textOf(approval).indexOf('Or sign in your wallet app'));
+      expect(textOf(approval)).toContain('shares this operation\'s status and receipt with this conversation');
       const token = new URL(keyboard.inline_keyboard[1]![0]!.url!).hash.slice(1);
 
+      const startedAt = api.delivered().length;
       const started = await startFromChannelToken(env, token, overrides);
       const wallet = deeplinkTestWallet('phantom', key);
       const proof = await deliver(wallet.approve(started.connectUrl)) as { url: string };
@@ -67,6 +71,9 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 Telegram native wallet signing 
       const review = api.delivered().slice(before).find(call => textOf(call).startsWith('Review: transfer on Solana Devnet'))!;
       expect(textOf(review)).toContain('You send: 0.01 SOL');
       expect(textOf(review)).toContain(`To: ${recipient}`);
+      // The owner's own wallet is shortened in the conversation (it may be a group); the recipient is in full.
+      expect(textOf(review)).toContain(`From your wallet: ${key.owner.slice(0, 4)}…${key.owner.slice(-4)}`);
+      expect(textOf(review)).not.toContain(key.owner);
       const confirm = keyboardOf(review)!.inline_keyboard[0]![0]!;
       expect(confirm).toEqual({ text: 'Confirm in Phantom', url: expect.stringMatching(/^https:\/\/flofi\.test\/api\/native-signing\/apr_[a-z2-7]{26}\/nsg_[a-z2-7]{26}\/confirm\/[A-Za-z0-9_-]{22}$/) });
       expect(chain.state.sent).toHaveLength(0);
@@ -82,6 +89,10 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 Telegram native wallet signing 
       const after = api.delivered().slice(sentAt).map(textOf);
       expect(after[0]).toContain('Signed in Phantom and handed to the network once by FloFi');
       expect(after.join('\n')).toMatch(/Execution reconciled ✅ · evidence: MOCKED[\s\S]*Receipt: https:\/\/flofi\.test\/app\/dashboard\/runs\/soltd-[a-f0-9]{32}/);
+      // The bounded follow-up after the broadcast (scheduled after the wallet's return page) reaches the same notifications: never posted twice.
+      const followed = api.delivered().length;
+      expect(await service.follow(handoffId!, sessionId!, { attempts: 2, sleep: async () => undefined })).toBe('RECONCILED');
+      expect(api.delivered().slice(followed).map(textOf).filter(text => /reconciled/i.test(text))).toEqual([]);
       // The scheduled dispatch follows the same approval and never posts it twice.
       const swept = api.delivered().length;
       const r = await handleChannelDispatch(new Request('https://flofi.test/api/channels/dispatch', { headers: { authorization: `Bearer ${dispatchToken}` } }),
@@ -89,6 +100,11 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 Telegram native wallet signing 
       expect(r.status).toBe(200);
       expect(api.delivered().slice(swept).map(textOf).filter(text => /reconciled/i.test(text))).toEqual([]);
       expect(chain.state.sent).toHaveLength(1);
+      // Signed in the wallet app with the Review here: no status notice sent the person to FloFi at any point.
+      for (const text of api.delivered().slice(startedAt).map(textOf)) expect(text).not.toMatch(/loaded in FloFi|wallet authorization in FloFi|Review accepted in FloFi/);
+      // A stopped conversation's button starts nothing.
+      await say('STOP');
+      await expect(startFromChannelToken(env, token, overrides)).rejects.toThrow('NATIVE_START_INVALID');
     } finally { await runtime.close(); }
   });
 });

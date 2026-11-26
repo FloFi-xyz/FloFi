@@ -5,7 +5,8 @@
  * platform a channel uses (`ChannelPlatform`). Model-free: the interpreter is attached only by the entry points that run turns.
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
-import { createPgHandoffStore, deploymentEngineRuntime, type EngineRuntime } from '../platform/index.ts';
+import { createPostgresLogStore } from '@defi-workflow-engine/cloud-runtime';
+import { createPgHandoffStore, deploymentEngineRuntime, NATIVE_SIGNING_NAMESPACE, nativeSessionPrefix, type EngineRuntime } from '../platform/index.ts';
 import { platformStateHost } from '../server/platform-state-host.ts';
 import { channelApprovalScheme, type ChannelPlatform } from './core/approval.ts';
 import type { ChannelCoreConfig } from './core/config.ts';
@@ -31,8 +32,11 @@ export async function channelHost(env: Env, core: ChannelCoreConfig, host?: Chan
 }
 export function channelRuntime(env: Env, core: ChannelCoreConfig, host: ChannelHost, runtime?: EngineRuntime): ChannelRuntime {
   const store = createPgChannelStore(host.db, host.tenantId);
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing journal's names only (never a session's content).
+  const native = createPostgresLogStore({ db: host.db, tenantId: host.tenantId, namespace: NATIVE_SIGNING_NAMESPACE });
   return { store, platform: { origin: core.origin, scheme: channelApprovalScheme(core.keys), handoffs: createPgHandoffStore(host.db, host.tenantId), allow: store.allow,
     runtime: runtime ?? deploymentEngineRuntime(env), policy: core.policy,
     // BUILD-CHAT-E2E-001: a multi-step approval's run (status and notifications), where this deployment runs workflows.
-    workflowRuns: workflowRunsEnabled(env) ? createPgWorkflowRunStore(host.db, host.tenantId) : null } };
+    workflowRuns: workflowRunsEnabled(env) ? createPgWorkflowRunStore(host.db, host.tenantId) : null,
+    nativeSigned: async handoffId => /^apr_[a-z2-7]{26}$/.test(handoffId) && (await native.list(nativeSessionPrefix(handoffId), 1)).length > 0 } };
 }

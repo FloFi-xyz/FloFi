@@ -50,6 +50,24 @@ describe.each(['EN', 'PT'] as const)('truthful channel lifecycle (%s)', language
     expect(channelCopy(language).loaded).not.toMatch(/Nothing is signed yet|Nada foi assinado ainda/);
   });
 
+  it('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: a natively signed approval never sends the person to FloFi; from submission on it follows as every run', () => {
+    const native = (runs: readonly Record<string, unknown>[]) => plannedNotifications(language, handoff, { ...progress, runs } as unknown as typeof progress, undefined, new Date(), true);
+    // The Review is in the conversation: no "loaded in FloFi", no "waiting for your review and wallet authorization in FloFi" (refreshed runs included).
+    const before = native([run, { ...run, executionId: 'rhx_fresh', status: 'PREPARED' }, { ...run, executionId: 'rhx_rejected', status: 'CANCELLED', terminal: true, errorCode: 'WALLET_REJECTED' }]);
+    expect(before.due).toEqual([]);
+    expect(before.done).toBe(false);
+    // Sent, then reconciled with its receipt: notified, and the follow-up ends (the earlier runs that were never sent do not keep it open).
+    const sent = native([run, { ...run, executionId: 'rhx_sent', status: 'SUBMITTING' }]);
+    expect(sent.due.map(n => n.text).join('\n')).toMatch(language === 'EN' ? /submission is pending/ : /envio pendente/);
+    const done = native([run, { ...run, executionId: 'rhx_sent', status: 'RECONCILED', reconciled: true, terminal: true, evidenceEnvironment: 'MOCKED', evidenceOutcome: 'RECONCILED',
+      evidenceBundleHash: 'sha256:' + 'b'.repeat(64), receiptUrl: 'https://flofi.test/app/dashboard/runs/rhx_sent' }]);
+    expect(done.due.map(n => n.text).join('\n')).toContain('https://flofi.test/app/dashboard/runs/rhx_sent');
+    expect(done.done).toBe(true);
+    for (const n of [...sent.due, ...done.due]) expect(n.text).not.toMatch(/in FloFi|no FloFi|loaded|carregada/);
+    // The same approval without native signing keeps every notice as before.
+    expect(plannedNotifications(language, handoff, progress).due.map(n => n.key)).toEqual(['notify:apr_test:loaded', expect.stringMatching(/:state:simulated$/)]);
+  });
+
   it('sends no notices without the owner sharing status', () => {
     expect(plannedNotifications(language, { ...handoff, shareStatus: false }, progress).due).toEqual([]);
   });

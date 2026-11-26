@@ -3,11 +3,11 @@
  * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the deployment's native signing service — its durable session journal (the platform's execution log,
  * namespace `native-signing`), the approval surface every FloFi requester shares, the flow runtime (the same `cloudFlow` the signing page uses,
  * with the execution pause honoured and the proven owner as principal), the requester's Flight identity, and each conversation's own delivery.
- * `FLOFI_NATIVE_SIGNING=disabled` turns the whole surface off (default: on wherever approvals and the cloud runtime are).
+ * `FLOFI_NATIVE_SIGNING` other than unset or `enabled` turns the whole surface off (fail closed; default: on wherever approvals and the cloud runtime are).
  */
 import { randomUUID } from 'node:crypto';
 import { createPostgresLeaseStore, createPostgresLogStore } from '@defi-workflow-engine/cloud-runtime';
-import type { EngineRuntime } from '../../platform/index.ts';
+import { NATIVE_SIGNING_NAMESPACE, nativeSigningSwitch, type EngineRuntime } from '../../platform/index.ts';
 import { betaAccessMode } from '../../flight/beta-access.ts';
 import { mcpBetaIdentity } from '../../mcp/beta-access.ts';
 import { approvalSurface } from '../approval-surface.ts';
@@ -21,8 +21,8 @@ import { createNativeSigning, type NativeDeps, type NativeFlowPort } from './ser
 import { createNativeSessionStore, nativeSealer } from './session-store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
-export const NATIVE_SIGNING_NAMESPACE = 'native-signing';
-export const nativeSigningEnabled = (env: Env) => (env.FLOFI_NATIVE_SIGNING ?? 'enabled') !== 'disabled';
+export { NATIVE_SIGNING_NAMESPACE };
+export const nativeSigningEnabled = nativeSigningSwitch;
 
 /** The flow runtime as the native service calls it: new execution methods respect `FLOFI_EXECUTION_PAUSED` exactly as the signing page's do. */
 export function cloudNativeFlow(env: Env): NativeFlowPort {
@@ -51,14 +51,22 @@ export async function nativeSigningService(env: Env = process.env, overrides: Pa
     notify: overrides.notify ?? (async (session, event, confirmRef) => {
       // An MCP host's panel reads the session status; a conversation gets each event as a message.
       if (session.requester.kind !== 'CHANNEL_CONVERSATION') return;
+      const channelOptions = { host, ...overrides.runtime ? { runtime: overrides.runtime } : {}, ...overrides.channelSeams ? { seams: overrides.channelSeams } : {},
+        ...overrides.now ? { now: overrides.now } : {} };
+      if (event === 'PROGRESS') {
+        const { notifyNativeStatus } = await import('../../channels/native-signing.ts');
+        await notifyNativeStatus(env, { conversationId: session.requester.ref, handoffId: session.handoffId }, channelOptions);
+        return;
+      }
       const message = nativeMessage(origin, session, event, confirmRef);
       if (!message) return;
       const { deliverNativeNotice } = await import('../../channels/native-signing.ts');
-      await deliverNativeNotice(env, { conversationId: session.requester.ref, handoffId: session.handoffId, ...message }, { host,
-        ...overrides.runtime ? { runtime: overrides.runtime } : {}, ...overrides.channelSeams ? { seams: overrides.channelSeams } : {},
-        ...overrides.now ? { now: overrides.now } : {} });
+      // The approval's own status notifications follow only once the wallet's answer is in (sent, or ended): before that, the Review here is the step.
+      await deliverNativeNotice(env, { conversationId: session.requester.ref, handoffId: session.handoffId, followStatus: event === 'SUBMITTED' || event === 'ENDED',
+        ...message }, channelOptions);
     }),
-    // Beta: an MCP account carries the Flight identity it was bound to at sign-in; a conversation carries none (its proposals are signed in FloFi then).
+    // Beta: an MCP account carries the Flight identity it was bound to at sign-in. A conversation carries none: its native buttons are offered only
+    // while beta access is open (`channels/core/config.ts`), and a wallet's return to FloFi carries no Flight identity of its own.
     betaIdentity: async requester => betaAccessMode(env) === 'open' || requester.kind !== 'MCP_ACCOUNT' ? null
       : mcpBetaIdentity(host, requester.ref, Date.now(), env).catch(() => null),
     ...overrides.now ? { now: overrides.now } : {} });
@@ -75,7 +83,12 @@ export async function startFromChannelToken(env: Env, token: unknown, overrides:
   if (!deployment.ok || !deployment.deployment.core.nativeSigning) throw new Error('NATIVE_SIGNING_NOT_ENABLED');
   const start = readNativeStartToken(deployment.deployment.core.keys, token, overrides.now?.() ?? new Date());
   if (!start) throw new Error('NATIVE_START_INVALID');
+  // Only a conversation that is still active (not stopped or erased), in its own language.
+  const { nativeStartConversation } = await import('../../channels/native-signing.ts');
+  const conversation = await nativeStartConversation(env, start.conversationId, { ...overrides.host ? { host: overrides.host } : {},
+    ...overrides.runtime ? { runtime: overrides.runtime } : {} });
+  if (!conversation) throw new Error('NATIVE_START_INVALID');
   const service = await nativeSigningService(env, overrides);
   return service.start({ handoffId: start.handoffId, requester: { kind: 'CHANNEL_CONVERSATION', ref: start.conversationId }, wallet: start.wallet,
-    returnTo: 'TELEGRAM', language: deployment.deployment.core.language });
+    returnTo: 'TELEGRAM', language: conversation.language });
 }

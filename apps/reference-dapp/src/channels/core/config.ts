@@ -25,7 +25,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { NETWORKS } from '../../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId } from '../../engine/strategy-spec';
-import type { HandoffPolicy } from '../../platform/index.ts';
+import { nativeSigningSwitch, type HandoffPolicy } from '../../platform/index.ts';
 import { deploymentTenant, isHostedDeployment, publicOrigin } from '../../server/deployment.ts';
 import { channelKeys, type ChannelKeys } from './crypto.ts';
 import { scopeOfEnv } from '../../domain/network-scope';
@@ -110,5 +110,5 @@ export function readChannelCoreConfig(env: Env, providerSecrets: readonly string
   return Object.freeze({ enabled: true, tenantId, origin, keys: channelKeys(secret), policy, copilot, simulation, language, supportContact, privacyUrl,
     hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), modelBudget: Object.freeze({ hourly, daily }),
     // Not during the Flight beta: a conversation carries no FloFi account session, which every owner flow call then needs (the Authorize link stays).
-    nativeSigning: (env.FLOFI_NATIVE_SIGNING ?? 'enabled') !== 'disabled' && (env.FLOFI_BETA_ACCESS === undefined || env.FLOFI_BETA_ACCESS === 'open') });
+    nativeSigning: nativeSigningSwitch(env) && (env.FLOFI_BETA_ACCESS === undefined || env.FLOFI_BETA_ACCESS === 'open') });
 }

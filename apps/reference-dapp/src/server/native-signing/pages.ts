@@ -48,7 +48,7 @@ const SOURCES: Readonly<Record<NativeReturn, readonly [string, string]>> = Objec
   CLAUDE: ['a Claude conversation', 'uma conversa no Claude'], TELEGRAM: ['a Telegram conversation', 'uma conversa no Telegram'],
   NONE: ['an assistant connected to FloFi', 'um assistente conectado à FloFi'] });
 /** Where a wallet's answer lands: the signer's Review, done (back to the conversation), already handled, ended, or the wallet reading this link. */
-export function statusPage(kind: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 'ENDED' | 'REFRESHED', session: NativeSession | null, language: PageLanguage,
+export function statusPage(kind: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 'ENDED' | 'REFRESHED' | 'NOTICE', session: NativeSession | null, language: PageLanguage,
   options: { readonly telegramBot?: string | null; readonly ended?: string | null } = {}): Page {
   const pt = language === 'PT', back = returnTo(session?.returnTo ?? null, language, options.telegramBot ?? null);
   // After the wallet proved the account: the signer sees FloFi's own Review here, and where the request came from, before any transaction is asked
@@ -58,6 +58,7 @@ export function statusPage(kind: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 
     return page(language, 'FloFi', `<h1>${pt ? 'Carteira verificada' : 'Wallet verified'}</h1><p>${pt ? `Este pedido veio de ${source[1]}. Confirme por lá; depois a sua carteira mostra exatamente isto:`
       : `This request came from ${source[0]}. Confirm it there; your wallet then shows exactly this:`}</p>`
       + `<div class="review">${lines.map(line => `<p>${escape(line)}</p>`).join('')}</div>`
+      + `<p>${pt ? 'Assinando assim, o status e o recibo desta operação são compartilhados com essa conversa.' : 'Signing this way shares this operation\'s status and receipt with that conversation.'}</p>`
       + `<p>${pt ? 'Se não foi você quem pediu isto na sua própria conversa, não confirme e recuse na carteira.' : 'If you did not ask for this in your own conversation, do not confirm it, and reject it in your wallet.'}</p>${back}`);
   }
   if (kind === 'METADATA') return page(language, 'FloFi', `<h1>FloFi</h1><p>${pt ? 'Assinatura pela sua carteira, revisada na sua conversa.' : 'Signing with your wallet, reviewed in your conversation.'}</p>`);
@@ -67,6 +68,8 @@ export function statusPage(kind: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 
     ? 'Os termos mudaram desde a sua Revisão, então a carteira não foi chamada. A FloFi mostrou uma nova Revisão na conversa.'
     : 'The terms changed since your Review, so your wallet was not asked. FloFi showed a new Review in your conversation.'}</p>${back}`);
   if (kind === 'ENDED') return page(language, 'FloFi', `<h1>${pt ? 'Encerrado' : 'Ended'}</h1><p>${escape(options.ended ?? (pt ? 'Este pedido foi encerrado.' : 'This request ended.'))}</p>${back}`);
+  // A step that could not go on while the session itself goes on (e.g. a lapsed confirmation while its wallet request is still out): never "nothing was sent".
+  if (kind === 'NOTICE') return page(language, 'FloFi', `<h1>FloFi</h1><p>${escape(options.ended ?? (pt ? 'Este passo não pôde continuar.' : 'This step could not go on.'))}</p>${back}`, { status: 409 });
   const state = session?.state;
   const line = state === 'REVIEW_READY' ? (pt ? 'Carteira verificada. A Revisão está na sua conversa: confira e confirme por lá.' : 'Wallet verified. Your Review is in your conversation: check it and confirm there.')
     : state === 'SUBMITTED' ? (pt ? 'Assinado e entregue à rede uma única vez. A FloFi publica o resultado verificado na sua conversa.' : 'Signed and handed to the network once. FloFi posts the verified result in your conversation.')

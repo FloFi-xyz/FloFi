@@ -42,8 +42,13 @@ const WORDS = {
     to: 'Para', from: 'Da sua carteira', fee: 'Taxa de rede e depósitos de conta, no máximo', feeToken: 'Taxa de rede, paga em', valid: 'Válida até',
     note: 'Nada foi assinado nem enviado ainda. A sua carteira mostra esta transação exata em seguida; só a sua aprovação lá a envia.' },
 } as const;
-/** The Review as plain-text lines in the conversation's language (no markup: every channel shows them as text). */
-export function nativeReviewLines(review: NativeReview, language: 'EN' | 'PT'): string[] {
+/** A Solana account as `Abcd…wxyz` (a conversation can be a group, or kept in a host's history: the owner's own wallet is recognisable shortened). */
+export const shortAccount = (account: string) => account.length > 12 ? `${account.slice(0, 4)}…${account.slice(-4)}` : account;
+/**
+ * The Review as plain-text lines in the conversation's language (no markup: every channel shows them as text). `shortOwner`: the owner's wallet
+ * shortened (the conversation and the panel); the signer's own page shows it in full. The recipient is always in full: it is what the owner checks.
+ */
+export function nativeReviewLines(review: NativeReview, language: 'EN' | 'PT', options: { readonly shortOwner?: boolean } = {}): string[] {
   const w = WORDS[language], lang = language === 'PT' ? 'PT' as const : 'EN' as const;
   const amount = (value: string, decimalsOf: number, sym: string, rounding: 'nearest' | 'down' | 'up', marker = false) =>
     formatDisplayTokenAmount({ units: value, decimals: decimalsOf }, { rounding, marker, symbol: sym, language: lang });
@@ -52,7 +57,7 @@ export function nativeReviewLines(review: NativeReview, language: 'EN' | 'PT'): 
     `${review.action === 'transfer' ? w.send : w.pay}: ${amount(review.pay.amount, review.pay.decimals, review.pay.symbol, 'nearest')}`,
     ...review.receive ? [`${w.receive}: ${amount(review.receive.amount, review.receive.decimals, review.receive.symbol, 'nearest', true)}`,
       ...review.receive.minimum ? [`${w.minimum}: ${amount(review.receive.minimum, review.receive.decimals, review.receive.symbol, 'down')}`] : []] : [],
-    ...review.recipient ? [`${w.to}: ${review.recipient}`] : [], `${w.from}: ${review.owner}`,
+    ...review.recipient ? [`${w.to}: ${review.recipient}`] : [], `${w.from}: ${options.shortOwner ? shortAccount(review.owner) : review.owner}`,
     review.feeToken ? `${w.feeToken} ${review.feeToken.symbol}: ${amount(review.feeToken.amount, review.feeToken.decimals, review.feeToken.symbol, 'up')}`
       : review.maximumNetworkCostLamports ? `${w.fee}: ${amount(review.maximumNetworkCostLamports, 9, 'SOL', 'up')}` : '',
     `${w.valid} ${time}`, w.note].filter(Boolean);

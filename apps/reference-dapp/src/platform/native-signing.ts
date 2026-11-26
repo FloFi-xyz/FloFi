@@ -12,3 +12,10 @@ export const NATIVE_SIGNING_WALLETS = Object.freeze(['phantom', 'solflare'] as c
 export type NativeSigningWallet = (typeof NATIVE_SIGNING_WALLETS)[number];
 export const isNativeSigningFlow = (flow: unknown): flow is NativeSigningFlow => (NATIVE_SIGNING_FLOWS as readonly unknown[]).includes(flow);
 export const nativeSigningEligible = (h: Pick<HandoffRecord, 'plan'>): boolean => h.plan.kind === 'SINGLE_FLOW' && isNativeSigningFlow(h.plan.flow);
+/** The platform execution-log namespace of native signing sessions (one journal per session, named `<approval>.nsg_<id>.jsonl`). */
+export const NATIVE_SIGNING_NAMESPACE = 'native-signing';
+/** The log-name prefix of one approval's native signing sessions. */
+export const nativeSessionPrefix = (handoffId: string) => `${handoffId}.nsg_`;
+/** The deployment's kill switch: on when `FLOFI_NATIVE_SIGNING` is unset or `enabled`; any other value (a typo included) turns it off (fail closed). */
+export const nativeSigningSwitch = (env: Readonly<Record<string, string | undefined>>): boolean =>
+  env.FLOFI_NATIVE_SIGNING === undefined || env.FLOFI_NATIVE_SIGNING === '' || env.FLOFI_NATIVE_SIGNING === 'enabled';

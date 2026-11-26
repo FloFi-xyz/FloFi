@@ -118,6 +118,9 @@ export function nativeConfirmLink(url: string, origin: string): boolean {
   return url.startsWith(prefix) && /^apr_[a-z2-7]{26}\/nsg_[a-z2-7]{26}\/confirm\/[A-Za-z0-9_-]{22}$/.test(url.slice(prefix.length));
 }
 const nativeStartLink = (url: string, origin: string) => url.startsWith(`${origin}/api/native-signing/start#ns1.`) && /^[^\s]{1,600}$/.test(url);
+/** The native signing buttons that pass the output guard on their own (exact start link, safe label); any other is dropped, never fatal to its message. */
+export const safeWalletLinks = (links: NonNullable<ChannelReply['walletLinks']>, origin: string) =>
+  links.filter(l => nativeStartLink(l.url, origin) && outputSafe({ text: l.label, choices: [], link: null }, origin));
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: the closed set of secret-free FloFi pages a Copilot answer may point to ("where do I see my automations?"). A
  * reply carries the relative path; delivery resolves it against its own trusted origin, so no other host or path can ever be sent.
@@ -199,7 +202,8 @@ export async function deliverConversation(ctx: DeliveryContext, conversationId: 
         if (!url) { await lostLink(ctx, conversationId, o, language, now); await end('SKIPPED', 'APPROVAL_LINK_LOST'); continue; }
         reply = { ...reply, link: { label: channelCopy(language).linkLabel, url } };
         // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing buttons of this approval, computed now (never stored); none on any failure.
-        const native = ctx.nativeLinks && o.handoffId ? await ctx.nativeLinks(o.handoffId, conversationId, language).catch(() => []) : [];
+        // A button that is not exactly a native start link (or whose label fails the guard) is dropped: the approval message itself still goes out.
+        const native = safeWalletLinks(ctx.nativeLinks && o.handoffId ? await ctx.nativeLinks(o.handoffId, conversationId, language).catch(() => []) : [], ctx.origin);
         if (native.length) reply = { ...reply, walletLinks: native };
       }
       if (!outputSafe(reply, ctx.origin)) { await end('FAILED', 'OUTPUT_GUARD'); continue; }

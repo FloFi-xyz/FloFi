@@ -931,7 +931,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'Where the approval is signed natively in a wallet app, also its wallet signing session: the in-conversation Review and its outcome.',
     ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => { const value = await progress(args.approvalId);
       // Only for an approval that can be signed natively, within the read budget; any failure leaves the approval's own status as it is.
-      const eligible = native ? nativeSigningEligible(await owned(args.approvalId)) : false;
+      const eligible = native ? await owned(args.approvalId).then(nativeSigningEligible).catch(() => false) : false;
       const session = eligible ? await withinBudget(ctx.budget, toolCap(ctx.budget, MCP_TOOL_TIMEOUTS.default), () => native!.latest(args.approvalId, requesterScope(requester)))
         .catch(() => null) : null;
       return { ok: true, ...value, ...session ? { walletSigning: session.public, walletPanel: session.panel } : {}, conversationState: approvalState(value) }; }, appOnly);

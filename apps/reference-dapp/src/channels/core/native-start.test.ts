@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { channelKeys, open, sealContext } from './crypto.ts';
-import { nativeConfirmLink, outputSafe, sealReply } from './delivery.ts';
+import { nativeConfirmLink, outputSafe, safeWalletLinks, sealReply } from './delivery.ts';
 import { nativeStartLinks, nativeStartToken, readNativeStartToken } from './native-start.ts';
 import { renderSendMessage } from '../telegram/render.ts';
 
@@ -32,6 +32,8 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native start buttons', () => {
     const reply = { text: 'ok', choices: [], link: null, walletLinks: links };
     expect(outputSafe(reply, ORIGIN)).toBe(true);
     expect(outputSafe({ ...reply, walletLinks: [{ label: 'x', url: 'https://evil.test/api/native-signing/start#ns1.a' }] }, ORIGIN)).toBe(false);
+    // Delivery drops a malformed button and keeps the good ones (the approval message itself is never failed by a button).
+    expect(safeWalletLinks([links[0]!, { label: 'x', url: 'https://evil.test/api/native-signing/start#ns1.a' }, { label: 'y', url: `${ORIGIN}/approve` }], ORIGIN)).toEqual([links[0]]);
     const sealed = sealReply({ tenantId: 't', keys }, 'cho_1', reply, ORIGIN);
     expect(open(keys.seal, sealed, sealContext('t', 'channel_outbox', 'cho_1', 'body'))).not.toMatch(/ns1\.|native-signing/);
     // A Review's confirmation link has one exact shape (kept sealed with its notification); anything else is not a native link.

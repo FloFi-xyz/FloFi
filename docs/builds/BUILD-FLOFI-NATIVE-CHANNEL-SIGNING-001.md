@@ -8,7 +8,7 @@
 **Dependency.** One new direct dependency, `@noble/ciphers` 1.3.0 (MIT). It was already in the lockfile through `@turnkey/crypto`, and no new package
 was downloaded.
 
-**What this BUILD does not show.** Green CI here is not real-wallet acceptance. Every "live" item in §6 is still to be done on real devices.
+**What this BUILD does not show.** Green CI here is not real-wallet acceptance. Every "live" item in §7 is still to be done on real devices.
 
 ## 1. What a person does now
 
@@ -19,14 +19,18 @@ was downloaded.
 3. **Telegram.** The approval message shows the same two buttons under **Authorize**.
 4. Tapping a button opens the wallet app.
 5. The wallet asks to **connect**. Then it asks to **sign FloFi's Sign-In With Solana message**, which authorizes no transaction and moves no funds.
-6. FloFi runs the flow's **fresh simulation** for that proven wallet, then claims the approval for it with the requester's own claim rule.
+6. FloFi checks the requester's own claim rule for that proven wallet, runs the flow's **fresh simulation**, then claims the approval for it. Signing
+   this way shares the operation's status with the conversation; the button's note, the signer's page and the Review all say so.
 7. FloFi presents the **Review in the conversation**. In the panel it shows in place. In Telegram it arrives as a message with **Confirm in Phantom**.
    The signer also sees the same Review on the page their wallet returns to, with where the request came from (§3).
 8. The person confirms in the conversation.
 9. The wallet shows the **exact reviewed transaction**. Only the owner's approval there signs it.
 10. FloFi verifies the signed bytes against the Review and **broadcasts them once**.
 11. FloFi observes and reconciles automatically.
-12. The **receipt** reaches the conversation through the approval's existing status. Telegram gets "Execution reconciled ✅ … Receipt: …"; the panel shows the run and its receipt.
+12. The **receipt** reaches the conversation through the approval's existing status notifications. Right after the broadcast FloFi observes the run,
+    then keeps observing it in a bounded follow-up (about 45 s) and posts the status each time it may have changed. Telegram gets "Execution
+    reconciled ✅ … Receipt: …"; the panel polls and shows the run and its receipt. A natively signed approval's notifications leave out the
+    "open FloFi" steps (§2). A run that takes longer to reconcile: see §5, Receipt on a real chain.
 13. The conversation continues.
 
 ### Between the apps
@@ -42,10 +46,12 @@ was downloaded.
 |---|---|---|
 | start | One-time X25519 key and a session journal; the wallet's `connect` deeplink (`app_url`, `dapp_encryption_public_key`, `cluster`, `redirect_link`) | `server/native-signing/service.ts` `start` |
 | connect | The wallet's answer is opened (NaCl box) and names an account. It is **not authenticated**: anyone holding the redirect link could forge one. FloFi answers with `signMessage` of its Sign-In With Solana challenge | `callback` (connect) |
-| signIn | `verifySolanaSignIn` checks the Ed25519 signature over the exact challenge. The account is then **proven**. Next come the flow's `simulate` for that owner (so a refusal, e.g. balances or the Flight beta, leaves the approval untouched), then the existing `claimApproval` (with the requester's claim rule, e.g. a channel's intended wallet) and `applyApproval`. The run must be bound to the approval (fail closed otherwise). The Review comes from the flow record only | `callback` (signIn), `prepareReview` |
+| signIn | `verifySolanaSignIn` checks the Ed25519 signature over the exact challenge. The account is then **proven**. Before any effect: the approval is open, its status is shared (or not yet claimed), and the requester's claim rule (e.g. a channel's intended wallet) accepts that wallet; no other session holds an open request; none of the approval's runs may have been sent, **including the claimant's runs of this exact workflow on FloFi's signing page, bound or not** (`approvalRunIds`, fail closed on an incomplete read). Next come the flow's `simulate` for that owner (so a refusal, e.g. balances or the Flight beta, leaves the approval untouched), then the existing `claimApproval` and `applyApproval`. The run must be bound to the approval (fail closed otherwise). The Review comes from the flow record only | `callback` (signIn), `prepareReview` |
 | Review | Posted to the conversation (Telegram) or read by the panel (`get_execution_progress.walletSigning`) | `review.ts`, `messages.ts`, `channels/native-signing.ts` |
 | confirm | The conversation's confirmation, bound to exactly the Review it saw by a single-use reference (Telegram's link; the MCP panel receives it only in `_meta`). One confirmation per approval at a time (a durable lease), never while another session may have sent it or holds an open wallet request. The same confirmation repeated returns the same wallet request. A Review with less than 45 s of validity left is simulated again at once, and FloFi continues only if the fresh terms are **no worse** than what was confirmed (§3), then tells the conversation which terms went to the wallet. Then the flow's `review` (acceptance) and `begin` (fresh checks, durable PREPARED, the exact unsigned bytes), then the wallet's `signTransaction` deeplink | `confirm`, `noWorse` |
-| sign | The signed bytes go to the flow's `submit`, which verifies the reviewed bytes and the owner signature, makes the signature durable and broadcasts once. Outcomes are classified from the flow's attempt (refused before broadcast: nothing sent; a transaction id: sent; an unknown hand-off: may have been sent, observed, never sent again). One `observe`, then the deployment's worker as for every run. A rejection (`errorCode=4001`) is recorded first (compare-and-swap) and only the winning write cancels the prepared request through the flow's `walletFailure`: nothing was sent | `callback` (sign) |
+| sign | The signed bytes go to the flow's `submit`, which verifies the reviewed bytes and the owner signature, makes the signature durable and broadcasts once. Outcomes are classified from the flow's attempt (refused before broadcast: nothing sent; a transaction id: sent; an unknown hand-off: may have been sent, observed, never sent again). A failed `submit` call (the execution pause, an unavailable runtime) is observed and then classified from the flow's own record: a cancelled or not-executed attempt is "nothing sent" and does not lock the approval. A rejection (`errorCode=4001`) is recorded first (compare-and-swap) and only the winning write cancels the prepared request through the flow's `walletFailure`: nothing was sent | `callback` (sign) |
+| follow | After the wallet's return page is sent, a bounded follow-up (Next.js `after`, at most 9 observations 5 s apart) observes the run and tells the conversation once its outcome is known; the approval's own status notifications then post the verified receipt. It never signs, sends or changes the session; the deployment's worker keeps observing as for every run | `follow`, `channels/native-signing.ts` `notifyNativeStatus` |
+| status | A natively signed approval's channel notifications leave out "loaded in FloFi" and the pre-submission run states ("waiting for your review and wallet authorization in FloFi"): the Review in the conversation already told those steps. From submission on, every run state and the receipt are notified as before | `channels/core/status.ts` (`native`), `ChannelPlatform.nativeSigned` |
 
 **Wire protocol** (`server/native-signing/deeplink/`).
 - Phantom `https://phantom.com/ul/v1/<method>` and Solflare `https://solflare.com/ul/v1/<method>`, per both wallets' documentation.
@@ -66,7 +72,7 @@ was downloaded.
 - MCP app-only tools: `start_wallet_session`, `confirm_wallet_review`, `reopen_wallet_request` and `report_panel_diagnostic`, registered only where the panel is. The panel ships as `…-v3` (v2, v1 and the legacy URI stay registered).
 - Telegram approval buttons, outside the Flight beta.
 
-**Off switch.** `FLOFI_NATIVE_SIGNING=disabled` turns the whole surface off. The default is on.
+**Off switch.** `FLOFI_NATIVE_SIGNING` turns the whole surface off for any value other than unset or `enabled` (a typo fails closed). The default is on.
 
 ## 3. Security properties and where they are proven
 
@@ -74,17 +80,22 @@ was downloaded.
 |---|---|---|
 | Wallet ownership proven before any claim, simulation or Review | SIWS signature over FloFi's sealed challenge (existing verifier); the connect answer alone grants nothing | `native-signing.pg` (mis-signed proof refused, session still waits) |
 | The signer sees FloFi's Review even when they are not the conversation's owner | After the proof, the page in the signer's own browser shows the Review and where the request came from, before any transaction request | `pages.test`, `native-signing.pg` |
-| One approval is sent at most once | No new session or confirmation while another may have sent it, holds an open wallet request, or a bound run has a live attempt; a durable lease per approval for confirmations | `native-signing.pg`, `mcp/native-signing.pg` |
+| Native signing never sends an approval that may already have been sent | No new session or confirmation while another session is sending it or holds an open wallet request (open until its Review can no longer be broadcast, even past the session's own validity). At the proof and the confirmation, every run that may be the approval's is checked through the flow: the bound runs and the claimant's runs of this exact workflow on FloFi's signing page (bound only while status is shared, so they are also found unbound); a prepared request still signable reads as open, anything further as possibly sent, an incomplete read refuses. A durable lease per approval for confirmations and for starts (exact session cap) | `native-signing.pg` (page run shared and not shared, late signature, paused submit), `mcp/native-signing.pg` |
+| Status sharing is the owner's | Native signing shares status with the conversation, said on the button's note, the signer's page and the Review. An approval its owner claimed on FloFi's page without sharing is not taken over (`NATIVE_SIGNING_STATUS_NOT_SHARED`) | `native-signing.pg`, `telegram/native-signing.pg` |
 | Confirmation bound to the Review shown | Single-use reference, derived, never stored; the MCP panel gets it only in `_meta`, so a model calling the tool cannot confirm | `native-signing.pg`, `mcp/native-signing.pg` |
 | Requester claim rules preserved | The existing `claimApproval` path, including `CHANNEL_INTENDED_WALLET_MISMATCH` and "another wallet already claimed" | `native-signing.pg` (foreign wallet → `HANDOFF_ALREADY_CLAIMED`, nothing sent) |
 | Review in the conversation before any signing request | `signTransaction` is produced only by `confirm`, which requires the REVIEW_READY state and its single-use tag, or the MCP requester itself | all three journey tests |
 | Exact transaction binding | The wallet receives `begin`'s exact bytes; the flow's `submit` refuses changed or mis-signed bytes (Lighthouse rule unchanged) | `native-signing.pg` (appended instructions → ENDED, 0 broadcasts) |
 | One broadcast | The flow's existing signature claim plus the journal's compare-and-swap on the step | journeys assert `sent` = 1 |
-| Replay, forgery, out-of-order | Single-use step tags; answers that do not open under the session key are refused without ending the session | `native-signing.pg`, `protocol.test` |
+| Replay, forgery, out-of-order | Single-use step tags, compared in constant time; answers that do not open under the session key are refused without ending the session | `native-signing.pg`, `protocol.test` |
 | Session isolation | Sessions are bound to `{approval, requester}`; MCP confirmation by the requester scope; Telegram by a channel-keyed start token (URL fragment, never stored) and a single-use confirm tag | `native-signing.pg`, `mcp/native-signing.pg`, `native-start.test` |
-| Expiry | Session ≤ 15 min and ≤ the approval; the challenge lasts 5 min; the flow's own Review TTL is unchanged | `native-signing.pg` |
+| Expiry | Session ≤ 15 min and ≤ the approval; the challenge lasts 5 min; the flow's own Review TTL is unchanged. A wallet request already sent stays "waiting for the wallet" until its Review can no longer be broadcast (never "expired, nothing was sent" while a late signature can still go out); a lapsed request is not handed out again | `native-signing.pg` |
 | Nothing secret or identifying in model context | The wallet URL, the Review (with the claiming wallet), the session id and its reference are only in `_meta['flofi/wallet']`; the model sees the wallet name, the state and why it ended | `mcp/native-signing.pg` |
 | Channel code has no financial authority | Channel modules only mint start tokens and post FloFi text; the boundary test is unchanged and passes | `channels/boundaries.test` |
+
+**Scope of the one-send rule.** FloFi's signing page keeps its existing behaviour: an owner who resumes an applied approval there can execute it
+again with a new Review and wallet signature, and the page does not consult native sessions. Changing the page is outside this BUILD; it is
+recorded for the owner.
 
 **Requester and signer.** The conversation that asks is not necessarily the wallet that signs: a third party could pass a session's links to someone else's wallet. That person never sees the conversation, so after their Sign-In FloFi shows them the Review on the page their wallet returns to, saying where the request came from and to reject it if they did not ask for it. Their wallet then shows the exact transaction. The requester never learns the signer's address from the MCP tools (it stays in the owner's panel `_meta`).
 
@@ -156,6 +167,14 @@ There is no maintained, commercially usable transport compatible with AGPL that 
 - **What still blocks it:** Claude allows embedded sites only for verified directory listings or a limited set of organizations, and the person must approve the origin. Without that, the frame stays blocked whatever FloFi sends.
 - **What works anyway:** native signing in Claude goes through `ui/open-link` and needs no frame.
 
+### Receipt on a real chain
+
+- On the MOCKED chain the first observation already reconciles, so the receipt is posted at once (CI proves this).
+- On a real chain, reconciliation can take longer than the bounded follow-up (about 45 s). The deployment's worker keeps observing the run,
+  but posting the receipt to Telegram then needs a status check: the scheduled channel dispatch (`/api/channels/dispatch`), which has **no
+  production scheduler** yet (a pending item of BUILD-CHANNELS-001), or the person sending STATUS. The MCP panel polls and is not affected.
+- **Decision for the CTO:** schedule `/api/channels/dispatch` (for example a Vercel cron, a configuration change that needs approval).
+
 ### Return to the conversation
 
 - **ChatGPT and Claude:** the transit page links to `https://chatgpt.com/` and `https://claude.ai/`.
@@ -164,7 +183,9 @@ There is no maintained, commercially usable transport compatible with AGPL that 
 
 ## 6. Specialist reviews (on the final code before certification)
 
-Run on the branch head with each specialist's own read of the source (the scratchpad inputs were out of their reach). Codex is not available in this environment, so no Codex review was run.
+Run on the branch head with each specialist's own read of the source (the scratchpad inputs were out of their reach). Codex is not available in
+this environment, so no Codex review was run; an independent adversarial review by a separate general-purpose agent, given only the code and
+no conclusions, took its place and reproduced its findings against the PostgreSQL harness.
 
 | Reviewer | Highest | Accepted and fixed |
 |---|---|---|
@@ -172,11 +193,23 @@ Run on the branch head with each specialist's own read of the source (the scratc
 | flofi-wallet-execution | medium | Refusal/signature race (compare-and-swap first, the loser answered with the winner's record). After a signature, never "nothing sent" (pages, route errors, late answers). Second execution of one approval refused. Confirmation bound to the Review. Submit outcomes classified from the attempt (including a fee payer's unknown answer). Bound-run check, fail closed. `noWorse` also checks the estimate. Expired sign-in proof ends the session. No session on an approval about to expire. Renewed terms told to the conversation. |
 | flofi-mcp | medium | Confirmation requires the Review's reference from `_meta`. Review, claiming wallet and session id out of model context. Expired sessions read as ended. `reopen_wallet_request`. 55 s panel waits. Retry after a pre-signature end. State reset on a new result. Native tools only with the panel. A created approval never turned into an error. Progress reads within the read budget, eligible approvals only. Panel URI v3. Capability matrix and public docs updated. Diagnostic host sanitized. Timeout wording for wallet steps. Claude `ui.domain` from the canonical connector URL. |
 
+**Second round** (on `6b52289`):
+
+| Reviewer | Highest | Accepted and fixed |
+|---|---|---|
+| independent adversarial review | high | An approval executed on FloFi's signing page with status not shared could be sent again natively (reproduced: 2 broadcasts): runs of the exact workflow are now found unbound, and an unshared claim is not taken over. "Expired, nothing was sent" while a late signature could still be broadcast (reproduced): a sent request stays open until its Review lapses. A pre-broadcast refusal (execution paused) is no longer "may have been sent" and no longer locks the approval. Constant-time tag comparison. A lapsed request is not handed out again. A progress read no longer fails on an extra uncaught read |
+| flofi-workflow | medium | The same cross-surface double send. A run simulated just before the claim was dropped from the approval's status and receipt (`sharedRunsRead` now keeps bound runs). The Review promised a receipt where sharing was off. Expired-request wording. Classification after a failed submit. The claim rule and status checked before any simulation or session rotation. Lapsed prepared runs are observed (closed as never sent). An open request reads as "open", not "sent". Start serialized per approval |
+| flofi-channels | medium | Status notifications sent the person to FloFi right after the in-chat Review: a natively signed approval leaves those out, and its status follows only after the wallet's answer. Owner's wallet shortened in the conversation and panel. Sharing disclosed on the signer's page and the button's note. Expired wording no longer says "tap again". A stopped conversation's button starts nothing, and the conversation's own language is used. Strict kill switch. The native note follows the authorization line without displacing interpreter notes; HELP and authority mention the wallet-app path. A malformed wallet link is dropped, not fatal. Skipped notices are logged. The receipt's dependency on the dispatch scheduler is recorded (§5) and the bounded follow-up added |
+
 **Not changed, recorded:**
 - the flow records the fresh run's Review acceptance on the owner's behalf, within the confirmed bounds (the flow API carries no provenance field);
 - the in-conversation Review is a subset of the signing page's Strategy Manifest (no route, price impact or token-extension facts);
 - a refusal is unauthenticated by the wallets' protocol: whoever holds a callback URL can end that one session (nothing is sent);
-- the feature is on by default after an approved deploy (kill switch below).
+- the feature is on by default after an approved deploy (kill switch below);
+- each refresh at confirmation binds one more run to the approval (shared cap of 16 runs; a Jupiter quote that keeps worsening ends with `NATIVE_SIGNING_RUN_LIMIT`);
+- `noWorse` compares asset symbol and decimals; the mints are pinned by the approval's workflow hash;
+- the session listing reads at most 32 sessions; starts are serialized and capped at 16, and the run check is the backstop;
+- FloFi's signing page does not consult native sessions (§3).
 
 ## 7. Live acceptance (owner, real devices)
 
@@ -187,6 +220,8 @@ Run on the branch head with each specialist's own read of the source (the scratc
    4. Repeat with Solflare.
    5. Repeat with a reject at each wallet prompt; each must end with "Nothing was signed or sent".
    6. Run this in Flight-open conditions, or with the beta decision made.
+   7. On a real chain, note whether the reconciled receipt arrives within the follow-up; if not, send STATUS (and see §5 on the dispatch scheduler).
+   8. Open the approval's **Authorize** link first and connect without sharing status, then tap **Sign with Phantom**: it must refuse without asking the wallet.
 2. **ChatGPT mobile and desktop, then Claude mobile and desktop:** the same flow from the panel. Check that the panel's Review matches the wallet's transaction, and that the receipt appears in the panel.
 3. **Universal links:** record, per app (ChatGPT, Claude, Telegram in-app browser, Safari, Chrome), whether the wallet opened on its own or only on the transit page's button.
 4. **ChatGPT desktop frame:** open a non-Solana approval and choose **Authorize in chat**. If it fails, read `mcp.panel.diagnostic` in the Vercel logs and propose `FLOFI_MCP_FRAME_ANCESTORS` from that origin.
@@ -194,11 +229,12 @@ Run on the branch head with each specialist's own read of the source (the scratc
 
 ## 8. Configuration
 
-- **Required:** none. The feature is on by default after an approved deploy; `FLOFI_NATIVE_SIGNING=disabled` is the kill switch.
+- **Required:** none. The feature is on by default after an approved deploy; `FLOFI_NATIVE_SIGNING` set to anything but `enabled` is the kill switch.
 - **Optional, each needing approval:**
   - `FLOFI_TELEGRAM_BOT_USERNAME`: the return link to Telegram.
   - `FLOFI_MCP_CLAUDE_UI_DOMAIN=enabled`: after a live check against the configured connector URL.
   - `FLOFI_MCP_FRAME_ANCESTORS`: only origins observed in `mcp.panel.diagnostic`.
+  - A production schedule for `/api/channels/dispatch` (§5, Receipt on a real chain).
 
 ## 9. Data
 
