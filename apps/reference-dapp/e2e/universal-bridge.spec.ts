@@ -331,6 +331,53 @@ test('P0 Canvas independently selects Base USDC and Arbitrum WETH and applies th
   await expect(panel(page)).toContainText('Bridge 1 USDC from Base to Arbitrum One, receiving WETH.');
 });
 
+test('PR #254 follow-up: a universal bridge applies a max price difference preset at once; Enter applies a typed value; Escape discards it', async ({ page }) => {
+  await installEvmWallet(page, wallets.evm);
+  await openBuilder(page);
+  await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
+  const card = page.locator('.build-flow-surface .composer-card'), revision = page.locator('.summary-bar');
+  await card.getByRole('textbox').fill('1');
+  await card.getByRole('button', { name: 'Configure source asset', exact: true }).click();
+  await page.getByRole('region', { name: 'Source network picker', exact: true }).getByRole('button', { name: 'Base', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
+  await card.getByRole('button', { name: 'Configure destination asset', exact: true }).click();
+  await page.getByRole('region', { name: 'Destination network picker', exact: true }).getByRole('button', { name: 'Arbitrum', exact: true }).click();
+  await page.getByRole('region', { name: 'Destination token picker', exact: true }).locator('label').filter({ has: page.getByRole('radio', { name: 'WETH', exact: true }) }).click();
+  await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
+  await card.getByRole('textbox').press('Enter');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '1');
+  const slippageBps = async () => Number(/"slippageBps":(\d+)/.exec(await readWorkflowIr(page))?.[1]);
+  const before = await counters();
+  expect(await slippageBps()).toBe(100);
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
+  const form = page.getByRole('form', { name: 'Edit universal bridge', exact: true });
+  const field = form.getByLabel('Universal bridge max price difference (%)', { exact: true });
+  await expect(field).toHaveValue('1');
+  await expect(form.getByRole('button', { name: '1%', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  // One click on a preset applies it to the workflow (a new revision); there is no proposal to review and no "Review bridge change" click.
+  await form.getByRole('button', { name: '2.5%', exact: true }).click();
+  await expect(revision).toHaveAttribute('data-workflow-revision', '2');
+  expect(await slippageBps()).toBe(250);
+  await expect(page.locator('.proposal-artifact')).toHaveCount(0);
+  await expect(field).toHaveValue('2.5');
+  await expect(form.getByRole('button', { name: '2.5%', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  // A typed value applies on Enter (never per keystroke); an invalid one is refused with its reason and never applied.
+  await field.fill('3');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '2');
+  await field.press('Enter');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '3');
+  expect(await slippageBps()).toBe(300);
+  await field.fill('0.125'); await field.press('Enter');
+  await expect(form.getByRole('alert')).toContainText('Enter a max price difference from 0.01% to');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '3');
+  // Escape discards a typed value that was not applied (the settings close; nothing changes).
+  await field.fill('4'); await field.press('Escape');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '3');
+  expect(await slippageBps()).toBe(300);
+  // Choosing a limit never quotes, signs or sends anything.
+  expect(await counters()).toEqual(before);
+});
+
 
 test('financial truth: an unresolved EVM wallet stays navigable and recoverable, then a definite rejection survives reload without a send', async ({ page, networkGuard }) => {
   await installEvmWallet(page, wallets.evm, 'pause-reject');

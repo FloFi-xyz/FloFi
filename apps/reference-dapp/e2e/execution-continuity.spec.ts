@@ -130,6 +130,10 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
   expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(2);
   // BUILD0-UX-001: no technical disclosure on Execute: the timeline keeps both transactions (copy and explorer), the Dashboard keeps the record.
   await expect(page.getByText('View technical details', { exact: true })).toHaveCount(0);
+  // Execution UX regression fixes (PR #254): a clean result is read in the compact result beside the Canvas; the Execution details below it are
+  // collapsed (where the Canvas shows the run) and both transactions are still there, one click away.
+  const details = page.locator('.execution-details-disclosure');
+  if (await details.count()) { await expect(details).not.toHaveAttribute('open', ''); await details.locator('summary').click(); await expect(details).toHaveAttribute('open', ''); }
   await expect(page.locator('.execution-plan').getByRole('button', { name: /Copy.*transaction/ })).toHaveCount(2);
   await expect(summary(page).getByRole('button', { name: 'View in Dashboard', exact: true })).toBeVisible();
   await reloadBuilder(page); await stage(page, 'Execute');

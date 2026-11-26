@@ -20,7 +20,8 @@ import { createUniversalBridgeFromInput, resolveUniversalAsset, universalAssetRe
   type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { TokenAmountInput } from './token-amount-input';
-import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { appliedSlippageCommand } from '../domain/applied-slippage';
 import { AssetSearch } from './asset-search';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
@@ -150,7 +151,7 @@ function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }
  */
 export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeId?: string; onDone?: () => void; options?: boolean }) {
   const { t: tr } = useLocale();
-  const { state, propose, amountInputs = {} } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, amountInputs = {} } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? universalBridgeDetails(node) : null;
   const [input, setInput] = useState<UniversalBridgeInput>(existing ? universalInputOf(existing)
     : { source: 'solana', destination: 'base', inputAsset: 'USDC', outputAsset: 'USDC', amount: '', recipient: '', slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' });
@@ -220,6 +221,23 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     }
     changeSlippage(slippage);
   }
+  /**
+   * PR #254 follow-up: an existing bridge's max price difference applies at once (a preset or Auto click, or a typed value on Enter or focus
+   * leaving it): one ordinary edit of the APPLIED bridge with only its slippage changed (`appliedSlippageCommand`; a draft amount, recipient or
+   * routing is never applied with it). Nothing is simulated, authorized or signed. Returns why a value cannot be applied.
+   */
+  function commitSlippage(slippage: string): string | null {
+    if (!nodeId) return null;
+    const result = appliedSlippageCommand(state, nodeId, slippage, context);
+    if ('code' in result) return appliedSlippageMessage(result.code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS);
+    dismissProposal(); dispatch(result.command); setAuto(null); setError('');
+    return null;
+  }
+  /** A delayed Auto click on a quote that expired since the previous render fetches a new recommendation instead of applying the old one. */
+  const autoStillValid = () => {
+    if (!currentAuto || currentAuto.expiresAt <= Date.now()) { void requestAuto(); return false; }
+    return true;
+  };
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -264,10 +282,13 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     {destinationRetry && <button type="button" className="composer-destination-choice composer-destination-connect" onClick={() => { retryAccountWallets(); destinationInput.current?.focus(); }}>{tr('Try again')}</button>}
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
-    <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
-      onBpsChange={changeSlippage}/></label>
-    <SlippageChoices bps={input.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onBpsChange={changeSlippage}
-      autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} onApplyAuto={applyAutoSlippage} autoPending={currentAuto?.pending ?? false}/>
+    {compact && existing ? <AppliedSlippageControls label={tr('Max price difference (%)')} inputLabel={tr('Universal bridge max price difference (%)')} maxLength={5}
+      bps={existing.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onCommit={commitSlippage}
+      autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} canApplyAuto={autoStillValid} autoPending={currentAuto?.pending ?? false}/> : <>
+      <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
+        onBpsChange={changeSlippage}/></label>
+      <SlippageChoices bps={input.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onBpsChange={changeSlippage}
+        autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} onApplyAuto={applyAutoSlippage} autoPending={currentAuto?.pending ?? false}/></>}
     {currentAuto && !currentAuto.pending && autoBps === null && <small role="status">{tr('Relay could not recommend a price difference for this bridge. Check the networks, assets and amount, or enter a value.')}</small>}
     {!compact && <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}

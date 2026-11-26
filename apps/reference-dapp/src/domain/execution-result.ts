@@ -70,6 +70,24 @@ export function isFinalExecutionResult(progress: ExecutionLifecycle | null | und
 }
 
 /**
+ * PR #254 follow-up (unrelated pending workflows): whether a run still has a request of the owner's wallet in flight — one being prepared, awaiting
+ * the wallet, signed, submitted, pending confirmation or uncertain (it may still land), or a signed order that may still fill. That is a genuine
+ * conflict for another execution from the same wallet (nonce, balance, an open wallet prompt). A bridge whose deposit is confirmed and whose
+ * delivery FloFi only observes on the destination (`wallet: false`) has none: its settlement needs no signature and keeps reconciling on its own.
+ */
+export function ownerRequestInFlight(progress: ExecutionLifecycle | null | undefined): boolean {
+  return Boolean(progress?.started && progress.steps.some(step => step.operations.some(operation => (operation.wallet || operation.intent) && IN_FLIGHT.includes(operation.state))));
+}
+/**
+ * Whether a run the per-card runtime holds still holds a single card back from its one-confirmation path (`localExecutionHolds` `unfinished`):
+ * any run of this Canvas that is not final, and a run of an unrelated workflow (detached after "Create new workflow") only while it has an
+ * owner-wallet request in flight. A final run never does (execution UX regression fixes).
+ */
+export function unfinishedRunHolds(progress: ExecutionLifecycle | null | undefined): boolean {
+  return Boolean(progress?.started) && !isFinalExecutionResult(progress) && (!progress!.detached || ownerRequestInFlight(progress));
+}
+
+/**
  * BUILD-FIX-UX-001: a final run in which no transaction was submitted and nothing was confirmed — every request it made was declined in
  * the wallet before submission (or recorded as not submitted). Starting over cannot repeat anything, so a fresh simulation is safe.
  */

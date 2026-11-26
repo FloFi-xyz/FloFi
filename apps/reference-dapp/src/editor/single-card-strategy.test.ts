@@ -12,6 +12,8 @@ import { parseLocalCommand } from '../domain/commands';
 import { editorReducer, initialEditor, type EditorState } from '../domain/editor';
 import type { Workflow } from '../domain/initial-workflow';
 import { deliveredByRun, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES, singleCardFallsBack, localExecutionHolds } from '../domain/workflow-sequence';
+import { currentExecution, isFinalExecutionResult, ownerRequestInFlight, unfinishedRunHolds } from '../domain/execution-result';
+import type { ExecutionLifecycle, LifecycleOperation } from '../domain/execution-lifecycle';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { evaluateWorkflowGates, readHandoffPolicy, workflowPlan } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
@@ -191,6 +193,37 @@ describe('execution UX regression fixes: one wallet confirmation for a simple ca
     // A detached run (the owner chose "Create new workflow" while it was submitted) that is not final: its flow's own guard stays in force.
     expect(localExecutionHolds({ ...none, started: true, unfinished: true })).toBe(true);
     expect(localExecutionHolds({ ...none, recorded: true })).toBe(true);                 // a start recorded for this workflow
+  });
+  it('PR #254 follow-up: an unrelated pending workflow holds a single card only while it has an owner-wallet request in flight', () => {
+    const run = (operations: Partial<LifecycleOperation>[], extra: Partial<ExecutionLifecycle> = {}) => ({ started: true, detached: true, matchesWorkflow: false,
+      state: 'active', steps: [{ id: 'bridge', operations: operations.map((op, i) => ({ id: `op-${i}`, nodeId: 'bridge', state: 'waiting', wallet: true, intent: false,
+        approval: false, hash: null, chain: 'eip155:1', ...op })) }], ...extra }) as unknown as ExecutionLifecycle;
+    const holds = (progress: ExecutionLifecycle) => localExecutionHolds({ current: Boolean(currentExecution(progress)), started: progress.started,
+      unfinished: unfinishedRunHolds(progress), recorded: false, sequence: null });
+    // Production evidence A/B: a bridge of ANOTHER workflow whose deposit is confirmed and whose delivery FloFi only observes on the destination
+    // (no signature left) no longer forces a new simple card into its multi-prompt flow; that run keeps reconciling on its own.
+    const settling = run([{ id: 'deposit', state: 'confirmed', hash: `0x${'a'.repeat(64)}` }, { id: 'destination', state: 'pending', wallet: false }]);
+    expect(isFinalExecutionResult(settling)).toBe(false);
+    expect(ownerRequestInFlight(settling)).toBe(false);
+    expect(holds(settling)).toBe(false);
+    // A previously completed unrelated workflow never holds it (unchanged).
+    expect(holds(run([{ state: 'confirmed', hash: `0x${'a'.repeat(64)}` }], { state: 'complete' }))).toBe(false);
+    // A genuine conflict still holds: a request of the owner's wallet being prepared, awaiting the wallet, signed, submitted, pending confirmation or
+    // uncertain (it may still land: nonce and balance), or a signed order that may still fill.
+    for (const state of ['preparing', 'wallet', 'signed', 'submitting', 'submitted', 'pending', 'uncertain'] as const) {
+      expect(holds(run([{ state, hash: state === 'wallet' || state === 'preparing' ? null : `0x${'b'.repeat(64)}` }])), state).toBe(true);
+    }
+    expect(holds(run([{ state: 'posted', intent: true }]))).toBe(true);
+    expect(holds(run([{ state: 'settling', intent: true }]))).toBe(true);
+    // The same workflow's own unfinished run always holds (same-workflow execution protection), detached or not.
+    const own = run([{ id: 'deposit', state: 'confirmed' }, { id: 'destination', state: 'pending', wallet: false }], { matchesWorkflow: true });
+    delete (own as { detached?: boolean }).detached;
+    expect(unfinishedRunHolds(own)).toBe(true); expect(holds(own)).toBe(true);
+    // A duplicate attempt of this workflow (a start recorded for it) and a step-by-step sequence keep their rules.
+    expect(localExecutionHolds({ ...none, recorded: true })).toBe(true);
+    expect(localExecutionHolds({ ...none, started: true, unfinished: unfinishedRunHolds(settling), sequence: { cursor: 0, completed: [] } })).toBe(true);
+    // Unsupported single-confirmation runtimes are unchanged (the universal Router and Solana cards keep their own flow).
+    expect(SINGLE_CARD_RUNTIMES).toEqual(['public', 'router', 'transfer', 'supply']);
   });
   it('a step-by-step sequence keeps its former rule', () => {
     expect(localExecutionHolds({ ...none, started: true, sequence: { cursor: 0, completed: [] } })).toBe(true);

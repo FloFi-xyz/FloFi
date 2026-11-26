@@ -135,6 +135,11 @@ export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 
  * that its runtime still holds (`started` alone). Before, any earlier per-card execution in the tab sent every later simple card to its own flow
  * (approval, then a second Review and Authorize, then the swap: two or more prompts) instead of ONE wallet confirmation. Nothing that may still
  * execute is ever bypassed.
+ *
+ * PR #254 follow-up: `unfinished` is `unfinishedRunHolds` (domain/execution-result.ts). An UNRELATED workflow's run (detached) that is not final
+ * holds a single card back only while it has an owner-wallet request in flight (a genuine nonce, balance or open-prompt conflict); a bridge of it
+ * whose deposit is confirmed and whose delivery FloFi only observes and reconciles no longer forces the card into its multi-prompt flow. The
+ * detached run keeps reconciling on its own and is never resent; its own flow's ATTEMPT_ALREADY_ACTIVE guard is unchanged.
  */
 export function localExecutionHolds(input: { readonly current: boolean; readonly started: boolean; readonly unfinished: boolean; readonly recorded: boolean;
   readonly sequence: { readonly cursor: number; readonly completed: readonly unknown[] } | null }): boolean {

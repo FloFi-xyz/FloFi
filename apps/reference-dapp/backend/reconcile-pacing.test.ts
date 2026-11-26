@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { backoffMs } from '@defi-workflow-engine/cloud-runtime';
 import { reconcileDelayMs, SETTLEMENT_CADENCE_MS, SETTLEMENT_WINDOW_MS, SETTLING_OUTCOMES, TRANSIENT_RETRY_MS } from './reconcile-pacing.ts';
+import { ADVANCE_RETRY_MS } from '../src/workflow-runs/state-machine.ts';
 
 const createdAt = new Date('2026-11-25T12:00:00Z'), mid = () => 0.5;
 const at = (ms: number) => createdAt.getTime() + ms;
@@ -40,6 +41,16 @@ describe('reconcile pacing (execution reconciliation regression)', () => {
     for (const outcome of ['UNDETERMINED', 'NOT_SUBMITTED', 'REVERTED', null, undefined])
       expect(reconcileDelayMs({ outcome, deliveries: 9, createdAt, now: at(60_000), random: mid })).toBe(backoffMs(9, mid));
     expect(reconcileDelayMs({ outcome: 'DESTINATION_OBSERVED', deliveries: 9, createdAt, now: at(SETTLEMENT_WINDOW_MS), random: mid })).toBe(backoffMs(9, mid));
+  });
+  it('PR #254 follow-up: a bridge in a multi-step workflow is paced the same way (no ten-minute wait on any path)', () => {
+    // A step-by-step sequence runs each bridge as its own Router or universal run: the same flow records this worker observes, so the settlement
+    // cadence above is theirs. A whole-workflow run's bridge step is observed by the workflow-run worker on every advance, at a fixed interval
+    // that is never the doubling backoff.
+    expect(ADVANCE_RETRY_MS).toBeLessThanOrEqual(20_000);
+    expect(ADVANCE_RETRY_MS).toBeLessThan(backoffMs(12, mid));
+    for (const flowOutcome of ['CONFIRMED', 'DESTINATION_OBSERVED'])
+      expect(reconcileDelayMs({ outcome: flowOutcome, phase: flowOutcome === 'CONFIRMED' ? 'IN_FLIGHT' : 'DESTINATION_OBSERVED', deliveries: 20, createdAt, now: at(7 * 60_000), random: mid }))
+        .toBe(SETTLEMENT_CADENCE_MS);
   });
   it('spends at most 300 of the 500-delivery observation budget inside the window', () => {
     expect(SETTLEMENT_WINDOW_MS / (SETTLEMENT_CADENCE_MS * 0.8)).toBeLessThanOrEqual(300);

@@ -66,4 +66,6 @@ export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
   'The simulation provider is temporarily unavailable. Try checking again shortly.': 'O serviço de simulação está temporariamente indisponível. Tente verificar novamente em instantes.',
   'Checking whether simulation is available on this network…': 'Verificando se a simulação está disponível nesta rede…',
   'The previous quote expired. Simulate again to check a fresh quote before Review.': 'A cotação anterior expirou. Simule novamente para conferir uma nova cotação antes de autorizar.',
+  'Your wallet does not hold enough WETH on this step’s network for this liquidity deposit, so nothing was simulated or sent. WETH is wrapped ETH and FloFi does not wrap it for you: add WETH to this wallet on that network, or lower the WETH amount on the Canvas, then simulate again.':
+    'Sua carteira não tem WETH suficiente na rede desta etapa para este depósito de liquidez, então nada foi simulado nem enviado. WETH é ETH embrulhado e a FloFi não faz essa conversão por você: adicione WETH a esta carteira nessa rede, ou reduza o valor de WETH no Canvas, e simule de novo.',
 };

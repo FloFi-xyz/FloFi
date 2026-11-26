@@ -11,7 +11,8 @@ import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
 import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
 import { DEFAULT_SLIPPAGE, slippageRangeMessage } from '../domain/slippage-policy';
-import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { appliedSlippageCommand } from '../domain/applied-slippage';
 
 export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: string) {
   const key = input?.network === 'Solana' ? JSON.stringify([scope, input.from, input.to, input.amount]) : null;
@@ -49,7 +50,7 @@ export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: 
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
-  const { state, propose, dispatch } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId);
   const existing = node ? solanaSwapDetails(node) : null;
   const devnet = (existing?.network ?? initialNetwork) === 'Solana Devnet';
@@ -71,12 +72,26 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
       setError(slippageRangeMessage(code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS) ?? code);
     }
   }
+  /**
+   * PR #254 follow-up: an existing Jupiter swap's max price difference applies at once (a preset or Auto click, or a typed value on Enter or focus
+   * leaving it), like the swap card's: one ordinary edit of the APPLIED swap with only its slippage changed (`appliedSlippageCommand`; a draft
+   * token or amount is never applied with it). Nothing is simulated, authorized or signed.
+   */
+  function commitSlippage(slippage: string): string | null {
+    if (!nodeId) return null;
+    const result = appliedSlippageCommand(state, nodeId, slippage, context);
+    if ('code' in result) return appliedSlippageMessage(result.code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS);
+    dismissProposal(); dispatch(result.command); setError('');
+    return null;
+  }
   return <form className="inspector-fields" aria-label={tr(nodeId ? `Edit ${label} swap` : `Create ${label} swap`)} onSubmit={submit}>
     <label>{tr(label)}{tr(" from token")}<select aria-label={tr("From token")} value={input.from} onChange={e => set({ from: e.target.value as SolanaSwapSymbol })}>{tokens.map(t => <option key={t} value={t}>{tr(solanaTokenLabel(input.network, t))}</option>)}</select></label>
     <label>{tr(label)}{tr(" to token")}<select aria-label={tr("To token")} value={input.to} onChange={e => set({ to: e.target.value as SolanaSwapSymbol })}>{tokens.map(t => <option key={t} value={t}>{tr(solanaTokenLabel(input.network, t))}</option>)}</select></label>
     <label>{tr(label)}{tr(" amount")}<input aria-label={tr("Amount")} inputMode="decimal" autoComplete="off" maxLength={40} value={input.amount} onChange={e => set({ amount: e.target.value })}/></label>
-    <label>{tr('Max price difference (%)')}<PriceDifferenceInput bps={input.slippage} maxLength={6} onBpsChange={slippage => set({ slippage })}/></label>
-    <SlippageChoices {...auto} bps={input.slippage} maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onBpsChange={slippage => set({ slippage })}/>
+    {nodeId && existing ? <AppliedSlippageControls {...auto} label={tr('Max price difference (%)')} maxLength={6} bps={existing.slippage}
+      maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onCommit={commitSlippage}/> : <>
+      <label>{tr('Max price difference (%)')}<PriceDifferenceInput bps={input.slippage} maxLength={6} onBpsChange={slippage => set({ slippage })}/></label>
+      <SlippageChoices {...auto} bps={input.slippage} maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onBpsChange={slippage => set({ slippage })}/></>}
     {autoError && <p className="muted" role="status">{tr(autoError)}</p>}
     {devnet && <p className="muted">{tr("Devnet test tokens have no value.")}</p>}
     {error && <p role="alert">{tr(error)}</p>}

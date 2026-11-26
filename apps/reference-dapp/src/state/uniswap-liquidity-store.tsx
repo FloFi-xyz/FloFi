@@ -36,7 +36,7 @@ function errorValue(value: unknown): unknown {
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
 
 export function UniswapLiquidityProvider({ children }: { children: ReactNode }) {
-  const { state, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
+  const { runtimeWorkflow, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<UniswapLiquidityRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   // BUILD-RH-002: the testnet pools and each catalog network (real funds: Robinhood Chain, BUILD-BASE-001 Base) are enabled separately; the
   // authored position (else the run) selects one.
@@ -45,7 +45,11 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   const [recovered, setRecovered] = useState(false), [price, setPrice] = useState<UniswapLiquidityPrice | null>(null);
   const [priceChain, setPriceChain] = useState<'eip155:84532' | 'eip155:11155111' | null>(null);
   const [requoted, setRequoted] = useState<Store['requoted']>(null);
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  // PR #254 follow-up (production: Swap → Bridge → Pool refused at simulation, ROUTER_ISOLATED_ONLY): a pool step of a step-by-step sequence is
+  // simulated, reviewed and executed ALONE, like every other sequence runtime (`SEQUENCE_RUNTIMES`): the store's `runtimeWorkflow` is that step
+  // (its amount bound to what the earlier step delivered) and, outside a sequence, the canonical workflow itself. It used the whole workflow, so the
+  // server linted the swap and the bridge with the pool and refused them together.
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const authoredChain = workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')?.chainId;
   const servedCatalog = networkIdentity(authoredChain ?? (record ? `eip155:${record.review.chainId}` : null));
   const { available, executionEnabled } = (servedCatalog?.catalog ? networks[servedCatalog.chain] : networks.testnet) ?? { available: false, executionEnabled: false };

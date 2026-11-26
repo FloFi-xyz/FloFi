@@ -4837,6 +4837,7 @@
       "sources": [
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
         "apps/reference-dapp/src/domain/build-entry.ts",
+        "apps/reference-dapp/src/domain/build-entry-fields.ts",
         "apps/reference-dapp/src/domain/approved-ux.ts",
         "apps/reference-dapp/src/domain/copilot-assist.ts",
         "apps/reference-dapp/src/domain/intelligence/concepts.ts",
@@ -5083,6 +5084,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/domain/applied-slippage.ts",
         "apps/reference-dapp/src/domain/catalog-swap-authoring.ts",
         "apps/reference-dapp/src/domain/jupiter-authoring.ts",
         "apps/reference-dapp/src/domain/public-testnet-swap.ts",

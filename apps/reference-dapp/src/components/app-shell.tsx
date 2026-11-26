@@ -76,7 +76,7 @@ import { editorRunReadiness } from '../domain/editor-run';
 import { useExecutionLifecycle } from '../state/execution-lifecycle';
 import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
-import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
+import { currentExecution, isFinalExecutionResult, unfinishedRunHolds } from '../domain/execution-result';
 import { executionContinuation } from '../domain/conversation-lifecycle';
 import { runReconciled, workflowProgressView } from '../domain/workflow-progress';
 import { shellCanvasExecution } from '../domain/canvas-execution';
@@ -643,9 +643,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // P0 workflow execution: a multi-step Canvas workflow runs as ONE workflow run, reviewed once and authorized with the lowest-friction mechanism
   // the owner's wallet really supports (an EIP-5792 atomic batch where it reports one), in place. The per-step sequence stays only as the explicit
   // fallback when the whole-workflow Review says a step needs its own flow (and why), or when this deployment does not offer it.
-  // A finished run of another workflow holds back only a step-by-step sequence, never a single card; anything not final still does (`localExecutionHolds`).
+  // A finished run of another workflow holds back only a step-by-step sequence, never a single card; anything not final still does (`localExecutionHolds`),
+  // except a run of an unrelated workflow (detached after "Create new workflow") with no owner-wallet request left in flight: its bridge delivery is
+  // only being observed and reconciled, which conflicts with nothing this wallet signs (`unfinishedRunHolds`).
   const localSequenceStarted = localExecutionHolds({ current: Boolean(currentExecution(executionProgress)), started: executionProgress.started,
-    unfinished: executionProgress.started && !isFinalExecutionResult(executionProgress), recorded: executionStart.started, sequence: sequence ?? null });
+    unfinished: unfinishedRunHolds(executionProgress),
+    recorded: executionStart.started, sequence: sequence ?? null });
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE EVM financial card whose action FloFi's user-funded execution groups build (a catalog swap, a
   // certified Router bridge, a transfer, an Aave supply / borrow / repay / withdraw) runs through the SAME whole-workflow path as a multi-step
   // workflow: one Authorize, ONE wallet confirmation (an atomic batch with any exact approval folded in, only where the allowance is short), then

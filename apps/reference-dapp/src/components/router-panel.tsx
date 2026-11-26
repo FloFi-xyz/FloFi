@@ -12,7 +12,8 @@ import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetw
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
-import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { appliedSlippageCommand } from '../domain/applied-slippage';
 import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { authoringEnvironment, useExecutionEnvironment } from '../state/capability-store';
@@ -54,7 +55,7 @@ const explorerTx = (network: RouterNetwork, chain: 'source' | 'destination', has
 export function RouterForm({ nodeId, onDone, network: initialNetwork, options = false }: { nodeId?: string; onDone?: () => void; network?: RouterNetwork; options?: boolean }) {
   const { t: tr } = useLocale();
   const { walletEnvironment } = useExecutionEnvironment();
-  const { state, propose, amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? routerDetails(node) : null;
   const start = ROUTER_NETWORK_OPTIONS[existing?.network ?? initialNetwork ?? 'mainnet'];
   const [input, setInput] = useState<RouterBridgeInput>(existing ? routerInputOf(existing)
@@ -99,6 +100,18 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
       setError(slippageRangeMessage(code, maximumSlippageBps) ?? code);
     }
   }
+  /**
+   * PR #254 follow-up: an existing bridge's max price difference applies at once (a preset click, or a typed value on Enter or focus leaving it),
+   * like the swap card's: one ordinary edit of the APPLIED bridge with only its slippage changed (`appliedSlippageCommand`; a draft amount,
+   * network, recipient or routing is never applied with it). Nothing is simulated, authorized or signed. Returns why a value cannot be applied.
+   */
+  function commitSlippage(slippage: string): string | null {
+    if (!nodeId) return null;
+    const result = appliedSlippageCommand(state, nodeId, slippage, context);
+    if ('code' in result) return appliedSlippageMessage(result.code, maximumSlippageBps);
+    dismissProposal(); dispatch(result.command); setError('');
+    return null;
+  }
   const compact = options && Boolean(nodeId);
   return <form className={`inspector-fields${compact ? ' bridge-options-form' : ''}`} aria-label={tr(nodeId ? 'Edit cross-chain bridge' : network === 'testnet' ? 'Create testnet cross-chain bridge' : 'Create cross-chain bridge')} onSubmit={submit}>
     {guidance && <p className="muted">{tr(guidance)}</p>}
@@ -117,8 +130,10 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
       onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr("Routing")}<select aria-label={tr("Cross-chain routing policy")} value={input.routing} onChange={e => set({ routing: e.target.value as RouterRouting })}>
       {(Object.keys(ROUTER_ROUTING_LABEL) as RouterRouting[]).map(k => <option key={k} value={k}>{tr(ROUTER_ROUTING_LABEL[k])}</option>)}</select></label>
-    <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Cross-chain max price difference (%)')} maxLength={5} bps={input.slippage} onBpsChange={slippage => set({ slippage })}/></label>
-    <SlippageChoices bps={input.slippage} maximumBps={maximumSlippageBps} onBpsChange={slippage => set({ slippage })}/>
+    {compact && existing ? <AppliedSlippageControls label={tr('Max price difference (%)')} inputLabel={tr('Cross-chain max price difference (%)')} maxLength={5}
+      bps={existing.slippage} maximumBps={maximumSlippageBps} onCommit={commitSlippage}/> : <>
+      <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Cross-chain max price difference (%)')} maxLength={5} bps={input.slippage} onBpsChange={slippage => set({ slippage })}/></label>
+      <SlippageChoices bps={input.slippage} maximumBps={maximumSlippageBps} onBpsChange={slippage => set({ slippage })}/></>}
     {!compact && network && option && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : network === 'mainnet' ? 'Maximum 100 USDC per bridge in this release.'
       : `Between ${bound(option.pair.minimumAmount, option.pair.source.decimals)} and ${bound(option.pair.maximumAmount, option.pair.source.decimals)} ${option.pair.source.symbol} per bridge in this release.`)}{tr(" The minimum you receive is fixed in the reviewed deposit.")}</small>}
     {error && <p role="alert">{tr(error)}</p>}

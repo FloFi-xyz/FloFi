@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { ELEVATED_SLIPPAGE_WARNING_BPS } from '@defi-workflow-engine/workflow-contracts';
-import { bpsToPercent, percentToBps, priceDifferenceLabel } from '../domain/slippage-policy';
+import { bpsToPercent, percentToBps, priceDifferenceLabel, slippageRangeMessage } from '../domain/slippage-policy';
 import { useLocale } from '../i18n/locale';
 
 /** What a percent that has no whole basis-point value becomes: every slippage validator refuses it (nothing is rounded). */
@@ -55,4 +55,55 @@ export function SlippageChoices({ bps, maximumBps, onBpsChange, autoBps, onReque
     {Number(bps) > ELEVATED_SLIPPAGE_WARNING_BPS && Number(bps) <= maximumBps && <p className="muted" role="status">
       {t('Above 3%, the price can move substantially against you before the operation stops.')}</p>}
   </>;
+}
+
+/** Why an applied max price difference was refused, in the wording the swap card's settings already use (never a raw code). */
+export const appliedSlippageMessage = (code: string, maximumBps: number): string => slippageRangeMessage(code, maximumBps)
+  ?? (/LOCK/.test(code) ? 'This step is protected. Unlock it before changing its max price difference.' : 'This max price difference cannot be applied to this step.');
+
+/**
+ * PR #254 follow-up: the max price difference of an existing card's own settings (Router bridge, universal bridge, Jupiter swap) applies like the
+ * swap card's, without a separate "Review … change": a preset (or Auto) applies its value in one click; a typed value applies on Enter or when
+ * focus leaves the max-price-difference controls (moving to a preset does not, the preset applies its own value); Escape discards a typed value
+ * that was not applied. `canApplyAuto` may refuse an Auto value whose quote expired (it then asks again). `bps` is the APPLIED limit (the presets show it as pressed). `onCommit` receives exact basis points (or
+ * INVALID_PRICE_DIFFERENCE) only when they differ from the applied limit, and applies them as one ordinary edit or returns why it cannot.
+ * Nothing here simulates, authorizes, signs or executes.
+ */
+export function AppliedSlippageControls({ bps, maximumBps, onCommit, label, inputLabel, maxLength, autoBps, onRequestAuto, canApplyAuto, autoPending }: {
+  bps: string; maximumBps: number; onCommit(bps: string): string | null; label: string; inputLabel?: string; maxLength: number;
+  autoBps?: number | null; onRequestAuto?: () => void; canApplyAuto?: () => boolean; autoPending?: boolean;
+}) {
+  const { t } = useLocale();
+  const [text, setText] = useState(() => bpsToPercent(bps));
+  const [error, setError] = useState<string | null>(null);
+  // The latest draft (a blur can follow a keystroke before the next render) and the applied limit it is compared with.
+  const draft = useRef(text), applied = useRef(bps), field = useRef<HTMLInputElement>(null);
+  draft.current = text;
+  useEffect(() => { if (bps !== applied.current) { applied.current = bps; draft.current = bpsToPercent(bps); setText(draft.current); setError(null); } }, [bps]);
+  // Escape in the field discards the draft. The settings popover closes on Escape from a document capture listener that stops the event, so this
+  // window capture listener (which runs first) resets the draft before the field loses focus: closing never applies what was typed.
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.target !== field.current) return;
+      draft.current = bpsToPercent(applied.current); setText(draft.current); setError(null);
+    };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, []);
+  // Compared in exact basis points: "2,5" and "2.5" are the applied 2.5%, never a second edit.
+  const commit = (next: string) => {
+    const nextBps = priceDifferenceBps(next);
+    if (nextBps === applied.current) { setError(null); return; }
+    setError(onCommit(nextBps));
+  };
+  const choose = (value: string) => { draft.current = bpsToPercent(value); setText(draft.current); commit(draft.current); };
+  return <div className="applied-slippage" onBlur={event => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) commit(draft.current); }}>
+    <label>{label}<input ref={field} {...inputLabel ? { 'aria-label': inputLabel } : {}} type="text" inputMode="decimal" autoComplete="off" spellCheck={false}
+      maxLength={maxLength} value={text} aria-invalid={Boolean(error) || undefined}
+      onChange={event => { setError(null); setText(event.target.value); }}
+      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(draft.current); } }}/></label>
+    <SlippageChoices bps={bps} maximumBps={maximumBps} onBpsChange={choose} autoBps={autoBps ?? null}
+      {...onRequestAuto ? { onRequestAuto } : {}} {...canApplyAuto ? { onApplyAuto: (value: string) => { if (canApplyAuto()) choose(value); } } : {}} autoPending={autoPending ?? false}/>
+    {error && <p className="form-error" role="alert">{t(error)}</p>}
+  </div>;
 }
