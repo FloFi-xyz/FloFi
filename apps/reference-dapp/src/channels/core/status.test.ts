@@ -106,3 +106,15 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 channel status follows the run evidenc
     expect(key(at('CONFIRMED', 'Confirmed onchain · workflow outcome not reconciled yet'))).not.toMatch(/:state:confirmed$/);
   });
 });
+
+describe('BUILD-FLOFI-POST-257-HOTFIX-001: a channel preview refusal is never shown by its code (flofi-channels review)', () => {
+  it('words a Router no-route in plain EN and PT, and keeps the wallet prompts it already had', () => {
+    const en = channelCopy('EN').preview({ kind: 'FAILED', code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
+    expect(en).toBe('Preview unavailable. No bridge route that FloFi can verify and execute is available for this amount right now. Nothing was signed or sent. '
+      + 'Try again later or change the amount. Open FloFi to continue.');
+    const pt = channelCopy('PT').preview({ kind: 'FAILED', code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
+    expect(pt).toMatch(/^Prévia indisponível\. Nenhuma rota de bridge que o FloFi consiga verificar e executar/);
+    for (const text of [en, pt]) expect(text).not.toMatch(/[A-Z]{3,}_[A-Z_]{3,}/);
+    expect(channelCopy('EN').preview({ kind: 'FAILED', code: 'EVM_WALLET_REQUIRED' })).toBe('Preview unavailable. Connect an EVM wallet to continue. Open FloFi to continue.');
+  });
+});

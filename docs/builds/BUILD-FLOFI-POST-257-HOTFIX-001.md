@@ -214,6 +214,8 @@ the `.codex/agents` roles are the same specialists that ran here.
 | wallet-execution (low) | Records overstated "a user-funded group is simulated whole" | Reworded (row above) and the MCP instructions say "its own fresh checks (a simulation wherever the network supports it)" |
 | wallet-execution (low) | Link contract text says a link is never financial authority | Still true: links are only offered as choices; nothing is chosen for the person |
 | wallet-execution (gap) | The short-journey proof covers the Router only, not a workflow-run/user-funded handoff | Stated: no gate changed in those paths (this PR changes MCP text only there) |
+| channels (low, pre-existing) | Telegram printed a preview refusal by its code (e.g. `ROUTER_NO_EXECUTABLE_ROUTE`), against the channel rule that a refusal is never explained by its code | `channels/core/copy.ts` falls back to the shared plain wording (EN/PT); test in `channels/core/status.test.ts` |
+| channels (low, pre-existing) | Robinhood Chain is printed as the raw id `robinhood` in Telegram's "Network:" line (6 of the 12 new examples involve it) | Recorded, not changed (channel labels are outside these incidents) |
 
 ## 8. Real-host acceptance (owner)
 
