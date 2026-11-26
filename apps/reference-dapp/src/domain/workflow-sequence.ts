@@ -126,17 +126,19 @@ export const SEQUENCE_RUNTIMES: readonly string[] = Object.freeze(['public', 'ro
 export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'transfer', 'supply']);
 /**
  * Whether an execution already made on this Editor's own paths holds the whole-workflow path back (`useEditorWorkflowRun` stays off): the shown
- * execution (`current`: a run of this workflow, or any run still in flight), a start recorded for this workflow (`recorded`), or a step-by-step
- * sequence that already began. A sequence also keeps any run its runtime holds (`started`), since its steps run there one by one.
+ * execution (`current`: a run of this workflow, or a run of another one still in flight), a start recorded for this workflow (`recorded`), ANY
+ * run the runtime holds that is not final yet (`unfinished`, a detached run after "Create new workflow" included: its own flow refuses a second
+ * request while it may still land, ATTEMPT_ALREADY_ACTIVE), or a step-by-step sequence that already began. A sequence also keeps any run its
+ * runtime holds (`started`), as before (its steps run there one by one).
  *
  * Execution UX regression fixes (multiple wallet prompts for simple cards): a single card is NOT held back by a FINISHED run of another workflow
  * that its runtime still holds (`started` alone). Before, any earlier per-card execution in the tab sent every later simple card to its own flow
- * (approval, then a second Review and Authorize, then the swap: two or more prompts) instead of ONE wallet confirmation. An unfinished run of any
- * workflow is `current` and still holds it, so nothing in flight is ever executed twice.
+ * (approval, then a second Review and Authorize, then the swap: two or more prompts) instead of ONE wallet confirmation. Nothing that may still
+ * execute is ever bypassed.
  */
-export function localExecutionHolds(input: { readonly current: boolean; readonly started: boolean; readonly recorded: boolean;
+export function localExecutionHolds(input: { readonly current: boolean; readonly started: boolean; readonly unfinished: boolean; readonly recorded: boolean;
   readonly sequence: { readonly cursor: number; readonly completed: readonly unknown[] } | null }): boolean {
-  return input.current || input.recorded || Boolean(input.sequence) && input.started
+  return input.current || input.recorded || input.unfinished || Boolean(input.sequence) && input.started
     || Boolean(input.sequence && (input.sequence.cursor > 0 || input.sequence.completed.length > 0));
 }
 /**

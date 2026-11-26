@@ -640,11 +640,13 @@ test.describe('Live Canvas', () => {
     await expect(page.locator('.react-flow__edge.canvas-execution-edge-done')).toHaveCount(2);
     const green = await cards(page).first().evaluate(card => getComputedStyle(card).borderTopColor);
     expect(green).not.toBe(await page.locator('.simulate-canvas').evaluate(frame => getComputedStyle(frame).borderTopColor));
-    // Every recorded transaction stays reachable under Execution details, which a final result opens by default; the owner can still close it.
+    // Execution UX regression fixes: a clean final result is read in the compact result of the status panel beside the Canvas; the long
+    // Execution details below it stay collapsed (no scrolling to understand the result). Every recorded transaction stays one click away.
     const details = page.locator('.execution-details-disclosure');
-    await expect(details).toHaveAttribute('open', '');
+    await expect(details).not.toHaveAttribute('open', '');
+    await expect(page.locator('.execution-status-panel [data-execution-result="compact"]')).toBeVisible();
+    await details.locator('summary').click(); await expect(details).toHaveAttribute('open', '');
     await expect(page.getByRole('region', { name: 'Execution details', exact: true })).toContainText('Supply');
-    await details.locator('summary').click(); await expect(details).not.toHaveAttribute('open', '');
     expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
   });
   test('a failed step is red beside its completed dependency; nothing completed is reset; details open with the failure', async ({ page }) => {

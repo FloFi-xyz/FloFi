@@ -181,14 +181,18 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists
 });
 
 describe('execution UX regression fixes: one wallet confirmation for a simple card after an earlier execution in the tab', () => {
-  const none = { current: false, started: false, recorded: false, sequence: null };
+  const none = { current: false, started: false, unfinished: false, recorded: false, sequence: null };
   it('a FINISHED run of another workflow that the runtime still holds never sends a single card to its own multi-prompt flow', () => {
     expect(localExecutionHolds({ ...none, started: true })).toBe(false);
     expect(localExecutionHolds(none)).toBe(false);
   });
-  it('anything still in flight, this workflow\'s own execution, or a started sequence keeps holding the whole-workflow path (never executed twice)', () => {
-    expect(localExecutionHolds({ ...none, current: true, started: true })).toBe(true);   // a run of this workflow, or any run in flight
+  it('anything that may still execute keeps holding the whole-workflow path (never executed twice)', () => {
+    expect(localExecutionHolds({ ...none, current: true, started: true, unfinished: true })).toBe(true); // a run of this workflow, or any run in flight
+    // A detached run (the owner chose "Create new workflow" while it was submitted) that is not final: its flow's own guard stays in force.
+    expect(localExecutionHolds({ ...none, started: true, unfinished: true })).toBe(true);
     expect(localExecutionHolds({ ...none, recorded: true })).toBe(true);                 // a start recorded for this workflow
+  });
+  it('a step-by-step sequence keeps its former rule', () => {
     expect(localExecutionHolds({ ...none, started: true, sequence: { cursor: 0, completed: [] } })).toBe(true);
     expect(localExecutionHolds({ ...none, sequence: { cursor: 1, completed: [] } })).toBe(true);
     expect(localExecutionHolds({ ...none, sequence: { cursor: 0, completed: [{}] } })).toBe(true);
