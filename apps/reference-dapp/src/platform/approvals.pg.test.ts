@@ -75,8 +75,11 @@ describe('BUILD-DEVELOPER-001 platform approval service', () => {
     const platform = await requestApproval(a.deps(), a.requester, BRIDGE, hashOf(BRIDGE));
     if (!platform.ok) throw new Error(platform.code);
     // MCP adds presentation fields of its own: the message, (BUILD-WORKFLOW-VISUAL-PRESENTATION-001) the visual of the same workflow and
-    // (BUILD-FLOFI-UNIVERSAL-CHANNELS-001) the conversational state of a new request.
-    const { message, visual, conversationState, ...mcp } = a.first;
+    // (BUILD-FLOFI-UNIVERSAL-CHANNELS-001) the conversational state of a new request and (BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 WS01) its
+    // additive `readiness` block, checked exactly here: handed to the owner, nothing authorized, simulated or submitted.
+    const { message, visual, conversationState, readiness, ...mcp } = a.first;
+    expect(readiness).toMatchObject({ authoring: 'VALID', simulation: 'NOT_RUN', review: 'OWNER_PRE_EXECUTION_PENDING', execution: 'GATES_PASSED_AWAITING_OWNER',
+      ownerAuthorization: 'PENDING_OWNER_WALLET', submission: 'NOT_SUBMITTED', reconciliation: 'NONE' });
     expect(typeof message).toBe('string');
     expect(conversationState).toMatchObject({ state: 'AWAITING_WALLET_CONNECTION', nextStep: 'OPEN_SIGNING_LINK', completed: false });
     expect(visual).toEqual(JSON.parse(JSON.stringify(workflowVisualModel(composeWorkflowOrRefuse(BRIDGE, platform.value.workflowHash)))));

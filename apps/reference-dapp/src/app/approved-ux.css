@@ -227,4 +227,3 @@
 .batch-payment-index{color:var(--muted);font-size:10px;text-align:right}
 .batch-payment-remove{border:0;background:transparent;color:var(--muted);font-size:14px;line-height:1;padding:0;cursor:pointer}
 .batch-payment-remove:disabled{opacity:.35;cursor:not-allowed}
-.batch-payment-summary{display:flex;flex-wrap:wrap;gap:2px}

@@ -858,7 +858,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         {card.supplyProposal.hasProposal && (card.contextualProposal ? <ProposalReviewArtifact portalFromCard canApply={card.supplyProposal.canApply} onApply={card.supplyProposal.onApply}/>
           : <button type="button" className="composer-amount-apply" disabled={!card.supplyProposal.canApply} onClick={card.supplyProposal.onApply}>{tr("Apply proposal")}</button>)}
       </div>}
-      {!amountBox && !poolCard && (!card.inspection || !pairDestination) && pair && <span className={card.summary.detail ? 'composer-detail' : 'composer-bridge-pair'}>{tr(pair)}</span>}
+      {!amountBox && !poolCard && !(card.batchPayment && !card.inspection) && (!card.inspection || !pairDestination) && pair && <span className={card.summary.detail ? 'composer-detail' : 'composer-bridge-pair'}>{tr(pair)}</span>}
       {poolCard && <div className="composer-pool-controls">
         {poolMode === 'Price' && <PoolPriceRange percent={poolRange.percent} preset={poolRange.preset} extent={poolRange.extent} reference={poolRange.reference} onChange={poolRange.edit}/>}
         <div className="composer-pool-control-row">{poolMode === 'Price' && (poolRange.preset && poolRange.preset !== 'Estável'

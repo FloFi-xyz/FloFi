@@ -52,7 +52,7 @@ export function BatchPaymentFields({ batch }: { batch: BatchPaymentCardData }) {
       {batch.rows.map((row, index) => <li key={index} className="batch-payment-row" data-batch-row={index + 1}>
         <span className="batch-payment-index numeric" aria-hidden="true">{index + 1}</span>
         <input className="composer-recipient-input numeric batch-payment-recipient" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
-          aria-label={tr('Recipient {0} address', index + 1)} placeholder="0x…" value={row.recipient}
+          aria-label={tr('Recipient {0} address', index + 1)} placeholder="0x…" value={row.recipient} title={row.recipient || undefined}
           onChange={event => { setRefusal(null); batch.onRow(index, 'recipient', event.target.value); }}/>
         <input className="composer-recipient-input numeric batch-payment-amount" type="text" inputMode="decimal" autoComplete="off" maxLength={40}
           aria-label={tr('Recipient {0} amount ({1})', index + 1, batch.asset)} placeholder="0.00" value={row.amount}
@@ -66,8 +66,7 @@ export function BatchPaymentFields({ batch }: { batch: BatchPaymentCardData }) {
       <button type="button" className="composer-amount-cancel" disabled={!batch.rows[0]?.amount} onClick={() => { setRefusal(null); batch.onSameAmount(); }}>{tr('Same amount for all')}</button>
     </div>
     <p className="composer-quote-note batch-payment-summary" role="status" data-batch-recipients={batch.rows.length}>
-      <span>{tr('{0} recipients', batch.rows.length)}</span>{tr(' · ')}
-      <span className="numeric">{batch.check.total === null ? tr('Total: enter every amount') : tr('Total: {0} {1}', batch.check.total, batch.asset)}</span>
+      {tr('{0} recipients', batch.rows.length)}{tr(' · ')}{batch.check.total === null ? tr('Total: enter every amount') : tr('Total: {0} {1}', batch.check.total, batch.asset)}
     </p>
     <p className="composer-quote-note">{tr('All payments run together in one wallet approval, or none of them run.')}</p>
     {problem && <span className="composer-amount-error" role="alert">{tr(problem)}</span>}
