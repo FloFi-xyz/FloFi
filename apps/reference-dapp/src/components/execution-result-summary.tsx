@@ -14,10 +14,12 @@ import { Amount, TransactionLink } from './dashboard/execution-receipt';
 
 const SENT = ['You sent', 'You supplied', 'Configured amount'];
 
-export function ExecutionResultSummary({ live }: { live: ExecutionLifecycle }) {
+/** `fees: false` where the surrounding summary already lists the run's known network costs (never shown twice). */
+export function ExecutionResultSummary({ live, fees = true }: { live: ExecutionLifecycle; fees?: boolean }) {
   const { t } = useLocale();
   const result = projectLiveExecutionResult(live);
-  if (!result.values.length && !result.fees.length && !result.transaction && !result.steps.length) return null;
+  const costs = fees ? result.fees : [];
+  if (!result.values.length && !costs.length && !result.transaction && !result.steps.length) return null;
   const sent = result.values.filter(row => SENT.includes(row.label)), results = result.values.filter(row => !SENT.includes(row.label));
   return <div className="execution-result-compact" data-execution-result="compact">
     {result.values.length > 0 && <dl className="execution-receipt-amounts">
@@ -34,8 +36,8 @@ export function ExecutionResultSummary({ live }: { live: ExecutionLifecycle }) {
         {step.transaction && <TransactionLink link={step.transaction}/>}
       </div>
     </li>)}</ol>}
-    {result.fees.length > 0 && <dl className="execution-receipt-facts">
-      {result.fees.map(fee => <div key={`${fee.label}:${fee.args?.join() ?? ''}`}><dt>{t(fee.label, ...fee.args ?? [])}</dt><dd><Amount row={fee}/></dd></div>)}
+    {costs.length > 0 && <dl className="execution-receipt-facts">
+      {costs.map(fee => <div key={`${fee.label}:${fee.args?.join() ?? ''}`}><dt>{t(fee.label, ...fee.args ?? [])}</dt><dd><Amount row={fee}/></dd></div>)}
     </dl>}
     {result.transaction?.explorer && <div className="execution-receipt-actions"><TransactionLink link={result.transaction}/></div>}
   </div>;

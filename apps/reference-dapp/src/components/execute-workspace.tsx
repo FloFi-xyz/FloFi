@@ -187,6 +187,8 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
           {providers.length > 0 && <div><dt>{tr("Providers")}</dt><dd>{tr(providers.join(' · '))}</dd></div>}
           {!live && !grouped && !continuation && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
         </dl>
+        {/* Execution UX regression fixes: the same compact result beside the Canvas in this summary (its known costs are listed above). */}
+        {live && <ExecutionResultSummary live={live} fees={false}/>}
         {live?.active && <section className="execute-next" aria-label={tr("Current step")}><h3>{tr(result ? 'Needs attention' : 'Current step')}</h3><p>{tr(live.active.number)}. {tr(live.active.action)}</p><p>{tr([live.active.provider, live.active.network].filter(Boolean).join(' · '))}</p><p>{tr(live.active.label)}</p></section>}
         {progressList}
         {!grouped && notices}

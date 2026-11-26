@@ -644,7 +644,7 @@ test.describe('Live Canvas', () => {
     // Execution details below it stay collapsed (no scrolling to understand the result). Every recorded transaction stays one click away.
     const details = page.locator('.execution-details-disclosure');
     await expect(details).not.toHaveAttribute('open', '');
-    await expect(page.locator('.execution-status-panel [data-execution-result="compact"]')).toBeVisible();
+    await expect(page.locator('.execution-summary [data-execution-result="compact"]')).toBeVisible();
     await details.locator('summary').click(); await expect(details).toHaveAttribute('open', '');
     await expect(page.getByRole('region', { name: 'Execution details', exact: true })).toContainText('Supply');
     expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
