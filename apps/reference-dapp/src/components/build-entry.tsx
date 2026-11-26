@@ -202,7 +202,7 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
         {partChoices.map(option => <button key={option} type="button" disabled={busy} onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()}
           onClick={() => choose(option)}>{option}</button>)}
       </div>}
-      <p id="build-entry-hint" className="sr-only">{parts.length ? tr('Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow. Suggestions for a token or network part follow the Create workflow button.')
+      <p id="build-entry-hint" className="sr-only">{parts.length ? tr('Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow. Type any token or network, or choose one of the suggestions shown under the field.')
         : tr('Press Enter to create the workflow, or Shift+Enter for a new line.')}</p>
       {busy && <p className={styles.status} role="status">{tr('Understanding your request and preparing the workflow…')}</p>}
       {refused && <div id="build-entry-error" className={styles.error} role="alert">

@@ -61,6 +61,8 @@ describe('PR #254 follow-up: a suggestion\'s template is filled part by part ins
     // The sentence's own words changed: free text; only the [placeholders] still in it are parts (Enter still refuses to submit them).
     const rewritten = templateFields('Please swap 10 [token] to ETH on [network]', session);
     expect(rewritten.map(part => [part.kind, part.placeholder])).toEqual([['token', true], ['network', true]]);
+    // Which side or action a leftover placeholder belongs to is no longer known: nothing is suggested for it.
+    expect(fieldSuggestions(session, rewritten, rewritten[0]!)).toEqual([]);
     // A part typed so that a placeholder ends up inside another part's value ("10 USDC" typed into [amount]: the single space between the parts
     // matches inside it) is ambiguous: the placeholders alone count, so the visible [token] is still a part to fill and Enter never submits it.
     const ambiguous = templateFields('Swap 10 USDC [token] for [token] on Base', session);

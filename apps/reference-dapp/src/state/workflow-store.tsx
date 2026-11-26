@@ -128,6 +128,8 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
    * runtime workflow skips as completed steps (`carried`). `executed > carried` means the next Review covers an executed action again.
    */
   executedActions: { readonly executed: number; readonly carried: number };
+  /** PR #254 follow-up: the steps of this workflow that this visit executed (a sequence's steps, or a single action's run), still exactly as executed. */
+  executedNodeIds: readonly string[];
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
 /** A step's own reconciled run: delivered amount, durable run id, runtime and the wallet that executed it (from its record). */
 export type StepCompletion = { readonly received: string | null; readonly runKey: string | null; readonly kind?: string; readonly owner?: string | null };
@@ -422,11 +424,13 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       return { workflowId: workflow.workflowId, completed: [done] };
     });
   }, []);
+  const executedNodeIds = useMemo(() => sequenceRun.workflowId !== state.workflow.workflowId ? []
+    : sequenceRun.completed.filter(done => state.workflow.nodes.some(node => node.nodeId === done.nodeId && stepNodeKey(node) === done.node)).map(done => done.nodeId),
+  [sequenceRun, state.workflow]);
   const executedActions = useMemo(() => {
     if (sequenceRun.workflowId !== state.workflow.workflowId) return { executed: 0, carried: 0 };
-    const executed = sequenceRun.completed.filter(done => state.workflow.nodes.some(node => node.nodeId === done.nodeId && stepNodeKey(node) === done.node)).length;
-    return { executed, carried: sequence ? Math.min(completed.length, sequence.steps.length) : 0 };
-  }, [sequenceRun, state.workflow, sequence, completed]);
+    return { executed: executedNodeIds.length, carried: sequence ? Math.min(completed.length, sequence.steps.length) : 0 };
+  }, [sequenceRun, state.workflow, sequence, completed, executedNodeIds]);
   const eligibility: Eligibility = useMemo(() => authoringIncomplete ? { eligible: false, reason: 'Configure the amount on the Canvas before simulating.' }
     : generationEligibility(state.workflow, context), [state.workflow, context, authoringIncomplete]);
 
@@ -641,7 +645,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, readCanvasViewport, rememberCanvasViewport, forgetCanvasViewport,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, clearStagedPosition, stageLiquidityPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, clearStagedPosition, stageLiquidityPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions, executedNodeIds,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;

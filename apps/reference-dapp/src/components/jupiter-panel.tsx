@@ -50,7 +50,7 @@ export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: 
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
-  const { state, propose, dispatch, dismissProposal, context, sequence } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, executedNodeIds = [] } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId);
   const existing = node ? solanaSwapDetails(node) : null;
   const devnet = (existing?.network ?? initialNetwork) === 'Solana Devnet';
@@ -64,8 +64,10 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      createSolanaSwapNode(nodeId ?? 'node-preview', input); setError('');
-      const command = nodeId ? { type: 'SET_SOLANA_SWAP' as const, nodeId, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
+      // An existing swap's max price difference is applied on its own (`commitSlippage`): this edit carries the APPLIED limit, never an older draft.
+      const edited = nodeId && existing ? { ...input, slippage: existing.slippage } : input;
+      createSolanaSwapNode(nodeId ?? 'node-preview', edited); setError('');
+      const command = nodeId ? { type: 'SET_SOLANA_SWAP' as const, nodeId, input: edited, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
         : { type: 'ADD_SOLANA_SWAP' as const, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
       if (direct) dispatch(command); else propose(command); onDone?.();
     } catch (cause) {
@@ -80,12 +82,11 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
    */
   function commitSlippage(slippage: string): string | null {
     if (!nodeId) return null;
-    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: Boolean(sequence?.completed.some(step => step.nodeId === nodeId)) });
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: executedNodeIds.includes(nodeId) });
     if ('code' in result) return appliedSlippageMessage(result.code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS);
-    // The form's own draft follows the applied value too (its later "Review swap change" never proposes the earlier limit).
     // Only the slippage changes: applied at once. Otherwise (the step cannot be rebuilt exactly) the same edit is a proposal the owner reviews.
     if (!result.exact) { propose(result.command); return null; }
-    dismissProposal(); dispatch(result.command); set({ slippage }); setError('');
+    dismissProposal(); dispatch(result.command); setError('');
     return null;
   }
   return <form className="inspector-fields" aria-label={tr(nodeId ? `Edit ${label} swap` : `Create ${label} swap`)} onSubmit={submit}>

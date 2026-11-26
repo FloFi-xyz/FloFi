@@ -91,7 +91,9 @@ const MAX_SUGGESTIONS = 8;
  * shortcut: any other text can be typed, and FloFi's conversation and Review still check everything.
  */
 export function fieldSuggestions(session: TemplateSession, fields: readonly TemplateField[], field: TemplateField): readonly string[] {
-  if (field.kind === 'amount') return [];
+  // Only while the sentence still follows its template: a rewritten one keeps its [placeholders] as parts, but which action or side each one
+  // belongs to is no longer known, so nothing is suggested (chat review).
+  if (field.kind === 'amount' || fields.length !== session.kinds.length || fields.some((item, index) => item.kind !== session.kinds[index])) return [];
   const position = session.kinds.slice(0, field.index + 1).filter(kind => kind === field.kind).length - 1;
   const actions = ACTIONS[session.id];
   // Multi-step: the second network is where the bridge delivers (any universal bridge network other than the first).

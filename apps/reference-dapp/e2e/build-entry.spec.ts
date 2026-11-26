@@ -277,12 +277,18 @@ test('PR #254 follow-up: a template is filled part by part in the same field (En
   await page.mouse.click(box.x + offset, box.y + 22);
   await expect.poll(() => selected(page)).toBe('[token]');
   await page.keyboard.type('USDT');
-  // The person's own additions are kept; with no part left, Enter creates the workflow as before.
+  // The person's own additions are kept.
   await expect(request(page)).toHaveValue('Swap 2 USDT for USDC on Base, then wait');
+  // Free text written over a template (no part left) is submitted on Enter, exactly as typed, as before.
+  await entry(page).getByRole('button', { name: 'Swap tokens', exact: true }).click();
+  await request(page).fill('Swap 1 USDC to WETH on Base slippage 50 bps');
+  await request(page).press('Enter');
+  await expectEditorSection(page, 'Build');
+  await expect(chat(page)).toContainText('Swap added to your workflow: 1 USDC');
   networkGuard.assertClean();
 });
 
-test('PR #254 follow-up: Portuguese templates fill part by part too, and free text still submits on Enter', async ({ page, networkGuard }) => {
+test('PR #254 follow-up: Portuguese templates fill part by part too', async ({ page, networkGuard }) => {
   await chooseLanguage(page.context(), 'PT');
   await open(page);
   await entry(page).getByRole('button', { name: 'Trocar moedas', exact: true }).click();

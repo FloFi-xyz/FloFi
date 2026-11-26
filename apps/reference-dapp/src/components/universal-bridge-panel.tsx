@@ -151,7 +151,7 @@ function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }
  */
 export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeId?: string; onDone?: () => void; options?: boolean }) {
   const { t: tr } = useLocale();
-  const { state, propose, dispatch, dismissProposal, context, sequence, amountInputs = {} } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, executedNodeIds = [], amountInputs = {} } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? universalBridgeDetails(node) : null;
   const [input, setInput] = useState<UniversalBridgeInput>(existing ? universalInputOf(existing)
     : { source: 'solana', destination: 'base', inputAsset: 'USDC', outputAsset: 'USDC', amount: '', recipient: '', slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' });
@@ -231,12 +231,11 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
    */
   function commitSlippage(slippage: string): string | null {
     if (!nodeId) return null;
-    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: Boolean(sequence?.completed.some(step => step.nodeId === nodeId)) });
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: executedNodeIds.includes(nodeId) });
     if ('code' in result) return appliedSlippageMessage(result.code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS);
-    // The form's own draft follows the applied value too (its later "Review bridge change" never proposes the earlier limit).
     // Only the slippage changes: applied at once. Otherwise (the bridge cannot be rebuilt exactly) the same edit is a proposal the owner reviews.
     if (!result.exact) { propose(result.command); return null; }
-    dismissProposal(); dispatch(result.command); setInput(value => ({ ...value, slippage })); setAuto(null); setError('');
+    dismissProposal(); dispatch(result.command); setAuto(null); setError('');
     return null;
   }
   /** A delayed Auto click on a quote that expired since the previous render fetches a new recommendation instead of applying the old one. */
@@ -248,7 +247,7 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     event.preventDefault();
     try {
       // BUILD-FLOFI-UX-FIX-003: the compact options propose the amount the card shows (its draft, as the Router form does), never a hidden older one.
-      const proposed = { ...input, amount };
+      const proposed = { ...input, amount, ...options && existing ? { slippage: existing.slippage } : {} };
       createUniversalBridgeFromInput(nodeId ?? 'node-preview', proposed); setError('');
       propose(nodeId ? { type: 'SET_UNIVERSAL_BRIDGE', nodeId, input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision }
         : { type: 'ADD_UNIVERSAL_BRIDGE', input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision });

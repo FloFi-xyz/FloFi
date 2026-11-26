@@ -55,7 +55,7 @@ const explorerTx = (network: RouterNetwork, chain: 'source' | 'destination', has
 export function RouterForm({ nodeId, onDone, network: initialNetwork, options = false }: { nodeId?: string; onDone?: () => void; network?: RouterNetwork; options?: boolean }) {
   const { t: tr } = useLocale();
   const { walletEnvironment } = useExecutionEnvironment();
-  const { state, propose, dispatch, dismissProposal, context, sequence, amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, executedNodeIds = [], amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? routerDetails(node) : null;
   const start = ROUTER_NETWORK_OPTIONS[existing?.network ?? initialNetwork ?? 'mainnet'];
   const [input, setInput] = useState<RouterBridgeInput>(existing ? routerInputOf(existing)
@@ -90,10 +90,13 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!network || draftUncertified) return;
+    // An existing bridge's settings apply their max price difference on their own (`commitSlippage`): this proposal carries the APPLIED limit,
+    // never an older draft of it.
+    const proposed = options && existing ? { ...fields, slippage: existing.slippage } : fields;
     try {
-      createRouterNode(nodeId ?? 'node-preview', fields); setError('');
-      propose(nodeId ? { type: 'SET_ROUTER_BRIDGE', nodeId, input: fields, source: 'CANVAS', baseRevision: state.workflow.revision }
-        : { type: 'ADD_ROUTER_BRIDGE', input: fields, source: 'CANVAS', baseRevision: state.workflow.revision });
+      createRouterNode(nodeId ?? 'node-preview', proposed); setError('');
+      propose(nodeId ? { type: 'SET_ROUTER_BRIDGE', nodeId, input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision }
+        : { type: 'ADD_ROUTER_BRIDGE', input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision });
       onDone?.();
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID';
@@ -107,12 +110,11 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
    */
   function commitSlippage(slippage: string): string | null {
     if (!nodeId) return null;
-    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: Boolean(sequence?.completed.some(step => step.nodeId === nodeId)) });
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: executedNodeIds.includes(nodeId) });
     if ('code' in result) return appliedSlippageMessage(result.code, maximumSlippageBps);
-    // The form's own draft follows the applied value too (its later "Review bridge change" never proposes the earlier limit).
     // Only the slippage changes: applied at once. Otherwise (the bridge cannot be rebuilt exactly) the same edit is a proposal the owner reviews.
     if (!result.exact) { propose(result.command); return null; }
-    dismissProposal(); dispatch(result.command); setInput(value => ({ ...value, slippage })); setError('');
+    dismissProposal(); dispatch(result.command); setError('');
     return null;
   }
   const compact = options && Boolean(nodeId);
