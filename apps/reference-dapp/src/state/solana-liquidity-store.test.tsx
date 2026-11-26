@@ -123,7 +123,9 @@ describe('post-#254 hotfix: an Orca pool step of a step-by-step sequence is simu
     f.sequenceRestore = null;
     read(); await settle();
     expect(f.invalidated).toEqual([store.record!.id]);
-    expect(store.record?.authorization).toBeNull();
+    // The service double journals to real files: under CI load its answer can land after `settle`'s fixed ticks (main run 64a4a961), so the same
+    // assertion waits for that answer instead of a tick count.
+    await vi.waitFor(() => { read(); expect(store.record?.authorization).toBeNull(); }, { timeout: 10_000 });
   });
 
   it('flofi-liquidity review: never invalidates a settled run (a completed Orca step once the sequence moved on), keeping its reconciled result', async () => {
