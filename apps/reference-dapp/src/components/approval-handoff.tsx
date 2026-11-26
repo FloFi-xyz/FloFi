@@ -39,6 +39,7 @@ import { activeNetworkScope, mainnetCounterpart, TEST_NETWORK_NOT_AVAILABLE } fr
 import { networkIdentity } from '../domain/network-registry';
 import { WorkflowRunPanel } from './workflow-run-panel';
 import { McpRouteState } from './mcp-route-state';
+import { APPROVAL_NOTICE, approvalNoticePhase, type ApprovalNoticeExecution } from '../domain/approval-notice';
 
 // BUILD-DEVELOPER-001: any FloFi approval link (MCP's `flofi_hs_…` and later surfaces' own tags); the server resolves which one.
 const SECRET = APPROVAL_SECRET_FORMAT;
@@ -141,7 +142,9 @@ function takeSecret(presented = typeof window === 'undefined' ? '' : window.loca
  * (a usable proposal was resolved). `onGateChange`: Simulate and Execute must stay closed (the proposal is not yet loaded for the proven
  * wallet). `onClaimedWallet`: the proven wallet the loaded proposal belongs to (null until loaded).
  */
-export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChange, onAvailabilityChange, onGateChange, onClaimedWallet, onClaimedDestination }: { slot?: HTMLElement | null;
+export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChange, onAvailabilityChange, onGateChange, onClaimedWallet, onClaimedDestination, execution = null }: { slot?: HTMLElement | null;
+  /** BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the shown execution's phase (AppShell), so a loaded proposal's notice follows it. */
+  execution?: ApprovalNoticeExecution;
   surface?: 'signing' | 'canvas'; onSurfaceChange?: ((surface: 'signing' | 'canvas') => void) | undefined; onAvailabilityChange?: (available: boolean) => void;
   onGateChange?: (blocked: boolean) => void; onClaimedWallet?: (wallet: string | null) => void;
   onClaimedDestination?: (wallet: { workflowId: string; address: string } | null) => void }) {
@@ -415,8 +418,9 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const wrongWallet = Boolean(proven && error && CLAIM_TEXT[error] && !claimed);
   const networks = [...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → ');
   let message: ReactNode;
+  const notice = APPROVAL_NOTICE[approvalNoticePhase(execution, view.workflowRun?.run)];
   if (loaded) message = <p role="status">{recovery ? tr('Proposal restored for its proven owner. Run a fresh simulation before approval. Existing runs remain available in Your runs; reconcile an interrupted run before starting again.')
-    : <><strong>{tr("Ready for your review.")}</strong>{tr(" FloFi prepares a fresh simulation for this wallet. Check it, then authorize in your wallet.")}</>}</p>;
+    : <><strong>{tr(notice[0])}</strong> {tr(notice[1])}</>}</p>;
   else if (claimed || busy) message = <p role="status"><strong>{tr("Nothing is authorized yet.")}</strong> {tr('Loading your exact proposal…')}</p>;
   else if (recoverable) message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" This proposal is already in a FloFi workflow for your wallet. Restore it to continue. An interrupted run stays in Your runs: reconcile it before starting again.")}</p>;
   else if (view.claimedByAnotherWallet) message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" Another wallet already opened this proposal. If it was yours, connect that wallet; otherwise ask for a new proposal.")}</p>;
@@ -459,13 +463,16 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
         {view.explanation.length > 0 && <ul className="approval-explanation">{view.explanation.map((line, i) => <li key={i}>{tr(line)}</li>)}</ul>}
       </details>}
     </details>
-    {!claimed && !recovery && links && <details className="approval-mobile"><summary>Open with a mobile wallet</summary>
-      <p>Use the browser inside your wallet app. A sign-in message proves ownership; it never approves spending.</p>
-      <div className="approval-actions">{view.walletNamespace === 'eip155' && <a className="primary" href={links.metamask} rel="noreferrer">Open in MetaMask</a>}
-        {view.walletNamespace === 'solana' && <a href={links.phantom} rel="noreferrer" target="_blank">Open Phantom browser</a>}
-        <button type="button" onClick={() => void run(async () => { await navigator.clipboard.writeText(fullLink!); setCopied(true); })}>Copy approval link</button></div>
-      <p>{copied ? 'Link copied. ' : ''}In Phantom, paste the copied link into its browser. If your app does not preserve the link, paste it into the wallet browser. Keep this link private.</p>
-      <input aria-label="Private approval link" readOnly value={fullLink!}/>
+    {/* BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incidents 2 and 11): a wallet deep link opens THIS page in the wallet's own browser; it is
+        never itself a signature request (some wallets open their home screen instead, losing the private link), and it is worded in the page's
+        language like everything around it. */}
+    {!claimed && !recovery && links && <details className="approval-mobile"><summary>{tr('Open with a mobile wallet')}</summary>
+      <p>{tr('This opens FloFi inside your wallet app\'s browser. A sign-in message proves ownership; it never approves spending. Your wallet asks for a signature only after you check the fresh simulation and choose Authorize in wallet.')}</p>
+      <div className="approval-actions">{view.walletNamespace === 'eip155' && <a className="primary" href={links.metamask} rel="noreferrer">{tr('Open FloFi in MetaMask')}</a>}
+        {view.walletNamespace === 'solana' && <a href={links.phantom} rel="noreferrer" target="_blank">{tr('Open FloFi in Phantom')}</a>}
+        <button type="button" onClick={() => void run(async () => { await navigator.clipboard.writeText(fullLink!); setCopied(true); })}>{tr('Copy approval link')}</button></div>
+      <p>{copied ? `${tr('Link copied.')} ` : ''}{tr('If your wallet app opens without this proposal, paste the copied link into its browser. Keep this link private.')}</p>
+      <input aria-label={tr('Private approval link')} readOnly value={fullLink!}/>
     </details>}
   </section>, slot);
 }

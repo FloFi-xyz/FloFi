@@ -156,7 +156,13 @@ import { useProductBootstrap } from '../state/product-bootstrap';
  * proposal's fresh read-only simulation once it is loaded for that signer; `onViewInFloFi` switches to the Canvas presentation. */
 type ProductNavigation = { engineering?: boolean; pathname?: string | null; navigate?: (path: string) => void;
   approvalSlot?: ((element: HTMLDivElement | null) => void) | undefined; approvalGate?: boolean;
-  surface?: 'workspace' | 'signing'; approvalWallet?: string | null; autoPrepare?: boolean; onViewInFloFi?: (() => void) | undefined };
+  surface?: 'workspace' | 'signing'; approvalWallet?: string | null; autoPrepare?: boolean; onViewInFloFi?: (() => void) | undefined;
+  /**
+   * BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incident 9): `/approve` only. The shown execution's phase, so the proposal notice above
+   * the signing surface stops saying "Ready for your review." once anything was requested from the wallet (presentation only; null: nothing yet).
+   */
+  onExecutionPhase?: ((phase: ApprovalExecutionPhase | null) => void) | undefined };
+export type ApprovalExecutionPhase = 'active' | 'complete' | 'attention';
 export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider><CompositionProvider><CanvasCardInputsProvider><PoolPriceRangeProvider><UniswapPositionProvider><AppShellContent {...props}/></UniswapPositionProvider></PoolPriceRangeProvider></CanvasCardInputsProvider></CompositionProvider></ModeBProvider>; }
 
 /**
@@ -207,7 +213,8 @@ function PublishedStudioMetadata() {
     </li>)}</ul>
   </details>;
 }
-function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi }: ProductNavigation) {
+function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi,
+  onExecutionPhase }: ProductNavigation) {
   const { t: tr, language } = useLocale();
   const { conversationScope = null } = useProductBootstrap();
   // Server HTML is visible before handlers and initial canvas preferences are ready.
@@ -626,6 +633,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     wallet: reviewBinding.wallet, execution: executionStart, progress: executionProgress, recovery: executionProgress.recovery,
     invalidWorkflow: Boolean(reviewError || authoringIncomplete || approvalGate || testNetworkWorkflow || accountIssue || autoPrepare && !approvalWallet) };
   const lifecycleControls = useExecutionControls(lifecycleState);
+  const shownLive = lifecycleControls.live;
+  const executionPhase: ApprovalExecutionPhase | null = !shownLive?.started ? null : !isFinalExecutionResult(shownLive) ? 'active'
+    : shownLive.state === 'complete' ? 'complete' : 'attention';
+  useEffect(() => { onExecutionPhase?.(executionPhase); }, [executionPhase, onExecutionPhase]);
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: "Run workflow" — a multi-step Canvas workflow that has not started here, valid and simulated at its
   // current revision, starts the shared workflow run on /approve (the server re-reads and re-gates it). The revision whose simulation last made it
   // ready is kept so an edit after the simulation says so; an open proposal on /approve and the signing surface never offer it.

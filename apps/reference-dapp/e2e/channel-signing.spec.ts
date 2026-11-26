@@ -24,8 +24,8 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     expect(fallback).toMatch(/\/approve#apr_[a-z2-7]{26}$/);
     const host = await context.newPage();
     const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result, { hostName });
-    await expect(panel.getByRole('button', { name: 'Open in MetaMask' })).toBeVisible();
-    await expect(panel.getByRole('button', { name: 'Open Phantom browser' })).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: 'Open FloFi in MetaMask' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Open FloFi in Phantom' })).toHaveCount(0);
     const elsewhere = await guardedContext(browser), stranger = await elsewhere.context.newPage();
     await stranger.goto(fallback);
     await expect(stranger.locator('.approval-page [role=alert]')).toContainText('APPROVAL_ACCOUNT_REQUIRED');
@@ -41,7 +41,7 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     await expect(region).toContainText('Nothing is authorized yet.');
     await expect(signingSurface(page).getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
     await region.getByText('Open with a mobile wallet', { exact: true }).click();
-    const metaMask = new URL((await region.getByRole('link', { name: 'Open in MetaMask', exact: true }).getAttribute('href'))!);
+    const metaMask = new URL((await region.getByRole('link', { name: 'Open FloFi in MetaMask', exact: true }).getAttribute('href'))!);
     expect(metaMask.hash).toMatch(/^#flofi_hs_/);
     expect(metaMask.pathname + metaMask.search).not.toContain('flofi_hs_');
     await page.setViewportSize({ width: 390, height: 844 });
