@@ -244,7 +244,7 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** BUILD-MCP-002: the MCP handoff policy (default: test funds only, every mainnet off). */
   readonly policy?: HandoffPolicy;
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
-  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[] } | null;
+  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[]; readonly frameAncestors?: readonly string[] } | null;
   /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (default: this server's, `server/network-scope.ts`). */
   readonly scope?: NetworkScope;
   /** The request's deadline (`deadline.ts`): a tool stops waiting at its tool deadline and answers with a classified timeout. */
@@ -730,7 +730,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   if (ctx.principal.kind === 'mcp-oauth' && ctx.state && ctx.oauth) {
     registerApprovalTools(ctx, register);
     if (ctx.ui) {
-      const meta = panelResourceMeta(ctx.oauth.origin), html = panelHtml({ origin: ctx.oauth.origin, inFrameProbeHosts: ctx.ui.inFrameProbeHosts });
+      const meta = panelResourceMeta(ctx.oauth.origin), html = panelHtml({ origin: ctx.oauth.origin, inFrameProbeHosts: ctx.ui.inFrameProbeHosts, frameAncestors: ctx.ui.frameAncestors ?? [] });
       // New tool results use a versioned resource so host HTML caches cannot retain the external-only adapter.
       // Keep the old resource readable for existing conversations; no approval or financial API changes.
       for (const uri of [PANEL_URI, LEGACY_PANEL_URI]) server.registerResource(uri === PANEL_URI ? 'flofi-approval-panel' : 'flofi-approval-panel-legacy', uri,

@@ -27,6 +27,7 @@ import { mcpStateHost } from './oauth/runtime.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
+import { approvalFrameAncestorList } from '../server/embedded-approval.ts';
 import { PANEL_URI } from './app/panel.ts';
 import { readHandoffPolicy } from './execution.ts';
 import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from './oauth/config.ts';
@@ -87,10 +88,12 @@ function requiredScopes(body: string, principal: McpPrincipal): readonly McpScop
  * BUILD-MCP-002: the in-chat panel (`FLOFI_MCP_APP`, default enabled) and the hosts on which it offers the in-frame environment
  * probe (`FLOFI_MCP_INFRAME_WALLET_HOSTS`, host names as MCP Apps `hostInfo.name`; empty by default). The probe never executes.
  */
-export function panelConfig(env: Env): { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[] } | null {
+export function panelConfig(env: Env): { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[]; readonly frameAncestors: readonly string[] } | null {
   if ((env.FLOFI_MCP_APP ?? 'enabled') === 'disabled') return null;
   const hosts = (env.FLOFI_MCP_INFRAME_WALLET_HOSTS ?? '').split(',').map(s => s.trim()).filter(h => /^[A-Za-z0-9._-]{1,64}$/.test(h)).slice(0, 16);
-  return { resourceUri: PANEL_URI, inFrameProbeHosts: hosts };
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the signing frame's exact allowed ancestors, so the panel can say precisely why a host's
+  // frame chain cannot open it (public origins only; the browser's CSP check on /mcp/approve stays the authority).
+  return { resourceUri: PANEL_URI, inFrameProbeHosts: hosts, frameAncestors: approvalFrameAncestorList(env) };
 }
 
 type Pending = { readonly id: string | number; readonly tool: ToolName | null; readonly call: boolean };
