@@ -56,6 +56,12 @@ export interface McpOAuthStore {
   /** RFC 7009: revokes a token issued to `clientId` (a refresh token revokes its family). Unknown tokens are ignored. */
   readonly revoke: (digest: Buffer, clientId: string, now: Date) => Promise<void>;
   readonly accountActive: (accountId: string) => Promise<boolean>;
+  /**
+   * Post-#254 hotfix (Agents page): the clients this account is connected to right now (an ACTIVE grant of an ACTIVE account that still holds an
+   * unused, unrevoked, unexpired refresh token), each with its client id and its registered redirect URIs (none once its registration is gone).
+   * Read-only; it never changes a grant or a token.
+   */
+  readonly connectedClients: (accountId: string, now: Date) => Promise<readonly { readonly clientId: string; readonly redirectUris: readonly string[] }[]>;
   /** Fixed-window counter: true while `bucket` stays within `limit` per `windowSeconds`. */
   readonly allow: (bucket: string, limit: number, windowSeconds: number, now: Date) => Promise<boolean>;
   /** Bounded retention: deletes expired credentials, requests, caches and counters past their grace periods. */

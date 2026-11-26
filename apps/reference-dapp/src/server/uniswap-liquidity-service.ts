@@ -828,9 +828,16 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       if (now().getTime() >= Date.parse(record.review.expiresAt) - UNISWAP_REVIEW_HANDOFF_MARGIN_MS) fail('UNISWAP_REVIEW_EXPIRED');
       return save({ ...record, authorization: commitment, error: null });
     }); },
+    /**
+     * A semantic edit clears an UNUSED authorization only. Post-#254 hotfix (lifecycle safety): a run with an execution attempt that is prepared,
+     * handed to the wallet, pending or of unknown outcome, or a run that already settled, is returned unchanged: its authorization, its error (the
+     * uncertainty it names) and its evidence are the execution's, not the editor's. That attempt keeps being observed and reconciled on its own
+     * and is never resent; the edited workflow is a new Review (`begin` and `review` already refuse while it is active).
+     */
     async invalidate(id: string): Promise<UniswapLiquidityRecord> { return locked(id, async () => {
       const record = await load(id);
-      return record.authorization ? save({ ...record, authorization: null, error: 'UNISWAP_SEMANTIC_EDIT_REQUIRES_REVIEW' }) : record;
+      return record.authorization && record.verdict === 'PENDING' && !active(record)
+        ? save({ ...record, authorization: null, error: 'UNISWAP_SEMANTIC_EDIT_REQUIRES_REVIEW' }) : record;
     }); },
     /**
      * Re-verifies the Review against fresh public state and re-simulates the remaining reviewed calls, then persists

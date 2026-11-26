@@ -86,6 +86,18 @@ describe('PR #254 follow-up: an existing bridge or Jupiter swap applies its max 
     expect(result.exact).toBe(false);
   });
 
+  it('post-#254 hotfix: a universal bridge of a token with no decimals applies its new slippage exactly, keeping its integer amount', () => {
+    const state = author({ type: 'ADD_UNIVERSAL_BRIDGE', source: 'CANVAS', baseRevision: 0, input: { source: 'base', destination: 'ethereum',
+      inputAsset: '0x1111111111111111111111111111111111111111@0', outputAsset: 'USDC', amount: '5', recipient: '', slippage: '100', routing: 'BEST' } });
+    expect(universalBridgeDetails(only(state))!.amount).toBe('5');
+    const { command, next } = apply(state, '250');
+    expect(command.type).toBe('SET_UNIVERSAL_BRIDGE');
+    const after = universalBridgeDetails(only(next))!;
+    expect(after.slippage).toBe('250');
+    expect(after.amountUnits).toBe('5');
+    expect(settingsKeyOf(only(next))).toBe(settingsKeyOf(only(state)));
+  });
+
   it('refuses a step that has no such setting, and a step that is not in the workflow', () => {
     const swap = author({ type: 'ADD_SWAP', source: 'CANVAS', baseRevision: 0, direction: 'USDC_TO_WETH', amount: '1', slippage: '100' });
     expect(appliedSlippageCommand(swap, only(swap).nodeId, '250', context)).toEqual({ code: 'SLIPPAGE_NOT_APPLICABLE' });

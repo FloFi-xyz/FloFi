@@ -98,7 +98,10 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   }, [restoreLiquidityCanvas, trackCanvasRestoration]);
   useEffect(() => {
     // While a sequence's completed steps are being re-proven after a reload the runtime step is not settled yet: nothing is invalidated then.
-    if (record && retired && record.authorization && !sequenceRestore) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
+    // Post-#254 hotfix: the server keeps the authorization of a run whose execution is in flight (or settled); that unchanged run is not shown again
+    // (which would only ask again), it is updated by its own observation and invalidated once its attempt concluded, if the edit still stands.
+    if (record && retired && record.authorization && !sequenceRestore) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok && r.value.authorization === null) setRecord(r.value); })
+      .catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
   }, [record, retired, sequenceRestore]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);

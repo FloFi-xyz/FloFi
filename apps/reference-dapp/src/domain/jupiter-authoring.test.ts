@@ -6,7 +6,7 @@ import { readExactInputSwap } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize } from './commands';
 import { editorReducer, templateEditor } from './editor';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
-import { createSolanaSwapNode, parseTokenAmount, solanaSwapDetails, type SolanaSwapInput } from './jupiter-authoring';
+import { createSolanaSwapNode, formatTokenAmount, parseTokenAmount, solanaSwapDetails, type SolanaSwapInput } from './jupiter-authoring';
 import { createSwapNode } from './swap-authoring';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 
@@ -39,6 +39,20 @@ describe('Solana swap chat/canvas authoring', () => {
     expect(solanaSwapDetails(createSolanaSwapNode('n', { ...canvasInput, slippage: '500' }))?.slippage).toBe('500');
     expect(() => createSolanaSwapNode('n', { ...canvasInput, slippage: '501' })).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
     expect(() => parseLocalCommand('swap 10 BONK to SOL on Solana', templateEditor().workflow, context)).toThrow();
+  });
+  it('post-#254 hotfix: a token with no decimals formats as its exact integer, and other precisions keep their exact decimal form', () => {
+    // Before the fix `slice(-0)` read the whole string as the fraction: 5 units read ".5", 1200 read ".12" and zero read "".
+    for (const [units, text] of [['0', '0'], ['5', '5'], ['1200', '1200'], ['1000000000000000000000001', '1000000000000000000000001']] as const) {
+      expect(formatTokenAmount(units, 0)).toBe(text);
+      if (units !== '0') expect(parseTokenAmount(formatTokenAmount(units, 0), 0)).toBe(units);
+    }
+    for (const [units, decimals, text] of [['0', 6, '0'], ['5', 6, '0.000005'], ['1200000', 6, '1.2'], ['123456789', 6, '123.456789'],
+      ['1000000000000000000', 18, '1'], ['10500000', 6, '10.5']] as const) {
+      expect(formatTokenAmount(units, decimals)).toBe(text);
+      if (units !== '0') expect(parseTokenAmount(text, decimals)).toBe(units);
+    }
+    expect(formatTokenAmount('05', 0)).toBe('--');
+    expect(formatTokenAmount('1.5', 0)).toBe('--');
   });
   it('edits amount and slippage through chat with revision checks and undo/redo', () => {
     let history = editorHistoryReducer(initialEditorHistory(), { type: 'COMMAND', command: { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context });

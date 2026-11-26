@@ -27,6 +27,8 @@ import { exportActions, isLegacyWallet, WALLET_LABEL_MAX } from '../accounts/acc
 import { walletInventory, walletStatus, type WalletInventoryEntry } from '../domain/wallet-inventory';
 import { floFiWalletProviderKey, isFloFiWalletChoice } from '../wallet/flofi-wallet-sync';
 import { StatusTag } from './dashboard/dashboard-status';
+import { assistantConnections, type AssistantConnections } from '../app/connections-action';
+import { ASSISTANT_PROVIDERS, ASSISTANT_SETUP, FLOFI_MCP_ENDPOINT, type AssistantProvider } from '../domain/assistant-connections';
 import { invalidateAccountWallets } from '../state/destination-wallets';
 import { ecosystemOfAddress, SAVED_RECIPIENT_LIMITS, type SavedRecipientEcosystem, type SavedRecipientStatus, type SavedRecipientView } from '../domain/saved-recipients';
 import { invalidateSavedRecipients, loadSavedRecipients, removeRecipientReference, renameRecipientReference, saveRecipientReference,
@@ -567,30 +569,61 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
   </div>;
 }
 
-/** Board 14: the assistant integrations are not available yet; each row says so with its status and is not a control. */
 /** Board 13: deleting the FloFi account, last and collapsed. DeleteAccount keeps its own two-step confirmation and server checks unchanged. */
 export function DangerZone({ state }: { state: AccountState }) {
   const { t: tr } = useLocale();
   return <details className="ux-details ux-danger-zone"><summary>{tr("Danger zone · delete FloFi account")}</summary><DeleteAccount state={state}/></details>;
 }
 
+const PROVIDER_MARKS: Readonly<Record<AssistantProvider, { readonly light: string; readonly dark: string | null }>> = {
+  Claude: { light: '/brand/providers/claude-spark.svg', dark: null },
+  ChatGPT: { light: '/brand/providers/openai-blossom-black.svg', dark: '/brand/providers/openai-blossom-white.svg' },
+};
+/**
+ * Board 14, post-#254 hotfix: Claude and ChatGPT connect to FloFi's existing MCP server and OAuth consent. "Connect" opens that platform's own setup
+ * steps with FloFi's MCP address to copy (neither platform adds a connector from a link); "Connected" appears only for a live connection of this
+ * browser's FloFi connection account (`assistantConnections`), never assumed. Nothing here signs, approves or executes.
+ */
 function AgentsWorkspace() {
   const { t: tr } = useLocale();
+  const [connections, setConnections] = useState<AssistantConnections | null>(null);
+  const [open, setOpen] = useState<AssistantProvider | null>(null), [copied, setCopied] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    assistantConnections().then(result => { if (mounted && result.ok) setConnections(result.value); }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, []);
+  const endpoint = connections?.endpoint ?? FLOFI_MCP_ENDPOINT;
+  async function copy() {
+    try { await navigator.clipboard.writeText(endpoint); setCopied(tr('FloFi MCP address copied.')); } catch { setCopied(tr('Copy the address above by hand.')); }
+  }
   return <div className="ux-page agents">
-    <header className="ux-page-head"><div><h1>{tr("Agents")}</h1><p>{tr("Connect AI assistants to FloFi. They suggest, and you approve each step here.")}</p></div></header>
+    <header className="ux-page-head"><div><h1>{tr("Agents")}</h1><p>{tr("Connect Claude or ChatGPT to FloFi. Describe what you want in the chat; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet here.")}</p></div></header>
     <section className="ux-panel" aria-labelledby="connect-agent">
       <div className="ux-panel-head"><div><h2 id="connect-agent">{tr("Connect an assistant")}</h2></div></div>
-      <ul className="ux-list">{[
-        { name: 'Claude', light: '/brand/providers/claude-spark.svg', dark: null },
-        { name: 'ChatGPT', light: '/brand/providers/openai-blossom-black.svg', dark: '/brand/providers/openai-blossom-white.svg' },
-      ].map(provider => <li key={provider.name} className="ux-row workspace-provider-row">
-        <span className="ux-row-icon workspace-provider-mark" aria-hidden="true">
-          <img src={provider.light} className={provider.dark ? 'provider-mark-light' : undefined} width={provider.dark ? 56 : 28} height={provider.dark ? 56 : 28} alt=""/>
-          {provider.dark && <img src={provider.dark} className="provider-mark-dark" width="56" height="56" alt=""/>}
-        </span>
-        <div className="ux-row-main"><h3 className="ux-row-name">{tr('Connect with {0}', provider.name)}</h3><p className="ux-row-meta">{tr('Use FloFi from inside {0}.', provider.name)}</p></div>
-        <StatusTag tone="testing">{tr("In testing")}</StatusTag>
-      </li>)}</ul>
+      <ul className="ux-list">{ASSISTANT_PROVIDERS.map(provider => {
+        const mark = PROVIDER_MARKS[provider], connected = connections?.connected.includes(provider) ?? false, setupId = `agent-setup-${provider.toLowerCase()}`;
+        return <li key={provider}><div className="ux-row workspace-provider-row">
+          <span className="ux-row-icon workspace-provider-mark" aria-hidden="true">
+            <img src={mark.light} className={mark.dark ? 'provider-mark-light' : undefined} width={mark.dark ? 56 : 28} height={mark.dark ? 56 : 28} alt=""/>
+            {mark.dark && <img src={mark.dark} className="provider-mark-dark" width="56" height="56" alt=""/>}
+          </span>
+          <div className="ux-row-main"><h3 className="ux-row-name">{tr('Connect with {0}', provider)}</h3><p className="ux-row-meta">{tr('Use FloFi from inside {0}.', provider)}</p></div>
+          <div className="ux-row-actions">{connected
+            ? <><StatusTag tone="success">{tr("Connected to FloFi")}</StatusTag><a className="ux-button" href="/connections">{tr("Manage")}</a></>
+            : <button type="button" className="ux-button" aria-expanded={open === provider} aria-controls={setupId}
+              aria-label={tr('Connect {0}', provider)} onClick={() => { setOpen(current => current === provider ? null : provider); setCopied(null); }}>{tr("Connect")}</button>}</div>
+        </div>
+        {!connected && open === provider && <div id={setupId} className="agent-setup" role="region" aria-label={tr('Connect {0} to FloFi', provider)}>
+          <ol className="ux-panel-text agent-setup-steps">{ASSISTANT_SETUP[provider].steps.map(step => <li key={step}>{tr(step)}</li>)}</ol>
+          <p className="ux-row-meta">{tr("FloFi MCP address")}</p>
+          <div className="agent-setup-endpoint"><code>{endpoint}</code>
+            <button type="button" className="ux-button" onClick={() => void copy()}>{tr("Copy")}</button>
+            <a className="ux-button" href={ASSISTANT_SETUP[provider].open} target="_blank" rel="noopener noreferrer">{tr('Open {0}', provider)}</a></div>
+          <p className="ux-row-meta" role="status">{copied ?? ''}</p>
+          <p className="ux-row-meta">{tr("Your assistant drafts and previews workflows and asks for your approval. Nothing runs until you review it in FloFi and sign with your own wallet.")}</p>
+        </div>}</li>;
+      })}</ul>
     </section>
     <section className="ux-panel ux-panel-row" aria-labelledby="agent-clients">
       <div className="ux-row"><span className="ux-row-icon"><WorkspaceIcon name="agent" size={22}/></span>

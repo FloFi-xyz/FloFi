@@ -178,6 +178,11 @@
 .ux-page .workspace-network-icon{border:0;background:var(--surface-raised);color:var(--accent)}
 .ux-page .ux-row-icon.workspace-provider-mark{position:relative;overflow:hidden}
 .ux-page .workspace-provider-mark :is(.provider-mark-light,.provider-mark-dark){inset:-8px;width:56px;height:56px}
+/* Post-#254 hotfix: an assistant's connection steps open under its row (Agents); the MCP address wraps rather than scrolling the page. */
+.ux-page .agent-setup{display:grid;gap:10px;margin:0 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised)}
+.ux-page .agent-setup-steps{display:grid;gap:6px;padding-left:20px}
+.ux-page .agent-setup-endpoint{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.ux-page .agent-setup-endpoint code{flex:1 1 14rem;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:14px;overflow-wrap:anywhere}
 .ux-page .delegation-credentials .automation-list{margin:12px 0 0}
 
 /* ── Small screens and touch ────────────────────────────────────────────────────────────────────────────────────────────────────────── */

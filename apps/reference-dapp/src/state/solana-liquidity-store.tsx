@@ -74,7 +74,7 @@ const bounded = (cause: unknown) => { try { const v = cause as Record<string, un
 const walletChange = (cause: unknown) => { const change = (cause as { change?: { format?: unknown } } | null)?.change; return change?.format === 'flofi.solana-wallet-change.v1' ? { change: change as SolanaWalletChange } : {}; };
 
 export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
-  const { state, stagedPosition } = useWorkflow();
+  const { runtimeWorkflow, sequenceRestore, stagedPosition } = useWorkflow();
   const jupiter = useJupiter();
   // Only an Orca mainnet choice (MANAGE_LIQUIDITY_POSITION) binds a run; the Devnet engineering command keeps preselecting its panel only.
   const staged = orcaStaged(stagedPosition), stagedChoice = staged?.choice ? staged : null;
@@ -83,7 +83,11 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState<Record<SolanaLiquidityNetwork, boolean>>({ 'Solana Devnet': false, Solana: false });
   const [signing, setSigning] = useState(false), [price, setPrice] = useState<PoolPrice | null>(null);
   const mintSigner = useRef<PositionMintSigner | null>(null), busyRef = useRef(false), operationEpoch = useRef(0);
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  // Post-#254 hotfix (the Uniswap pool's PR #254 fix, applied to Orca): an Orca pool step of a step-by-step sequence (Swap → Bridge → Orca Pool,
+  // Bridge to Solana → Orca Pool) is simulated, reviewed and executed ALONE, like every other sequence runtime (`SEQUENCE_RUNTIMES`): the store's
+  // `runtimeWorkflow` is that step (its amount bound to what the earlier step delivered) and, outside a sequence, the canonical workflow itself.
+  // It used the whole workflow, which the Orca compiler refuses with any other step in it (SOLANA_LIQUIDITY_ISOLATED_ONLY).
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const authoredNetwork = workflow.nodes.map(node => solanaLiquidityDetails(node)?.network).find(Boolean) ?? null;
   const authored = authoredNetwork !== null;
@@ -115,8 +119,9 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; };
   }, []);
   // A semantic edit after Review invalidates the authorization; any existing transaction stays observable.
-  useEffect(() => { if (record && retired && record.authorization) runtimes[networkOfRecord(record)].invalidate(record.id).then(result => { if (result.ok) setRecord(result.value); })
-    .catch(() => setError('ORCA_LIQUIDITY_AUTHORIZATION_INVALIDATION_FAILED')); }, [record, retired]);
+  // While a sequence's completed steps are being re-proven after a reload the runtime step is not settled yet: nothing is invalidated then.
+  useEffect(() => { if (record && retired && record.authorization && !sequenceRestore) runtimes[networkOfRecord(record)].invalidate(record.id).then(result => { if (result.ok) setRecord(result.value); })
+    .catch(() => setError('ORCA_LIQUIDITY_AUTHORIZATION_INVALIDATION_FAILED')); }, [record, retired, sequenceRestore]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
     try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'ORCA_LIQUIDITY_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }

@@ -106,6 +106,19 @@ export const portugueseApprovedUxPages: Readonly<Record<string, string>> = {
   'Connect AI assistants to FloFi. They suggest, and you approve each step here.': 'Conecte assistentes de IA à FloFi. Eles sugerem, e você aprova cada passo aqui.',
   'Connect an assistant': 'Conectar um assistente', 'Connect with {0}': 'Conectar com {0}', 'Use FloFi from inside {0}.': 'Use a FloFi de dentro do {0}.',
   'API clients': 'Clientes de API', 'For people who integrate FloFi through code': 'Para quem integra a FloFi por código',
+  // Post-#254 hotfix: the Claude and ChatGPT connection steps (Agents).
+  'Connect Claude or ChatGPT to FloFi. Describe what you want in the chat; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet here.':
+    'Conecte o Claude ou o ChatGPT à FloFi. Descreva o que você quer no chat; a FloFi prepara e simula o fluxo, e você revisa e assina cada transação com a sua própria carteira aqui.',
+  'Connected to FloFi': 'Conectado à FloFi', 'Connect {0} to FloFi': 'Conectar o {0} à FloFi', 'FloFi MCP address': 'Endereço MCP da FloFi',
+  'FloFi MCP address copied.': 'Endereço MCP da FloFi copiado.', 'Copy the address above by hand.': 'Copie o endereço acima manualmente.',
+  'In Claude, open Settings › Connectors and choose Add custom connector.': 'No Claude, abra Configurações › Conectores e escolha Adicionar conector personalizado.',
+  'Name it FloFi, paste the FloFi address below and choose Add.': 'Dê o nome FloFi, cole o endereço da FloFi abaixo e escolha Adicionar.',
+  'Choose Connect, then sign in to FloFi and approve the connection.': 'Escolha Conectar, depois entre na FloFi e aprove a conexão.',
+  'In ChatGPT, open Settings › Apps › Advanced settings and turn on Developer mode (available on eligible plans).':
+    'No ChatGPT, abra Configurações › Apps › Configurações avançadas e ative o Modo de desenvolvedor (disponível nos planos elegíveis).',
+  'Choose Create, name it FloFi, paste the FloFi address below and choose OAuth.': 'Escolha Criar, dê o nome FloFi, cole o endereço da FloFi abaixo e escolha OAuth.',
+  'Your assistant drafts and previews workflows and asks for your approval. Nothing runs until you review it in FloFi and sign with your own wallet.':
+    'Seu assistente monta e pré-visualiza fluxos e pede a sua aprovação. Nada é executado até você revisar na FloFi e assinar com a sua própria carteira.',
 
   // Passkeys (board 15).
   'Sign in with your fingerprint or face': 'Entrar com a digital ou o rosto',

@@ -5729,6 +5729,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/domain/assistant-connections.ts",
         "apps/reference-dapp/src/mcp/account.ts",
         "apps/reference-dapp/src/mcp/app/panel.ts",
         "apps/reference-dapp/src/mcp/approval-profile.ts",

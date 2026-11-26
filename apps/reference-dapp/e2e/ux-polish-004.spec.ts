@@ -654,6 +654,49 @@ async function addSwapCardPt(page: Page) {
   await expect(graph(page).locator('.react-flow__node')).toHaveCount(1);
 }
 
+test.describe('post-#254 hotfix: Agents connects Claude and ChatGPT', () => {
+  test('each assistant offers Connect with its own steps and the FloFi MCP address to copy; nothing is assumed connected (EN, PT, phone)', async ({ page, context, networkGuard }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: E2E_APP_ORIGIN });
+    await page.goto('/app/agents');
+    const agents = main(page), claude = agents.getByRole('button', { name: 'Connect Claude', exact: true }), chatgpt = agents.getByRole('button', { name: 'Connect ChatGPT', exact: true });
+    await expect(claude).toBeEnabled(); await expect(chatgpt).toBeEnabled();
+    await expect(agents.getByText('In testing', { exact: true })).toHaveCount(0);
+    // This loopback deployment has no live assistant connection: neither reads Connected.
+    await expect(agents.getByText('Connected to FloFi', { exact: true })).toHaveCount(0);
+    await claude.click();
+    await expect(claude).toHaveAttribute('aria-expanded', 'true');
+    const setup = agents.getByRole('region', { name: 'Connect Claude to FloFi', exact: true });
+    await expect(setup).toContainText('In Claude, open Settings › Connectors and choose Add custom connector.');
+    const endpoint = (await setup.locator('code').innerText()).trim();
+    expect(endpoint).toMatch(/^https:\/\/[^/]+\/api\/mcp$/);
+    const openClaude = setup.getByRole('link', { name: 'Open Claude', exact: true });
+    await expect(openClaude).toHaveAttribute('href', 'https://claude.ai/settings/connectors');
+    await expect(openClaude).toHaveAttribute('target', '_blank'); await expect(openClaude).toHaveAttribute('rel', 'noopener noreferrer');
+    await setup.getByRole('button', { name: 'Copy', exact: true }).click();
+    await expect(setup.getByRole('status')).toHaveText('FloFi MCP address copied.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(endpoint);
+    await expect(setup).toContainText('Nothing runs until you review it in FloFi and sign with your own wallet.');
+    // One assistant's steps at a time; ChatGPT names its own setup.
+    await chatgpt.click();
+    await expect(setup).toHaveCount(0);
+    const chatgptSetup = agents.getByRole('region', { name: 'Connect ChatGPT to FloFi', exact: true });
+    await expect(chatgptSetup).toContainText('turn on Developer mode');
+    await expect(chatgptSetup.getByRole('link', { name: 'Open ChatGPT', exact: true })).toHaveAttribute('href', 'https://chatgpt.com/');
+    // A phone keeps every control on screen with no sideways scrolling (the address wraps).
+    await page.setViewportSize({ width: 320, height: 800 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(chatgptSetup.getByRole('button', { name: 'Copy', exact: true })).toBeInViewport();
+    // Portuguese.
+    await chooseLanguage(context, 'PT');
+    await page.reload();
+    await expect(main(page).getByRole('button', { name: 'Conectar Claude', exact: true })).toBeVisible();
+    await main(page).getByRole('button', { name: 'Conectar ChatGPT', exact: true }).click();
+    await expect(main(page).getByRole('region', { name: 'Conectar o ChatGPT à FloFi', exact: true })).toContainText('ative o Modo de desenvolvedor');
+    await expect(main(page).getByText('Endereço MCP da FloFi', { exact: true })).toBeVisible();
+    networkGuard.assertClean();
+  });
+});
+
 test.describe('UXA-02 Canvas zoom, pan and independent scrolling', () => {
   test('a mouse wheel zooms around the cursor; + and − use the same transform; Ctrl + wheel still zooms; cards never move', async ({ page, networkGuard }) => {
     await page.setViewportSize({ width: 1440, height: 900 });

@@ -10,7 +10,7 @@
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { test, expect, chooseWallet, openSimulationDetails, AUTHORIZE_IN_WALLET, readWorkflowIr, sendChatCommand } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
@@ -89,9 +89,26 @@ async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' |
 }
 async function authorByChat(page: Page, sentence: string) {
   await openBuilder(page);
-  const quote = page.waitForResponse(response => response.url().endsWith('/api/build-estimate') && response.request().method() === 'POST');
+  // Post-#254 hotfix (post-merge CI shard 8, also seen on PR #253's merge): the quote endpoint streams NDJSON, and Chromium can report that request
+  // as cancelled (net::ERR_ABORTED) at the moment its last bytes reach the page — after the page has read and shown the estimate — so DevTools
+  // keeps no body for a later `response.json()`. The test therefore reads the endpoint's own answer as it passes to the page, unchanged (the same
+  // status, headers and bytes; only the first quote, and only from the loopback app).
+  let answer!: (value: { readonly body: string; readonly headers: Record<string, string> }) => void;
+  const quote = new Promise<{ readonly body: string; readonly headers: Record<string, string> }>(resolve => { answer = resolve; });
+  let captured = false;
+  const passThrough = async (route: Route) => {
+    if (captured || route.request().method() !== 'POST') return route.fallback();
+    captured = true;
+    const response = await route.fetch(), body = await response.text();
+    answer({ body, headers: response.headers() });
+    await route.fulfill({ response, body });
+  };
+  await page.route('**/api/build-estimate', passThrough);
   await sendChatCommand(page, sentence);
-  const response = await quote, result = await response.json() as BuildEstimateResult;
+  const { body, headers } = await quote;
+  await page.unroute('**/api/build-estimate', passThrough);
+  // The first NDJSON line is the estimate (an optional USD line may follow it).
+  const result = JSON.parse(body.slice(0, body.indexOf('\n') < 0 ? undefined : body.indexOf('\n'))) as BuildEstimateResult;
   expect(result.ok).toBe(true);
   if (!result.ok) throw Error(result.code);
   const card = page.locator('.build-flow-surface .composer-card');
@@ -100,7 +117,7 @@ async function authorByChat(page: Page, sentence: string) {
   await expect(shown).toHaveAttribute('title', result.estimate.expected);
   const expected = Number(result.estimate.expected);
   expect(Math.abs(Number(await shown.innerText()) - expected)).toBeLessThanOrEqual(expected * 5e-6);
-  expect(result.estimate.correlationId).toBe(response.headers()['x-quote-correlation-id']);
+  expect(result.estimate.correlationId).toBe(headers['x-quote-correlation-id']);
   // BUILD-FLOFI-UX-FIX-003: an executable (builder-verified) estimate is shown as the amount alone; provider and quality labels stay off the card,
   // and only a route FloFi cannot execute is said so in plain words.
   await expect(card).not.toContainText(/simulation and Review still required|Live quote only|Provider estimates/);

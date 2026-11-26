@@ -100,20 +100,24 @@ describe('secondary product workspaces', () => {
     expect(html).not.toMatch(/\d{12,}|cvv|cvc/i);
   });
 
-  it('offers only Claude and ChatGPT with decorative official assets, "In testing" and nothing that looks clickable (board 14)', () => {
+  it('post-#254 hotfix: offers Claude and ChatGPT with decorative official assets and a Connect button each; nothing reads In testing or Connected unasked (board 14)', () => {
     const html = markup('agents');
     for (const label of ['Connect with Claude', 'Connect with ChatGPT', 'Use FloFi from inside Claude.', 'Use FloFi from inside ChatGPT.']) expect(html).toContain(label);
+    expect(html).toContain('Describe what you want in the chat; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet here.');
     expect(html).toContain('src="/brand/providers/claude-spark.svg"');
     expect(html).toContain('src="/brand/providers/openai-blossom-black.svg"');
     expect(html).toContain('src="/brand/providers/openai-blossom-white.svg"');
     expect(html.match(/class="ux-row-icon workspace-provider-mark" aria-hidden="true"/g)).toHaveLength(2);
     expect(html.match(/width="28" height="28" alt=""/g)).toHaveLength(1);
     expect(html.match(/width="56" height="56" alt=""/g)).toHaveLength(2);
-    expect(html.match(/<span class="ux-tag" data-tone="testing">In testing<\/span>/g)).toHaveLength(2);
-    // "Create client" is replaced by ONE "API clients · Coming soon" row; there is no control, disabled or not, and no arrow.
+    // The testing badges are gone: one actionable Connect per assistant, collapsed until asked; no connection is ever assumed.
+    expect(html).not.toMatch(/In testing|data-tone="testing"/);
+    for (const provider of ['Claude', 'ChatGPT']) expect(html).toContain(`aria-expanded="false" aria-controls="agent-setup-${provider.toLowerCase()}" aria-label="Connect ${provider}"`);
+    expect(html.match(/<button type="button" class="ux-button"[^>]*>Connect<\/button>/g)).toHaveLength(2);
+    expect(html).not.toMatch(/Connected to FloFi|agent-setup-steps/);
+    // "API clients · Coming soon" is unchanged; nothing else is offered.
     expect(html).not.toContain('Create client'); expect(html.match(/API clients/g)).toHaveLength(1); expect(html.match(/data-tone="soon">Coming soon/g)).toHaveLength(1);
-    expect(html).not.toMatch(/<button|disabled=""|M4 12h16m-5-5 5 5-5 5/);
-    expect(html).not.toMatch(/>C<|>GPT<|>G<|Grok|<a\b|API key|OAuth|signing key|Connected with/i);
+    expect(html).not.toMatch(/>C<|>GPT<|>G<|Grok|API key|signing key/i);
   });
 
   it('keeps EVM Default and Solana Default identities stable across provider names, accounts and networks', () => {
