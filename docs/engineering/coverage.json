@@ -2041,6 +2041,10 @@
     "app.mcp.post-257-hotfix": {
       "path": "apps/reference-dapp/src/mcp/post-257-hotfix.test.ts",
       "stage": "unit"
+    },
+    "app.mcp.oauth.linked-wallet.pg": {
+      "path": "apps/reference-dapp/src/mcp/oauth/linked-wallet.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -5802,6 +5806,7 @@
         "app.mcp.link-integrity.pg",
         "app.mcp.mainnet-only",
         "app.mcp.post-257-hotfix",
+        "app.mcp.oauth.linked-wallet.pg",
         "app.mcp.oauth.foundation",
         "app.mcp.oauth.no-model",
         "app.mcp.oauth.server.pg",
@@ -7522,6 +7527,7 @@
         "apps/reference-dapp/src/server/router-providers.ts",
         "apps/reference-dapp/src/server/router-runtime.ts",
         "apps/reference-dapp/src/server/router-service.ts",
+        "apps/reference-dapp/src/domain/route-refusals.ts",
         "apps/reference-dapp/src/server/testdata/router/across-logs-2026-10-04.json",
         "apps/reference-dapp/src/server/testdata/router/across-swap-approval-2026-10-04.json",
         "apps/reference-dapp/src/server/testdata/router/lifi-quote-across-2026-10-04.json",
@@ -9343,6 +9349,7 @@
     "app.mcp.handoff.workflow.pg",
     "app.mcp.link-integrity.pg",
     "app.mcp.oauth.server.pg",
+    "app.mcp.oauth.linked-wallet.pg",
     "app.server.copilot-metrics.pg",
     "app.workflow-runs.cancel-run.pg",
     "app.workflow-runs.confirm-run.pg",

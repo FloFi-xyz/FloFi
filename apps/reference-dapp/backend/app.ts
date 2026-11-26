@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reportUniversalFailure } from '../src/server/universal-router/failure.ts';
+import { routeRefusalsFor } from '../src/domain/route-refusals.ts';
 /**
  * BUILD-CLOUD-001 backend composition: the stateless API routes and the worker handlers, both built on the
  * same flow services and the same PostgreSQL-backed storage. No request or worker keeps execution state in
@@ -383,7 +384,9 @@ export function createBackend(options: BackendOptions) {
           if (abandoned.signal.aborted) return { ok: false, code: stopCode };
           if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
           if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
-          return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
+          // BUILD-FLOFI-POST-257-HOTFIX-001: a Router no-route keeps its code and carries the providers' closed refusal codes.
+          const failed = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode, refusals = routeRefusalsFor(failed, error);
+          return { ok: false, code: failed, ...refusals ? { refusals } : {} } as const;
         }
         finally { clearTimeout(timer); }
       });

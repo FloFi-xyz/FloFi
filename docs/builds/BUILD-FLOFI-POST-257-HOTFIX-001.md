@@ -90,9 +90,9 @@ See §3.
 | Issue | Cause | Fix |
 |---|---|---|
 | Native ETH advertised as transfer-only | `capability-catalog.ts` tagged NATIVE assets `transfer` only although catalog swaps accept native ETH | Native ETH: `swap`, `bridge`, `transfer`; stale picker comment corrected |
-| Repeated wallet-address requests | `plan_strategy`'s beneficiary was "exactly as the user gave it"; linked wallets reached tools only for `flofi.runs` calls; `EVM_WALLET_REQUIRED` fell to the generic "adjust the request" text; a pool-range need was reported as `field: 'beneficiary'` | For a supply goal without a beneficiary, `plan_strategy` uses the account's one linked EVM wallet (several: they are the `options`; `beneficiarySource: LINKED_WALLET` says so), loaded lazily and only when the grant holds `flofi.runs` (checked in the tool itself); the preview-subject codes say approval needs no address; the pool-range need reports `liquidity.range`. The instructions never let a linked wallet stand in for a recipient, beneficiary or simulation subject the person did not choose |
-| Separate compose / validate / simulate commands | Instructions and `nextSteps` asked for compose → review → request (and validate, simulate) although `request_user_approval` already re-composes, re-checks the hash and refuses review blockers | Instructions and `nextSteps` (where the connection can request approvals): compose (or plan) → `request_user_approval`; review, validate and simulate are optional. `workflowHash` stays required |
-| Generic `ROUTER_NO_EXECUTABLE_ROUTE` | `router-service.ts` collected each provider's refusal and threw the generic code; MCP worded it with the generic "could not complete this step" | The certified Router throws the first provider's definitive refusal (e.g. `LIFI_NO_ROUTE`, `LIFI_UNDERLYING_PROTOCOL_NOT_RECONCILABLE`), as the Universal Router already does, or `ROUTER_PROVIDER_UNAVAILABLE` for an outage (never a provider HTTP status); the generic code remains when neither applies. MCP says "no bridge route FloFi can verify and execute for this amount" or "temporarily unavailable, try again". The web Simulate text and the Router panel keep their no-route sentence for these codes (both routers). **Intentional change of the certified Router's refusal code** (route selection, simulation and recovery unchanged): owner approval requested |
+| Repeated wallet-address requests | `plan_strategy`'s beneficiary was "exactly as the user gave it"; linked wallets reached tools only for `flofi.runs` calls; `EVM_WALLET_REQUIRED` fell to the generic "adjust the request" text; a pool-range need was reported as `field: 'beneficiary'` | For a supply goal without a beneficiary, `plan_strategy` returns the person's **own linked EVM wallets as options to confirm** (`optionsSource: LINKED_WALLETS`), loaded lazily and only when the grant holds `flofi.runs` (checked in the tool itself); FloFi never chooses one, because the beneficiary is fixed in the workflow hash before anyone signs and the signing wallet may differ (flofi-workflow review). The preview-subject codes say approval needs no address; the pool-range need reports `liquidity.range`. The instructions never let a linked wallet stand in for a recipient, beneficiary or simulation subject the person did not choose |
+| Separate compose / validate / simulate commands | Instructions and `nextSteps` asked for compose → review → request (and validate, simulate) although `request_user_approval` already re-composes, re-checks the hash and refuses review blockers | Instructions and `nextSteps` (where the connection can request approvals): compose (or plan) → `request_user_approval`; review, validate and simulate are optional in chat. **No gate moved**: MCP's review/validate/simulate calls were never gates (the signing path does not depend on them). The handoff authorizes nothing; the signing surface runs its own checks and the owner's Review before the wallet is asked anything: the Router refuses `begin` without an accepted Review (`ROUTER_REVIEW_REQUIRED`, proven after a short-journey handoff in `mcp/handoff/journey.pg.test.ts`), the Universal Router requires `authorization === reviewCommitment`; a user-funded group is simulated whole before it is offered, except where the RPC has no `eth_simulateV1`, when only transfer-only groups and swaps whose output stays with the owner are offered after an `eth_estimateGas` check (pre-existing, `user-funded/groups.ts:166-194`). A request to simulate only stays read-only: `simulate_strategy` stores nothing and creates no approval, and the instructions say to stop there unless the person asks to execute. `workflowHash` stays required |
+| Generic `ROUTER_NO_EXECUTABLE_ROUTE` | `router-service.ts` collected each provider's refusal, then dropped it; MCP worded the code with the generic "could not complete this step" | **The contract is unchanged**: the certified Router still fails with `ROUTER_NO_EXECUTABLE_ROUTE` (web Router panel, Simulate and estimate wording, API, channels and Developer API untouched). The error now carries `providerRefusals` (closed codes per provider; an outage is `ROUTER_PROVIDER_UNAVAILABLE`, never an HTTP status), passed by the API preview body and the BFF client. MCP returns them with a `reason` and words the message by it ("no bridge route FloFi can verify and execute for this amount" or "temporarily unavailable, try again") (`domain/route-refusals.ts`) |
 | Inconsistent financial presentation by the host | `simulate_strategy` returned base units and asked the host to convert | `display.EN` / `display.PT` (new `mcp/financial-display.ts`) built with the shared six-significant-digit rule (`≈` only for an estimate, a minimum rounded down), a mocked preview labelled as such; the instructions say to quote it verbatim in the person's language. Exact facts unchanged; swap quotes and cross-chain routes for now |
 
 Compact receipts, six-significant-digit formatting and automatic reconciliation are unchanged.
@@ -117,22 +117,36 @@ otherwise the Review says STEP_BY_STEP (two confirmations). Only a real-host run
 
 ## 4. Decision for the CTO: the mobile wallet transport (P0-2)
 
-Every `@walletconnect/*` package since 2.22.0 (20-08-2025; latest 2.26.0) is under the **WalletConnect Community License**, not Apache-2.0:
-royalty-free only up to 500 monthly active users and 2.5 million relay calls, a paid commercial licence above; use must connect to Reown's gateway;
-modifications are assigned to Reown; confidentiality terms. That conflicts with FloFi's AGPL-3.0-only distribution and is a paid service beyond
-the thresholds. The last Apache-2.0 line is 2.21.x, which receives no fixes. A Reown project id (an account with Reown) is required either way.
-MetaMask's own SDK carries the ConsenSys non-commercial licence (already rejected in `pnpm-workspace.yaml`).
+Requirement: from ChatGPT, Claude or Telegram, the owner's own wallet (MetaMask, Phantom, Solflare) shows the signing request itself, with no visit to
+FloFi's website. On the owner's instruction, the outdated, unmaintained WalletConnect 2.21.x line is **not** an option. Licences were read from the
+published npm packages on 26-11-2026 (`npm pack`, the package's own LICENSE); costs from the vendors' public pages, with the caveat that they change.
 
-Options:
-1. **WalletConnect 2.21.x (Apache-2.0), pinned**, behind a `FLOFI_WALLETCONNECT_PROJECT_ID` gate (off when unset): the in-chat panel (ChatGPT,
-   Claude) and a Telegram Mini App run the session; the wallet shows the batch or transaction itself; FloFi's existing claim, Review and
-   reconciliation stay the authority. Needs: licence approval of an unmaintained line, a Reown project, the hosts' `connect_domains` review.
-2. **Current WalletConnect under the Community License**: legal review of AGPL compatibility and the commercial thresholds first.
-3. **No relay transport**: keep the deep link to the wallet browser and make that page open the Review directly (no navigation), accepting that
-   the owner still acts on a FloFi page inside the wallet.
+| Transport (version) | Licence (exact) | Cost | MetaMask | Phantom | Solflare | AGPL-3.0-only FloFi |
+|---|---|---|---|---|---|---|
+| WalletConnect `@walletconnect/*` 2.26.0 (sign-client, ethereum-provider, universal-provider) | **WalletConnect Community License** (release 20-08-2025, Reown, Inc.): royalty-free for development and below **500 MAU / 2,500,000 RPC per month**; above, a paid commercial licence (fee not published); must use Reown's gateway; modifications assigned to Reown; confidentiality clause | Reown account required. Starter $0 (projects paused at limits), Pro $89/month (7,500 MAU, $0.05 per extra MAU), Growth and Enterprise above | EVM, mobile, yes | EVM and Solana, yes | Solana, yes | **No**: field-of-use and commercial restrictions, gateway lock-in and IP assignment are further restrictions AGPL §10 forbids |
+| Reown AppKit 2.0.0 | **Reown Community License** (25-08-2025), same 500 MAU / 2.5 M RPC thresholds | As above | yes | yes | yes | **No** |
+| MetaMask Connect (`@metamask/connect-evm` 2.1.1, `connect-multichain` 1.2.0, `connect-solana` 2.1.1; `@metamask/connect` 0.2.0 is an MIT meta-package over them) | **ConsenSys licence** ("Copyright ConsenSys Software Inc. 2022. All rights reserved"): use, modification and combination only for **Non-Commercial Use**, which ConsenSys defines as personal, charitable/educational/government use, or a program with at most **10,000 MAU**; the Resulting Program must carry the same notice and Non-Commercial restriction | Free within that definition; commercial terms by request (metamask.license@consensys.net), price not published | EVM (and MetaMask's Solana accounts), mobile, yes | no | no | **No**: the restriction must propagate to FloFi itself |
+| Legacy MetaMask SDK (`@metamask/sdk` 0.34.0) | Same ConsenSys licence family (already refused in `pnpm-workspace.yaml`) | As above | yes | no | no | **No** |
+| Phantom Connect SDK (`@phantom/browser-sdk`, `@phantom/react-sdk` 2.0.5) | MIT per the repository (`phantom/phantom-connect-sdk`); the npm tarball of `browser-sdk` carries no LICENSE file or licence field, which should be corrected or confirmed with Phantom before use | Free; Phantom Portal is not accepting new apps (embedded and social-login wallets unavailable to new apps); extension-only mode needs no app id | no | yes (extension; mobile through Portal only) | no | Yes (MIT), but it does not deliver a mobile signing request for a new app today |
+| Phantom deeplinks / universal links (`phantom.app/ul/v1/…`: connect, signTransaction, signAllTransactions, signMessage; signAndSendTransaction deprecated) | Open, documented protocol; FloFi's own implementation (X25519 + XSalsa20-Poly1305 with existing permissive libraries) | Free | no | **yes** (iOS and Android) | not verified here (Solflare documents a compatible deeplink API; confirm before relying on it) | **Yes** |
+| Solflare SDK (`@solflare-wallet/sdk` 1.4.2) | Apache-2.0 | Free | no | no | yes (Solflare web wallet; in-chat and mobile suitability not verified) | Yes |
+| Solana Mobile Wallet Adapter (`@solana-mobile/mobile-wallet-adapter-protocol` 3.0.2, `wallet-standard-mobile` 0.7.1) | Apache-2.0 | Free | no | yes (Android) | yes (Android) | Yes, Android only, needs a web page context |
 
-Recommendation: none yet. Option 1 reuses the existing EIP-1193 wallet path unchanged, but flofi-security advises against freezing a signing channel on
-an unpatched line; option 2 needs legal review; option 3 keeps a FloFi page in the flow. The CTO decides; nothing is implemented until then.
+Findings:
+- No maintained, commercially usable SDK that is compatible with AGPL-3.0-only delivers a **MetaMask** mobile signing request from a chat. Both
+  vendor routes (WalletConnect/Reown and MetaMask Connect) are proprietary licences with commercial thresholds.
+- For **Phantom** (and, if confirmed, Solflare) an AGPL-compatible route exists: the open deeplink protocol, Solana only. The signed transaction
+  comes back to a FloFi callback and FloFi broadcasts it after its own checks. This needs a design for the callback, which opens a URL, and for the
+  in-chat return.
+
+Options for the CTO:
+1. A commercial agreement and legal review for WalletConnect/Reown (one transport for MetaMask, Phantom and Solflare), including whether an AGPL
+   additional permission is acceptable to FloFi.
+2. A commercial agreement with ConsenSys for MetaMask Connect (MetaMask only), with the same AGPL question.
+3. Phantom (and Solflare, once verified) through the open deeplink protocol now; MetaMask stays on the wallet-browser deep link until (1) or (2).
+4. No relay transport: the wallet-browser deep link opens FloFi's Review directly. The owner still acts on a FloFi page inside the wallet.
+
+Nothing is implemented until the CTO decides. In-channel signing stays open in KAN-6.
 
 ## 5. Required production configuration (for CTO approval; none applied)
 
@@ -143,12 +157,17 @@ an unpatched line; option 2 needs legal review; option 3 keeps a FloFi page in t
 
 ## 6. Validation
 
+- New: `apps/reference-dapp/src/mcp/oauth/linked-wallet.pg.test.ts` (the gateway with real OAuth grants and links: one linked wallet becomes the
+  beneficiary, several are the options, a grant without `flofi.runs` and an unavailable link store never resolve one), the short-journey test in
+  `mcp/handoff/journey.pg.test.ts` (no approval from a simulation-only call; `begin` refused before an accepted Review; nothing sent), Router
+  refusal compatibility in `router-service.test.ts`, `router-arbitrum-certification.test.ts`, `cloud-api-client.test.ts` and end to end through the
+  embedded backend in `mcp/simulation.test.ts`.
 - New: `apps/reference-dapp/src/mcp/post-257-hotfix.test.ts` (the incident request composes and plans as one Universal Bridge with the same hash,
   no swap, no cap; schema and instructions; discovery; native ETH; one-call approval path; linked-wallet beneficiary; specific messages; display
   lines, including the 24-11 incident amounts).
 - Updated: `privy-client.test.ts`; `strategy-engine.test.ts`, `channels/core/strategy.test.ts`, `domain/authoring-capabilities.test.ts` (the 12 new
   examples are byte-identical through the chat, the channels and the natural-language Copilot; that test now loads the same fixture catalogs as the
-  Copilot bridge tests); `router-service.test.ts`, `router-arbitrum-certification.test.ts` (specific refusal codes); `arbitrum-certification.test.ts`
+  Copilot bridge tests); `arbitrum-certification.test.ts`
   and `runtime-selection.test.ts` (native ETH actions; the new rows run on the universal runtime); `parity.test.ts` (an explicit time budget for the
   larger enumeration, same checks).
 - Local runs (Node 22 container; CI pins Node 24): focused suites and the whole unit suite; remaining local failures are live/fork/remote suites without
@@ -165,17 +184,36 @@ flofi-security, flofi-mcp and flofi-bridge (read-only) reviewed the working tree
 | security | Privy change can only narrow the offered wallets; server sign-in does not depend on the modal | No change needed |
 | security (low) | `accountWallets` scope enforced only in the gateway | Checked again in `plan_strategy` (`flofi.runs`) |
 | security, mcp (medium) | "Use linked wallets instead of asking for an address" was broader than the code (recipients, simulation subjects, consent gate) | Narrowed to the Aave supply beneficiary in `plan_strategy`; never a recipient, beneficiary or subject the person did not choose |
-| security (low) | Provider HTTP statuses (401/403) could reach a person | Outages surface as `ROUTER_PROVIDER_UNAVAILABLE` |
-| bridge (medium) | New Router codes fell to generic Simulate wording | Simulate text, build estimate and MCP map the definitive refusals to the no-route sentence (both routers) |
+| security (low) | Provider HTTP statuses (401/403) could reach a person | An outage is `ROUTER_PROVIDER_UNAVAILABLE` in `providerRefusals` |
+| bridge (medium) | New Router codes fell to generic Simulate wording; changing a certified code needs owner approval | Superseded on the owner's request: the code stays `ROUTER_NO_EXECUTABLE_ROUTE`; the reasons ride along as `providerRefusals`; no consumer or wording changed |
 | bridge, mcp (medium) | `bridge` advertised for every list token, Stock Tokens included | Limited to native ETH, USDC, USDG, USDT and WETH |
 | bridge (low) | Binding text still invited a cap | Binding `step` description updated |
-| mcp (low) | Wallet read for every plan; no source marker; doc said FloFi never substitutes | Read only for a supply step; `beneficiarySource`; goal-strategy doc updated |
+| mcp (low) | Wallet read for every plan; no source marker; doc said FloFi never substitutes | Read only for a supply step; superseded in round 2: offered as options, never filled (`optionsSource`) |
 | mcp (low) | `nextSteps` named `request_user_approval` for connections that cannot request approvals | Conditional on `canRequestApproval` |
 | mcp (low) | `display` EN only, unconditional note, no provenance | `display.EN`/`display.PT`, note only when present, mocked previews labelled |
 | security | Do not pin WalletConnect 2.21.x (frozen signing channel) | Recorded in §4 for the CTO decision |
 
-Not addressed (stated): a gateway-level PostgreSQL test of `accountWallets` (the rule is unit-tested through `goalBeneficiary`; the scope check is
-one line in the tool).
+Follow-up on PR #258 (owner request of 26-11-2026): the PostgreSQL gateway regression now exists (`mcp/oauth/linked-wallet.pg.test.ts`); the Router
+refusal keeps its contract code; the short journey's gates are proven server-side (`mcp/handoff/journey.pg.test.ts`). Second review round on the final
+code: see §7a.
+
+## 7a. Second review round on the final code (owner request of 26-11-2026)
+
+Reviewers: flofi-wallet-execution, flofi-security (authentication and authorization), flofi-workflow, flofi-channels. They could not read the
+git-ignored diff and reviewed the working tree directly. **Independent Codex review: not available in this environment** (no Codex CLI or service);
+the `.codex/agents` roles are the same specialists that ran here.
+
+| Reviewer | Finding | Resolution |
+|---|---|---|
+| workflow (medium) | A defaulted linked beneficiary is fixed in the hash while another proven wallet may claim and sign, so the supply would credit the linked wallet | No default any more: linked wallets are options the person confirms (`goalBeneficiary`); pg test proves offer-not-fill, cross-account isolation, scope and store failure |
+| workflow (low) | Multi-step compose and plan `nextSteps` named `request_user_approval` for connections that cannot request approvals | Conditional on `canRequestApproval` |
+| workflow (low, latent) | Certification evidence key `bridge:src→dst` has no asset, so an `alsoCovers` entry could certify a Universal row | Not triggered (all 12 rows `IMPLEMENTED_UNCERTIFIED`, no live evidence); recorded, no change in this hotfix |
+| workflow (low) | Developer API capability rows repeat (action, network, destinationNetwork) per EVM pair; only `exampleStrategy` tells them apart | Recorded; no Developer API contract change in this hotfix |
+| security (low) | API-supplied refusals were accepted on any code; an outage entry could carry an HTTP status | Refusals only accompany `ROUTER_NO_EXECUTABLE_ROUTE` (`routeRefusalsFor`); every outage is normalized to `ROUTER_PROVIDER_UNAVAILABLE`; tested in `cloud-api-client.test.ts` |
+| security (low) | `reason` wording applied to any refusal with a code-shaped `reason` | Only when `providerRefusals` is present |
+| wallet-execution (low) | Records overstated "a user-funded group is simulated whole" | Reworded (row above) and the MCP instructions say "its own fresh checks (a simulation wherever the network supports it)" |
+| wallet-execution (low) | Link contract text says a link is never financial authority | Still true: links are only offered as choices; nothing is chosen for the person |
+| wallet-execution (gap) | The short-journey proof covers the Router only, not a workflow-run/user-funded handoff | Stated: no gate changed in those paths (this PR changes MCP text only there) |
 
 ## 8. Real-host acceptance (owner)
 

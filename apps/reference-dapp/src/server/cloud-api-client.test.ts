@@ -7,6 +7,21 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const noSleep = async () => undefined;
 
 describe('BUILD-CLOUD-001 BFF forwarding client', () => {
+  it('BUILD-FLOFI-POST-257-HOTFIX-001: keeps a Router no-route\'s code and its validated provider refusals, dropping anything malformed', async () => {
+    const refusals = [{ provider: 'lifi', outcome: 'REFUSED', code: 'LIFI_NO_ROUTE' }, { provider: 'across', outcome: 'UNAVAILABLE', code: 'ROUTER_PROVIDER_UNAVAILABLE' }];
+    const answer = (body: unknown) => vi.fn<typeof fetch>().mockResolvedValue(json(200, body));
+    expect(await previewCloudFlow('crosschain-router', ['workflow', 'owner'], { env, transport: answer({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', refusals }), maxAttempts: 1 }))
+      .toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', refusals });
+    for (const bad of [[{ provider: 'lifi', outcome: 'REFUSED', code: 'no route: see https://example' }], 'LIFI_NO_ROUTE', Array(9).fill(refusals[0])])
+      expect(await previewCloudFlow('crosschain-router', ['workflow', 'owner'], { env, transport: answer({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', refusals: bad }), maxAttempts: 1 }))
+        .toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
+    // A forged or faulty body: refusals on another code never reword it, and an outage never shows its HTTP status (flofi-security review).
+    expect(await previewCloudFlow('crosschain-router', ['workflow', 'owner'], { env, transport: answer({ ok: false, code: 'SIMULATION_SUBJECT_INVALID', refusals }), maxAttempts: 1 }))
+      .toEqual({ ok: false, code: 'SIMULATION_SUBJECT_INVALID' });
+    expect(await previewCloudFlow('crosschain-router', ['workflow', 'owner'], { env, maxAttempts: 1,
+      transport: answer({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', refusals: [{ provider: 'lifi', outcome: 'UNAVAILABLE', code: 'ROUTER_PROVIDER_HTTP_401' }] }) }))
+      .toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', refusals: [{ provider: 'lifi', outcome: 'UNAVAILABLE', code: 'ROUTER_PROVIDER_UNAVAILABLE' }] });
+  });
   it('fails closed without retry when an older backend rejects the Jupiter QUOTE payload', async () => {
     const transport = vi.fn<typeof fetch>().mockResolvedValue(json(400, { ok: false, code: 'ARGUMENTS_INVALID' }));
     expect(await previewCloudFlow('jupiter-swap', ['workflow', 'quote-subject'], { env, transport, purpose: 'QUOTE', maxAttempts: 1 }))

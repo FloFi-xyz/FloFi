@@ -81,14 +81,17 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'Use only FloFi navigation URLs supplied by genuine successful MCP tool results, on this server\'s trusted origin. ' +
   'Never invent an official website, approval link, financial quote, approval ID or transaction status. ' +
   'When approval is requested, call compose_strategy (or plan_strategy for a goal), then request_user_approval with the resulting strategy and workflowHash: ' +
-  'request_user_approval itself re-composes, re-checks every review blocker and gate, and FloFi simulates again with the owner\'s wallet before signing, so ' +
-  'validate_strategy, review_strategy and simulate_strategy are optional (only when the person asks for findings or a quote first). ' +
+  'request_user_approval itself re-composes and re-checks every review blocker and gate; it authorizes nothing, and FloFi\'s signing surface always runs ' +
+  'its own fresh checks (a simulation wherever the network supports it) and shows the Review (Strategy Manifest) before the owner\'s wallet is asked to ' +
+  'authorize anything. So validate_strategy, ' +
+  'review_strategy and simulate_strategy are optional in chat (when the person asks for findings or a quote first). When the person asks only to ' +
+  'simulate, preview or quote, call simulate_strategy and stop: it is read-only; request approval only when they ask to execute. ' +
   // BUILD-FLOFI-POST-257-HOTFIX-001 (P0-3, P1-5)
   'A cross-chain request with a different destination asset (e.g. 0.0003 ETH on base → USDC on arbitrum-one) is ONE bridge step: `asset` is spent, ' +
   '`outputAsset` is received, and the route converts in flight. Never split it into a swap plus a bridge, and never invent an amount, cap or limit the ' +
-  'person did not state. Native ETH swaps and bridges like any other asset. For an Aave supply goal, omit the beneficiary in plan_strategy: FloFi uses ' +
-  'the person\'s own linked wallet (or returns their linked wallets to choose from). Never put a linked wallet into a recipient, beneficiary or ' +
-  'simulationSubject the person did not choose. ' +
+  'person did not state. Native ETH swaps and bridges like any other asset. For an Aave supply goal without a beneficiary, plan_strategy returns the ' +
+  'person\'s own linked wallets as options: ask which one Aave credits instead of asking them to type an address, and never choose for them. Never ' +
+  'put a linked wallet into a recipient, beneficiary or simulationSubject the person did not choose. ' +
   'Quote only the public nonsecret approvalUrl returned by that successful request_user_approval result, verbatim; never construct or rewrite it. ' +
   'Private approval capabilities and wallet links in tool-result _meta belong only to the approved FloFi UI; never quote them in chat. ' +
   'If a real tool call is unavailable or fails, disclose that and provide no approval CTA. Use actual simulation/status tool results for quotes and status. ' +
@@ -211,7 +214,7 @@ function schemasFor(scope: NetworkScope) {
     preference: Type.Optional(Type.Union(GOAL_PREFERENCES.map(item => Type.Literal(item)), { description: 'Only if the user asked for it.' })),
     cap: Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$', description: 'The most a later funded step of another asset may spend, as the user stated.' })),
     beneficiary: Type.Optional(Type.String({ pattern: '^0x[0-9a-fA-F]{40}$', description: 'Supply only: the account Aave credits, exactly as the user gave it. Never invent one. ' +
-      'Omit it to use the account\'s one linked EVM wallet (when this connection may read the account\'s wallets); with several, FloFi returns them as options.' })),
+      'Omit it to get the person\'s own linked EVM wallets as options to confirm (when this connection may read the account\'s wallets).' })),
     liquidity: Type.Optional(Type.Object({
       maxAmounts: Type.Record(Type.String({ minLength: 1, maxLength: 160 }), Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$' }), { minProperties: 2, maxProperties: 2 }),
       range: Type.Union([Type.Object({ unit: Type.Union([Type.Literal('price'), Type.Literal('tick')]), lower: Type.String({ maxLength: 48 }), upper: Type.String({ maxLength: 48 }) }, strict),
@@ -362,14 +365,15 @@ export const PORTFOLIO_READ_RESERVE_MS = 15_000;
 export const HISTORY_READS_PER_ACCOUNT_HOUR = 60;
 
 /**
- * BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the Aave beneficiary of a goal. What the person gave wins; otherwise the account's one linked EVM wallet;
- * with several linked EVM wallets, none is chosen and they are the options to ask about (never "type an address").
+ * BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the Aave beneficiary of a goal. Only what the person gave is ever used. When they gave none, their own
+ * linked EVM wallets are the options to confirm (never "type an address"), and FloFi never chooses one for them: the beneficiary is fixed in the
+ * workflow hash before anyone signs, and the wallet that later signs may be another one (flofi-workflow review).
  */
 export function goalBeneficiary(given: string | undefined, linked: readonly { readonly namespace: string; readonly address: string }[]):
   { readonly address: string | null; readonly options: readonly string[] } {
   if (given) return { address: given, options: [] };
-  const evm = [...new Set(linked.filter(wallet => wallet.namespace === 'eip155' && /^0x[0-9a-fA-F]{40}$/.test(wallet.address)).map(wallet => wallet.address.toLowerCase()))];
-  return { address: evm.length === 1 ? evm[0]! : null, options: evm.length > 1 ? evm : [] };
+  return { address: null, options: [...new Set(linked.filter(wallet => wallet.namespace === 'eip155' && /^0x[0-9a-fA-F]{40}$/.test(wallet.address))
+    .map(wallet => wallet.address.toLowerCase()))] };
 }
 
 export function createFlofiMcpServer(ctx: ToolContext): McpServer {
@@ -438,7 +442,11 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           result = { content: [{ type: 'text', text: JSON.stringify(body) }, userMessageContent(outcome)], structuredContent: body, isError: true };
         } else {
           const body = { ok: false, code: outcome, ...error instanceof PlatformRefusal ? error.extra : {} };
-          result = { content: [{ type: 'text', text: JSON.stringify(body) }, userMessageContent(outcome)], structuredContent: body, isError: true };
+          // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): a refusal that names its reason (a Router no-route's provider refusal) is worded by that reason.
+          // Only a Router no-route with provider refusals is worded by its reason; every other refusal keeps its own code's wording (flofi-security).
+          const named = (body as Record<string, unknown>).reason, withRefusals = Array.isArray((body as Record<string, unknown>).providerRefusals);
+          const reason = withRefusals && typeof named === 'string' && /^[A-Z][A-Z0-9_]{2,80}$/.test(named) ? named : outcome;
+          result = { content: [{ type: 'text', text: JSON.stringify(body) }, userMessageContent(reason)], structuredContent: body, isError: true };
         }
       }
       ctx.onTool?.({ tool: name, outcome, durationMs: Math.round(now() - started) });
@@ -526,8 +534,9 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
         fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),
       notes: w.notes, authority: AUTHORITY, visual, conversationState: conversationState('DRAFT_CREATED'),
-      nextSteps: ['request_user_approval to hand the whole workflow to its owner (it re-checks every step\'s review): it reports how many authorizations each mode needs. ' +
-        'Each step runs only after the previous one reconciled.', 'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)'] };
+      nextSteps: canRequestApproval(ctx) ? ['request_user_approval to hand the whole workflow to its owner (it re-checks every step\'s review): it reports how many ' +
+        'authorizations each mode needs. Each step runs only after the previous one reconciled.', 'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
+        : ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview'] };
   });
 
   register('plan_strategy', 'Plan strategy from a goal', 'FloFi\'s goal planner (the same one its own chat uses): from an outcome the user described — the asset and ' +
@@ -550,21 +559,24 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     if (plan.kind === 'LIQUIDITY') return { ok: true, kind: 'LIQUIDITY', network: plan.network, authority: AUTHORITY,
       nextSteps: ['compose_strategy with an add_liquidity strategy on this network, naming both pool assets, their maximum deposits and the range the user states.'] };
     if (plan.kind !== 'PLAN') return { ok: true, ...plan, authority: AUTHORITY };
-    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): a left-out beneficiary is the account's own linked EVM wallet when it has exactly one; with several, those
-    // wallets are the options (never "type an address"). A pool goal without a price range is that field, not the beneficiary.
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): for a left-out beneficiary the account's own linked EVM wallets are only offered as options for the person
+    // to confirm (never "type an address"; never filled in). A pool goal without a price range is that field, not the beneficiary.
     // The linked wallets only for a grant that may already read them (get_account's own scope), whoever built this context (flofi-security review),
     // and only when a supply step needs a beneficiary the person left out (flofi-mcp review).
     const needsWallet = !g.beneficiary && plan.steps.some(step => step.action === 'supply') && principalScopes(ctx.principal).includes('flofi.runs');
     const beneficiary = goalBeneficiary(g.beneficiary, needsWallet ? await ctx.accountWallets?.().catch(() => []) ?? [] : []);
     const strategy = goalStrategy(plan.steps, beneficiary.address);
     if (!strategy.ok) return { ok: true, kind: 'NEEDS', field: strategy.code === 'GOAL_POOL_PRICE_REQUIRED' ? 'liquidity.range' : 'beneficiary',
-      options: strategy.code === 'GOAL_BENEFICIARY_REQUIRED' ? beneficiary.options : [], authority: AUTHORITY };
+      options: strategy.code === 'GOAL_BENEFICIARY_REQUIRED' ? beneficiary.options : [],
+      ...strategy.code === 'GOAL_BENEFICIARY_REQUIRED' && beneficiary.options.length ? { optionsSource: 'LINKED_WALLETS',
+        note: 'These are the person\'s own linked wallets: ask which one Aave credits (and to sign with it). Never choose for them; never ask them to type an address.' } : {},
+      authority: AUTHORITY };
     const w = composeWorkflowOrRefuse(strategy.strategy, undefined, scope);
     return { ok: true, kind: 'PLAN', strategy: w.strategy, workflowHash: w.workflowHash, stepCount: w.steps.length, fundsClass: w.fundsClass, reasons: plan.reasons,
       alternatives: plan.alternatives, bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })),
       steps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, summary: c.summary })), notes: w.notes, authority: AUTHORITY,
-      ...beneficiary.address && !g.beneficiary ? { beneficiarySource: 'LINKED_WALLET' } : {},
-      nextSteps: ['request_user_approval with this strategy and workflowHash to hand it to its owner in FloFi (it re-checks the review; nothing executes from MCP)'] };
+      nextSteps: canRequestApproval(ctx) ? ['request_user_approval with this strategy and workflowHash to hand it to its owner in FloFi (it re-checks the review; nothing executes from MCP)']
+        : ['review_strategy with this strategy and workflowHash', 'simulate_strategy for a read-only preview (optional)'] };
   });
 
   register('validate_strategy', 'Validate strategy', 'Check a strategy against FloFi\'s authoring rules (networks, assets, amounts, limits) and, when given, the workflowHash ' +

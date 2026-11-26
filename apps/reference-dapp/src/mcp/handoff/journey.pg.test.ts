@@ -135,4 +135,33 @@ describe('BUILD-MCP-002 in-chat execution journey (embedded runtime, MOCKED chai
     // MCP moved nothing: only the owner's two wallet transactions were ever sent.
     expect(h.counters.sends).toBe(2);
   });
+  // Last: its owner-wallet run must not meet the journey above (runs are attributed by owner and workflow).
+  it('BUILD-FLOFI-POST-257-HOTFIX-001: the short journey removes no gate before the wallet, and a simulation-only request stays read-only', async () => {
+    const h = createRouterHarness({ profile: TESTNET, nonce: 21n }), d = deployment(h);
+    const tokens = await d.connect('flofi.strategy flofi.approval flofi.runs');
+    const composed = (await d.mcp(tokens.access_token, 'compose_strategy', { strategy: STRATEGY })).output as { strategy: unknown; workflowHash: string };
+    const handoffs = async () => Number((await t.db.query<{ n: string }>('SELECT count(*) AS n FROM mcp_handoffs')).rows[0]!.n);
+    // A request to simulate only: a read-only preview, nothing stored, nothing authorizable, no approval created.
+    const before = await handoffs();
+    const preview = await d.mcp(tokens.access_token, 'simulate_strategy', { strategy: composed.strategy, workflowHash: composed.workflowHash, simulationSubject: ROUTER_OWNER });
+    expect(preview.output).toMatchObject({ ok: true, preview: true, persisted: false, authorizable: false, authority: expect.stringMatching(/^NONE: this result authorizes nothing/) });
+    expect(JSON.stringify(preview.output)).not.toMatch(/approvalId|approvalUrl/);
+    expect(await handoffs()).toBe(before);
+    // compose → request_user_approval with no review_strategy / simulate_strategy call in between.
+    const approvalResult = await d.mcp(tokens.access_token, 'request_user_approval', { strategy: composed.strategy, workflowHash: composed.workflowHash });
+    const approval = { ...approvalResult.output, ...approvalResult.meta['flofi/approval'] as Record<string, unknown> } as { approvalUrl: string };
+    expect(approvalResult.output).toMatchObject({ ok: true, status: 'PENDING', authority: 'NONE' });
+    const digest = credentialDigest(HANDOFF_KEY, credentialOf('handoff', decodeURIComponent(new URL(approval.approvalUrl).hash.slice(1)))!);
+    const wallet = { namespace: 'eip155' as const, address: ROUTER_OWNER };
+    const workflow = await d.state(async (s, runtime) => {
+      const h0 = (await s.handoffs.bySecret(digest, new Date()))!, verified = await verifyHandoff(h0, runtime, readHandoffPolicy({}));
+      if (!verified.ok) throw new Error(verified.code);
+      await s.handoffs.claim(digest, wallet, new Date(), CLAIM_SECONDS, () => ({ ok: true, share: true }));
+      return verified.composition.workflow;
+    });
+    // In FloFi the wallet is asked for nothing before FloFi's own fresh simulation AND the owner's accepted Review of it.
+    const simulated = await d.owner<RouterRecord>('simulate', workflow, ROUTER_OWNER);
+    await expect(d.owner('begin', simulated.id, ROUTER_OWNER, workflow)).rejects.toThrow('ROUTER_REVIEW_REQUIRED');
+    expect(h.counters.sends).toBe(0);
+  });
 });

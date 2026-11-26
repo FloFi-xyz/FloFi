@@ -30,6 +30,7 @@ import { acrossCallPlan, depositMatches as acrossDepositMatches, fillMatches, re
 import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fees.ts';
 import { refusalNote } from '../domain/wallet-nonce.ts';
 import type { RouteProvider, RouteRequest, TransferHint } from './router-providers.ts';
+import { NoExecutableRouteError, providerRefusal } from '../domain/route-refusals.ts';
 
 export const ROUTER_RUN_ID = /^xroute-[a-f0-9]{32}$/;
 export type RouterStep = 'APPROVAL' | 'DEPOSIT';
@@ -422,11 +423,10 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         considered.push({ provider: id, outcome: AVAILABILITY.test(code) ? 'UNAVAILABLE' : 'REFUSED', code, minimumOutput: null, feeTotal: null, routeCommitment: null });
       }
     }
-    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): a provider's own definitive refusal (FloFi's closed codes, e.g. LIFI_NO_ROUTE, a route FloFi cannot
-    // reconcile), as the Universal Router reports it, instead of a generic "no route". An outage reads as ROUTER_PROVIDER_UNAVAILABLE ("try again"),
-    // never the provider's HTTP status (no 401/403 detail reaches a person; flofi-security review). The generic code remains when neither applies.
-    if (!selected) fail(considered.find(c => c.outcome === 'REFUSED' && c.code !== 'ROUTER_PROVIDER_FAILED')?.code
-      ?? (considered.some(c => c.outcome === 'UNAVAILABLE') ? 'ROUTER_PROVIDER_UNAVAILABLE' : 'ROUTER_NO_EXECUTABLE_ROUTE'));
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the unchanged contract code, carrying each provider's own closed refusal (domain/route-refusals.ts) so a
+    // caller can say why; an outage is ROUTER_PROVIDER_UNAVAILABLE, never the provider's HTTP status.
+    if (!selected) throw new NoExecutableRouteError('ROUTER_NO_EXECUTABLE_ROUTE', considered.flatMap(c => c.outcome === 'REFUSED' || c.outcome === 'UNAVAILABLE'
+      ? [providerRefusal(c.provider, c.outcome, c.code)] : []));
     const route = selected!;
     if (!routeMatchesIntent(route, { owner, recipient, amount: f.amount })) fail('ROUTER_ROUTE_INTENT_MISMATCH');
     const allowance = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(owner) + addrWord(route.approval.spender), tag(probe.block.number)), 0);

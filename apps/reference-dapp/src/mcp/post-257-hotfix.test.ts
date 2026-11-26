@@ -5,8 +5,10 @@
  *  - P1-5: native ETH advertised as transfer-only; extra compose/validate/simulate calls; repeated wallet-address requests; generic refusals;
  *    host-made rounding of FloFi's amounts.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { credential, gatewayEnv, session } from './gateway.test-harness';
+import type { McpRuntime } from './runtime';
 import { goalBeneficiary, MCP_INSTRUCTIONS } from './tools';
 import { previewDisplay } from './financial-display';
 import { userFacingError } from '../platform/conversation-state';
@@ -76,7 +78,13 @@ describe('BUILD-FLOFI-POST-257-HOTFIX-001 P1-5: MCP capability and conversationa
 
   it('asks for compose then request_user_approval only: review, validate and simulate are optional because the request re-checks the review', async () => {
     expect(MCP_INSTRUCTIONS).not.toMatch(/call compose_strategy, review_strategy and request_user_approval/);
-    expect(MCP_INSTRUCTIONS).toMatch(/request_user_approval itself re-composes, re-checks every review blocker/);
+    expect(MCP_INSTRUCTIONS).toMatch(/request_user_approval itself re-composes and re-checks every review blocker/);
+    // The shortened chat journey keeps FloFi's own simulation and Review before any wallet authorization, and a simulation-only ask stays read-only
+    // (enforced server-side: mcp/handoff/journey.pg.test.ts, user-funded/groups.ts whole-batch simulation, the Router's ROUTER_REVIEW_REQUIRED).
+    expect(MCP_INSTRUCTIONS).toMatch(/signing surface always runs its own fresh checks \(a simulation wherever the network supports it\) and shows the Review \(Strategy Manifest\) before the owner's wallet is asked/);
+    expect(MCP_INSTRUCTIONS).toMatch(/asks only to simulate, preview or quote, call simulate_strategy and stop: it is read-only; request approval only when they ask to execute/);
+    // request_user_approval (registered for OAuth accounts only) still tells the host the owner checks FloFi's fresh simulation before authorizing.
+    expect(readFileSync(new URL('./tools.ts', import.meta.url), 'utf8')).toContain("check FloFi\\'s fresh simulation and choose Authorize in wallet");
     const client = session({ env: publicEnv, token: alice.token });
     const composed = await client.callTool('compose_strategy', { strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1', slippageBps: 50 } });
     // A static credential cannot request approvals, so it keeps the review/simulate path (flofi-mcp review); validate_strategy is never a required step.
@@ -85,9 +93,9 @@ describe('BUILD-FLOFI-POST-257-HOTFIX-001 P1-5: MCP capability and conversationa
     expect(next[0]).toMatch(/^review_strategy with this strategy and workflowHash/);
   });
 
-  it('uses the account\'s linked wallet as the beneficiary instead of asking for an address', () => {
+  it('offers the person\'s own linked wallets as the beneficiary options instead of asking for an address, never choosing one', () => {
     const one = [{ namespace: 'eip155', address: '0x' + 'A'.repeat(40) }, { namespace: 'solana', address: 'CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH' }];
-    expect(goalBeneficiary(undefined, one)).toEqual({ address: '0x' + 'a'.repeat(40), options: [] });
+    expect(goalBeneficiary(undefined, one)).toEqual({ address: null, options: ['0x' + 'a'.repeat(40)] });
     const two = [...one, { namespace: 'eip155', address: '0x' + 'b'.repeat(40) }];
     expect(goalBeneficiary(undefined, two)).toEqual({ address: null, options: ['0x' + 'a'.repeat(40), '0x' + 'b'.repeat(40)] });
     expect(goalBeneficiary('0x' + 'c'.repeat(40), two)).toEqual({ address: '0x' + 'c'.repeat(40), options: [] });
@@ -103,6 +111,27 @@ describe('BUILD-FLOFI-POST-257-HOTFIX-001 P1-5: MCP capability and conversationa
       expect(message.EN).toMatch(/requesting approval needs no address/);
       expect(message.PT).toMatch(/pedir a aprovação não exige endereço/);
     }
+  });
+
+  it('keeps the Router\'s ROUTER_NO_EXECUTABLE_ROUTE contract while saying why, per provider (never a provider HTTP status)', async () => {
+    const answering = (refusals: unknown): McpRuntime => ({ kind: 'embedded', mode: async () => 'live', run: async () => ({ ok: true, value: null }),
+      journal: async () => ({ ok: true, value: null }), evidence: async () => ({ ok: true, value: null }),
+      preview: async () => ({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', refusals }) as never });
+    const bridge = { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '10' };
+    const simulate = async (runtime: McpRuntime) => {
+      const client = session({ env: publicEnv, token: alice.token, runtime });
+      const composed = (await client.callTool('compose_strategy', { strategy: bridge })).output;
+      return client.callTool('simulate_strategy', { strategy: bridge, workflowHash: composed.workflowHash, simulationSubject: '0x' + 'a'.repeat(40) });
+    };
+    const refused = await simulate(answering([{ provider: 'lifi', outcome: 'REFUSED', code: 'LIFI_NO_ROUTE' }, { provider: 'across', outcome: 'UNAVAILABLE', code: 'ROUTER_PROVIDER_UNAVAILABLE' }]));
+    expect(refused.output).toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', reason: 'LIFI_NO_ROUTE',
+      providerRefusals: [{ provider: 'lifi', outcome: 'REFUSED', code: 'LIFI_NO_ROUTE' }, { provider: 'across', outcome: 'UNAVAILABLE', code: 'ROUTER_PROVIDER_UNAVAILABLE' }] });
+    expect(refused.texts.join(' ')).toMatch(/No bridge route that FloFi can verify and execute is available for this amount/);
+    const outage = await simulate(answering([{ provider: 'lifi', outcome: 'UNAVAILABLE', code: 'ROUTER_PROVIDER_UNAVAILABLE' }]));
+    expect(outage.output).toMatchObject({ code: 'ROUTER_NO_EXECUTABLE_ROUTE', reason: 'ROUTER_PROVIDER_UNAVAILABLE' });
+    expect(outage.texts.join(' ')).toMatch(/temporarily unavailable/);
+    // Anything that is not a closed refusal list is dropped whole: the plain contract remains.
+    expect((await simulate(answering([{ provider: 'lifi', outcome: 'REFUSED', code: 'HTTP 403 Forbidden' }]))).output).toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
   });
 
   it('gives the host FloFi\'s own amount lines (six significant digits, minimum rounded down) instead of base units to convert', () => {

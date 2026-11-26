@@ -9,6 +9,7 @@
  * and any later surface together (best effort, never a correctness rule). A surface may add its own budget (e.g. per account),
  * consulted once a slot is granted (see `simulationAdmission`).
  */
+import { refusalReason, routeRefusalsFor } from '../domain/route-refusals.ts';
 import type { PreviewPlan, SimulationView } from '../mcp/simulation.ts';
 import { previewPlan, projectJupiterMarketQuote, projectSimulation } from '../mcp/simulation.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
@@ -161,7 +162,11 @@ async function previewBoundStep(runtime: EngineRuntime, c: Composition, plan: Pr
     preview = quote ? await runtime.preview(plan.flow, [c.workflow, UNIVERSAL_QUOTE_SUBJECTS.SOLANA], 'QUOTE', options.signal)
       : await runtime.preview(plan.flow, subject ? [c.workflow, subject, ...destination ? [destination] : []] : [c.workflow], undefined, options.signal);
   } finally { releaseSimulationSlot(); }
-  if (!preview.ok) return refuse(preview.code);
+  if (!preview.ok) {
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the code is unchanged; a Router no-route also says why per provider, and the one reason to tell a person.
+    const refusals = routeRefusalsFor(preview.code, (preview as { refusals?: unknown }).refusals);
+    return refuse(preview.code, refusals ? { providerRefusals: refusals, reason: refusalReason(refusals) } : {});
+  }
   return { composition: c, plan, view: quote ? projectJupiterMarketQuote(preview.value) : projectSimulation(plan.flow, preview.value), simulationSubject: subject };
 }
 
