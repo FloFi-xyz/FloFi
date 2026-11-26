@@ -62,7 +62,12 @@ export type ChannelVisual = { readonly model: WorkflowVisualModel; readonly lang
  * workflow proposal, an optional visual.
  */
 export type ChannelReply = { readonly text: string; readonly choices: readonly ReplyChoice[]; readonly link: { readonly label: string; readonly url: string } | null;
-  readonly visual?: ChannelVisual | null };
+  readonly visual?: ChannelVisual | null;
+  /**
+   * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: an approval message's "Sign with Phantom / Solflare" buttons (FloFi's native signing start for this
+   * conversation's approval). Attached in memory at send time, like the approval link, and never stored; providers without link buttons omit them.
+   */
+  readonly walletLinks?: readonly { readonly label: string; readonly url: string }[] };
 /** A reply's visual, rendered once by the shared renderer: PNG bytes (never a URL) and their text alternative. */
 export type ChannelImage = { readonly mimeType: 'image/png'; readonly bytes: Uint8Array; readonly alt: string };
 /** The one shared renderer, injected by the channel wiring: a reply's visual as a PNG, or null when it cannot be drawn (text only then). */

@@ -40,6 +40,8 @@ export type ChannelCoreConfig = {
   readonly dispatchTokenDigest: Buffer | null;
   /** Global model-call budget (cost guard), shared by every instance through the store's fixed windows. */
   readonly modelBudget: { readonly hourly: number; readonly daily: number };
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: offer native wallet signing buttons on eligible approvals (`FLOFI_NATIVE_SIGNING`, default enabled). */
+  readonly nativeSigning?: boolean;
 };
 export type ChannelCoreConfigResult = ChannelCoreConfig | { readonly enabled: false; readonly code: 'CHANNEL_CONFIGURATION_INVALID'; readonly reason: string };
 
@@ -106,5 +108,6 @@ export function readChannelCoreConfig(env: Env, providerSecrets: readonly string
   if (hourly === null) return invalid('FLOFI_CHANNEL_MODEL_BUDGET_HOURLY');
   if (daily === null || daily < hourly) return invalid('FLOFI_CHANNEL_MODEL_BUDGET_DAILY');
   return Object.freeze({ enabled: true, tenantId, origin, keys: channelKeys(secret), policy, copilot, simulation, language, supportContact, privacyUrl,
-    hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), modelBudget: Object.freeze({ hourly, daily }) });
+    hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), modelBudget: Object.freeze({ hourly, daily }),
+    nativeSigning: (env.FLOFI_NATIVE_SIGNING ?? 'enabled') !== 'disabled' });
 }

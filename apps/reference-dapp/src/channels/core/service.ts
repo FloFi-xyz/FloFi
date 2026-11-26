@@ -20,8 +20,9 @@
 import { looksSecret } from '../../domain/copilot-conversation';
 import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
-import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan, type SimulationView } from '../../platform/index.ts';
-import { channelRequester, createChannelApproval, endChannelApproval, inSigningFlow, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
+import { nativeSigningEligible, PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan, type SimulationView } from '../../platform/index.ts';
+import { channelRequester, conversationScope, createChannelApproval, endChannelApproval, inSigningFlow, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
+import { nativeStartLinks } from './native-start.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
 import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
 import { learningCopy } from '../../domain/copilot-learning-copy.ts';
@@ -125,8 +126,14 @@ export function createChannelService(ctx: ChannelContext) {
   const languageOf = (intent: unknown): 'EN' | 'PT' | null => { const value = (intent as { language?: unknown } | null)?.language; return value === 'EN' || value === 'PT' ? value : null; };
   const stateContext = (conversationId: string) => sealContext(tenant, 'channel_conversations', conversationId, 'state');
   const payloadContext = (digest: Buffer) => sealContext(tenant, 'channel_events', digest.toString('hex'), 'payload');
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: an approval message of a provider with link buttons offers native signing when its approval is eligible and
+  // still open; the buttons only start FloFi's native signing for this conversation (channel code runs none of its steps).
+  const nativeLinks = core.nativeSigning && adapter.linkWithChoices ? async (handoffId: string, conversationId: string, language: ChannelLanguage) => {
+    const h = await ctx.platform.handoffs.forRequester(handoffId, conversationScope(conversationId), ctx.now());
+    return h && h.status === 'PENDING' && nativeSigningEligible(h) ? nativeStartLinks(core.origin, keys, { handoffId, conversationId, expiresAt: h.expiresAt }, language) : [];
+  } : null;
   const delivery: DeliveryContext = { tenantId: tenant, origin: core.origin, keys, store, adapter, handoffs: ctx.platform.handoffs, log, now: ctx.now,
-    ...ctx.sleep ? { sleep: ctx.sleep } : {}, ...ctx.random ? { random: ctx.random } : {}, ...ctx.visuals ? { visuals: ctx.visuals } : {} };
+    ...ctx.sleep ? { sleep: ctx.sleep } : {}, ...ctx.random ? { random: ctx.random } : {}, ...ctx.visuals ? { visuals: ctx.visuals } : {}, ...nativeLinks ? { nativeLinks } : {} };
   const subjectKey = (m: InboundMessage) => `${m.channel}:${m.subject.business}:${m.subject.user}`;
   /** Choices the provider cannot show as buttons are listed as numbers (answerable by number), in the reply's language. */
   const fitted = (reply: ChannelReply, language: ChannelLanguage): ChannelReply => !reply.choices.length || adapter.choicesFit(reply.choices) ? reply
@@ -427,10 +434,12 @@ export function createChannelService(ctx: ChannelContext) {
     const specs = isStrategyWorkflow(strategy.spec) ? strategy.spec.steps : [strategy.spec];
     const networks = [...new Set(specs.flatMap(spec => spec.action === 'bridge' ? [spec.sourceNetwork, spec.destinationNetwork] : [(spec as { network: string }).network]))];
     const plan = approval.authorizationPlan;
+    // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the approval offers native wallet signing (its buttons are attached when the message is sent).
+    const native = nativeLinks ? (await nativeLinks(approval.approvalId, conversationId, state.language).catch(() => [])).length > 0 : false;
     const reply: ChannelReply = { text: readyText(state.language, { lines: strategy.steps.map(s => stepSummary(s, state.language)), networks, fundsClass: strategy.fundsClass,
       // The previous proposal already in the owner's signing flow may have run: this one never replaces it (a correction is a new, separate proposal).
       notes: [...revoked ? [m.replaced] : [], ...dropped ? [m.earlierApplied] : inSigningFlow(ended) ? [m.separateProposal] : [],
-        ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
+        ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...native ? [m.nativeNote] : [], ...notes.slice(0, 2)], preview,
       intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null, aiInterpreted,
       expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
     choices: adapter.linkWithChoices ? approvalActions(state.language, specs.length > 1) : [], link: { label: m.linkLabel, url: approval.approvalUrl },

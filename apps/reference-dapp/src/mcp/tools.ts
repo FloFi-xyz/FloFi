@@ -38,8 +38,8 @@ import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet.ts';
 import { arbitrumAuthoringCatalog } from '../server/arbitrum-mainnet.ts';
 import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
 import { approvalForRequester, approvalProgress, approvalStatus, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
-  openApprovalSession, PlatformRefusal, refuse, requestApproval, requesterScope, reviewWorkflow, simulatePreview, stepViews, validateStrategy, type ApprovalDeps,
-  type ApprovalRequester } from '../platform/index.ts';
+  NATIVE_SIGNING_WALLETS, nativeSigningEligible, openApprovalSession, PlatformRefusal, refuse, requestApproval, requesterScope, reviewWorkflow, simulatePreview, stepViews,
+  validateStrategy, type ApprovalDeps, type ApprovalRequester, type NativeSigningWallet, type RequesterScope } from '../platform/index.ts';
 import { principalOwners, principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { previewDisplay } from './financial-display.ts';
 import { GOAL_PREFERENCES, GOAL_USES, planGoal, type Goal } from '../domain/intelligence/goal-planner';
@@ -237,8 +237,13 @@ const SCHEMAS = { PUBLIC_MAINNET: schemasFor('PUBLIC_MAINNET'), ENGINEERING: sch
  * the model never sees them.
  */
 export const APPROVAL_TOOL_NAMES = Object.freeze(['request_user_approval', 'get_approval_status', 'open_approval_session', 'get_execution_progress',
-  'list_approvals', 'cancel_approval'] as const);
-export const APP_ONLY_TOOLS: readonly ToolName[] = Object.freeze(['open_approval_session', 'get_execution_progress']);
+  'list_approvals', 'cancel_approval', 'start_wallet_session', 'confirm_wallet_review', 'report_panel_diagnostic'] as const);
+/**
+ * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the panel's native wallet signing (start with Phantom/Solflare, confirm the Review) and its frame diagnostic
+ * report are app-only too.
+ */
+export const APP_ONLY_TOOLS: readonly ToolName[] = Object.freeze(['open_approval_session', 'get_execution_progress', 'start_wallet_session', 'confirm_wallet_review',
+  'report_panel_diagnostic']);
 export type ToolName = (typeof MCP_TOOL_NAMES)[number] | (typeof APPROVAL_TOOL_NAMES)[number];
 export const TOOL_SCOPES: Readonly<Record<ToolName, McpScope>> = Object.freeze({
   get_supported_networks: 'flofi.strategy', get_supported_assets: 'flofi.strategy', get_capabilities: 'flofi.strategy', compose_strategy: 'flofi.strategy', plan_strategy: 'flofi.strategy',
@@ -246,7 +251,8 @@ export const TOOL_SCOPES: Readonly<Record<ToolName, McpScope>> = Object.freeze({
   explain_concept: 'flofi.strategy', explain_strategy: 'flofi.strategy', get_platform_help: 'flofi.strategy', list_automation_types: 'flofi.strategy',
   get_automation_status: 'flofi.runs', get_account: 'flofi.runs', get_portfolio: 'flofi.runs', list_executions: 'flofi.runs',
   request_user_approval: 'flofi.approval', get_approval_status: 'flofi.approval', open_approval_session: 'flofi.approval', get_execution_progress: 'flofi.approval',
-  list_approvals: 'flofi.approval', cancel_approval: 'flofi.approval' });
+  list_approvals: 'flofi.approval', cancel_approval: 'flofi.approval', start_wallet_session: 'flofi.approval', confirm_wallet_review: 'flofi.approval',
+  report_panel_diagnostic: 'flofi.approval' });
 
 export type ToolEvent = { readonly tool: string; readonly outcome: string; readonly durationMs: number };
 export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: McpRuntime; readonly onTool?: (event: ToolEvent) => void; readonly now?: () => number;
@@ -263,7 +269,9 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** BUILD-MCP-002: the MCP handoff policy (default: test funds only, every mainnet off). */
   readonly policy?: HandoffPolicy;
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
-  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[]; readonly frameAncestors?: readonly string[] } | null;
+  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[]; readonly frameAncestors?: readonly string[];
+    /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: Claude's dedicated sandbox host for this connector URL (`ui.domain`), where the deployment declares it. */
+    readonly claudeDomain?: string | null } | null;
   /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (default: this server's, `server/network-scope.ts`). */
   readonly scope?: NetworkScope;
   /** The request's deadline (`deadline.ts`): a tool stops waiting at its tool deadline and answers with a classified timeout. */
@@ -271,7 +279,21 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** The read-only automation port of `get_automation_status` (the gateway injects the deployment's; absent: automations are not offered). */
   readonly automations?: AutomationReadPort;
   /** BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the read-only portfolio port of `get_portfolio` (the gateway injects the deployment's; absent: not offered). */
-  readonly portfolio?: PortfolioReadPort };
+  readonly portfolio?: PortfolioReadPort;
+  /**
+   * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native wallet signing of this account's eligible approvals (the deployment's `src/server/native-signing`
+   * service, injected by the gateway; absent: not offered). The tools only start a session and confirm its Review; the wallet signs.
+   */
+  readonly native?: McpNativeSigning | null;
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: records the panel's frame diagnostic (public origins and a closed code) in the deployment's logs. */
+  readonly report?: ((fields: Readonly<Record<string, string | number | boolean | null>>) => void) | null };
+export type McpNativeSigning = {
+  readonly start: (input: { readonly handoffId: string; readonly requester: RequesterScope; readonly wallet: NativeSigningWallet; readonly returnTo: 'CHATGPT' | 'CLAUDE' | 'NONE';
+    readonly language: 'EN' | 'PT' }) => Promise<{ readonly sessionId: string; readonly connectUrl: string; readonly expiresAt: string; readonly wallet: string }>;
+  readonly confirm: (input: { readonly handoffId: string; readonly sessionId: string; readonly requester: RequesterScope }) =>
+    Promise<{ readonly kind: 'WALLET'; readonly url: string } | { readonly kind: 'REFRESHED'; readonly session: unknown }>;
+  /** The approval's latest session for this requester, as its requester may see it (`publicNativeSession`), or null. */
+  readonly latest: (handoffId: string, requester: RequesterScope) => Promise<Record<string, unknown> | null> };
 type Output = Record<string, unknown>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 // BUILD-DEVELOPER-001: the engine operations live in the shared platform (`src/platform`); this file is the MCP surface over them.
@@ -294,7 +316,8 @@ const DEFAULT_POLICY = readHandoffPolicy({});
 type TimeoutClass = 'READ_ONLY' | 'STATUS_READ' | 'EFFECT_UNKNOWN';
 const TIMEOUT_CLASS: Readonly<Partial<Record<ToolName, TimeoutClass>>> = Object.freeze({ get_execution_status: 'STATUS_READ', get_evidence: 'STATUS_READ',
   get_automation_status: 'STATUS_READ', list_executions: 'STATUS_READ', list_approvals: 'STATUS_READ', cancel_approval: 'EFFECT_UNKNOWN',
-  get_approval_status: 'STATUS_READ', get_execution_progress: 'STATUS_READ', request_user_approval: 'EFFECT_UNKNOWN', open_approval_session: 'EFFECT_UNKNOWN' });
+  get_approval_status: 'STATUS_READ', get_execution_progress: 'STATUS_READ', request_user_approval: 'EFFECT_UNKNOWN', open_approval_session: 'EFFECT_UNKNOWN',
+  start_wallet_session: 'EFFECT_UNKNOWN', confirm_wallet_review: 'EFFECT_UNKNOWN' });
 const DEADLINE_CODES: ReadonlySet<string> = new Set<DeadlineCode>(['MCP_REQUEST_TIMEOUT', 'MCP_UPSTREAM_TIMEOUT', 'MCP_REQUEST_CANCELLED']);
 const TIMEOUT_CODES = new Set([...DEADLINE_CODES, 'CLOUD_API_DEADLINE_EXCEEDED', 'CLOUD_PREVIEW_TIMEOUT']);
 /** The classified answer of a tool that ran out of time (`code`: the request's or one upstream read's deadline). */
@@ -416,16 +439,19 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         assertSafeOutput(output);
         // MCP Apps tool-result _meta is delivered to the UI, outside model context. App visibility alone does not redact results.
         const privateLinks = name === 'request_user_approval' || name === 'open_approval_session';
-        const { approvalUrl, walletLinks, ...publicFields } = output;
+        const { approvalUrl, walletLinks, walletUrl, ...publicFields } = output;
+        // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: a wallet request (its session's callback tags inside) reaches only the UI, never model context.
+        const walletRequest = (name === 'start_wallet_session' || name === 'confirm_wallet_review') && typeof walletUrl === 'string' ? walletUrl : null;
         const visible = privateLinks && typeof approvalUrl === 'string'
           ? { ...publicFields, approvalUrl: publicApprovalUrl(ctx.oauth!.origin, output.approvalId) }
-          : output;
+          : walletRequest ? publicFields : output;
         const presented = VISUAL_TOOLS.has(name) && isVisualModel(visible.visual)
           // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): the picture is optional and comes after an approval may already exist, so it is capped
           // (5 s) and dropped on timeout — never the result, and never turning a created approval into an UNKNOWN timeout.
           ? await Promise.race([presentation(visible.visual, visible, name === 'request_user_approval').catch(() => null),
             new Promise<null>(resolve => { const timer = setTimeout(() => resolve(null), 5_000); timer.unref?.(); })]) : null;
-        const meta = { ...privateLinks && typeof approvalUrl === 'string' ? { 'flofi/approval': { approvalUrl, walletLinks } } : {}, ...presented?.meta };
+        const meta = { ...privateLinks && typeof approvalUrl === 'string' ? { 'flofi/approval': { approvalUrl, walletLinks } } : {},
+          ...walletRequest ? { 'flofi/wallet': { walletUrl: walletRequest } } : {}, ...presented?.meta };
         return { content: [{ type: 'text', text: JSON.stringify(visible) }, ...presented?.content ?? []], structuredContent: visible,
           ...Object.keys(meta).length ? { _meta: meta } : {} } satisfies CallToolResult;
         });
@@ -784,7 +810,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   if (ctx.principal.kind === 'mcp-oauth' && ctx.state && ctx.oauth) {
     registerApprovalTools(ctx, register);
     if (ctx.ui) {
-      const meta = panelResourceMeta(ctx.oauth.origin), html = panelHtml({ origin: ctx.oauth.origin, inFrameProbeHosts: ctx.ui.inFrameProbeHosts, frameAncestors: ctx.ui.frameAncestors ?? [] });
+      const meta = panelResourceMeta(ctx.oauth.origin, { claudeDomain: ctx.ui.claudeDomain ?? null }), html = panelHtml({ origin: ctx.oauth.origin, inFrameProbeHosts: ctx.ui.inFrameProbeHosts, frameAncestors: ctx.ui.frameAncestors ?? [] });
       // New tool results use a versioned resource so host HTML caches cannot retain the external-only adapter.
       // Keep the old resource readable for existing conversations; no approval or financial API changes.
       for (const uri of [PANEL_URI, PREVIOUS_PANEL_URI, LEGACY_PANEL_URI]) server.registerResource(uri === PANEL_URI ? 'flofi-approval-panel'
@@ -801,6 +827,13 @@ type Register = <S extends TSchema>(name: ToolName, title: string, description: 
 const ApprovalId = Type.String({ pattern: '^apr_[a-z2-7]{26}$', description: 'The approvalId returned by request_user_approval.' });
 const ApprovalSchemas = {
   byId: Type.Object({ approvalId: ApprovalId }, strict),
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the panel's native wallet signing.
+  startWallet: Type.Object({ approvalId: ApprovalId, wallet: Type.Union(NATIVE_SIGNING_WALLETS.map(w => Type.Literal(w)), { description: 'The owner\'s wallet app.' }),
+    language: Type.Optional(Type.Union([Type.Literal('EN'), Type.Literal('PT')], { description: 'The conversation language for FloFi\'s pages.' })) }, strict),
+  diagnostic: Type.Object({ approvalId: ApprovalId, code: Type.Union(['HOST_FRAME_ORIGIN_NOT_ALLOWED', 'HOST_FRAME_BLOCKED', 'HOST_FRAME_TIMEOUT'].map(c => Type.Literal(c))),
+    frameChain: Type.Array(Type.String({ pattern: '^(?:null|https?://[A-Za-z0-9.-]{1,253}(?::[0-9]{1,5})?)$' }), { maxItems: 8 }),
+    host: Type.String({ pattern: '^[A-Za-z0-9 ._-]{1,64}$' }) }, strict),
+  confirmWallet: Type.Object({ approvalId: ApprovalId, sessionId: Type.String({ pattern: '^nsg_[a-z2-7]{26}$', description: 'The walletSigning.sessionId of get_execution_progress.' }) }, strict),
   list: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: 'How many of the most recent approval requests (default 10).' })) }, strict),
 };
 /**
@@ -834,7 +867,10 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     return { ...value, runsComplete: false, runsReadError: failure,
       note: 'Some runs of this approval could not be read now; their state is UNKNOWN (not "not started"). Read get_approval_status again.' };
   };
-  const ui = ctx.ui ?? null, appOnly = { ui: { visibility: ['app'] } };
+  const ui = ctx.ui ?? null, appOnly = { ui: { visibility: ['app'] } }, native = ctx.native ?? null;
+  /** Where the owner goes back after the wallet: the host this grant's client is (OAuth client metadata), never a client-supplied value. */
+  const returnOf = (p: McpOAuthPrincipal): 'CHATGPT' | 'CLAUDE' | 'NONE' => p.clientId.startsWith('https://claude.ai/') ? 'CLAUDE'
+    : p.clientId.startsWith('https://chatgpt.com/') ? 'CHATGPT' : 'NONE';
 
   register('request_user_approval', 'Request the owner\'s approval', 'Request approval for the exact composed strategy and workflowHash. The MCP App can present the existing signing surface inside chat when the host and wallet support it. ' +
     'FloFi re-composes and re-checks it, then returns an approval link with authority NONE. Nothing is authorized, signed or sent by this request: the owner must use the signing surface, ' +
@@ -853,7 +889,9 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     if (!result.ok) return failWith(result.code, result.extra ?? {});
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
     const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()));
-    return { ok: true, ...result.value, visual, conversationState: approvalState({ status: 'PENDING' }), message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
+    // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: an approval the owner can sign in a wallet app from the panel says which wallets.
+    const nativeSigning = native && nativeSigningEligible(await owned(result.value.approvalId)) ? { wallets: [...NATIVE_SIGNING_WALLETS] } : null;
+    return { ok: true, ...result.value, visual, ...nativeSigning ? { nativeSigning } : {}, conversationState: approvalState({ status: 'PENDING' }), message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
       'Confirm each step: confirm each exact transaction in your wallet. User-funded groups: your own wallet authorizes each group of steps on one network and pays every fee. Opening the FloFi signing link is an optional external fallback, not in-chat completion. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
   }, ui ? { ui: { resourceUri: ui.resourceUri }, 'openai/outputTemplate': ui.resourceUri, 'openai/toolInvocation/invoking': 'Preparing approval…',
     'openai/toolInvocation/invoked': 'Approval ready' } : {});
@@ -874,9 +912,46 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'in-app browser). The link only shows the proposal; it authorizes nothing.', ApprovalSchemas.byId, { readOnlyHint: false, destructiveHint: false,
     idempotentHint: false, openWorldHint: false }, async args => ({ ok: true, ...await openApprovalSession(deps(), requester, args.approvalId) }), appOnly);
 
-  register('get_execution_progress', 'Execution progress', 'App-only: the approval\'s state and, when its owner shares it, the status of the runs started from it.',
-    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => { const value = await progress(args.approvalId); return { ok: true, ...value,
-      conversationState: approvalState(value) }; }, appOnly);
+  register('get_execution_progress', 'Execution progress', 'App-only: the approval\'s state and, when its owner shares it, the status of the runs started from it. ' +
+    'Where the approval is signed natively in a wallet app, also its wallet signing session: the in-conversation Review and its outcome.',
+    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => { const value = await progress(args.approvalId);
+      const walletSigning = native ? await native.latest(args.approvalId, requesterScope(requester)).catch(() => null) : null;
+      return { ok: true, ...value, ...walletSigning ? { walletSigning } : {}, conversationState: approvalState(value) }; }, appOnly);
+
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the panel's frame diagnostic (why the in-chat signing frame could not open here), logged as public origins
+  // and a closed code so a host's real frame chain is allowed from evidence, never guessed.
+  register('report_panel_diagnostic', 'Report a panel diagnostic', 'App-only: the in-chat panel reports why the signing frame could not open in this host ' +
+    '(public frame origins and a closed code). It changes nothing.', ApprovalSchemas.diagnostic, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  async args => {
+    await owned(args.approvalId);
+    ctx.report?.({ code: args.code, frame_chain: args.frameChain.join(','), host: args.host });
+    return { ok: true, recorded: !!ctx.report, authority: AUTHORITY };
+  }, appOnly);
+
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native signing in the owner's wallet app from the panel. Starting asks the wallet to connect and prove the
+  // account (Sign-In With Solana); FloFi then claims the approval for that proven wallet and simulates it afresh, and the panel shows that Review. Only
+  // the owner's confirmation of that Review in the panel asks the wallet to sign, and only the wallet's approval sends anything.
+  if (native) {
+    register('start_wallet_session', 'Sign in your wallet app', 'App-only: starts signing this approval in the owner\'s Phantom or Solflare app (Solana, one step). ' +
+      'The wallet is asked to connect and to prove the account with a sign-in message (no transaction, no funds); then FloFi simulates afresh and the Review ' +
+      'appears in the panel. It authorizes nothing.', ApprovalSchemas.startWallet, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async args => {
+      const h = await owned(args.approvalId);
+      if (!nativeSigningEligible(h)) return failWith('NATIVE_SIGNING_NOT_AVAILABLE_FOR_THIS_OPERATION');
+      const started = await native.start({ handoffId: h.handoffId, requester: requesterScope(requester), wallet: args.wallet, returnTo: returnOf(principal), language: args.language ?? 'EN' });
+      return { ok: true, approvalId: h.handoffId, sessionId: started.sessionId, wallet: started.wallet, expiresAt: started.expiresAt, walletUrl: started.connectUrl,
+        next: 'Open walletUrl: the wallet asks to connect and to sign in. Then read get_execution_progress for the Review.', authority: AUTHORITY };
+    }, appOnly);
+    register('confirm_wallet_review', 'Confirm the Review in your wallet', 'App-only: the owner confirmed the Review the panel shows (walletSigning.review). FloFi prepares that ' +
+      'exact transaction and returns the wallet\'s signing request; the owner\'s approval in the wallet is still required. If the Review lapsed and the fresh terms are ' +
+      'worse, nothing reaches the wallet and a new Review is shown instead.', ApprovalSchemas.confirmWallet,
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async args => {
+      const h = await owned(args.approvalId);
+      const confirmed = await native.confirm({ handoffId: h.handoffId, sessionId: args.sessionId, requester: requesterScope(requester) });
+      if (confirmed.kind === 'REFRESHED') return { ok: true, approvalId: h.handoffId, refreshed: true,
+        walletSigning: await native.latest(h.handoffId, requesterScope(requester)), authority: AUTHORITY };
+      return { ok: true, approvalId: h.handoffId, sessionId: args.sessionId, walletUrl: confirmed.url, authority: AUTHORITY };
+    }, appOnly);
+  }
 
   // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: this account's approval requests (from any of its conversations) and withdrawing one before anything is signed.
   register('list_approvals', 'Approval requests', 'This account\'s most recent approval requests, newest first, each with its status (PENDING, CLAIMED, APPLIED, ' +

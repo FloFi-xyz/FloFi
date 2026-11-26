@@ -27,14 +27,25 @@ import { mcpStateHost } from './oauth/runtime.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
-import { approvalFrameAncestorList } from '../server/embedded-approval.ts';
+import { approvalFrameAncestorList, claudeAppDomain } from '../server/embedded-approval.ts';
 import { PANEL_URI } from './app/panel.ts';
 import { readHandoffPolicy } from './execution.ts';
 import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from './oauth/config.ts';
 import { credentialDigest, credentialOf } from './oauth/crypto.ts';
 import { mcpState, type McpState } from './oauth/state.ts';
 import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime.ts';
-import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, userMessageContent, type ToolContext, type ToolName } from './tools.ts';
+import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, userMessageContent, type McpNativeSigning, type ToolContext, type ToolName } from './tools.ts';
+
+/** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the deployment's native signing service behind the panel's app-only tools (loaded on first use). */
+function deploymentNativeSigning(env: Env): McpNativeSigning {
+  const service = async () => (await import('../server/native-signing/runtime.ts')).nativeSigningService(env);
+  const view = async (session: unknown) => session ? (await import('../server/native-signing/service.ts')).publicNativeSession(session as never) as Record<string, unknown> : null;
+  return {
+    start: async input => (await service()).start(input),
+    confirm: async input => (await service()).confirm(input),
+    latest: async (handoffId, requester) => view(await (await service()).latest(handoffId, requester)),
+  };
+}
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
 import { deploymentAutomationReader, type AutomationReadPort } from './automations.ts';
 import { deploymentPortfolioPort, type PortfolioReadPort } from './account.ts';
@@ -49,6 +60,8 @@ export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime
   readonly automations?: AutomationReadPort;
   /** Tests: the read-only portfolio port of `get_portfolio` (default: the deployment's Dashboard portfolio and position reads). */
   readonly portfolio?: PortfolioReadPort;
+  /** Tests: the native wallet signing service (default: the deployment's, where `FLOFI_NATIVE_SIGNING` is not disabled; null: not offered). */
+  readonly native?: McpNativeSigning | null;
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
@@ -253,6 +266,9 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   const scope = networkScope({ ...process.env, ...env });
   const automations = options.automations ?? deploymentAutomationReader(env, budget);
   const portfolio = options.portfolio ?? deploymentPortfolioPort(env);
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the deployment's native signing service, loaded only when a panel tool asks for it.
+  const native = options.native !== undefined ? options.native : active.kind === 'mcp-oauth' && state && oauth && (env.FLOFI_NATIVE_SIGNING ?? 'enabled') !== 'disabled'
+    ? deploymentNativeSigning(env) : null;
   const publicStudioIntegrations = async () => {
     if (!env.DATABASE_URL) return [];
     const host = await mcpStateHost(env).catch(() => null);
@@ -260,7 +276,13 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const { listPublishedStudioIntegrations } = await import('../platform/studio-catalog.ts');
     return listPublishedStudioIntegrations(host.db, host.tenantId);
   };
-  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, portfolio, publicStudioIntegrations,
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: Claude's dedicated sandbox host for the exact connector URL this request came to (Claude hashes the URL the
+  // person configured), only for a Claude client and only where FLOFI_MCP_CLAUDE_UI_DOMAIN=enabled: a mismatch makes Claude show an error instead of the panel.
+  const claudeDomain = ui && oauth && active.kind === 'mcp-oauth' && active.clientId.startsWith('https://claude.ai/') && env.FLOFI_MCP_CLAUDE_UI_DOMAIN === 'enabled'
+    ? claudeAppDomain(`${oauth.origin}${new URL(request.url).pathname}`) : null;
+  const report = (fields: Readonly<Record<string, string | number | boolean | null>>) => logger?.info('mcp.panel.diagnostic', { request_id: budget.requestId, principal: active.id, ...fields });
+  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui: ui ? { ...ui, claudeDomain } : ui, scope, budget, automations, portfolio,
+    publicStudioIntegrations, native, report,
     ...simulationWallets ? { simulationWallets } : {}, ...accountWallets ? { accountWallets } : {},
     ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;

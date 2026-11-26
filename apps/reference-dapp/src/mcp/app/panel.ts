@@ -95,18 +95,25 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
   type Json = Record<string, unknown>;
   type Step = { index: number; action: string; network: string; destinationNetwork: string | null; protocol: string; kind: string };
   type Approval = { approvalId: string; approvalUrl?: string; workflowHash: string; expiresAt: string; status: string; networkEnvironment: string; fundsClass: string;
-    steps: Step[]; authority: string; requires?: string[]; summary?: string; walletNamespace?: string };
+    steps: Step[]; authority: string; requires?: string[]; summary?: string; walletNamespace?: string; nativeSigning?: { wallets?: string[] } };
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the approval's native wallet signing session, as get_execution_progress reports it (public facts only).
+  type WalletSigning = { sessionId: string; wallet: string; state: string; review: { lines?: { EN?: string[]; PT?: string[] } } | null;
+    outcome: { code?: string | null; text?: { EN?: string; PT?: string } } | null };
+  const WALLET_NAMES: Record<string, string> = { phantom: 'Phantom', solflare: 'Solflare' };
+  // Only the wallets' own official universal-link hosts (the server chose the method): anything else from a tool result is refused.
+  const walletRequestUrl = (value: unknown): string | null => typeof value === 'string' && value.length <= 8_000
+    && /^https:\/\/(?:phantom\.com|solflare\.com)\/ul\/v1\/[A-Za-z]{1,32}\?[A-Za-z0-9%._~=&+-]+$/.test(value) ? value : null;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
   type Visual = { tree: Json; width: number; height: number; alt: string };
   // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the signing frame's own lifecycle (never an indefinite "opening" state), the panel's
   // language (the host's locale), and the last frame diagnostic (public facts only: origins and a closed code).
   const view: { approval: Approval | null; progress: Json | null; error: string | null; host: string; opened: string | null; probe: Json | null; reported: string;
-    visual: Visual | null; language: 'EN' | 'PT'; frame: 'none' | 'loading' | 'shown' | 'failed'; diagnostic: Json | null } = { approval: null, progress: null, error: null,
-    host: '', opened: null, probe: null, reported: '', visual: null, language: /^pt\b/i.test(navigator.language || '') ? 'PT' : 'EN', frame: 'none', diagnostic: null };
+    visual: Visual | null; language: 'EN' | 'PT'; frame: 'none' | 'loading' | 'shown' | 'failed'; diagnostic: Json | null; walletSigning: WalletSigning | null; walletNote: string | null } = { approval: null, progress: null, error: null,
+    host: '', opened: null, probe: null, reported: '', visual: null, language: /^pt\b/i.test(navigator.language || '') ? 'PT' : 'EN', frame: 'none', diagnostic: null, walletSigning: null, walletNote: null };
   const L = (en: string, pt: string) => view.language === 'PT' ? pt : en;
   const languageOf = (locale: unknown) => typeof locale === 'string' && locale ? (/^pt\b/i.test(locale) ? 'PT' as const : 'EN' as const) : null;
   let nextId = 1, timer: ReturnType<typeof setTimeout> | null = null, polls = 0;
-  let opening = false, disposed = false;
+  let opening = false, disposed = false, reportedFor = '';
   let signingFrame: HTMLIFrameElement | null = null;
   let frameTimeout: ReturnType<typeof setTimeout> | null = null;
   const closeFrame = () => { if (frameTimeout) clearTimeout(frameTimeout); frameTimeout = null; signingFrame?.remove(); signingFrame = null;
@@ -129,6 +136,13 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const chain = frameChain();
     closeFrame(); view.frame = 'failed';
     view.diagnostic = { code, frameChain: chain.chain, notAllowed: chain.blocked, host: view.host || 'unknown', checkedAt: new Date().toISOString() };
+    // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the same public facts (origins and a closed code) to FloFi's logs, so the operator can allow a host's real
+    // frame chain from evidence. Best effort, once per approval; nothing about the owner or the proposal.
+    if (view.approval && reportedFor !== view.approval.approvalId) {
+      reportedFor = view.approval.approvalId;
+      void callTool('report_panel_diagnostic', { approvalId: view.approval.approvalId, code, frameChain: chain.chain, host: (view.host || 'unknown').slice(0, 64) })
+        .catch(() => undefined);
+    }
     view.error = code === 'HOST_FRAME_ORIGIN_NOT_ALLOWED'
       ? L('This chat runs the panel from an origin FloFi does not yet allow for in-chat signing, so your wallet review could not open here. Nothing was authorized.',
         'Este chat executa o painel numa origem que a FloFi ainda não permite para assinatura no chat, então a revisão da carteira não abriu aqui. Nada foi autorizado.')
@@ -147,8 +161,9 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const result = await request('tools/call', { name, arguments: args }) as { structuredContent?: Json; isError?: boolean; _meta?: Json };
     const content = result?.structuredContent ?? {};
     if (result?.isError || content.ok !== true) throw new Error(typeof content.code === 'string' ? content.code : 'TOOL_FAILED');
-    const links = result?._meta?.['flofi/approval'];
-    return links && typeof links === 'object' ? { ...content, approvalUrl: (links as Json).approvalUrl, walletLinks: (links as Json).walletLinks } : content;
+    const links = result?._meta?.['flofi/approval'], wallet = result?._meta?.['flofi/wallet'];
+    const withWallet = wallet && typeof wallet === 'object' ? { ...content, walletUrl: (wallet as Json).walletUrl } : content;
+    return links && typeof links === 'object' ? { ...withWallet, approvalUrl: (links as Json).approvalUrl, walletLinks: (links as Json).walletLinks } : withWallet;
   };
   const el = (tag: string, text?: string, className?: string) => {
     const node = document.createElement(tag);
@@ -265,6 +280,46 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     finally { opening = false; }
     render();
   }
+  /**
+   * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: signing in the owner's wallet app. FloFi's server speaks the wallet's own deeplink protocol; this panel only
+   * opens the wallet request the server returns (official wallet hosts only), shows the Review the server simulated, and passes on the owner's tap.
+   */
+  async function walletStart(wallet: string) {
+    if (!view.approval || opening) return;
+    const approvalId = view.approval.approvalId;
+    opening = true; view.error = null; view.walletNote = null; render();
+    try {
+      const started = await callTool('start_wallet_session', { approvalId, wallet, language: view.language });
+      const url = walletRequestUrl(started.walletUrl);
+      if (!url || disposed || view.approval?.approvalId !== approvalId) throw new Error('WALLET_REQUEST_INVALID');
+      view.walletSigning = { sessionId: String(started.sessionId), wallet, state: 'AWAITING_CONNECT', review: null, outcome: null };
+      await openLink(url);
+      polls = 0; schedule(3_000);
+    } catch (error) { view.error = error instanceof Error ? error.message : 'WALLET_START_FAILED'; }
+    finally { opening = false; }
+    render();
+  }
+  async function walletConfirm() {
+    const signing = view.walletSigning;
+    if (!view.approval || !signing || opening) return;
+    opening = true; view.error = null; view.walletNote = null; render();
+    try {
+      const confirmed = await callTool('confirm_wallet_review', { approvalId: view.approval.approvalId, sessionId: signing.sessionId });
+      if (confirmed.refreshed === true) {
+        view.walletNote = L('The terms changed since this Review, so your wallet was not asked. Check the new Review below.',
+          'Os termos mudaram desde esta Revisão, então a carteira não foi chamada. Confira a nova Revisão abaixo.');
+        if (confirmed.walletSigning && typeof confirmed.walletSigning === 'object') view.walletSigning = confirmed.walletSigning as unknown as WalletSigning;
+      } else {
+        const url = walletRequestUrl(confirmed.walletUrl);
+        if (!url) throw new Error('WALLET_REQUEST_INVALID');
+        view.walletSigning = { ...signing, state: 'AWAITING_SIGNATURE' };
+        await openLink(url);
+      }
+      polls = 0; schedule(3_000);
+    } catch (error) { view.error = error instanceof Error ? error.message : 'WALLET_CONFIRM_FAILED'; }
+    finally { opening = false; }
+    render();
+  }
   /** Adapter A: report what this frame can do; never request accounts, never sign. */
   function probe() {
     const w = window as unknown as { ethereum?: unknown; solana?: unknown; phantom?: unknown };
@@ -293,6 +348,7 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       const progress = await callTool('get_execution_progress', { approvalId });
       if (disposed || view.approval?.approvalId !== approvalId) return;
       view.progress = progress;
+      view.walletSigning = progress.walletSigning && typeof progress.walletSigning === 'object' ? progress.walletSigning as unknown as WalletSigning : view.walletSigning;
       view.error = null;
       report();
     } catch (error) { view.error = error instanceof Error ? error.message : 'PROGRESS_FAILED'; }
@@ -304,7 +360,8 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const done = !incomplete && (view.progress?.conversationState ? presentation().done
       : terminal(view.progress?.status) && !view.progress?.workflowRun || runs.length > 0 && runs.every(r => r.reconciled === true || r.terminal === true));
     // Reconciliation continues server-side whether or not this panel is open; the panel only reads it (automatic, never a signature).
-    if (!done) schedule(view.opened || view.frame === 'shown' ? 5_000 : 15_000);
+    const walletActive = !!view.walletSigning && !['SUBMITTED', 'ENDED'].includes(view.walletSigning.state);
+    if (!done || walletActive) schedule(walletActive ? 3_000 : view.opened || view.frame === 'shown' ? 5_000 : 15_000);
   }
   const presentation = () => present({ status: String(view.approval?.status ?? ''), progress: view.progress, language: view.language,
     action: view.approval && view.approval.steps.length === 1 ? view.approval.steps[0]!.action : null });
@@ -328,7 +385,8 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const csRaw = progress.conversationState && typeof progress.conversationState === 'object' ? progress.conversationState as Json : null;
     const conversationState = csRaw ? { state: token(csRaw.state), final: csRaw.final === true, completed: csRaw.completed === true, nextStep: token(csRaw.nextStep),
       reason: token(csRaw.reason) } : null;
-    const summary = JSON.stringify({ status, runs, runsComplete, workflowRun, conversationState });
+    const ws = view.walletSigning ? { wallet: token(view.walletSigning.wallet), state: token(view.walletSigning.state), code: token(view.walletSigning.outcome?.code) } : null;
+    const summary = JSON.stringify({ status, runs, runsComplete, workflowRun, conversationState, ws });
     if (summary === view.reported) return;
     view.reported = summary;
     const lines = [`FloFi approval ${view.approval?.approvalId}: ${String(status)}${conversationState ? `, conversationState ${String(conversationState.state)}${conversationState.reason ? ` (${conversationState.reason})` : ''}, final ${String(conversationState.final)}` : ''}.`, ...runs.map(r =>
@@ -337,7 +395,8 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
         ...workflowRun.steps.map(step => `Step ${String((step.index ?? 0) + 1)} (${String(step.action)}): ${String(step.state)}${step.code ? ` (${step.code})` : ''}.${step.receiptUrl ? ` Receipt: ${step.receiptUrl}` : ''}`),
         ...workflowRun.code === 'WALLET_BATCH_OUTCOME_UNKNOWN' || workflowRun.steps.some(step => step.code === 'WALLET_BATCH_OUTCOME_UNKNOWN')
           ? ['A batch handed to the owner\'s wallet may have executed: never report it as not run and never propose it again before the owner checks the wallet activity.'] : []] : [],
-      ...runsComplete ? [] : ['Some runs of this approval could not be read now: their state is UNKNOWN — this is not evidence that nothing was sent.']];
+      ...runsComplete ? [] : ['Some runs of this approval could not be read now: their state is UNKNOWN — this is not evidence that nothing was sent.'],
+      ...ws ? [`Wallet signing (${String(ws.wallet)}): ${String(ws.state)}${ws.code ? ` (${ws.code})` : ''}. The Review and every confirmation happen in the FloFi panel and the owner's wallet; never claim it executed before a reconciled run says so.`] : []];
     void request('ui/update-model-context', { content: [{ type: 'text', text: lines.join(' ') }],
       structuredContent: { flofiApproval: { approvalId: view.approval?.approvalId, status, panelPhase: phase, runs, runsComplete, ...conversationState ? { conversationState } : {},
         ...workflowRun ? { workflowRun } : {} } } }).catch(() => undefined);
@@ -402,6 +461,39 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
         list.append(row);
       }
       root.append(el('h2', L('Execution', 'Execução')), list);
+    }
+    // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the owner's wallet app, with the Review in this panel.
+    const signing = view.walletSigning, wallets = (a.nativeSigning?.wallets ?? []).filter(w => WALLET_NAMES[w]);
+    if (signing && !signingFrame) {
+      const name = WALLET_NAMES[signing.wallet] ?? signing.wallet, box = el('div', undefined, 'notice');
+      const lines = signing.review?.lines?.[view.language] ?? signing.review?.lines?.EN ?? [];
+      if (signing.state === 'REVIEW_READY' && lines.length) {
+        for (const line of lines) box.append(el('p', line, 'review-line'));
+        root.append(el('h2', L('Review', 'Revisão')), box);
+        const confirm = el('div', undefined, 'actions');
+        confirm.append(button(L(`Confirm in ${name}`, `Confirmar no ${name}`), () => void walletConfirm(), true));
+        root.append(confirm);
+      } else {
+        const words: Record<string, [string, string]> = { AWAITING_CONNECT: [`Approve the connection and the sign-in message in ${name}.`, `Aprove a conexão e a mensagem de login no ${name}.`],
+          AWAITING_PROOF: [`Approve the sign-in message in ${name}. It authorizes no transaction.`, `Aprove a mensagem de login no ${name}. Ela não autoriza transação.`],
+          PREPARING_REVIEW: ['FloFi is simulating this operation for your wallet…', 'A FloFi está simulando esta operação para a sua carteira…'],
+          PREPARING_SIGNATURE: [`Preparing the exact transaction for ${name}…`, `Preparando a transação exata para o ${name}…`],
+          AWAITING_SIGNATURE: [`Approve the transaction in ${name}. Only your approval there sends it.`, `Aprove a transação no ${name}. Só a sua aprovação lá a envia.`],
+          SUBMITTING: ['Sending the signed transaction once…', 'Enviando a transação assinada uma única vez…'],
+          SUBMITTED: ['Signed and sent once. FloFi follows the network and shows the verified receipt here.', 'Assinado e enviado uma única vez. A FloFi acompanha a rede e mostra o recibo verificado aqui.'] };
+        const text = signing.state === 'ENDED' ? signing.outcome?.text?.[view.language] ?? L('This wallet request ended.', 'Este pedido à carteira terminou.')
+          : words[signing.state] ? L(words[signing.state]![0], words[signing.state]![1]) : L('Checking your wallet request…', 'Verificando o pedido à carteira…');
+        root.append(el('p', text, signing.state === 'ENDED' ? 'warning' : 'notice'));
+      }
+      if (view.walletNote) root.append(el('p', view.walletNote, 'muted'));
+    }
+    if (wallets.length && shown.actionable && !terminal(status) && !signingFrame && (!signing || signing.state === 'ENDED')) {
+      const native = el('div', undefined, 'actions');
+      native.append(el('span', L('In your wallet app:', 'No app da sua carteira:'), 'muted'));
+      for (const wallet of wallets) native.append(button(L(`Sign with ${WALLET_NAMES[wallet]}`, `Assinar com ${WALLET_NAMES[wallet]}`), () => void walletStart(wallet), true));
+      root.append(native);
+      root.append(el('p', L('FloFi shows the Review here first; then your wallet asks you to confirm the exact transaction. You do not need to open the FloFi website.',
+        'A FloFi mostra a Revisão aqui primeiro; depois a sua carteira pede a confirmação da transação exata. Você não precisa abrir o site da FloFi.'), 'muted'));
     }
     if (shown.actionable && !terminal(status)) {
       const actions = el('div', undefined, 'actions');
@@ -522,7 +614,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:0}dt{c
 .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}button{min-height:40px;border-radius:8px;padding:0 14px;font:inherit;font-weight:700;cursor:pointer}
 button.primary{background:var(--blue);color:#fff;border:0}button.secondary{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
 .muted{color:var(--muted);font-size:12px;margin:0}code{font-size:11px;overflow-wrap:anywhere}pre{font-size:11px;background:var(--soft);padding:8px;border-radius:8px;overflow:auto}
-.error{color:var(--red);margin:0;font-weight:700}.runs{margin:0;padding-left:18px}
+.error{color:var(--red);margin:0;font-weight:700}.runs{margin:0;padding-left:18px}.review-line{margin:0 0 4px;overflow-wrap:anywhere}
 .signing-frame{display:block;width:100%;min-height:480px;border:0;background:var(--bg)}.signing-frame[hidden]{display:none}\n.visual{width:100%;max-width:482px;overflow:hidden;border-radius:12px;border:1px solid var(--line)}`;
 
 /** The panel document: one HTML file with inline style and script, no external resource. */
@@ -534,9 +626,11 @@ export function panelHtml(settings: PanelSettings): string {
     `<script>(${panelMain.toString()})(${JSON.stringify(settings).replace(/</g, '\\u003c')}, ${trustedFlofiUrl.toString()}, ${panelPresentation.toString()});</script></body></html>`;
 }
 /** MCP Apps metadata: one same-origin signing frame, no wrapper network or external resources. Existing redirect allowlist is retained. */
-export function panelResourceMeta(origin: string) {
-  return { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [origin], baseUriDomains: [] }, prefersBorder: true },
-    'openai/widgetCSP': { connect_domains: [], resource_domains: [], frame_domains: [origin], redirect_domains: [origin, 'https://phantom.com', 'https://metamask.app.link'] },
+export function panelResourceMeta(origin: string, options: { readonly claudeDomain?: string | null } = {}) {
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: Claude's dedicated sandbox host (`ui.domain`), only for a Claude client and only where the deployment turns it on.
+  return { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [origin], baseUriDomains: [] }, prefersBorder: true,
+    ...options.claudeDomain ? { domain: options.claudeDomain } : {} },
+    'openai/widgetCSP': { connect_domains: [], resource_domains: [], frame_domains: [origin], redirect_domains: [origin, 'https://phantom.com', 'https://solflare.com', 'https://metamask.app.link'] },
     'openai/widgetDescription': 'FloFi approval: opens the existing signing surface inside the conversation when the host and wallet support it. External FloFi is optional. Only the wallet signs.',
     'openai/widgetPrefersBorder': true };
 }

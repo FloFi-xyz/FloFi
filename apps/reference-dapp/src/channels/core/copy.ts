@@ -115,6 +115,8 @@ const EN = {
   authorize: (wallet: string | null, minutes: number) => `Nothing is authorized yet: open FloFi${wallet ? `, connect the wallet ${wallet}` : ', connect your wallet'}, review the Strategy Manifest and sign there. The link works once and expires in ${minutes} minutes.`,
   ai: 'Interpreted from your message with an AI assistant. It is not financial advice; you decide.',
   linkLabel: 'Authorize',
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: under an approval that offers native signing. */
+  nativeNote: 'Or sign in your wallet app with the Phantom or Solflare button: FloFi shows the Review here first, then your wallet asks you to confirm the exact transaction.',
   authority: 'Nothing can be authorized here — not with "yes", "confirm" or any other message. To execute, open FloFi with the approval link, connect your wallet, check the fresh simulation and the Strategy Manifest, and sign there. Send LINK for a fresh link.',
   // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an unmapped refusal is explained in plain words (`platform/conversation-state.ts`), never by its closed code.
   refused: (code: string) => REFUSALS_EN[code] ?? `FloFi couldn't prepare an approval link. ${userFacingError(code).EN} Nothing was proposed.`,
@@ -257,6 +259,7 @@ const PT: Copy = {
   authorize: (wallet, minutes) => `Nada está autorizado ainda: abra o FloFi${wallet ? `, conecte a carteira ${wallet}` : ', conecte sua carteira'}, revise o Strategy Manifest e assine lá. O link funciona uma vez e expira em ${minutes} minutos.`,
   ai: 'Interpretado da sua mensagem com um assistente de IA. Não é recomendação financeira; a decisão é sua.',
   linkLabel: 'Autorizar',
+  nativeNote: 'Ou assine no app da sua carteira pelo botão Phantom ou Solflare: a FloFi mostra a Revisão aqui primeiro, depois a sua carteira pede a confirmação da transação exata.',
   authority: 'Nada pode ser autorizado aqui — nem com "sim", "confirmo" ou qualquer outra mensagem. Para executar, abra o FloFi pelo link de aprovação, conecte sua carteira, confira a nova simulação e o Strategy Manifest e assine lá. Envie LINK para um novo link.',
   refused: code => REFUSALS_PT[code] ?? `O FloFi não conseguiu preparar um link de aprovação. ${userFacingError(code).PT} Nada foi proposto.`,
   noPending: 'Não há estratégia pendente. Diga o que você quer fazer.',
