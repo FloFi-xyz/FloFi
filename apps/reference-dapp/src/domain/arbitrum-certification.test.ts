@@ -89,9 +89,10 @@ describe('Arbitrum capability certification matrix — Canvas / exact Chat / nat
       expect(assets.find(asset => asset.symbol === symbol)).toMatchObject({ address: catalog.address, decimals: catalog.decimals });
     }
     // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): native ETH swaps and bridges too (it was advertised as transfer-only).
-    expect(assets.find(asset => asset.symbol === 'ETH')).toMatchObject({ address: null, decimals: 18, actions: ['bridge', 'swap', 'transfer'] });
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: and Batch Payments.
+    expect(assets.find(asset => asset.symbol === 'ETH')).toMatchObject({ address: null, decimals: 18, actions: ['batch_payment', 'bridge', 'swap', 'transfer'] });
     // BUILD AAVE-V3-EXPANSION-001: ARB is also a reserve of the Arbitrum Aave V3 Core market.
-    expect(assets.find(asset => asset.symbol === 'ARB')?.actions).toEqual(['add_liquidity', 'borrow', 'repay', 'supply', 'swap', 'transfer', 'withdraw']);
+    expect(assets.find(asset => asset.symbol === 'ARB')?.actions).toEqual(['add_liquidity', 'batch_payment', 'borrow', 'repay', 'supply', 'swap', 'transfer', 'withdraw']);
     resetNetworkCatalogs();
     const unloaded = await mcp().callTool('get_supported_assets', { network: 'arbitrum-one' });
     // Without the catalog ARB is discovered only as the registered Aave reserve: lending actions, no catalog swap or transfer.

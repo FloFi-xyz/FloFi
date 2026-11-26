@@ -284,7 +284,19 @@ export async function resumeRun(deps: WorkflowRunDeps, run: RunRecord, wallets: 
  * signed, an expired preparation): the group is planned again to be signed when due with the actual facts — a user operation becomes a
  * wallet batch the owner confirms then — and its steps wait again. Nothing already signed is reused (`resumeRefusal` checked it is unsigned).
  */
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: whether a group holds a leg of a Batch Payment, which executes only as ONE atomic authorization: such a
+ * group is never continued step by step through its legs' own flows (no fallback, no owner steps), whatever stopped it.
+ */
+function holdsBatchPayment(run: RunRecord, g: Pick<GroupRecord, 'stepFrom' | 'stepTo'>): boolean {
+  const composed = composeWorkflowBound(run.strategy, run.workflowHash);
+  // A run whose strategy no longer composes is stale anyway; it is treated as atomic so it can never be split.
+  if (!composed.ok) return true;
+  return (composed.batches ?? []).some(b => b.from <= g.stepTo && g.stepFrom <= b.to);
+}
 async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord): Promise<RunRecord> {
+  const atomicOnly = holdsBatchPayment(run, g);
+  if (atomicOnly && g.code !== null && PERMANENT_DUE_REFUSALS.has(g.code)) refuse('BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION');
   if (!await deps.store.transition(run.runId, { version: run.version, from: ['HALTED'] }, 'RUNNING', { code: null }, 'RUN_RESUMED')) refuse('WORKFLOW_RUN_CHANGED');
   // Every wallet batch ever handed out for this group shares its EIP-5792 id and may still be in (or already sent by) the owner's wallet: the
   // resumed group keeps that history, so a batch the wallet sends under the id later is still recognised and reconciled.
@@ -294,7 +306,7 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord, g: GroupR
   // itself — instead of being planned as the same batch and refused again. Only when no batch was ever handed to the wallet for it: otherwise
   // that batch could still execute and the steps would run twice.
   // Owner requirement (FloFi Wallet + Circle): an unsigned Circle preparation of a FloFi Wallet owner-step group goes back to its owner steps.
-  const ownerSteps = (g.code !== null && PERMANENT_DUE_REFUSALS.has(g.code) || plannedStrategyOf(g.prepared) === 'EVM_OWNER_STEP') && history.length === 0;
+  const ownerSteps = !atomicOnly && (g.code !== null && PERMANENT_DUE_REFUSALS.has(g.code) || plannedStrategyOf(g.prepared) === 'EVM_OWNER_STEP') && history.length === 0;
   const strategy = ownerSteps ? g.namespace === 'solana' ? 'SOLANA_OWNER_STEP' as const : 'EVM_OWNER_STEP' as const
     : g.strategy === 'EVM_USER_OPERATION' ? 'EVM_WALLET_BATCH' as const : g.strategy === 'SOLANA_DURABLE_NONCE' ? 'SOLANA_SIGN_ALL' as const : g.strategy;
   await deps.store.groupTransition(run.runId, g.groupIndex, ['BLOCKED'], 'PLANNED', { strategy, signing: 'WHEN_DUE',
@@ -313,6 +325,7 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord, g: GroupR
  * flow) or ends it — instead of the run staying RUNNING (up to its expiry) while every attempt fails again.
  */
 export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BINDING_NOTHING_RECEIVED', 'WORKFLOW_BINDING_NOTHING_GUARANTEED', 'WORKFLOW_BINDING_NOT_EXACT',
+  'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT', 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE',
   'USER_FUNDED_SIMULATION_UNAVAILABLE', 'AAVE_BENEFICIARY_NOT_OWNER', 'WORKFLOW_SLIPPAGE_UNSUPPORTED', 'USER_FUNDED_GROUP_TOO_MANY_CALLS', 'USER_FUNDED_CHAIN_DISABLED',
   'USER_FUNDED_ACTION_NOT_BUILDABLE', 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED', 'DELEGATION_ASSET_NOT_SUPPORTED', 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED',
   // A transfer or swap of an asset no batch may move (a Stock Token, a token outside the catalog or with other decimals): a run grouped before
@@ -476,6 +489,8 @@ function refusedBatchEvidence(prepared: GroupRecord['prepared']): Record<string,
 }
 /** Same run, same current step. A browser report becomes usable only after independent chain evidence and a locked comparison. */
 async function resumeRefusedWalletBatch(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord): Promise<RunRecord> {
+  // A refused Batch Payment is never continued payment by payment: nothing was paid, and the owner ends the run or authorizes a new Review.
+  if (holdsBatchPayment(run, g)) return refuse('BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION');
   const now = deps.now(), preparation = batchPreparation(g);
   if (!dueUnansweredBatch(run, g, now) || !preparation || !g.validUntil) return refuse('WORKFLOW_RUN_FALLBACK_NOT_THIS_REQUEST');
   const paused = executionRefusal();
@@ -628,6 +643,11 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
     // Final review (P3): a FloFi Wallet owner-step group asked about Circle is never blocked here: its steps run through their own flows, whose
     // confirm pass stops the step exactly as before.
     if (available <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: every exact leg bound to this delivery must be covered in full (their caps together), or none is paid.
+    const exactNeed = composed.bindings.filter(x => x.exact && x.amountFrom === b.amountFrom && x.step >= g.stepFrom && x.step <= g.stepTo
+      && assetKey({ chain: x.asset.chainId, address: x.asset.address }) === asset).reduce((sum, x) => sum + BigInt(x.cap), 0n);
+    if (exactNeed > available) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT')
+      : refuse('WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
     if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
     if (g.namespace === 'solana') {
       const left = available - (allocated.get(share) ?? 0n);

@@ -177,8 +177,11 @@ export function parseCopilotIntentV2(value: unknown): CopilotIntentV2 {
     }
     case 'COMPOSITION': {
       const v = keys(['actions']);
-      if (Array.isArray(v.actions) && v.actions.length > COPILOT_LIMITS.maxActions) return fail('COPILOT_TOO_MANY_ACTIONS');
-      const actions = list(v.actions, COPILOT_LIMITS.maxActions).map(parseAction);
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: sends only (a payment to several recipients, one Batch Payment) may name up to its 8 recipients.
+      const sendsOnly = Array.isArray(v.actions) && v.actions.every(a => a && typeof a === 'object' && (a as { type?: unknown }).type === 'TRANSFER');
+      const limit = sendsOnly ? COPILOT_LIMITS.maxPaymentActions : COPILOT_LIMITS.maxActions;
+      if (Array.isArray(v.actions) && v.actions.length > limit) return fail('COPILOT_TOO_MANY_ACTIONS');
+      const actions = list(v.actions, limit).map(parseAction);
       if (actions.length < 2) return fail();
       return { ...common(v), kind, actions };
     }
@@ -276,7 +279,8 @@ export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: 
   object({ ...head('ACTION'), action: ACTION, reuse: { anyOf: [object({ from: TARGET, fields: { type: 'array', items: choice(COPILOT_REUSE_FIELDS,
     'A value the user explicitly asked to reuse from an earlier step ("the same network", "a mesma rede").') } }), { type: 'null' }],
     description: 'Only when the user said "same …" about an earlier step; null otherwise.' } }),
-  object({ ...head('COMPOSITION'), actions: { type: 'array', description: 'Two or three dependent steps in order.', items: ACTION } }),
+  object({ ...head('COMPOSITION'), actions: { type: 'array', description: 'Two or three dependent steps in order; or two to eight TRANSFER actions when the user ' +
+    'pays several recipients (each with its own recipient and amount exactly as written; FloFi makes them one Batch Payment).', items: ACTION } }),
   object({ ...head('EDIT'), target: TARGET, changes: CHANGES }),
   object({ ...head('REPEAT'), target: TARGET, changes: CHANGES }),
   object({ ...head('REMOVE'), target: TARGET }),

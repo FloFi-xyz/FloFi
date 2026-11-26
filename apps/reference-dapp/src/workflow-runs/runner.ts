@@ -129,6 +129,8 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
         }, 0n);
         const used = boundAmount(binding.cap, received > consumed ? received - consumed : 0n);
         if (used <= 0n) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_NOTHING_RECEIVED');
+        // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg pays exactly its amount, never less (a new Review is needed instead).
+        if (binding.exact && used < BigInt(binding.cap)) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
         strategy = boundStrategy(strategy, used, binding.asset.decimals, binding.inputAsset);
         resolutions.push({ amountFrom: binding.amountFrom, asset: binding.asset, cap: binding.cap, received: received.toString(), used: used.toString() });
       }

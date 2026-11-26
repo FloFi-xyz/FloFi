@@ -13,6 +13,7 @@ import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput, isSolanaTransferNetwork } from './robinhood-transfer-authoring';
+import { createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
 import { parseSolanaTransferChat } from './solana-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
@@ -73,6 +74,9 @@ export type Command = Base & (
   | {readonly type:'AUTHOR_LENDING';readonly input:LendingInput}
   | { readonly type: 'ADD_RH_TRANSFER'; readonly input: RobinhoodTransferInput }
   | { readonly type: 'SET_RH_TRANSFER'; readonly nodeId: string; readonly input: RobinhoodTransferInput }
+  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment card (several recipients, one asset, one EVM mainnet). */
+  | { readonly type: 'ADD_BATCH_PAYMENT'; readonly input: BatchPaymentInput }
+  | { readonly type: 'SET_BATCH_PAYMENT'; readonly nodeId: string; readonly input: BatchPaymentInput }
   | { readonly type: 'ADD_WITHDRAW'; readonly input: WithdrawInput }
   | { readonly type: 'SET_WITHDRAW'; readonly nodeId: string; readonly input: WithdrawInput }
   | { readonly type: 'ADD_REPAY'; readonly input: SupplyInput }
@@ -219,6 +223,23 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     createAuthoredTransfer('node-preview', fields);
     return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: "pay 25 USDC to 0x… and 50 USDC to 0x… on Base" (also "batch pay …", commas between payments): ONE Batch
+  // Payment, every recipient and amount exactly as written, in order; one asset for all of them. A recipient written twice is refused, never merged.
+  const batchPay = new RegExp(`^(?:batch )?pay (.+) on (${CATALOG_CHAT_NETWORKS})$`, 'i').exec(input);
+  const batchNetwork = batchPay ? catalogNetworkOfChatName(batchPay[2]!) : null;
+  if (batchPay && batchNetwork) {
+    const parts = batchPay[1]!.split(/\s*(?:,|\band\b)\s*/i).filter(Boolean);
+    const lines = parts.map(part => new RegExp(`^([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} to (0x[0-9a-fA-F]{40})$`, 'i').exec(part.trim()));
+    if (lines.length >= 2 && lines.every(Boolean)) {
+      const symbols = new Set(lines.map(line => symbolOn(batchNetwork.chain, line![2]!)));
+      if (symbols.size === 1) {
+        const fields: BatchPaymentInput = { network: batchNetwork.name as BatchPaymentInput['network'], asset: [...symbols][0]!,
+          payments: lines.map(line => ({ recipient: line![3]!.toLowerCase(), amount: line![1]! })) };
+        createAuthoredBatchPayment('node-preview', fields);
+        return { type: 'ADD_BATCH_PAYMENT', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+      }
+    }
+  }
   const catalogTransfer = new RegExp(`^(?:transfer|send) ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: to (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   const transferNetwork = catalogTransfer ? catalogNetworkOfChatName(catalogTransfer[3]!) : null;
   if (catalogTransfer && transferNetwork) {
@@ -361,7 +382,7 @@ export function commandIsValid(input: unknown): input is Command {
       || !['CHAT', 'CANVAS'].includes(command.source as string)) return false;
   const fields: Record<string, string[]> = {
     ADD_SEQUENCE: ['steps'], ADD_CRYPTO_ACTION: ['input'], SET_CRYPTO_ACTION: ['nodeId', 'input'],
-    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], MANAGE_LIQUIDITY_POSITION: ['choice', 'pool'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD_UNIVERSAL_BRIDGE: ['input'], SET_UNIVERSAL_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
+    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_BATCH_PAYMENT: ['input'], SET_BATCH_PAYMENT: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], MANAGE_LIQUIDITY_POSITION: ['choice', 'pool'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD_UNIVERSAL_BRIDGE: ['input'], SET_UNIVERSAL_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
     CONNECT: ['from', 'to'], DISCONNECT: ['from', 'to'], REMOVE: ['nodeId'], REMOVE_MANY: ['nodeIds'], ADD_SWAP: ['direction', 'amount', 'slippage'], ADD_TESTNET_SWAP: ['direction', 'amount', 'slippage'], ADD_ETHEREUM_SEPOLIA_SWAP: ['direction', 'amount', 'slippage'], ADD_COW_SWAP: ['direction', 'amount', 'slippage'],
     SET_SWAP_AMOUNT: ['nodeId', 'amount'], SET_SLIPPAGE: ['nodeId', 'slippage'],
   };
@@ -390,6 +411,19 @@ export function commandIsValid(input: unknown): input is Command {
       const keys=Reflect.ownKeys(fields??{}).sort().join(), base=['network','asset','amount','recipient'].sort().join(), mint=['network','asset','amount','recipient','decimals','program'].sort().join();
       if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||(keys!==base&&!(keys===mint&&isSolanaTransferNetwork(String((fields as {network?:unknown}).network))))||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=64))return false;
       try{createAuthoredTransfer('node-preview',fields as RobinhoodTransferInput);return true;}catch{return false;}
+    }
+    case 'ADD_BATCH_PAYMENT':
+    case 'SET_BATCH_PAYMENT': {
+      if (command.type === 'SET_BATCH_PAYMENT' && !id(command.nodeId)) return false;
+      const fields = command.input as unknown;
+      // A closed input: network, asset and 2..8 payments of exactly {recipient, amount}, all short strings.
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.getPrototypeOf(fields) !== Object.prototype) return false;
+      const f = fields as { network?: unknown; asset?: unknown; payments?: unknown };
+      if (Reflect.ownKeys(f).sort().join() !== 'asset,network,payments' || typeof f.network !== 'string' || typeof f.asset !== 'string' || f.asset.length > 64 ||
+          !Array.isArray(f.payments) || f.payments.length > 8 || !f.payments.every(p => p && typeof p === 'object' && !Array.isArray(p) &&
+            Reflect.ownKeys(p).sort().join() === 'amount,recipient' && typeof (p as { recipient: unknown }).recipient === 'string' &&
+            typeof (p as { amount: unknown }).amount === 'string' && (p as { amount: string }).amount.length <= 64 && (p as { recipient: string }).recipient.length <= 64)) return false;
+      try { createAuthoredBatchPayment('node-preview', fields as BatchPaymentInput); return true; } catch { return false; }
     }
     case 'ADD_WITHDRAW':
     case 'SET_WITHDRAW': {

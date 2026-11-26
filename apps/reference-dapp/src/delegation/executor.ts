@@ -496,6 +496,8 @@ function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBind
     return { ok: true, step: narrowedStep(requirement, k, fixed), binding: pinned };
   }
   const used = boundAmount(b.cap, available);
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg is never reduced (this retired mode never runs one; the rule holds regardless).
+  if (b.exact && used < BigInt(b.cap)) return { ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT' };
   if (used <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
   const need = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? { ...pinned.need, amountIn: used } : { ...pinned.need, amount: used };
   return { ok: true, step: narrowedStep(requirement, k, used), binding: { ...pinned, need } };

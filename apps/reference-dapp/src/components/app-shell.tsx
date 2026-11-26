@@ -104,7 +104,7 @@ import { activeNetworkScope, workflowAllowed } from '../domain/network-scope';
 import { usePublicTestnet } from '../state/public-testnet-store';
 import { PublicTestnetPanel } from './public-testnet-panel';
 
-import { UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { isBatchPaymentNode, UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from '../state/lending-store';
 import {LendingPanel} from './lending-panel';
 import { useSupply } from '../state/supply-store';
@@ -667,8 +667,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Review shows the card cannot run as one confirmation, the card keeps its own flow exactly as before.
   const singleCardRun = !sequence && soleAction.length === 1 && SINGLE_CARD_RUNTIMES.includes(runtime.kind ?? '') && soleAction[0]!.chainId.startsWith('eip155:')
     && !compositionWorkflow(state.workflow);
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): ONE Batch Payment card has no per-card flow: it always runs as the shared workflow run of its
+  // payments (one atomic group), exactly like a multi-step sequence.
+  const batchPaymentRun = !sequence && soleAction.length === 1 && isBatchPaymentNode(soleAction[0]!);
   const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account, single: singleCardRun,
-    enabled: (Boolean(sequence) || singleCardRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+    enabled: (Boolean(sequence) || singleCardRun || batchPaymentRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
   // A single card goes back to its own flow when its Review is not one grouped interaction, refuses the batch, or could not answer at all
   // (`singleCardFallsBack`); a started run of it always stays here.
   const singleCardReview = singleCardRun ? workflowRunHere.review : null;

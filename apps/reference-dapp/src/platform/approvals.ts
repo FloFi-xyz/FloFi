@@ -153,6 +153,14 @@ export async function prepareApprovalRequest(deps: ApprovalDeps, requester: Appr
   const findings = workflow.steps.map(handoffFindings), blockers = findings.flatMap((f, index) => f.blockers.map(b => ({ ...b, step: index })));
   const preExecution = [...new Set(findings.flatMap(f => f.preExecution))];
   if (blockers.length) return { ok: false, code: 'REVIEW_BLOCKED', extra: { blockers: blockers.map(b => ({ code: b.code, message: b.message, ...sequence ? { step: b.step } : {} })) } } satisfies Failure;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is handed off only where it can run as ONE atomic authorization of the owner's own
+  // wallet on this deployment (user-funded groups for its chain, every leg batchable). The owner's real wallet is checked again at /approve.
+  if (workflow.batches?.length) {
+    const facts = options.ownerStepsOnly ? null : (await deps.runtime.sequences?.().catch(() => null))?.userFunded ?? null;
+    const atomic = authorizationPlan(workflow, gates, null, undefined, facts ? { facts } : undefined).userFunded;
+    if (!atomic.available) return { ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', extra: { reason: atomic.reason ?? 'USER_FUNDED_UNAVAILABLE',
+      executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView) } } satisfies Failure;
+  }
   if (!await deps.allow(requestBucket(requester), deps.rules.rate[0], deps.rules.rate[1], deps.now)) return { ok: false, code: 'HANDOFF_RATE_LIMITED' } satisfies Failure;
   // Bounded retention, opportunistically (handoffs older than 30 days).
   if (Math.random() < 0.02) await deps.handoffs.purge(deps.now).catch(() => undefined);

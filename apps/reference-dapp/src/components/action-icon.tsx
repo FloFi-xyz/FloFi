@@ -2,10 +2,12 @@
 
 import type { CanvasAction } from '../domain/canvas-authoring';
 
-export function ActionIcon({ action }: { action: CanvasAction | 'stocks' | 'transfer' | 'action' }) {
+export function ActionIcon({ action }: { action: CanvasAction | 'stocks' | 'transfer' | 'batch' | 'action' }) {
   const paths = {
     stocks: <><path d="M3 3v18h18M6 15l5-5 4 3 6-8m-5 0h5v5"/></>,
     transfer: <path d="M4 12h16m-5-5 5 5-5 5"/>,
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one source fanning out to several recipients (the Send arrow, split three ways).
+    batch: <><path d="M4 12h6m0 0 9-6m-9 6h9m-9 0 9 6"/><path d="m16 4 3 2-2 3m0 6 2 3-3 2"/></>,
     action: <rect x="5" y="5" width="14" height="14" rx="3"/>,
     swap: <><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4"/></>,
     bridge: <><path d="M3 18h18M5 18V9m14 9V9M5 9c4 0 4 6 7 6s3-6 7-6M3 7h4m10 0h4"/></>,

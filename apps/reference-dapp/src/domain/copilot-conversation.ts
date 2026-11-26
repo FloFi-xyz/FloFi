@@ -52,6 +52,8 @@ import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } fro
 import { copilotNetworksFor, lendingOffers } from './authoring-capabilities';
 import { followOnSelection, type CryptoAction } from './crypto-action-picker';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, type BatchPaymentInput } from './batch-payment-authoring';
+import type { RobinhoodTransferInput } from './robinhood-transfer-authoring';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { lendingProfileOfReserve } from './supply-authoring';
 import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
@@ -1770,6 +1772,34 @@ function bindDependentStep(action: CopilotAction, producer: CopilotAction | unde
   const cap = action.amount === null && delivered.same ? delivered.amount : null;
   return { action: cap !== null ? { ...next, amount: cap } : next, inherited, copiedCap: cap !== null };
 }
+/** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the Batch Payment several planned sends make, a duplicate recipient (never merged), or null. */
+function batchPaymentOf(steps: readonly Command[], baseRevision: number): { readonly command: Command } | { readonly duplicate: string } | null {
+  if (steps.length < BATCH_PAYMENT_MIN_RECIPIENTS || steps.length > BATCH_PAYMENT_MAX_RECIPIENTS) return null;
+  const sends = steps.map(step => step.type === 'ADD_RH_TRANSFER' ? step.input : null);
+  if (sends.some(send => send === null)) return null;
+  const [first] = sends as RobinhoodTransferInput[];
+  if (!first || !(BATCH_PAYMENT_NETWORKS as readonly string[]).includes(first.network)) return null;
+  if ((sends as RobinhoodTransferInput[]).some(send => send.network !== first.network || send.asset !== first.asset || send.recipient === 'CONNECTED_OWNER'
+    || send.decimals !== undefined || send.program !== undefined)) return null;
+  const seen = new Set<string>();
+  for (const send of sends as RobinhoodTransferInput[]) {
+    const key = send.recipient.toLowerCase();
+    if (seen.has(key)) return { duplicate: send.recipient };
+    seen.add(key);
+  }
+  return { command: { type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision, input: { network: first.network as BatchPaymentInput['network'], asset: first.asset,
+    payments: (sends as RobinhoodTransferInput[]).map(send => ({ recipient: send.recipient, amount: send.amount })) } } as Command };
+}
+const BATCH_PAYMENT_COPY = {
+  EN: { sentence: (n: number, asset: string, network: string) => `batch payment of ${asset} to ${n} recipients on ${network}`,
+    intro: (n: number, network: string) => `One Batch Payment on ${network} to ${n} recipients:`,
+    atomic: 'It runs only as one atomic authorization of your wallet: every payment settles, or none does. Review every recipient before you authorize.',
+    duplicate: (address: string) => `${address} appears more than once. A Batch Payment pays each recipient once and FloFi never merges or drops a payment: say the one amount for that recipient.` },
+  PT: { sentence: (n: number, asset: string, network: string) => `pagamento em lote de ${asset} para ${n} destinatários na ${network}`,
+    intro: (n: number, network: string) => `Um Pagamento em lote na ${network} para ${n} destinatários:`,
+    atomic: 'Ele só executa como uma autorização atômica da sua carteira: todos os pagamentos são liquidados, ou nenhum. Revise cada destinatário antes de autorizar.',
+    duplicate: (address: string) => `${address} aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez e a FloFi nunca junta nem descarta um pagamento: diga o valor único desse destinatário.` },
+} as const;
 function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind: 'PLAN' }> | null, sequenceActions: readonly CopilotAction[], state: CopilotConversation,
   env: CopilotEnvironment, notesIn: readonly string[], extras: Extras = {}): Result {
   const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language);
@@ -1814,6 +1844,18 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     const next = editorReducer({ workflow, error: null }, outcome.command, env.context);
     if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
     steps.push(outcome.command); sentences.push(outcome.sentence); stepNotes.push(...outcome.notes); workflow = next.workflow;
+  }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: several sends of one asset on one EVM mainnet, each to its own explicit recipient, are ONE Batch
+  // Payment (every recipient and amount exactly as planned and grounded above, in the person's order), never separate transfer cards.
+  const batch = !plan && !bound.size ? batchPaymentOf(steps, env.workflow.revision) : null;
+  if (batch && 'duplicate' in batch) return refused(state, m, BATCH_PAYMENT_COPY[language].duplicate(batch.duplicate));
+  if (batch) {
+    const next = editorReducer({ workflow: env.workflow, error: null }, batch.command, env.context);
+    if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
+    const input = (batch.command as Extract<Command, { type: 'ADD_BATCH_PAYMENT' }>).input;
+    const lines = input.payments.map((p, index) => `${index + 1}. ${p.amount} ${input.asset} → ${p.recipient}`);
+    return propose(state, env, batch.command, BATCH_PAYMENT_COPY[language].sentence(input.payments.length, input.asset, input.network),
+      [BATCH_PAYMENT_COPY[language].intro(input.payments.length, input.network), ...lines, BATCH_PAYMENT_COPY[language].atomic].join(' '), [...notes, ...stepNotes], m.subject.request);
   }
   const command = { type: 'ADD_SEQUENCE', steps, source: 'CHAT', baseRevision: env.workflow.revision } as Command;
   // The existing sequence runtime must take every step on its own, funded exactly as planned; otherwise this is not executable and FloFi says so.

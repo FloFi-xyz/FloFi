@@ -115,8 +115,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   // A sequence reports each mode on its own (a delegated-only workflow is supported by code overall, yet not in confirm mode).
   const runsOff = gates.enabledByDeployment.reason === 'WORKFLOW_RUNS_NOT_ENABLED' ? 'WORKFLOW_RUNS_NOT_ENABLED' : null;
   const modes = gates.supportedByCode.modes;
-  const confirmReason = modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
-    : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is never confirmed payment by payment: it runs only as one atomic authorization.
+  const batchOnlyAtomic = (workflow.batches ?? []).length > 0 ? 'BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION' : null;
+  const confirmReason = batchOnlyAtomic ?? (modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
+    : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason);
   const namespaces = [...new Set(steps.map(s => s.network.startsWith('solana') ? 'solana' as const : 'eip155' as const))].sort();
   // Every distinct chain a delegated run signs one workflow grant on (one-time setup there: the MetaMask EIP-7702 smart account).
   const enrollments = req.ok ? [...new Map(req.value.steps.flatMap(s => {
@@ -131,7 +133,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   // User-funded groups: every step must pass its own gates exactly as in confirm mode (an owner-step group IS a confirm-mode step).
   const facts = userFunded?.facts ?? null;
   const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, userFunded?.evmOwner, facts.bridgeRoutes) ?? true)) : null;
-  const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : confirmReason);
+  // A user-funded group passes the same per-step gates as confirm mode; a Batch Payment's own "never confirmed step by step" rule is not one of them.
+  const stepGates = batchOnlyAtomic ? modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
+    : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason : confirmReason;
+  const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : stepGates);
   const groupsPlan = grouped && grouped.ok ? grouped : null;
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;
   // Recommended: at least one grouped interaction and never more wallet interactions than confirming each step (`userFundedPreferred`); a

@@ -117,6 +117,9 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
     // BUILD-BASE-001: transfers are typed steps; an explicit recipient is shown as such.
     case 'TRANSFER': return step({ action: 'TRANSFER', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],
       account: d.input.recipient === 'CONNECTED_OWNER' ? { role: 'CONNECTED_WALLET' } : { role: 'RECIPIENT', address: short(d.input.recipient) }, testFunds });
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment card: its total and its recipient count (each payment is listed by its legs).
+    case 'BATCH_PAYMENT': return step({ action: 'TRANSFER', provider: 'Batch Payment', network: d.input.network, amounts: [{ amount: d.total, asset: d.input.asset }],
+      account: { role: 'RECIPIENT', address: `${d.input.payments.length} recipients` }, testFunds });
     case 'OTHER': {
       const transfer = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
       if (transfer) return step({ action: 'TRANSFER', network: transfer.network, amounts: [{ amount: transfer.amount, asset: transfer.asset }],

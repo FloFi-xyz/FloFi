@@ -117,7 +117,9 @@ export function certificationMatrix(ledger: Ledger, verification: LiveVerificati
     const capability = capabilities[index]!, composed = composeStrategy(strategy);
     if (!composed.ok) throw new Error(`CERTIFICATION_EXAMPLE_INVALID ${id}`);
     const network = strategyNetwork(strategy), destination = strategy.action === 'bridge' ? strategy.destinationNetwork : null;
-    const webRuntime = selectOwnerRuntime(composed.workflow as Workflow, PRODUCTION_ROUTING).kind;
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment has no per-card browser runtime; it runs only as one atomic user-funded group of the
+    // shared workflow run (the Editor's whole-workflow Review and /approve).
+    const webRuntime = strategy.action === 'batch_payment' ? 'per group' : selectOwnerRuntime(composed.workflow as Workflow, PRODUCTION_ROUTING).kind;
     const agents = agentRolloutAllows(strategy.action, network), real = capability.funds === 'REAL_FUNDS';
     const key = destination ? `${strategy.action}:${network}→${destination}` : `${strategy.action}:${network}`;
     const liveEvidence = verifiedEntries(ledger, verification, key, capability.adapters);
@@ -127,7 +129,8 @@ export function certificationMatrix(ledger: Ledger, verification: LiveVerificati
       : status === 'BROKEN' ? 'Implemented and handed off, but no web runtime serves it.'
       : status === 'LIVE_CERTIFIED' ? `Owner-signed public execution re-verified read-only at ${verification.checkedAt.slice(0, 10)} (historical; not re-run on this release).`
       : real ? 'Implemented; no owner-signed mainnet execution has ever been recorded.' : 'Implemented; no owner-signed public execution recorded for this exact path.';
-    return { id, action: strategy.action, network, destinationNetwork: destination, funds: capability.funds, protocols: capability.adapters, flow: strategyFlow(strategy),
+    return { id, action: strategy.action, network, destinationNetwork: destination, funds: capability.funds, protocols: capability.adapters,
+      flow: strategy.action === 'batch_payment' ? 'workflow-run' : strategyFlow(strategy),
       webRuntime, ownerWalletExecutionImplemented: implemented,
       channels: { canvas: webRuntime !== null, approve: webRuntime !== null, copilot: agents, mcp: agents, telegram: agents, whatsapp: 'POLICY_BLOCKED', developerApi: !real && agents },
       agentRollout: agents ? null : pendingAgentCapability(strategy.action, network), registryEvidence: capability.demonstratedEvidence, liveEvidence, status, reason };

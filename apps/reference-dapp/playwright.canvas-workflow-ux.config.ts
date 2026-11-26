@@ -13,7 +13,7 @@ if (copilot) {
   process.env.GRYLOO_SUPPLY_JOURNAL = join(tmpdir(), 'gryloo-build012a-p7b-' + process.pid);
 }
 const servers = Array.isArray(base.webServer) ? base.webServer : [];
-export default defineConfig({ ...base, testMatch: ['canvas-workflow-ux.spec.ts', 'workflow-ux-authoring.spec.ts', ...(copilot ? ['copilot-conversation.spec.ts'] : [])],
+export default defineConfig({ ...base, testMatch: ['canvas-workflow-ux.spec.ts', 'workflow-ux-authoring.spec.ts', 'batch-payment-card.spec.ts', ...(copilot ? ['copilot-conversation.spec.ts'] : [])],
   webServer: [...servers.map((server, index) => index === 1 && isolated ? { ...server,
     env: { ...server.env, FLOFI_MOTION_PREVIEW: 'true' } } : server), ...(copilot ? [{ command: 'node e2e/supply-harness.mjs --serve', url: 'http://127.0.0.1:8549', reuseExistingServer: false, timeout: 30_000 }] : [])],
 });

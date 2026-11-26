@@ -73,10 +73,12 @@ import { portugueseUxRefinement, portugueseUxRefinementParameterized } from './p
 import { portugueseEditorFidelity } from './pt-editor-fidelity';
 import { portugueseGlobalPrecision } from './pt-global-precision';
 import { portugueseChannelExecutionParity } from './pt-channel-execution-parity';
+import { portugueseBatchPayment } from './pt-batch-payment';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
   ...portugueseSavedRecipients,
+  ...portugueseBatchPayment,
   // UX-01/02/03/05 (owner guidelines of 21-11-2026): new keys only.
   ...portugueseUxGuidelines,
   ...portugueseCopilotAssist,

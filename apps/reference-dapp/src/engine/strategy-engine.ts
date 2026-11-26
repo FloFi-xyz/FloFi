@@ -29,6 +29,7 @@ import { networkIdentity } from '../domain/network-registry';
 import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
 import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
+import { createAuthoredBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
 import { solanaTransferProfileFor } from '../domain/solana-transfer-authoring';
 import { solanaTransferAsset } from '@defi-workflow-engine/action-registry';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
@@ -38,7 +39,7 @@ import { createSwapNode, type Direction } from '../domain/swap-authoring';
 import { DEFAULT_SLIPPAGE_BPS, defaultSlippageWithin, formatSlippage } from '../domain/slippage-policy';
 import { createUniswapLiquidityNode, uniswapLiquidityProfileFor, type UniswapLiquidityNetwork } from '../domain/uniswap-liquidity-authoring';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
-import { isStrategyInput, isStrategySpec, isStrategyWorkflow, strategyInputIssues, strategySpecIssues, NETWORK_IDS, type NetworkId, type SchemaIssue, type StrategyInput,
+import { isStrategyInput, isStrategySpec, isStrategyWorkflow, MAX_WORKFLOW_STEPS, strategyInputIssues, strategySpecIssues, NETWORK_IDS, type NetworkId, type SchemaIssue, type StrategyInput,
   type StrategySpec } from './strategy-spec';
 import { canonicalBindings, validateBindings, type WorkflowBinding, type WorkflowBindingInput } from './workflow-bindings';
 
@@ -199,6 +200,17 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
       return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount,
         ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
+    case 'batch_payment': {
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: recipients lower-cased, in the person's order; a recipient named twice is refused (never merged).
+      const recipients = spec.recipients.map(line => {
+        if (!/^0x[0-9a-fA-F]{40}$/.test(line.recipient)) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
+        return { recipient: lower(line.recipient), amount: line.amount };
+      });
+      if (new Set(recipients.map(line => line.recipient)).size !== recipients.length) throw new Error('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
+      notes.push(`Batch Payment of ${recipients.length} recipients: it runs only as one atomic authorization of your own wallet (every payment settles, or none does); ` +
+        'a wallet or deployment that cannot do that refuses it instead of splitting it into separate transfers.');
+      return { notes, strategy: { version: 1, action: 'batch_payment', network: spec.network, asset: symbol(spec.network, spec.asset), recipients } };
+    }
     case 'lending_composition': return { notes, strategy: { version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: spec.supplyAmount,
       borrowAmount: spec.borrowAmount, outputAsset: 'WETH', slippageBps: slippage!, owner: lower(spec.owner) } };
   }
@@ -289,6 +301,12 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       const input = { supply: spec.supplyAmount, borrow: spec.borrowAmount, slippage, owner: spec.owner };
       return { command: { ...base, type: 'AUTHOR_LENDING', input }, check: () => createAuthoredLending('lending-preview', 1, input) };
     }
+    case 'batch_payment': {
+      const network = catalogNetworkName(spec.network) ?? refuse('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
+      const input: BatchPaymentInput = { network: network as BatchPaymentInput['network'], asset: spec.asset,
+        payments: spec.recipients.map(line => ({ recipient: line.recipient, amount: line.amount })) };
+      return { command: { ...base, type: 'ADD_BATCH_PAYMENT', input }, check: () => createAuthoredBatchPayment('node-preview', input) };
+    }
     case 'transfer': {
       const solana = spec.network === 'solana' || spec.network === 'solana-devnet';
       const input: RobinhoodTransferInput = solana ? { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', asset: spec.asset, amount: spec.amount,
@@ -351,14 +369,25 @@ export type WorkflowComposition = {
   readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS'; readonly notes: readonly string[];
   /** BUILD-CHAT-E2E-001: typed amount dependencies between steps (empty: every step has its own fixed amount). */
   readonly bindings: readonly WorkflowBinding[];
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the Batch Payments of the workflow. `steps` are the executable legs (one transfer per recipient);
+   * each batch names its own strategy step (`step`), the inclusive leg range it expands to, and its own semantic composition (the batch node and
+   * its hash, which the workflow hash binds). Absent or empty: no batch.
+   */
+  readonly batches?: readonly BatchOperation[];
 };
+export type BatchOperation = { readonly step: number; readonly from: number; readonly to: number; readonly composition: Composition;
+  readonly network: NetworkId; readonly asset: string; readonly recipients: number };
 /**
  * The hash of an ordered list of step hashes (several steps only). BUILD-CHAT-E2E-001: bindings, when present, are part of it;
  * without bindings the hash is byte-for-byte the BUILD-MCP-002 one.
  */
-export function workflowSequenceHash(stepHashes: readonly string[], bindings: readonly WorkflowBindingInput[] = []): string {
-  const body = bindings.length ? { contract: 'flofi-strategy-workflow', version: 2, steps: stepHashes, bindings: canonicalBindings(bindings) }
-    : { contract: 'flofi-strategy-workflow', version: 2, steps: stepHashes };
+export function workflowSequenceHash(stepHashes: readonly string[], bindings: readonly WorkflowBindingInput[] = [],
+  batches: readonly (Pick<BatchOperation, 'step' | 'from' | 'to'> & { readonly workflowHash: string })[] = []): string {
+  const body = { contract: 'flofi-strategy-workflow', version: 2, steps: stepHashes, ...bindings.length ? { bindings: canonicalBindings(bindings) } : {},
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: present only with a Batch Payment (every other workflow keeps its hash byte for byte): each batch's
+    // own semantic hash (its whole ordered manifest) and the legs it is executed as.
+    ...batches.length ? { batches: batches.map(b => ({ step: b.step, legs: [b.from, b.to], workflowHash: b.workflowHash })) } : {} };
   return '0x' + createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
 const sameAccount = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -378,21 +407,67 @@ export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFa
   // A bound workflow is a general sequence: its step indexes are what its bindings name, so it is never collapsed.
   const specs = isStrategyWorkflow(input) ? rawBindings.length ? input.steps.map(step => ({ ...step, version: 1 }) as StrategySpec)
     : collapseLending(input.steps.map(step => ({ ...step, version: 1 }) as StrategySpec)) : [input];
-  const steps: Composition[] = [];
+  const steps: Composition[] = [], semantic: Composition[] = [], legStart: number[] = [], batches: BatchOperation[] = [];
+  const located = (index: number, issues: readonly SchemaIssue[]) => issues.map(issue => ({ path: specs.length > 1 || isStrategyWorkflow(input)
+    ? `/steps/${index}${issue.path === '/' ? '' : issue.path}` : issue.path, rule: issue.rule }));
   for (const [index, spec] of specs.entries()) {
+    legStart.push(steps.length);
     const composed = composeStrategy(spec);
-    if (!composed.ok) return { ...composed, issues: composed.issues.map(issue => ({ path: specs.length > 1 || isStrategyWorkflow(input) ? `/steps/${index}${issue.path === '/' ? '' : issue.path}` : issue.path, rule: issue.rule })) };
-    steps.push(composed);
+    if (!composed.ok) return { ...composed, issues: located(index, composed.issues) };
+    semantic.push(composed);
+    if (composed.strategy.action !== 'batch_payment') { steps.push(composed); continue; }
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment executes as its ordered legs, each exactly the transfer of that recipient and amount
+    // (the network's own verified transfer declaration); the batch's own composition stays its semantic identity.
+    const batch = composed.strategy, from = steps.length;
+    for (const [leg, line] of batch.recipients.entries()) {
+      const transfer = composeStrategy({ version: 1, action: 'transfer', network: batch.network, asset: batch.asset, amount: line.amount, recipient: line.recipient });
+      if (!transfer.ok) return { ...transfer, issues: located(index, transfer.issues.length ? transfer.issues : [{ path: `/recipients/${leg}`, rule: transfer.code }]) };
+      steps.push(transfer);
+    }
+    batches.push({ step: index, from, to: steps.length - 1, composition: composed, network: batch.network, asset: batch.asset, recipients: batch.recipients.length });
   }
+  // Every payment of a Batch Payment is one step of the workflow run's budget (its durable schema holds at most MAX_WORKFLOW_STEPS steps).
+  if (steps.length > MAX_WORKFLOW_STEPS) return { ok: false, code: 'BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET',
+    issues: [{ path: batches.length && specs.length === 1 && !isStrategyWorkflow(input) ? '/recipients' : '/steps', rule: 'maxItems' }] };
   const fundsClass = steps.some(c => c.fundsClass === 'REAL_FUNDS') ? 'REAL_FUNDS' : 'TEST_FUNDS';
   if (steps.length === 1) return { ok: true, strategy: steps[0]!.strategy, workflowHash: steps[0]!.workflowHash, steps, fundsClass, notes: steps[0]!.notes, bindings: [] };
-  const checked = validateBindings(steps, rawBindings);
+  // A binding names strategy steps: a Batch Payment consumer binds each of its legs (each spends exactly its own amount, never less); a batch
+  // delivers nothing to the owner, so it is never a producer.
+  const batchAt = (index: number) => batches.find(b => b.step === index) ?? null;
+  const legBindings: (WorkflowBindingInput & { readonly exact?: true })[] = [];
+  for (const [i, b] of rawBindings.entries()) {
+    if (batchAt(b.amountFrom)) return { ok: false, code: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED', issues: [{ path: `/bindings/${i}/amountFrom`, rule: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED' }] };
+    const consumer = batchAt(b.step), producer = legStart[b.amountFrom], target = legStart[b.step];
+    if (producer === undefined || target === undefined) return { ok: false, code: 'WORKFLOW_BINDING_INVALID', issues: [{ path: `/bindings/${i}`, rule: 'WORKFLOW_BINDING_INVALID' }] };
+    if (consumer) for (let leg = consumer.from; leg <= consumer.to; leg++) legBindings.push({ step: leg, amountFrom: producer, exact: true });
+    else legBindings.push({ step: target, amountFrom: producer });
+  }
+  const checked = validateBindings(steps, legBindings);
   if (!checked.ok) return { ok: false, code: checked.code, issues: checked.issues };
-  const bindings = checked.bindings;
-  return { ok: true, strategy: { version: 2, steps: steps.map(c => c.strategy), ...bindings.length ? { bindings: canonicalBindings(bindings) } : {} },
-    workflowHash: workflowSequenceHash(steps.map(c => c.workflowHash), bindings), steps, fundsClass, bindings,
-    notes: [...steps.flatMap((c, i) => c.notes.map(note => `Step ${i + 1}: ${note}`)),
-      ...bindings.map(b => `Step ${b.step + 1} spends what step ${b.amountFrom + 1} actually delivers (after reconciliation), up to its own amount.`)] };
+  const exactLegs = new Set(legBindings.filter(b => b.exact).map(b => b.step));
+  const bindings = checked.bindings.map(b => exactLegs.has(b.step) ? { ...b, exact: true as const } : b);
+  const notes = [...semantic.flatMap((c, i) => c.notes.map(note => `Step ${i + 1}: ${note}`)),
+    ...rawBindings.map(b => batchAt(b.step)
+      ? `Step ${b.step + 1} pays each recipient exactly their amount from what step ${b.amountFrom + 1} actually delivers (after reconciliation); if that is not enough, nothing is paid and a new Review is needed.`
+      : `Step ${b.step + 1} spends what step ${b.amountFrom + 1} actually delivers (after reconciliation), up to its own amount.`)];
+  if (!batches.length) return { ok: true, strategy: { version: 2, steps: steps.map(c => c.strategy), ...bindings.length ? { bindings: canonicalBindings(bindings) } : {} },
+    workflowHash: workflowSequenceHash(steps.map(c => c.workflowHash), bindings), steps, fundsClass, bindings, notes };
+  return { ok: true, strategy: { version: 2, steps: semantic.map(c => c.strategy), ...rawBindings.length ? { bindings: canonicalBindings(rawBindings) } : {} },
+    workflowHash: workflowSequenceHash(steps.map(c => c.workflowHash), bindings, batches.map(b => ({ step: b.step, from: b.from, to: b.to, workflowHash: b.composition.workflowHash }))),
+    steps, fundsClass, bindings, batches, notes };
+}
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the workflow's operations, one per strategy step: a Batch Payment's own semantic composition in place of
+ * its legs, every other step as composed. What a person authored (and every surface's parity guard compares); `steps` stays what executes.
+ */
+export function operationSteps(w: Pick<WorkflowComposition, 'steps' | 'batches'>): readonly Composition[] {
+  const out: Composition[] = [];
+  for (let leg = 0; leg < w.steps.length; leg++) {
+    const batch = (w.batches ?? []).find(b => b.from === leg);
+    if (batch) { out.push(batch.composition); leg = batch.to; continue; }
+    out.push(w.steps[leg]!);
+  }
+  return out;
 }
 export function composeWorkflowBound(input: unknown, expectedHash: string | undefined): WorkflowComposition | ComposeFailure {
   const composed = composeWorkflow(input);

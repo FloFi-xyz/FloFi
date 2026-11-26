@@ -92,8 +92,10 @@ function assetEntries(): Entry[] {
   // tokens (Robinhood Stock Tokens included: their issuer checks live on the swap path) are not advertised for bridges (flofi-bridge review).
   for (const [catalog, name] of [[ROBINHOOD_BASE_ASSETS, 'robinhood'], [BASE_BASE_ASSETS, 'base'], [ARBITRUM_BASE_ASSETS, 'arbitrum-one'], [ETHEREUM_BASE_ASSETS, 'ethereum']] as const)
     for (const t of (networkCatalog(catalog.chain) ?? catalog).assets)
-      for (const action of (t.kind === 'NATIVE' ? ['swap', 'bridge', 'transfer'] as const : UNIVERSAL_BRIDGE_TOKENS.includes(t.symbol)
-        ? ['swap', 'add_liquidity', 'bridge', 'transfer'] as const : ['swap', 'add_liquidity', 'transfer'] as const).filter(action => actionsOn(name).includes(action)))
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment pays native ETH or a catalog ERC-20, never a Stock Token.
+      for (const action of [...(t.kind === 'NATIVE' ? ['swap', 'bridge', 'transfer'] as const : UNIVERSAL_BRIDGE_TOKENS.includes(t.symbol)
+        ? ['swap', 'add_liquidity', 'bridge', 'transfer'] as const : ['swap', 'add_liquidity', 'transfer'] as const), ...'stock' in t && t.stock ? [] : ['batch_payment'] as const]
+        .filter(action => actionsOn(name).includes(action)))
         out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address, decimals: t.decimals, action,
           source: action === 'bridge' ? `crosschain-universal:${name}` : `${name}-catalog:${action}` });
   const aave = AAVE_V3_LENDING_PROFILES.find(p => p.network === 'Base Sepolia')!;

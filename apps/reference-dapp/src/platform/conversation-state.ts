@@ -219,6 +219,28 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
   [/^WORKFLOW_STEP_COUNT_MISMATCH$/, { EN: 'FloFi received a different number of steps than you asked for, so it stopped. Nothing was signed or sent. Check the steps and ' +
       'try again.',
     PT: 'O FloFi recebeu um número de etapas diferente do que você pediu, então parou. Nada foi assinado nem enviado. Confira as etapas e tente de novo.' }],
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): Batch Payment refusals, each said as it is (before the generic families that would word them as
+  // "too many requests", "invalid details" or "not available").
+  [/^BATCH_PAYMENT_DUPLICATE_RECIPIENT$/, { EN: 'A recipient appears more than once. A Batch Payment pays each recipient once, and FloFi never merges or drops a payment: ' +
+      'give that recipient one amount.',
+    PT: 'Um destinatário aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez, e o FloFi nunca junta nem descarta um pagamento: dê um único ' +
+      'valor a esse destinatário.' }],
+  [/^BATCH_PAYMENT_(?:ATOMIC_EXECUTION_UNAVAILABLE|REQUIRES_ATOMIC_EXECUTION)$/, { EN: 'This Batch Payment can only run as one atomic authorization of your own wallet ' +
+      '(every payment, or none), and that is not available here. Nothing was signed or sent. Use a wallet that supports atomic batches, or send separate transfers.',
+    PT: 'Este Pagamento em lote só pode executar como uma autorização atômica da sua própria carteira (todos os pagamentos, ou nenhum), e isso não está disponível ' +
+      'aqui. Nada foi assinado nem enviado. Use uma carteira que suporte lotes atômicos, ou envie transferências separadas.' }],
+  [/^BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET$/, { EN: `Each recipient of a Batch Payment counts as one of the ${MAX_WORKFLOW_STEPS} steps of a workflow, and this ` +
+      'workflow has more. Nothing was dropped, signed or sent. Pay fewer recipients or split it into two workflows.',
+    PT: `Cada destinatário de um Pagamento em lote conta como uma das ${MAX_WORKFLOW_STEPS} etapas de um fluxo, e este fluxo tem mais. Nada foi descartado, assinado ` +
+      'ou enviado. Pague menos destinatários ou divida em dois fluxos.' }],
+  [/^WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT$/, { EN: 'The earlier step delivered less than the payments need, so no payment was made: FloFi never reduces a ' +
+      'recipient\u2019s amount. Review the workflow again with amounts that fit.',
+    PT: 'A etapa anterior entregou menos do que os pagamentos precisam, então nenhum pagamento foi feito: o FloFi nunca reduz o valor de um destinatário. Revise o fluxo ' +
+      'de novo com valores que caibam.' }],
+  [/^BATCH_PAYMENT_(?:NETWORK|ASSET|TOKEN|RECIPIENT)_UNSUPPORTED$/, { EN: 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, ' +
+      'Ethereum and Robinhood Chain (never Stock Tokens, never Solana in this version).',
+    PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens, nunca Solana ' +
+      'nesta versão).' }],
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): balance reads that this FloFi deployment has not turned on (an operator setting), before the
   // generic portfolio family: re-linking the wallet cannot change it, and it is never a zero balance.
   [/^PORTFOLIO_READS_NOT_ENABLED$/, { EN: 'This FloFi deployment does not read wallet balances through this connection yet. Linking your wallet again does not change ' +

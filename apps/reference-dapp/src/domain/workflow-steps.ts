@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { batchPaymentDetails, type BatchPaymentInput } from './batch-payment-authoring';
 import { reviewContextForChain, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { isLendingComposition, LENDING_NODE_IDS, workflowDependencyOrder, type ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import type { Workflow } from './initial-workflow';
@@ -21,7 +22,7 @@ import { networkIdentity } from './network-registry';
  * BUILD-COPILOT-002: ordered, typed descriptions of the canonical workflow's steps, read only from the IR through the
  * existing `*Details` readers. AI-agnostic and read-only: nothing here edits, quotes or observes a chain.
  */
-export type StepKind = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'LIQUIDITY' | 'TRANSFER' | 'TEMPLATE' | 'OTHER';
+export type StepKind = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'LIQUIDITY' | 'TRANSFER' | 'BATCH_PAYMENT' | 'TEMPLATE' | 'OTHER';
 export type StepDetail =
   | { readonly type: 'EVM_SWAP'; readonly network: 'Base' | 'Base Sepolia' | 'Ethereum Sepolia'; readonly from: 'USDC' | 'WETH'; readonly to: 'USDC' | 'WETH'; readonly amount: string;
       readonly slippage: string }
@@ -46,6 +47,8 @@ export type StepDetail =
       readonly tokenB: string; readonly fee: number; readonly management: ConcentratedLiquidityManagement }
   /** BUILD-BASE-001: a transfer (native ETH, or a catalog token on a catalog network) to the connected owner or an explicit recipient. */
   | { readonly type: 'TRANSFER'; readonly input: RobinhoodTransferInput }
+  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several recipients, one asset, one EVM mainnet). */
+  | { readonly type: 'BATCH_PAYMENT'; readonly input: BatchPaymentInput; readonly total: string }
   | { readonly type: 'LENDING_COMPOSITION'; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP'; readonly input: LendingInput }
   | { readonly type: 'TEMPLATE'; readonly template: string }
   | { readonly type: 'OTHER'; readonly actionType: string };
@@ -121,6 +124,10 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
     protocol: orca.provider, network: orca.network, testFunds: orca.network === 'Solana Devnet' };
   const network = CHAIN_LABEL[node.chainId] ?? node.chainId;
   const testFunds = TEST_CHAINS.has(node.chainId) ? true : MAIN_CHAINS.has(node.chainId) ? false : null;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is one typed step (all of its recipients and amounts).
+  const batch = read(() => batchPaymentDetails(node as Parameters<typeof batchPaymentDetails>[0]));
+  if (batch) return { kind: 'BATCH_PAYMENT', detail: { type: 'BATCH_PAYMENT', input: { network: batch.network, asset: batch.asset, payments: batch.payments }, total: batch.total },
+    protocol: 'Batch Payment', network: batch.network, testFunds: false };
   // BUILD-BASE-001: transfers are typed steps (the Copilot refers to and re-authors catalog-network transfers like any other step).
   const transfer = read(() => transferDetails(node as Parameters<typeof transferDetails>[0]));
   if (transfer) return { kind: 'TRANSFER', detail: { type: 'TRANSFER', input: transfer }, protocol: 'Transfer', network: transfer.network,

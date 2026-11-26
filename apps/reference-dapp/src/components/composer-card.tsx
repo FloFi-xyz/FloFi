@@ -10,6 +10,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { composerSummary, composerNodeState } from '../domain/composer-presentation';
 import type { Command } from '../domain/commands';
 import type { CanvasAction } from '../domain/canvas-authoring';
+import { BatchPaymentFields, type BatchPaymentCardData } from './batch-payment-fields';
 import { ActionIcon } from './action-icon';
 import { TokenBrandIcon, NetworkBrandIcon } from './brand-icon';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
@@ -61,9 +62,9 @@ export function poolProposalTarget(command: Command): string | null {
   return ['SET_LIQUIDITY', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY'].includes(command.type) && 'nodeId' in command ? command.nodeId : null;
 }
 
-const actionIcons: Record<string, CanvasAction | 'stocks' | 'transfer'> = {
+const actionIcons: Record<string, CanvasAction | 'stocks' | 'transfer' | 'batch'> = {
   Swap: 'swap', Bridge: 'bridge', 'Pool / Liquidity': 'pool', 'Prepare liquidity': 'pool',
-  Supply: 'supply', Lending: 'lending', Borrow: 'borrow', Repay: 'repay', Withdraw: 'withdraw', Send: 'transfer', Stocks: 'stocks',
+  Supply: 'supply', Lending: 'lending', Borrow: 'borrow', Repay: 'repay', Withdraw: 'withdraw', Send: 'transfer', Stocks: 'stocks', 'Batch Payment': 'batch',
 };
 
 /**
@@ -563,6 +564,8 @@ export type ComposerCardData = {
   stocks?: { equity: string; side: 'source' | 'destination'; onEquityChange?(equity: string): void };
   supplyProposal?: { formId: string; reviewLabel?: string; canReview: boolean; hasProposal: boolean; canApply: boolean; onApply(): void };
   recipient?: CardRecipient;
+  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment card's network, asset, recipients and exact total (its own fields). */
+  batchPayment?: BatchPaymentCardData;
   /** BUILD-FLOFI-MAINNET-EXEC-002: a Bridge card's destination wallet (auto-filled, editable). */
   destination?: CardDestination;
   poolProposal?: { nodeId: string; formId: string; canReview: boolean; canApply: boolean; onApply(): void };
@@ -751,7 +754,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       </span>}
       </div>
       {poolCard && <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/>}
-      {card.inspection ? <>
+      {!card.inspection && card.batchPayment ? <BatchPaymentFields batch={card.batchPayment}/> : card.inspection ? <>
         {card.summary.liquidityValues ? <ValuePair relationship="contribution">
           {card.summary.liquidityValues.map((value, index) => <ValueBox key={value.token} readOnly source={index === 0} amount={value.amount} token={value.token} network={sourceNetwork}
             label={`${index === 0 ? 'First' : 'Second'} liquidity asset amount`} hint="Configured liquidity contribution" fiatFirst={false} onFiatFirstChange={setFiatFirst}/>)}

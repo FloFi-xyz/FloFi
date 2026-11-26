@@ -61,6 +61,9 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
     case 'add_liquidity': return spec.network === 'solana-devnet' || spec.network === 'solana' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
       : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.liquidity ?? 'uniswap-liquidity', subject: 'EVM' };
     case 'lending_composition': return { flow: 'lending-composition', subject: 'EVM' };
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is simulated only as the one atomic batch of the owner's own wallet (every payment,
+    // its fees and the owner's balances together), which the owner's FloFi signing surface prepares; MCP cannot preview it without that wallet.
+    case 'batch_payment': return { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' };
   }
 }
 /** The flow enablement that governs a strategy even when MCP cannot preview it (for capability reporting). */

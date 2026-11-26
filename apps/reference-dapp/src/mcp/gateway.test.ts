@@ -170,7 +170,10 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
       expect(valid.output, id).toMatchObject({ ok: true, valid: true });
       const review = await client().callTool('review_strategy', { strategy, workflowHash: composed.output.workflowHash });
       expect(review.isError, `${id}: ${review.text.slice(0, 200)}`).toBe(false);
-      expect((review.output.findings as { code: string }[]).map(f => f.code), id).toContain('OWNER_APPROVAL_REQUIRED');
+      // A Batch Payment is reviewed per leg (it executes as its legs): every leg carries the owner-approval finding.
+      const findings = review.output.workflowSteps ? (review.output.workflowSteps as { findings: { code: string }[] }[]).flatMap(step => step.findings)
+        : review.output.findings as { code: string }[];
+      expect(findings.map(f => f.code), id).toContain('OWNER_APPROVAL_REQUIRED');
     }
   });
 

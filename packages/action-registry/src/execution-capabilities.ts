@@ -42,12 +42,13 @@ const mockReadOnly = flags(['AUTHOR', 'QUOTE_OR_READ', 'SIMULATE', 'REVIEW']);
 const fork = flags(['AUTHOR', 'QUOTE_OR_READ', 'SIMULATE', 'REVIEW', 'AUTHORIZE', 'EXECUTE', 'RECONCILE', 'RECOVER', 'EVIDENCE']);
 const preparation = flags(['AUTHOR', 'QUOTE_OR_READ', 'SIMULATE', 'REVIEW', 'EVIDENCE']);
 const templateKinds = new Set(['mock-read', 'mock-transform', 'mock-condition', 'mock-bridge', 'mock-pool', 'mock-supply', 'mock-lending', 'mock-borrow']);
-const definedActions = new Set(['asset.transfer', 'withdraw', 'repay', 'borrow', 'supply', 'asset.swap.exact-input', 'asset.bridge', 'asset.liquidity.uniswap-v3', 'asset.liquidity.concentrated', 'asset.liquidity.prepare', ...templateKinds]);
+const definedActions = new Set(['asset.transfer', 'asset.transfer.batch', 'withdraw', 'repay', 'borrow', 'supply', 'asset.swap.exact-input', 'asset.bridge', 'asset.liquidity.uniswap-v3', 'asset.liquidity.concentrated', 'asset.liquidity.prepare', ...templateKinds]);
 const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
   'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'weth9.wrap': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
   'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'orca.whirlpools-mainnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
   'flofi.router': '1.0.0', 'flofi.router.universal': '1.0.0', 'evm.token-transfer': '1.0.0', 'solana.system-transfer': '1.0.0', 'solana.spl-transfer': '1.0.0',
+  'evm.batch-payment': '1.0.0',
 });
 const rows: ExecutionCapabilityProfile[] = [];
 function add(actionType: string, adapterId: string, chainId: string, environment: ExecutionEnvironment,
@@ -144,6 +145,12 @@ for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
 for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.bridge', 'flofi.router'], ['asset.liquidity.concentrated', 'uniswap.v3'],
   ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
   add(action, adapter, 'eip155:1', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: Batch Payment (one source wallet, one asset, several recipients) on the four EVM mainnets with a
+// transfer profile that pays explicit recipients. Executed only as ONE atomic owner-wallet authorization of its transfer legs (EIP-5792 atomic batch
+// or the owner's own smart-account operation), on deployments that enable user-funded execution for the chain; none is demonstrated on mainnet, so no
+// evidence ceiling is claimed. Solana has no atomic multi-recipient path in this build and no row.
+for (const chain of ['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1'] as const)
+  add('asset.transfer.batch', 'evm.batch-payment', chain, 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH ⇄ WETH9 conversions (deposit / withdraw on each network's verified WETH9, exactly 1:1) on the
 // four catalog mainnets, in the same owner-wallet swap runtime; native-ETH pool swaps stay `uniswap.v3`. None is demonstrated on mainnet.
 for (const chain of ['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1'] as const)

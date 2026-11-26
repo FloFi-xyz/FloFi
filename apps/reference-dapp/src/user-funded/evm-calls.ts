@@ -386,6 +386,8 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const available = BigInt(produced.amount), cap = BigInt(binding.cap);
       amount = available < cap ? available : cap;
       if (amount <= 0n) return refuse('WORKFLOW_BINDING_NOTHING_GUARANTEED');
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg is paid exactly or not at all (the whole atomic batch is then refused).
+      if (binding.exact && amount < cap) return refuse('WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
       // Several consumers of one guarantee share it: each spends what the earlier ones left.
       guaranteed.set(binding.amountFrom, { asset: produced.asset, amount: (available - amount).toString() });
     }

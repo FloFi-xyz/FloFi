@@ -41,7 +41,7 @@ export const COPILOT_ASSET_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9.&'-]*(?: [A-Za-z0
 export const COPILOT_MISSING_FIELDS = ['amount', 'asset', 'network', 'sourceNetwork', 'destinationNetwork', 'protocol', 'range', 'slippage',
   'beneficiary', 'recipient'] as const;
 export const COPILOT_LIMITS = Object.freeze({
-  maxActions: 3, maxMessages: 6, maxUserMessageLength: 1024, maxAssistantMessageLength: 600, maxValueLength: 40,
+  maxActions: 3, /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the sends of one Batch Payment. */ maxPaymentActions: 8, maxMessages: 6, maxUserMessageLength: 1024, maxAssistantMessageLength: 600, maxValueLength: 40,
   maxQuestionLength: 300, maxReasonLength: 300, maxOptions: 4, maxOptionLength: 60, maxOutputTextLength: 8192,
 });
 

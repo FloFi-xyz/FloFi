@@ -37,7 +37,7 @@ import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
 import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet.ts';
 import { arbitrumAuthoringCatalog } from '../server/arbitrum-mainnet.ts';
 import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
-import { approvalForRequester, approvalProgress, approvalStatus, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
+import { approvalForRequester, approvalProgress, approvalStatus, batchPaymentViews, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
   NATIVE_SIGNING_WALLETS, nativeSigningEligible, openApprovalSession, PlatformRefusal, refuse, requestApproval, requesterScope, reviewWorkflow, simulatePreview, stepViews,
   validateStrategy, type ApprovalDeps, type ApprovalRequester, type NativeSigningWallet, type RequesterScope } from '../platform/index.ts';
 import { principalOwners, principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
@@ -117,6 +117,12 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'conversion is one bridge step; for a plan_strategy result, its stepCount). WORKFLOW_STEP_COUNT_MISMATCH means the strategy that arrived has another ' +
   'number of steps: compose again with every step, in the person\'s order. `readiness` says what a result establishes: a valid or reviewed strategy is ' +
   'not authorized and not necessarily executable. ' +
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02)
+  'Several payments of one asset on one EVM mainnet (base, arbitrum-one, ethereum, robinhood) are ONE batch_payment step: 2 to 8 recipients, each ' +
+  'with the exact amount the person stated, in their order (the same amount for each only when they asked for equal amounts). Never split it into ' +
+  'transfers, never invent, merge or reorder a recipient, and ask when a recipient or an amount is missing. Each recipient counts as one step of the ' +
+  '8-step budget (stepCount counts these legs). It executes only as one atomic authorization of the owner\'s own wallet (every payment, or none); a ' +
+  'wallet or deployment that cannot do that refuses it (BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE). Solana batch payments are not available. ' +
   'When a result carries `display` lines, show those amounts verbatim in the person\'s language; never re-round or convert those amounts yourself.';
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
 export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
@@ -638,6 +644,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   register('compose_strategy', 'Compose strategy', 'Deterministically turn structured intent into FloFi\'s canonical Semantic Workflow IR (revision 1), using the same ' +
     'authoring rules as the FloFi app. Unsupported or ambiguous input is refused with a code, never guessed. Keep `strategy` (normalized) and `workflowHash` for ' +
     'validate/simulate/review. The model must not invent addresses: use only values the user gave. A multi-step workflow is `{version: 2, steps: [...]}` ' +
+    '(several payments of one asset on one EVM mainnet are ONE `batch_payment` step, reported with its legs in `workflowSteps` and in `batchPayments`) ' +
     '(one step is the same as version 1); each step keeps its own IR and hash. A bridge whose destination asset differs (`outputAsset`, e.g. ETH → USDC) ' +
     'is one Universal Bridge step, never a swap plus a bridge.', Schemas.compose, pure, args => {
     const w = composeWorkflowOrRefuse(args.strategy, undefined, scope), visual = workflowVisualModel(w);
@@ -650,8 +657,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
           : ['review_strategy with this strategy and workflowHash', 'simulate_strategy for a read-only preview (optional)'] };
     }
-    const plan = workflowPlan(w);
-    return { ok: true, strategy: w.strategy, workflowHash: w.workflowHash, fundsClass: w.fundsClass, stepCount: w.steps.length,
+    const plan = workflowPlan(w), batches = batchPaymentViews(w);
+    return { ok: true, strategy: w.strategy, workflowHash: w.workflowHash, fundsClass: w.fundsClass, stepCount: w.steps.length, ...batches.length ? { batchPayments: batches } : {},
       executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP', bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })) },
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
         fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),

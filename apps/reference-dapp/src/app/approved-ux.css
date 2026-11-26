@@ -219,3 +219,12 @@
 .universal-destination[data-destination-state="error"] input{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
 .universal-destination[data-destination-state="loading"] input{border-style:dashed}
 .universal-bridge-form .composer-destination-warning{display:block;padding:4px 6px;border-radius:6px;background:var(--warning-surface);color:var(--warning-text)}
+/* BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): the Batch Payment card's recipient rows, built from the Send card's existing field tokens. */
+.batch-payment-fields{display:flex;flex-direction:column;gap:4px}
+.batch-payment-selects{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
+.batch-payment-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.batch-payment-row{display:grid;grid-template-columns:12px minmax(0,1fr) 68px 16px;gap:4px;align-items:center}
+.batch-payment-index{color:var(--muted);font-size:10px;text-align:right}
+.batch-payment-remove{border:0;background:transparent;color:var(--muted);font-size:14px;line-height:1;padding:0;cursor:pointer}
+.batch-payment-remove:disabled{opacity:.35;cursor:not-allowed}
+.batch-payment-summary{display:flex;flex-wrap:wrap;gap:2px}

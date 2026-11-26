@@ -18,14 +18,14 @@
  * (`singleStep`, BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001).
  */
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
-import { parseArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { isBatchPaymentNode, parseArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { nodeSemantics } from '../automations/binding.ts';
 import { strategyOfCommand } from '../channels/core/strategy.ts';
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import { compositionWorkflow, sequenceOrder, stepProjection, workflowSequence } from '../domain/workflow-sequence';
 import { workflowSteps, type StepDetail } from '../domain/workflow-steps';
-import { composeWorkflow, dappReviewContext, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
+import { composeWorkflow, dappReviewContext, operationSteps, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
 import { editorReducer, initialEditor } from '../domain/editor';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 
@@ -60,6 +60,7 @@ export function authoringCommandOf(detail: StepDetail): Command | null {
         secondAmount: i.amountB, slippage: i.slippage, fee: i.fee, ...i.rangeUnit === 'TICK' ? { rangeUnit: 'TICK', lower: i.lower, upper: i.upper } : {} } } as Command;
     }
     case 'TRANSFER': return { ...base, type: 'ADD_RH_TRANSFER', input: detail.input } as Command;
+    case 'BATCH_PAYMENT': return { ...base, type: 'ADD_BATCH_PAYMENT', input: detail.input } as Command;
     default: return null;
   }
 }
@@ -89,7 +90,10 @@ export function editorWorkflowStrategy(input: unknown, options: { readonly singl
   if (!ordered.length) return { ok: false, code: 'EDITOR_WORKFLOW_EMPTY' };
   // A workflow one of FloFi's composition runtimes executes as a whole keeps that path; it is not a sequence of independent steps.
   if (compositionWorkflow(workflow)) return { ok: false, code: 'EDITOR_WORKFLOW_COMPOSITION' };
-  const single = ordered.length === 1 && options.singleStep === true;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a lone Batch Payment card is one operation whose run is its 2..8 payments (one atomic group), so it
+  // takes the shared workflow run without the single-card opt-in.
+  const loneBatch = ordered.length === 1 && isBatchPaymentNode(ordered[0]!);
+  const single = ordered.length === 1 && (options.singleStep === true || loneBatch);
   if (ordered.length < EDITOR_RUN_MIN_STEPS && !single) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
   if (ordered.length > EDITOR_RUN_MAX_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_TOO_LONG' };
   // Exactly the Canvas's own sequence: every step must lint alone with its own network's trusted context, as its runtime receives it. One card
@@ -118,10 +122,12 @@ export function editorWorkflowStrategy(input: unknown, options: { readonly singl
   const strategy = { version: 2, steps: specs, ...unique.length ? { bindings: unique } : {} } as StrategyInput;
   const composed = composeWorkflow(strategy);
   if (!composed.ok) return { ok: false, code: composed.code };
-  if (composed.steps.length !== steps.length) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED' };
+  // One operation per Canvas card: a Batch Payment card is its own semantic composition (its legs are the engine's verified transfers of it).
+  const operations = operationSteps(composed);
+  if (operations.length !== steps.length) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED' };
   // Every composed step must be exactly its Canvas node: the run executes the engine's composition, so anything else is not this workflow.
   for (const [index, step] of steps.entries()) {
-    const reproduced = financialNodes(composed.steps[index]!.workflow), node = ordered.find(candidate => candidate.nodeId === step.nodeId);
+    const reproduced = financialNodes(operations[index]!.workflow), node = ordered.find(candidate => candidate.nodeId === step.nodeId);
     if (!node || reproduced.length !== 1 || nodeSemantics(reproduced[0]!) !== nodeSemantics(node)) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED', step: index };
   }
   return { ok: true, strategy: composed.strategy, workflowHash: composed.workflowHash, stepCount: composed.steps.length, composition: composed };
@@ -141,7 +147,8 @@ export function canvasWorkflowOfStrategy(input: unknown): CanvasOfStrategy {
   if (composed.steps.length < EDITOR_RUN_MIN_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
   const context = dappReviewContext();
   let state = initialEditor();
-  for (const [index, step] of composed.steps.entries()) {
+  // One Canvas card per operation: a Batch Payment is ONE card (never one Send card per payment).
+  for (const [index, step] of operationSteps(composed).entries()) {
     const before = new Set(state.workflow.nodes.map(n => n.nodeId));
     // The same authoring command, applied at the Canvas's current revision (each edit advances it).
     const next = editorReducer(state, { ...step.command, baseRevision: state.workflow.revision } as Command, context);

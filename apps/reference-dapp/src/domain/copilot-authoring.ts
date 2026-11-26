@@ -67,7 +67,9 @@ export const COPILOT_AUTHORING_COMMANDS = Object.freeze(['ADD_SWAP', 'ADD_TESTNE
   // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge between the five mainnets.
   'ADD_UNIVERSAL_BRIDGE',
   // PR B: a Solana Devnet swap's output funding an Orca position, added and linked exactly as the Canvas does.
-  'ADD_SOLANA_COMPOSITION'] as const);
+  'ADD_SOLANA_COMPOSITION',
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several sends of one asset on one EVM mainnet), as the chat's grammar authors it.
+  'ADD_BATCH_PAYMENT'] as const);
 export type CopilotAuthoringCommand = (typeof COPILOT_AUTHORING_COMMANDS)[number];
 export const COPILOT_CAPABILITIES = copilotCopy('EN').capabilities;
 
@@ -439,10 +441,16 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   if (maximum !== undefined && Number(value) > maximum) return reject('COPILOT_SLIPPAGE_OUT_OF_RANGE', m.slippageAtMost(maximum));
   return value;
 }
-function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+/**
+ * `sent`: the asset a catalog transfer sends, already resolved to its catalog identity (BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001). Its token is a catalog
+ * symbol, never an address the person typed, so "send 25 USDC to 0x… on Base" names a recipient, not a token: only that token's own address can collide.
+ */
+function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field),
+  sent?: { readonly address?: string | null }): string | null {
   if (value !== null && field === 'recipient' && g.saved?.includes(value)) return value;
   if (value !== null && !g.carried.has(field)) {
-    const assetAddresses = [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
+    const assetAddresses = sent ? sent.address ? [sent.address.toLowerCase()] : []
+      : [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
     const mentions = [...g.text.matchAll(/0x[0-9a-fA-F]{40}/g)].filter(match => match[0].toLowerCase() === value.toLowerCase());
     if (assetAddresses.includes(value.toLowerCase()) && mentions.length === 1) return ask([field], copyOf(g).addressIsAsset);
   }
@@ -804,7 +812,7 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const token = catalogToken(a.asset, network, g, 'transfer', 'asset', 'ANY', notes).asset;
   const amount = amountOf(a.amount, g, 'transfer');
   // The Canvas "To" field's own network-aware check: the same canonical recipient whichever surface authored it.
-  const typed = self ? null : addressOf(a.recipient, g, 'recipient', m.sendRecipientNotFound);
+  const typed = self ? null : addressOf(a.recipient, g, 'recipient', m.sendRecipientNotFound, { address: (token as { readonly address?: string | null }).address ?? null });
   const check = self ? { ok: true as const, recipient: 'CONNECTED_OWNER' } : checkRecipient(label, typed === null ? null : typedAddress(g.text, typed));
   if (!check.ok) return check.code === 'TRANSFER_RECIPIENT_REQUIRED' ? ask(['recipient'], m.sendRecipientQuestion)
     : check.code === 'TRANSFER_RECIPIENT_INVALID' ? ask(['recipient'], m.sendRecipientInvalid(label)) : refuse(m.cannotAuthor);

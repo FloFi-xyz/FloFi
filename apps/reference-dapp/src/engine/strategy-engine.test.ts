@@ -110,6 +110,11 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
           const name = { base: 'Base', 'arbitrum-one': 'Arbitrum One', ethereum: 'Ethereum', robinhood: 'Robinhood Chain' }, output = destination === 'robinhood' ? 'USDG' : 'USDC';
           return [`bridge-${source}-${destination}-native-to-stable`, `bridge 0.001 ETH from ${name[source]} to ${name[destination]} receive ${output} via best slippage 100 bps`];
         }))),
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment, written as the chat's exact grammar.
+      'batch-payment-robinhood': 'pay 1 USDG to 0x0000000000000000000000000000000000000002 and 2 USDG to 0x0000000000000000000000000000000000000003 on Robinhood Chain',
+      'batch-payment-base': 'pay 25 USDC to 0x0000000000000000000000000000000000000002 and 50 USDC to 0x0000000000000000000000000000000000000003 on Base',
+      'batch-payment-arbitrum': 'pay 5 USDC to 0x0000000000000000000000000000000000000002, 10 USDC to 0x0000000000000000000000000000000000000003 on Arbitrum One',
+      'batch-payment-ethereum': 'batch pay 5 USDC to 0x0000000000000000000000000000000000000002 and 10 USDC to 0x0000000000000000000000000000000000000003 on Ethereum',
     };
     expect(Object.keys(sentences).sort()).toEqual(STRATEGY_EXAMPLES.map(e => e.id).sort());
     for (const example of STRATEGY_EXAMPLES) {

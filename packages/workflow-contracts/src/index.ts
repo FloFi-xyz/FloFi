@@ -52,6 +52,7 @@ export * from './withdraw.js';
 
 export * from './lending-composition.js';
 export * from './native-transfer.js';
+export * from './batch-payment.js';
 export * from './solana-transfer.js';
 export * from './pix.js';
 export * from './boleto.js';

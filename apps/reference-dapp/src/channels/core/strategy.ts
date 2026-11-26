@@ -20,6 +20,7 @@ import type { NetworkId, StrategyInput, StrategySpec } from '../../engine/strate
 import { composeWorkflowOrRefuse, PlatformRefusal, type WalletRef } from '../../platform/index.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/workflow-visual.ts';
 import { sameAsset, stepInputs, stepOutput } from '../../engine/workflow-bindings';
+import { operationSteps } from '../../engine/strategy-engine';
 
 const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = Object.fromEntries(AAVE_V3_LENDING_PROFILES.map(profile => [profile.network, networkIdentity(profile.chain)!.key as NetworkId]));
 /** BUILD-BASE-001: the catalog networks (Canvas name → strategy network): Robinhood Chain and Base. */
@@ -80,6 +81,13 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
       const network = i.network === 'Ethereum Sepolia' ? 'ethereum-sepolia' : i.network === 'Robinhood Chain Testnet' ? 'robinhood-testnet' : CATALOG_NETWORK[i.network];
       return !network ? null : { version: 1, action: 'transfer', network, asset: i.asset, amount: i.amount,
         ...i.recipient === 'CONNECTED_OWNER' ? {} : { recipient: i.recipient } } as StrategySpec;
+    }
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment, recipients and amounts exactly as authored, in order.
+    case 'ADD_BATCH_PAYMENT': {
+      const i = c.input as { network: string; asset: string; payments: readonly { recipient: string; amount: string }[] };
+      const network = CATALOG_NETWORK[i.network];
+      return !network ? null : { version: 1, action: 'batch_payment', network, asset: i.asset,
+        recipients: i.payments.map(p => ({ recipient: p.recipient, amount: p.amount })) } as StrategySpec;
     }
     case 'ADD_SUPPLY': case 'ADD_BORROW': case 'ADD_REPAY': {
       const i = c.input as { network: string; asset: string; amount: string; beneficiary: string };
@@ -142,7 +150,8 @@ export function canonicalStrategy(command: Command): ChannelStrategy | { readonl
   let workflow;
   try { workflow = composeWorkflowOrRefuse(spec, undefined); }
   catch (cause) { return { ok: false, code: cause instanceof PlatformRefusal ? cause.message : 'CHANNEL_STRATEGY_PARITY_FAILED' }; }
-  const step = workflow.steps.length === 1 ? workflow.steps[0]! : null;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: compared per operation (a Batch Payment is one operation, executed as its legs).
+  const operations = operationSteps(workflow), step = operations.length === 1 ? operations[0]! : null;
   if (!step || !sameCommand(step.command, command)) return { ok: false, code: 'CHANNEL_STRATEGY_PARITY_FAILED' };
   return { ok: true, spec: workflow.strategy as StrategySpec, workflowHash: workflow.workflowHash, command: step.command, summary: step.summary,
     fundsClass: workflow.fundsClass, notes: workflow.notes, intendedWallet: intendedWalletOf(workflow.strategy as StrategySpec),
@@ -168,7 +177,8 @@ export function canonicalWorkflow(commands: readonly Command[]): ChannelWorkflow
   let workflow;
   try { workflow = composeWorkflowOrRefuse({ version: 2, steps: specs }, undefined); }
   catch (cause) { return { ok: false, code: cause instanceof PlatformRefusal ? cause.message : 'CHANNEL_STRATEGY_PARITY_FAILED' }; }
-  if (workflow.steps.length !== commands.length || workflow.steps.some((step, i) => !sameCommand(step.command, commands[i]!)))
+  const operations = operationSteps(workflow);
+  if (operations.length !== commands.length || operations.some((step, i) => !sameCommand(step.command, commands[i]!)))
     return { ok: false, code: 'CHANNEL_STRATEGY_PARITY_FAILED' };
   const named = [...new Map(workflow.steps.map(step => intendedWalletOf(step.strategy)).filter((w): w is WalletRef => w !== null).map(w => [w.address, w])).values()];
   if (named.length > 1) return { ok: false, code: 'CHANNEL_INTENDED_WALLETS_DIFFER' };
@@ -193,10 +203,11 @@ function sequenceWorkflow(commands: readonly Command[]): ChannelWorkflow | { rea
     const unbound = composeWorkflowOrRefuse({ version: 2, steps: specs }, undefined);
     const bindings = flat.flatMap((_, consumer) => {
       if (group[consumer] === -1) return [];
-      return stepInputs(unbound.steps[consumer]!).flatMap(input => {
+      const ops = operationSteps(unbound);
+      return stepInputs(ops[consumer]!).flatMap(input => {
         for (let producer = consumer - 1; producer >= 0; producer -= 1) {
           if (group[producer] !== group[consumer]) break;
-          const output = stepOutput(unbound.steps[producer]!);
+          const output = stepOutput(ops[producer]!);
           if (output && sameAsset(output, input)) return [{ step: consumer, amountFrom: producer }];
         }
         return [];
@@ -204,7 +215,8 @@ function sequenceWorkflow(commands: readonly Command[]): ChannelWorkflow | { rea
     });
     workflow = bindings.length ? composeWorkflowOrRefuse({ version: 2, steps: specs, bindings }, undefined) : unbound;
   } catch (cause) { return { ok: false, code: cause instanceof PlatformRefusal ? cause.message : 'CHANNEL_STRATEGY_PARITY_FAILED' }; }
-  if (workflow.steps.length !== flat.length || workflow.steps.some((step, i) => !sameCommand({ ...step.command, baseRevision: 0 } as Command, flat[i]!)))
+  const operations = operationSteps(workflow);
+  if (operations.length !== flat.length || operations.some((step, i) => !sameCommand({ ...step.command, baseRevision: 0 } as Command, flat[i]!)))
     return { ok: false, code: 'CHANNEL_STRATEGY_PARITY_FAILED' };
   const named = [...new Map(workflow.steps.map(step => intendedWalletOf(step.strategy)).filter((w): w is WalletRef => w !== null).map(w => [w.address, w])).values()];
   if (named.length > 1) return { ok: false, code: 'CHANNEL_INTENDED_WALLETS_DIFFER' };
@@ -212,8 +224,10 @@ function sequenceWorkflow(commands: readonly Command[]): ChannelWorkflow | { rea
 }
 function channelWorkflowOf(workflow: ReturnType<typeof composeWorkflowOrRefuse>, commands: readonly Command[], named: WalletRef | null): ChannelWorkflow {
   const first = workflow.steps[0]!.strategy, firstSolana = (first.action === 'bridge' ? first.sourceNetwork : first.network).startsWith('solana');
-  return { ok: true, spec: workflow.strategy, workflowHash: workflow.workflowHash, command: commands.at(-1)!, commands: workflow.steps.map(s => s.command),
-    summary: workflow.steps.map(s => s.summary).join(' → '), stepSummaries: workflow.steps.map(s => s.summary), fundsClass: workflow.fundsClass, notes: workflow.notes,
-    intendedWallet: firstSolana ? null : named, steps: workflow.steps.flatMap(c => c.steps.filter(s => s.kind !== 'TEMPLATE')),
-    visual: workflowVisualModel(workflow), stepCount: workflow.steps.length };
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the conversation keeps what the person authored: one command per operation (a Batch Payment is one).
+  const operations = operationSteps(workflow);
+  return { ok: true, spec: workflow.strategy, workflowHash: workflow.workflowHash, command: commands.at(-1)!, commands: operations.map(s => s.command),
+    summary: operations.map(s => s.summary).join(' → '), stepSummaries: operations.map(s => s.summary), fundsClass: workflow.fundsClass, notes: workflow.notes,
+    intendedWallet: firstSolana ? null : named, steps: operations.flatMap(c => c.steps.filter(s => s.kind !== 'TEMPLATE')),
+    visual: workflowVisualModel(workflow), stepCount: operations.length };
 }
