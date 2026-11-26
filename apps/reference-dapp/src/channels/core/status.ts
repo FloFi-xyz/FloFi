@@ -86,15 +86,23 @@ export type PlannedNotification = { readonly key: string; readonly text: string 
  * the owner claimed it and shares status, then each recorded lifecycle state once and its terminal outcome once. `done` once nothing more can
  * follow. `now`: the moment of this check (a wallet batch's answer is announced only once its validity has passed).
  */
-export function plannedNotifications(language: ChannelLanguage, handoff: HandoffRecord, progress: Progress, origin?: string, now: Date = new Date()):
+/**
+ * `native` (BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001): the approval is signed in the owner's wallet app with its Review in this conversation, which
+ * already told each step: "loaded in FloFi" and the pre-submission run states ("waiting for your review and wallet authorization in FloFi") would
+ * send the person to FloFi, so they are left out (and a run still before submission neither ends nor extends the follow-up). Every run from its
+ * submission on — sent, pending, reconciled with its receipt, failed — is notified as for every approval.
+ */
+const BEFORE_SUBMISSION = new Set(['SIMULATED', 'AUTHORIZED', 'PREPARED', 'CANCELLED']);
+export function plannedNotifications(language: ChannelLanguage, handoff: HandoffRecord, progress: Progress, origin?: string, now: Date = new Date(), native = false):
   { readonly due: readonly PlannedNotification[]; readonly done: boolean } {
   const m = channelCopy(language), due: PlannedNotification[] = [];
   // BUILD-CHAT-E2E-001: a running workflow outlives its approval link's own window, so its run decides (not the link's expiry).
   if (progress.workflowRun) return workflowNotifications(language, handoff, progress.workflowRun, now, origin);
   if (ENDED.has(progress.status)) return { due, done: true };
   if (!handoff.shareStatus || (progress.status !== 'CLAIMED' && progress.status !== 'APPLIED')) return { due, done: false };
-  due.push({ key: `notify:${handoff.handoffId}:loaded`, text: m.loaded });
-  for (const run of progress.runs) {
+  if (!native) due.push({ key: `notify:${handoff.handoffId}:loaded`, text: m.loaded });
+  const runs = native ? progress.runs.filter(r => !BEFORE_SUBMISSION.has(r.status) || r.landed) : progress.runs;
+  for (const run of runs) {
     const id = createHash('sha256').update(run.executionId).digest('hex').slice(0, 16);
     // Preparation creates a run too. Keep its notice distinct so it cannot consume a later authorization/submission notice.
     // A landed label keys its own notice by what it means (not sent, pending, failed, unresolved, …), so a later outcome under the same summary
@@ -104,7 +112,7 @@ export function plannedNotifications(language: ChannelLanguage, handoff: Handoff
     else due.push({ key: `notify:${handoff.handoffId}:run:${id}:${run.reconciled ? 'reconciled' : 'ended'}`, text: shorten(m.run(run)) });
   }
   // An incomplete run read never ends the follow-up (an unread run may still be in flight).
-  return { due, done: progress.runsComplete !== false && progress.runs.length > 0 && progress.runs.every(r => r.terminal) };
+  return { due, done: progress.runsComplete !== false && runs.length > 0 && runs.every(r => r.terminal) };
 }
 
 /** A code or classification as a notification key part: the outbox accepts only `[a-z0-9_.:-]` (and at most 160 characters in all). */

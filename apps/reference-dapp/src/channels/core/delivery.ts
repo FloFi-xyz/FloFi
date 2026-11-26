@@ -42,7 +42,12 @@ export type DeliveryContext = { readonly tenantId: string; readonly origin: stri
   /** BUILD-WORKFLOW-VISUAL-PRESENTATION-001: the shared workflow renderer; none = replies are sent as text only. */
   readonly visuals?: ChannelVisualRenderer | null;
   /** Test seams: the wait between inline approval retries, and the jitter source. */
-  readonly sleep?: (ms: number) => Promise<void>; readonly random?: () => number };
+  readonly sleep?: (ms: number) => Promise<void>; readonly random?: () => number;
+  /**
+   * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing buttons of an approval message, computed at send time for its own handoff (none when the
+   * deployment, the provider or the approval does not offer them).
+   */
+  readonly nativeLinks?: ((handoffId: string, conversationId: string, language: ChannelLanguage) => Promise<readonly { readonly label: string; readonly url: string }[]>) | null };
 export type DeliveryOptions = { readonly kinds: readonly OutboxKind[]; readonly links?: ReadonlyMap<string, string>; readonly address?: ChannelAddress | null;
   readonly language?: ChannelLanguage };
 export type DeliveryReport = { readonly sent: number; readonly failed: number; readonly skipped: number; readonly retrying: number; readonly uncertain: number };
@@ -92,8 +97,9 @@ export const MAX_SEALED_BODY_BYTES = 12_288;
  * workflow visual is sealed with the body when it fits (BUILD-WORKFLOW-VISUAL-PRESENTATION-001).
  */
 export function sealReply(ctx: Pick<DeliveryContext, 'tenantId' | 'keys'>, outboxId: string, reply: ChannelReply, origin: string | null = null): Buffer {
-  const keep = reply.link !== null && (pageLink(reply.link.url) || (origin !== null && workspaceLink(reply.link.url, origin)));
-  const { visual, ...rest } = reply, body = { ...rest, link: keep ? reply.link : null };
+  const keep = reply.link !== null && (pageLink(reply.link.url) || (origin !== null && (workspaceLink(reply.link.url, origin) || nativeConfirmLink(reply.link.url, origin))));
+  // Native start buttons carry a token and are never stored (they are attached again at send time).
+  const { visual, ...rest } = reply, body = { ...rest, link: keep ? reply.link : null, walletLinks: undefined };
   const withVisual = visual ? JSON.stringify({ ...body, visual }) : null;
   const json = withVisual && Buffer.byteLength(withVisual) <= MAX_SEALED_BODY_BYTES ? withVisual : JSON.stringify(body);
   return seal(ctx.keys.seal, json, bodyContext(ctx, outboxId));
@@ -103,6 +109,18 @@ export function workspaceLink(url: string, origin: string): boolean {
   const workspace = `${origin}/app/automations`, occurrence = `${workspace}?occurrence=`;
   return url === workspace || (url.startsWith(occurrence) && /^occ_[a-z2-7]{26}$/.test(url.slice(occurrence.length))) || FLOFI_PAGES.some(page => url === `${origin}${page}`);
 }
+/**
+ * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the confirmation of one native signing Review (its approval, its session and a single-use tag valid for at most
+ * the session's 15 minutes). It may be stored sealed with its notification: it authorizes nothing on its own (the owner's wallet still signs).
+ */
+export function nativeConfirmLink(url: string, origin: string): boolean {
+  const prefix = `${origin}/api/native-signing/`;
+  return url.startsWith(prefix) && /^apr_[a-z2-7]{26}\/nsg_[a-z2-7]{26}\/confirm\/[A-Za-z0-9_-]{22}$/.test(url.slice(prefix.length));
+}
+const nativeStartLink = (url: string, origin: string) => url.startsWith(`${origin}/api/native-signing/start#ns1.`) && /^[^\s]{1,600}$/.test(url);
+/** The native signing buttons that pass the output guard on their own (exact start link, safe label); any other is dropped, never fatal to its message. */
+export const safeWalletLinks = (links: NonNullable<ChannelReply['walletLinks']>, origin: string) =>
+  links.filter(l => nativeStartLink(l.url, origin) && outputSafe({ text: l.label, choices: [], link: null }, origin));
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: the closed set of secret-free FloFi pages a Copilot answer may point to ("where do I see my automations?"). A
  * reply carries the relative path; delivery resolves it against its own trusted origin, so no other host or path can ever be sent.
@@ -129,9 +147,11 @@ async function imageOf(ctx: DeliveryContext, conversationId: string, reply: Chan
 
 /** The last line before the provider: no calldata-sized hex, no serialized blobs, no credentials, no approval secret outside the one link. */
 export function outputSafe(reply: ChannelReply, origin: string): boolean {
-  const texts = [reply.text, ...reply.choices.map(c => c.label), reply.link?.label ?? ''];
+  const texts = [reply.text, ...reply.choices.map(c => c.label), reply.link?.label ?? '', ...(reply.walletLinks ?? []).map(l => l.label)];
   if (texts.some(t => UNSAFE.some(pattern => pattern.test(t)))) return false;
+  if ((reply.walletLinks ?? []).some(l => !nativeStartLink(l.url, origin))) return false;
   if (reply.link === null) return true;
+  if (nativeConfirmLink(reply.link.url, origin)) return true;
   // BUILD-AUTOMATION-001: an automation notification links to the owner's own FloFi workspace — an opaque id, never a secret.
   if (workspaceLink(reply.link.url, origin)) return true;
   return reply.link.url.startsWith(`${origin}/approve#flofi_chs_`) && /^[^\s]+$/.test(reply.link.url);
@@ -181,6 +201,10 @@ export async function deliverConversation(ctx: DeliveryContext, conversationId: 
         const url = options.links?.get(o.outboxId);
         if (!url) { await lostLink(ctx, conversationId, o, language, now); await end('SKIPPED', 'APPROVAL_LINK_LOST'); continue; }
         reply = { ...reply, link: { label: channelCopy(language).linkLabel, url } };
+        // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing buttons of this approval, computed now (never stored); none on any failure.
+        // A button that is not exactly a native start link (or whose label fails the guard) is dropped: the approval message itself still goes out.
+        const native = safeWalletLinks(ctx.nativeLinks && o.handoffId ? await ctx.nativeLinks(o.handoffId, conversationId, language).catch(() => []) : [], ctx.origin);
+        if (native.length) reply = { ...reply, walletLinks: native };
       }
       if (!outputSafe(reply, ctx.origin)) { await end('FAILED', 'OUTPUT_GUARD'); continue; }
       const image = await imageOf(ctx, conversationId, reply, windowOpen);

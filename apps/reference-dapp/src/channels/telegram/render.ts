@@ -27,10 +27,12 @@ export const choicesFitKeyboard = (choices: readonly ReplyChoice[]) => choices.l
  */
 function keyboard(reply: ChannelReply): Record<string, unknown> | null {
   const choices = choicesFitKeyboard(reply.choices) ? reply.choices.map(c => ({ text: c.label, callback_data: c.id })) : [];
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: an approval's native signing buttons, one row under its link (at most two wallets).
+  const wallets = (reply.walletLinks ?? []).slice(0, 2).map(l => ({ text: clip(l.label, TELEGRAM_LIMITS.buttonText), url: l.url }));
   if (reply.link) {
     const rows: Record<string, unknown>[][] = [];
     for (let i = 0; i < choices.length; i += 2) rows.push(choices.slice(i, i + 2));
-    return { inline_keyboard: [[{ text: clip(reply.link.label, TELEGRAM_LIMITS.buttonText), url: reply.link.url }], ...rows] };
+    return { inline_keyboard: [[{ text: clip(reply.link.label, TELEGRAM_LIMITS.buttonText), url: reply.link.url }], ...wallets.length ? [wallets] : [], ...rows] };
   }
   if (choices.length) return { inline_keyboard: choices.map(c => [c]) };
   return null;

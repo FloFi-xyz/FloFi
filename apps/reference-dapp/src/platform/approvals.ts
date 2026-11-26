@@ -341,7 +341,9 @@ export async function sharedRunsRead(h: HandoffRecord, runtime: EngineRuntime, h
   for (const runId of [...bound, ...window]) {
     const run = await runtime.run(runId, owner);
     if (!run.ok) { complete = false; continue; }
-    if (!run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
+    // A run bound to this approval is its own even when it was simulated just before the claim (BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native
+    // signing simulates for the proven wallet first, so a refusal leaves the approval unclaimed, then claims and binds that run).
+    if (!run.value || !h.runIds.includes(runId) && Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
     const record = await runtime.record(flow, runId, owner);
     if (!record.ok) { complete = false; continue; }
     if (!reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) continue;
@@ -370,6 +372,32 @@ export async function sharedRunsRead(h: HandoffRecord, runtime: EngineRuntime, h
   // Newest first, as the listing orders them (bound runs are read first, but are not listed first).
   out.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   return { runs: out, complete, truncated };
+}
+/**
+ * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 (flofi-workflow review): every run that may be this approval's, whether or not its owner shares status
+ * (a run started on FloFi's signing page is bound only while status is shared): the bound runs, plus the claimant wallet's runs on the plan's flow
+ * after the claim whose reviewed workflow hashes EXACTLY to the approval's. Read server-side as the owner; nothing leaves. `complete` is false when a
+ * read failed or the listing may hold more than it returned: the caller then refuses (fail closed), never "no run".
+ */
+export async function approvalRunIds(h: HandoffRecord, runtime: EngineRuntime): Promise<{ readonly runIds: readonly string[]; readonly complete: boolean }> {
+  const ids = new Set(h.runIds);
+  if (!h.claimed || !h.claimedAt || !h.plan.flow) return { runIds: [...ids], complete: true };
+  if (!runtime.runs || !runtime.record) return { runIds: [...ids], complete: false };
+  const flow = h.plan.flow, owner = h.claimed.address, listed = await runtime.runs(flow, owner);
+  if (!listed.ok) return { runIds: [...ids], complete: false };
+  const afterClaim = listed.value.filter(r => Date.parse(r.updatedAt) >= h.claimedAt!.getTime() - 1_000);
+  let complete = !(listed.value.length >= LISTING_PAGE && afterClaim.length === listed.value.length);
+  for (const { runId } of afterClaim) {
+    if (ids.has(runId)) continue;
+    // Created after the claim (a run of this approval on the signing page always is), so another approval's run of the same workflow is not counted.
+    const run = await runtime.run(runId, owner);
+    if (!run.ok) { complete = false; continue; }
+    if (!run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
+    const record = await runtime.record(flow, runId, owner);
+    if (!record.ok) { complete = false; continue; }
+    if (reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) ids.add(runId);
+  }
+  return { runIds: [...ids], complete };
 }
 /** The shared runs, or null when not shared. An incomplete read fails as CLOUD_RUNTIME_UNAVAILABLE (never an empty "no runs" list). */
 export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<readonly RunProgress[] | null> {

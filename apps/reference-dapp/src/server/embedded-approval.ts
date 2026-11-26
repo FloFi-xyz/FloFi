@@ -18,13 +18,21 @@ export function configuredFrameAncestors(env: Readonly<Record<string, string | u
   return [...new Set((env.FLOFI_MCP_FRAME_ANCESTORS ?? '').split(',').map(value => value.trim())
     .filter(value => SANDBOX_ORIGIN.test(value) && value !== 'https://files.oaiusercontent.com'))].slice(0, 8);
 }
+/**
+ * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: Claude's dedicated sandbox host for a connector, as Claude documents it (`ui.domain`): the first 32 hex
+ * characters of SHA-256 over the EXACT connector URL the person configured (scheme, path and any trailing slash), then `.claudemcpcontent.com`.
+ * Without `ui.domain` Claude serves each conversation from its own host, which no fixed `frame-ancestors` list can name.
+ */
+export function claudeAppDomain(connectorUrl: string): string {
+  return `${createHash('sha256').update(connectorUrl).digest('hex').slice(0, 32)}.claudemcpcontent.com`;
+}
 /** The exact origins allowed to frame `/mcp/approve` (empty: none). The panel reads the same list for its own fast diagnostic. */
 export function approvalFrameAncestorList(env: Readonly<Record<string, string | undefined>>): readonly string[] {
   const origin = publicOrigin(env);
   if (!origin) return [];
-  const claude = createHash('sha256').update(`${origin}/api/mcp`).digest('hex').slice(0, 32);
-  const hosts = ['https://chatgpt.com', 'https://web-sandbox.oaiusercontent.com',
-    `https://${claude}.claudemcpcontent.com`, 'https://claude.ai', ...configuredFrameAncestors(env)];
+  // The connector URL as documented, and the same URL with a trailing slash (each is its own Claude host).
+  const claude = [`${origin}/api/mcp`, `${origin}/api/mcp/`].map(url => `https://${claudeAppDomain(url)}`);
+  const hosts = ['https://chatgpt.com', 'https://web-sandbox.oaiusercontent.com', ...claude, 'https://claude.ai', ...configuredFrameAncestors(env)];
   if (new URL(origin).protocol === 'http:') hosts.push(origin);
   return [...new Set(hosts)];
 }

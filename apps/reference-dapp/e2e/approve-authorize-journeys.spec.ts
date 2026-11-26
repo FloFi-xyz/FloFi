@@ -46,7 +46,7 @@ async function proposal(browser: Browser, request: APIRequestContext, presentati
   // Nothing is authorized by the chat.
   expect(result.structuredContent).toMatchObject({ ok: true, status: 'PENDING', authority: 'NONE' });
   const host = await context.newPage();
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), args, result);
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v3.html'), args, result);
   await expect(panel.getByText('Nothing is authorized yet.', { exact: false })).toBeVisible();
   await panel.getByRole('button', { name: 'Open FloFi', exact: true }).click();
   await expect.poll(async () => (await hostLog(host)).openLinks.length).toBe(1);
@@ -201,7 +201,7 @@ test('embedded chat: existing execution runtime completes after wallet confirmat
   const args = { strategy: composed.strategy, workflowHash: composed.workflowHash };
   await client.tool('review_strategy', args);
   const result = await client.toolResult('request_user_approval', args);
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), args, result, { embedded: true });
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v3.html'), args, result, { embedded: true });
   await consent.close();
   await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
   const signing = panel.frameLocator('iframe.signing-frame');

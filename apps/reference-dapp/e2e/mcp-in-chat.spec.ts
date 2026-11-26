@@ -28,7 +28,7 @@ import { installLendingWallet, LENDING_OWNER, lendingRpc, lendingSends } from '.
 import { devnetControl, devnetPanel, installDevnetWallet } from './solana-devnet-fixtures';
 import { panelHtml } from '../src/mcp/app/panel';
 
-const PANEL_URI = 'ui://flofi/approval-panel-chat-first-v2.html';
+const PANEL_URI = 'ui://flofi/approval-panel-chat-first-v3.html';
 /** The newest durable run of one flow owned by one wallet, read from the disposable loopback database. */
 async function latestRun(flow: string, owner: string): Promise<string> {
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });

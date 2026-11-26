@@ -88,11 +88,14 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
   });
 
   it('gives no channel module financial authority: no signing, key, transaction submission, execution or approval decision', () => {
-    const entries = ['src/channels/http.ts', 'src/channels/dispatch-http.ts', 'src/channels/approval-ping.ts', 'src/channels/approval-profile.ts',
+    // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing notice delivery is a channel entry too (reached from the server, never the reverse).
+    const entries = ['src/channels/http.ts', 'src/channels/dispatch-http.ts', 'src/channels/approval-ping.ts', 'src/channels/approval-profile.ts', 'src/channels/native-signing.ts',
       'src/app/api/channels/whatsapp/route.ts', 'src/app/api/channels/telegram/route.ts', 'src/app/api/channels/dispatch/route.ts', 'src/app/api/channels/health/route.ts'];
     const channelFiles = new Set<string>();
     for (const entry of entries) for (const file of closure(join(app, entry)).files) if (file.startsWith('src/channels/') || file.startsWith('src/app/api/channels/')) channelFiles.add(file);
     expect(channelFiles.size).toBeGreaterThan(30);
+    // ...and no channel module reaches FloFi's native signing service (channel code only mints start tokens and posts FloFi's text).
+    for (const entry of entries) expect(closure(join(app, entry)).files.filter(f => f.startsWith('src/server/native-signing/')), entry).toEqual([]);
     for (const file of channelFiles) {
       const text = code(join(app, file));
       // Wallet signing, keys and raw transactions.

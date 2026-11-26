@@ -9,7 +9,7 @@
  * has a stable key, so repeated checks never send twice. It never waits on, changes or blocks FloFi's execution, reconciliation or
  * evidence: a failed delivery is only a failed message.
  */
-import { approvalProgress, type HandoffRecord } from '../../platform/index.ts';
+import { approvalProgress, nativeSigningEligible, type HandoffRecord } from '../../platform/index.ts';
 import type { ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig } from './config.ts';
 import { parseStateLanguage } from './state-language.ts';
@@ -33,7 +33,9 @@ export async function notifyChannelHandoff(ctx: NotifyContext, handoff: HandoffR
   const state = open(ctx.core.keys.seal, conversation.stateSealed, sealContext(ctx.core.tenantId, 'channel_conversations', conversation.conversationId, 'state'));
   const language = parseStateLanguage(state, ctx.core.language);
   const progress = await approvalProgress(handoff, ctx.platform.runtime, ctx.platform.handoffs, ctx.platform.origin, ctx.platform.workflowRuns ?? null);
-  const { due, done } = plannedNotifications(language, handoff, progress, ctx.platform.origin);
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: signed in the owner's wallet app from this conversation (a failed read keeps the usual notices).
+  const native = nativeSigningEligible(handoff) && ctx.platform.nativeSigned ? await ctx.platform.nativeSigned(handoff.handoffId).catch(() => false) : false;
+  const { due, done } = plannedNotifications(language, handoff, progress, ctx.platform.origin, new Date(), native);
   const deliveryCtx = { tenantId: ctx.core.tenantId, origin: ctx.core.origin, keys: ctx.core.keys, store: ctx.store, adapter,
     handoffs: ctx.platform.handoffs, log: ctx.log, now: ctx.now };
   const rows = due.map((n, sequence) => { const outboxId = newOutboxId();

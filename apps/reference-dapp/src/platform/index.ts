@@ -25,6 +25,7 @@ export * from './ids.ts';
 export * from './pinned-https.ts';
 // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the conversational lifecycle and plain-language refusals every external surface shares.
 export * from './conversation-state.ts';
+export * from './native-signing.ts';
 export { ENGINE_VERSION, evaluateGates, evaluateWorkflowGates, executionPlan, handoffFindings, policyGate, workflowPlan, type ExecutionPlan, type Gates,
   type HandoffPolicy, type PlanStep } from '../mcp/execution.ts';
 export { assertSafeOutput, previewPlan, projectSimulation, strategyFlow, type PreviewPlan, type SimulationView } from '../mcp/simulation.ts';

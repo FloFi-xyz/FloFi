@@ -25,7 +25,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { NETWORKS } from '../../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId } from '../../engine/strategy-spec';
-import type { HandoffPolicy } from '../../platform/index.ts';
+import { nativeSigningSwitch, type HandoffPolicy } from '../../platform/index.ts';
 import { deploymentTenant, isHostedDeployment, publicOrigin } from '../../server/deployment.ts';
 import { channelKeys, type ChannelKeys } from './crypto.ts';
 import { scopeOfEnv } from '../../domain/network-scope';
@@ -40,6 +40,8 @@ export type ChannelCoreConfig = {
   readonly dispatchTokenDigest: Buffer | null;
   /** Global model-call budget (cost guard), shared by every instance through the store's fixed windows. */
   readonly modelBudget: { readonly hourly: number; readonly daily: number };
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: offer native wallet signing buttons on eligible approvals (`nativeSigningSwitch`: `FLOFI_NATIVE_SIGNING` unset, empty or `enabled`). */
+  readonly nativeSigning?: boolean;
 };
 export type ChannelCoreConfigResult = ChannelCoreConfig | { readonly enabled: false; readonly code: 'CHANNEL_CONFIGURATION_INVALID'; readonly reason: string };
 
@@ -106,5 +108,7 @@ export function readChannelCoreConfig(env: Env, providerSecrets: readonly string
   if (hourly === null) return invalid('FLOFI_CHANNEL_MODEL_BUDGET_HOURLY');
   if (daily === null || daily < hourly) return invalid('FLOFI_CHANNEL_MODEL_BUDGET_DAILY');
   return Object.freeze({ enabled: true, tenantId, origin, keys: channelKeys(secret), policy, copilot, simulation, language, supportContact, privacyUrl,
-    hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), modelBudget: Object.freeze({ hourly, daily }) });
+    hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), modelBudget: Object.freeze({ hourly, daily }),
+    // Not during the Flight beta: a conversation carries no FloFi account session, which every owner flow call then needs (the Authorize link stays).
+    nativeSigning: nativeSigningSwitch(env) && (env.FLOFI_BETA_ACCESS === undefined || env.FLOFI_BETA_ACCESS === 'open') });
 }

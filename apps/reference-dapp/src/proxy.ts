@@ -68,6 +68,9 @@ export function proxy(request: NextRequest) {
   // Playwright's embedded host then replaces the document with setContent, and Chromium inherits the prior navigation's CSP into
   // that document.write — which would block the host fixture's inline script and never render the approval panel.
   if (pathname === '/mcp-e2e-callback') return NextResponse.next();
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing transit pages send their own stricter policy (no script, or one fixed script by hash,
+  // no frame, no form); the product's nonce policy must not be applied on top of it.
+  if (pathname.startsWith('/api/native-signing/')) return NextResponse.next();
   // Privy's trust boundary is the entire product origin. Public pages, admin pages and even error documents must carry the same
   // script restrictions: a script injected there could otherwise open a signer page and drive its same-origin wallet frame.
   // Route handlers that return their own stricter policy (e.g. script-free OAuth consent) keep that response policy.

@@ -39,7 +39,9 @@ const marketQuote = (q: MarketQuoteNote, language: ChannelLanguage) => {
 };
 const workflowQuotes = (quotes: readonly MarketQuoteNote[] | undefined, language: ChannelLanguage) => (quotes ?? []).map(q => ` ${marketQuote(q, language)}`).join('');
 export type ReadyFacts = { readonly lines: readonly string[]; readonly networks: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
-  readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number };
+  readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number;
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the approval offers native wallet signing (its note follows the authorization line). */
+  readonly native?: boolean };
 export type RunLine = { readonly status: string; readonly reconciled: boolean; readonly terminal: boolean; readonly errorCode: string | null;
   readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null; readonly receiptUrl?: string | null;
   /** BUILD-FLOFI-E2E-RELIABILITY-001: what of this run is confirmed onchain while it is not reconciled (the label of what landed). */
@@ -104,7 +106,7 @@ const RUN_PT: Readonly<Record<string, string>> = {
 
 const EN = {
   firstContact: (support: string, privacy: string) => `FloFi (automated assistant). I compose DeFi strategies for you to review and sign in FloFi. I can't sign, execute or move funds, and nothing you write here authorizes anything. Never send a private key or seed phrase. Human support: ${support}. Privacy: ${privacy}. Reply STOP to stop messages.`,
-  help: (support: string, privacy: string) => `What I can do: compose a strategy from your message (for example "Supply 100 USDC on Aave on Base"), ask for anything missing, correct it ("make it 50"), and tell you its status (STATUS). LINK sends a fresh approval link, NEW starts over, STOP stops messages.\nWorkflows: after a proposal, ADD STEP keeps it and you describe the next action; STEPS, REMOVE STEP n and MOVE STEP n TO m edit the list; the whole workflow gets ONE approval link.\nExecution happens only in FloFi, with your own wallet, after a fresh simulation and your review of the Strategy Manifest. Messages here never authorize anything.\nHuman support: ${support}. Privacy: ${privacy}.`,
+  help: (support: string, privacy: string) => `What I can do: compose a strategy from your message (for example "Supply 100 USDC on Aave on Base"), ask for anything missing, correct it ("make it 50"), and tell you its status (STATUS). LINK sends a fresh approval link, NEW starts over, STOP stops messages.\nWorkflows: after a proposal, ADD STEP keeps it and you describe the next action; STEPS, REMOVE STEP n and MOVE STEP n TO m edit the list; the whole workflow gets ONE approval link.\nExecution happens only in FloFi, with your own wallet, after a fresh simulation and your review of the Strategy Manifest — or, where a proposal offers a Phantom or Solflare button, in that wallet app after FloFi's Review here. Messages here never authorize anything.\nHuman support: ${support}. Privacy: ${privacy}.`,
   ready: 'Strategy ready:',
   network: (labels: string, real: boolean) => `Network: ${labels}${real ? ' — REAL FUNDS' : ' (test funds)'}`,
   preview: (p: PreviewNote) => p.kind === 'PASSED' ? `Simulation preview passed (read-only${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). FloFi simulates again before your review.`
@@ -115,7 +117,9 @@ const EN = {
   authorize: (wallet: string | null, minutes: number) => `Nothing is authorized yet: open FloFi${wallet ? `, connect the wallet ${wallet}` : ', connect your wallet'}, review the Strategy Manifest and sign there. The link works once and expires in ${minutes} minutes.`,
   ai: 'Interpreted from your message with an AI assistant. It is not financial advice; you decide.',
   linkLabel: 'Authorize',
-  authority: 'Nothing can be authorized here — not with "yes", "confirm" or any other message. To execute, open FloFi with the approval link, connect your wallet, check the fresh simulation and the Strategy Manifest, and sign there. Send LINK for a fresh link.',
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: under an approval that offers native signing. */
+  nativeNote: 'Or sign in your wallet app with the Phantom or Solflare button: FloFi shows the Review here first, then your wallet asks you to confirm the exact transaction. Signing this way shares this operation\'s status and receipt with this conversation.',
+  authority: 'Nothing can be authorized here — not with "yes", "confirm" or any other message. To execute, open FloFi with the approval link, connect your wallet, check the fresh simulation and the Strategy Manifest, and sign there (or, where a proposal offers it, use its Phantom or Solflare button: your wallet app asks you to confirm the exact transaction). Send LINK for a fresh link.',
   // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: an unmapped refusal is explained in plain words (`platform/conversation-state.ts`), never by its closed code.
   refused: (code: string) => REFUSALS_EN[code] ?? `FloFi couldn't prepare an approval link. ${userFacingError(code).EN} Nothing was proposed.`,
   noPending: 'There is no pending strategy. Tell me what you want to do.',
@@ -247,7 +251,7 @@ const APPROVAL_EN: Readonly<Record<string, (expires: string) => string>> = {
 type Copy = typeof EN;
 const PT: Copy = {
   firstContact: (support, privacy) => `FloFi (assistente automático). Eu monto estratégias DeFi para você revisar e assinar no FloFi. Não posso assinar, executar nem mover fundos, e nada do que você escrever aqui autoriza qualquer coisa. Nunca envie chave privada ou frase-semente. Suporte humano: ${support}. Privacidade: ${privacy}. Responda PARAR para não receber mais mensagens.`,
-  help: (support, privacy) => `O que posso fazer: montar uma estratégia a partir da sua mensagem (por exemplo "Coloca 100 USDC na Aave na Base"), perguntar o que faltar, corrigir ("muda para 50") e informar o status (ESTADO). LINK envia um novo link de aprovação, NOVO recomeça, PARAR interrompe as mensagens.\nFluxos: depois de uma proposta, ADICIONAR ETAPA a mantém e você descreve a próxima ação; ETAPAS, REMOVER ETAPA n e MOVER ETAPA n PARA m editam a lista; o fluxo inteiro recebe UM link de aprovação.\nA execução acontece só no FloFi, com a sua própria carteira, depois de uma nova simulação e da sua revisão do Strategy Manifest. Mensagens aqui nunca autorizam nada.\nSuporte humano: ${support}. Privacidade: ${privacy}.`,
+  help: (support, privacy) => `O que posso fazer: montar uma estratégia a partir da sua mensagem (por exemplo "Coloca 100 USDC na Aave na Base"), perguntar o que faltar, corrigir ("muda para 50") e informar o status (ESTADO). LINK envia um novo link de aprovação, NOVO recomeça, PARAR interrompe as mensagens.\nFluxos: depois de uma proposta, ADICIONAR ETAPA a mantém e você descreve a próxima ação; ETAPAS, REMOVER ETAPA n e MOVER ETAPA n PARA m editam a lista; o fluxo inteiro recebe UM link de aprovação.\nA execução acontece só no FloFi, com a sua própria carteira, depois de uma nova simulação e da sua revisão do Strategy Manifest — ou, quando uma proposta oferece um botão Phantom ou Solflare, nesse app de carteira depois da Revisão da FloFi aqui. Mensagens aqui nunca autorizam nada.\nSuporte humano: ${support}. Privacidade: ${privacy}.`,
   ready: 'Estratégia pronta:',
   network: (labels, real) => `Rede: ${labels}${real ? ' — FUNDOS REAIS' : ' (fundos de teste)'}`,
   preview: p => p.kind === 'PASSED' ? `Prévia da simulação aprovada (somente leitura${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). O FloFi simula de novo antes da sua revisão.`
@@ -257,7 +261,8 @@ const PT: Copy = {
   authorize: (wallet, minutes) => `Nada está autorizado ainda: abra o FloFi${wallet ? `, conecte a carteira ${wallet}` : ', conecte sua carteira'}, revise o Strategy Manifest e assine lá. O link funciona uma vez e expira em ${minutes} minutos.`,
   ai: 'Interpretado da sua mensagem com um assistente de IA. Não é recomendação financeira; a decisão é sua.',
   linkLabel: 'Autorizar',
-  authority: 'Nada pode ser autorizado aqui — nem com "sim", "confirmo" ou qualquer outra mensagem. Para executar, abra o FloFi pelo link de aprovação, conecte sua carteira, confira a nova simulação e o Strategy Manifest e assine lá. Envie LINK para um novo link.',
+  nativeNote: 'Ou assine no app da sua carteira pelo botão Phantom ou Solflare: a FloFi mostra a Revisão aqui primeiro, depois a sua carteira pede a confirmação da transação exata. Assinando assim, o status e o recibo desta operação são compartilhados com esta conversa.',
+  authority: 'Nada pode ser autorizado aqui — nem com "sim", "confirmo" ou qualquer outra mensagem. Para executar, abra o FloFi pelo link de aprovação, conecte sua carteira, confira a nova simulação e o Strategy Manifest e assine lá (ou, quando a proposta oferecer, use o botão Phantom ou Solflare: o app da sua carteira pede a confirmação da transação exata). Envie LINK para um novo link.',
   refused: code => REFUSALS_PT[code] ?? `O FloFi não conseguiu preparar um link de aprovação. ${userFacingError(code).PT} Nada foi proposto.`,
   noPending: 'Não há estratégia pendente. Diga o que você quer fazer.',
   cancelled: 'Cancelado. O link de aprovação anterior não funciona mais.',
@@ -366,6 +371,6 @@ export const channelCopy = (language: ChannelLanguage): Copy => language === 'PT
 export function readyText(language: ChannelLanguage, facts: ReadyFacts): string {
   const m = channelCopy(language);
   const lines = [m.ready, ...facts.lines.map((line, i) => `${i + 1}. ${line}`), m.network(facts.networks.map(networkLabel).join(' → '), facts.fundsClass === 'REAL_FUNDS'),
-    ...facts.notes.slice(0, 3), m.preview(facts.preview), m.authorize(facts.intendedWallet, facts.expiresMinutes), ...facts.aiInterpreted ? [m.ai] : []];
+    ...facts.notes.slice(0, 3), m.preview(facts.preview), m.authorize(facts.intendedWallet, facts.expiresMinutes), ...facts.native ? [m.nativeNote] : [], ...facts.aiInterpreted ? [m.ai] : []];
   return shorten(lines.join('\n'));
 }
