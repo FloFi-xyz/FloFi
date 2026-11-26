@@ -209,7 +209,10 @@ no conclusions, took its place and reproduced its findings against the PostgreSQ
 - each refresh at confirmation binds one more run to the approval (shared cap of 16 runs; a Jupiter quote that keeps worsening ends with `NATIVE_SIGNING_RUN_LIMIT`);
 - `noWorse` compares asset symbol and decimals; the mints are pinned by the approval's workflow hash;
 - the session listing reads at most 32 sessions; starts are serialized and capped at 16, and the run check is the backstop;
-- FloFi's signing page does not consult native sessions (§3).
+- FloFi's signing page does not consult native sessions (§3);
+- pre-existing, not introduced here (flofi-developers): `sharedRunsRead` can bind a wallet's run to another approval of the same wallet with the identical workflow hash that it claimed earlier and shares; runs from the signing page already behave this way.
+
+**Focused delta review of `2a9ab92`:** flofi-developers found no change to any Developer API v1, OpenAPI, SDK or webhook contract (the bound-run exemption is a no-op for developer approvals; `approvalRunIds` has no Developer API caller). Its requested platform regression (a bound pre-claim run is kept, an unbound one is not; `approvalRunIds` binds nothing and fails closed) was added to `platform/approvals.test.ts`.
 
 ## 7. Live acceptance (owner, real devices)
 

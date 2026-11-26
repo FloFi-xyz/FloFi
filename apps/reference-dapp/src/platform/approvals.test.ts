@@ -5,7 +5,7 @@ import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
 import type { CloudRun } from '../server/flow-runtime';
 import type { EvidenceRecord, McpRuntime, Result } from '../mcp/runtime';
 import type { HandoffRecord, HandoffStore } from './handoff-store';
-import { approvalProgress, sharedRuns, sharedRunsRead } from './approvals';
+import { approvalProgress, approvalRunIds, sharedRuns, sharedRunsRead } from './approvals';
 
 const composition = composeWorkflow(STRATEGY_EXAMPLES.find(e => e.id === 'transfer-ethereum-sepolia')!.strategy);
 if (!composition.ok) throw new Error(composition.code);
@@ -116,5 +116,30 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 shared runs window (automations and de
     const { runtime, store } = windowed([own], own, { ok: false, code: 'EVIDENCE_UNAVAILABLE' });
     expect(await sharedRunsRead(handoff, runtime, store)).toMatchObject({ complete: false, runs: [{ executionId: own.runId, reconciled: false }] });
     await expect(sharedRuns(handoff, runtime, store)).rejects.toThrow('CLOUD_RUNTIME_UNAVAILABLE');
+  });
+
+  it('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: a run bound to the approval stays its own even when simulated just before the claim; an unbound one does not', async () => {
+    // Native signing simulates for the proven wallet, then claims and binds that run: its creation can precede the claim by a few seconds.
+    const early = { ...run, createdAt: at(-0.1), updatedAt: at(1) };
+    const bound = windowed([early], early);
+    expect((await sharedRunsRead({ ...handoff, runIds: [early.runId] }, bound.runtime, bound.store))?.runs.map(r => r.executionId)).toEqual([early.runId]);
+    // The same run, unbound: still outside the approval (another proposal of the wallet may have reviewed the same workflow before the claim), never bound.
+    const unbound = windowed([early], early);
+    expect((await sharedRunsRead(handoff, unbound.runtime, unbound.store))?.runs).toEqual([]);
+    expect(unbound.store.bindRuns).not.toHaveBeenCalled();
+  });
+
+  it('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: approvalRunIds finds the claimant\'s run of the exact workflow whether or not status is shared, binds nothing, and fails closed', async () => {
+    const own = { ...run, createdAt: at(1), updatedAt: at(1) }, unrelated = other(2);
+    const { runtime, store } = windowed([unrelated, own], own);
+    expect(await approvalRunIds({ ...handoff, shareStatus: false }, runtime)).toEqual({ runIds: [own.runId], complete: true });
+    expect(store.bindRuns).not.toHaveBeenCalled();
+    (runtime.runs as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' });
+    expect(await approvalRunIds(handoff, runtime)).toMatchObject({ complete: false });
+    (runtime.record as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' });
+    expect(await approvalRunIds(handoff, runtime)).toMatchObject({ complete: false });
+    // A full listing page whose runs are all after the claim may hide more: never complete.
+    const full = windowed(Array.from({ length: 25 }, (_, i) => other(i + 1)), own);
+    expect(await approvalRunIds(handoff, full.runtime)).toMatchObject({ complete: false });
   });
 });
