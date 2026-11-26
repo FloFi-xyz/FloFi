@@ -14,7 +14,7 @@ import { createTestDatabase, type TestDatabase } from '../../../../../packages/c
 import { createEmbeddedRuntime } from '../../server/flow-runtime.ts';
 import { embeddedMcpRuntime } from '../../mcp/runtime.ts';
 import { nativeSigningService, startFromChannelToken } from '../../server/native-signing/runtime.ts';
-import { callbackParts, deeplinkTestWallet } from '../../wallet/deeplink/test-wallet.test-harness.ts';
+import { callbackParts, deeplinkTestWallet } from '../../server/native-signing/deeplink/test-wallet.test-harness.ts';
 import { handleChannelDispatch } from '../dispatch-http.ts';
 import { botApi, telegramEnv, telegramRequest, textUpdate } from './fixtures.test-harness.ts';
 import { handleTelegramWebhook } from './handler.ts';
@@ -72,15 +72,15 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 Telegram native wallet signing 
       expect(chain.state.sent).toHaveLength(0);
       // A tampered tag never confirms.
       const [, , , handoffId, sessionId, , tag] = new URL(confirm.url!).pathname.split('/');
-      await expect(service.confirm({ handoffId: handoffId!, sessionId: sessionId!, confirmTag: 'A'.repeat(22) })).rejects.toThrow('NATIVE_CONFIRMATION_INVALID');
+      await expect(service.confirm({ handoffId: handoffId!, sessionId: sessionId!, confirmRef: 'A'.repeat(22) })).rejects.toThrow('NATIVE_CONFIRMATION_INVALID');
 
-      const signing = await service.confirm({ handoffId: handoffId!, sessionId: sessionId!, confirmTag: tag! }) as { url: string };
+      const signing = await service.confirm({ handoffId: handoffId!, sessionId: sessionId!, confirmRef: tag! }) as { url: string };
       const sentAt = api.delivered().length;
       await deliver(wallet.approve(signing.url));
       expect(chain.state.sent).toHaveLength(1);
       // Sent once; FloFi's observation reconciled it (MOCKED chain) and the approval's own notification posted the verified receipt to the chat.
       const after = api.delivered().slice(sentAt).map(textOf);
-      expect(after[0]).toContain('Signed in Phantom and sent once by FloFi');
+      expect(after[0]).toContain('Signed in Phantom and handed to the network once by FloFi');
       expect(after.join('\n')).toMatch(/Execution reconciled ✅ · evidence: MOCKED[\s\S]*Receipt: https:\/\/flofi\.test\/app\/dashboard\/runs\/soltd-[a-f0-9]{32}/);
       // The scheduled dispatch follows the same approval and never posts it twice.
       const swept = api.delivered().length;

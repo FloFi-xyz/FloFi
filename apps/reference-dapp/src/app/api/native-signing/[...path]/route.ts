@@ -5,9 +5,10 @@
  *
  *   GET  start                         a conversation's "Sign with …" button (its token in the URL fragment): the start page
  *   POST start                         { token } → the wallet's connect request
- *   GET  <approval>/<session>/<tag>    a wallet's answer (connect, sign-in proof, signed transaction) → the next wallet request, or "back to your chat"
- *   GET  <approval>/<session>/open     re-opens the wallet request the session waits for (idempotent)
- *   GET  <approval>/<session>/confirm/<tag>   the conversation's single-use confirmation of its Review → the wallet's signing request
+ *   GET  <approval>/<session>/<tag>    a wallet's answer (connect, sign-in proof, signed transaction) → the next wallet request, the signer's Review after
+ *                                      the proof, or "back to your conversation"
+ *   GET  <approval>/<session>/confirm/<ref>   the conversation's single-use confirmation of its Review → the wallet's signing request (the same request
+ *                                      again for the same confirmation)
  *
  * Off with `FLOFI_NATIVE_SIGNING=disabled`. Nothing here signs: the wallet signs, and the flow verifies and broadcasts the exact reviewed bytes.
  */
@@ -15,7 +16,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { nativeSigningEnabled, nativeSigningService, startFromChannelToken } from '../../../../server/native-signing/runtime';
 import { nativeMessage } from '../../../../server/native-signing/messages';
 import { startPage, statusPage, walletPage, type PageLanguage } from '../../../../server/native-signing/pages';
-import { DEEPLINK_WALLETS } from '../../../../wallet/deeplink/protocol';
+import { DEEPLINK_WALLETS } from '../../../../server/native-signing/deeplink/protocol';
 import { publicOrigin } from '../../../../server/deployment';
 
 export const dynamic = 'force-dynamic';
@@ -40,13 +41,8 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Res
   if (!handoffId || !sessionId || !step || path.length > 4) return html(statusPage('IGNORED', null, language));
   try {
     const service = await nativeSigningService(process.env);
-    if (step === 'open' && path.length === 3) {
-      const url = await service.pendingRequest(handoffId, sessionId);
-      const session = (await service.latestById(handoffId, sessionId));
-      return html(url && session ? walletPage(url, DEEPLINK_WALLETS[session.wallet].name, language) : statusPage('IGNORED', session, language, { telegramBot: telegramBot() }));
-    }
     if (step === 'confirm' && path.length === 4) {
-      const confirmed = await service.confirm({ handoffId, sessionId, confirmTag: confirmTag ?? "" });
+      const confirmed = await service.confirm({ handoffId, sessionId, confirmRef: confirmTag ?? '' });
       if (confirmed.kind === 'REFRESHED') return html(statusPage('REFRESHED', confirmed.session, language, { telegramBot: telegramBot() }));
       const session = await service.latestById(handoffId, sessionId);
       return html(walletPage(confirmed.url, session ? DEEPLINK_WALLETS[session.wallet].name : 'wallet', language));
@@ -58,6 +54,8 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Res
     return html(statusPage(outcome.page, outcome.session, language, { telegramBot: telegramBot(), ended: endedLine(outcome.session, language) }));
   } catch (error) {
     const session = await nativeSigningService(process.env).then(s => s.latestById(handoffId, sessionId)).catch(() => null);
+    // After the signed bytes arrived, never "nothing changed": the page says it was signed and the status follows in the conversation.
+    if (session && (session.state === 'SUBMITTING' || session.state === 'SUBMITTED')) return html(statusPage('RETURN', session, language, { telegramBot: telegramBot() }));
     return html(statusPage(session?.state === 'ENDED' ? 'ENDED' : 'IGNORED', session, language, { telegramBot: telegramBot(),
       ended: session?.state === 'ENDED' ? endedLine(session, language) : codeOf(error) }));
   }

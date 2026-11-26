@@ -5,7 +5,8 @@
  * with the execution pause honoured and the proven owner as principal), the requester's Flight identity, and each conversation's own delivery.
  * `FLOFI_NATIVE_SIGNING=disabled` turns the whole surface off (default: on wherever approvals and the cloud runtime are).
  */
-import { createPostgresLogStore } from '@defi-workflow-engine/cloud-runtime';
+import { randomUUID } from 'node:crypto';
+import { createPostgresLeaseStore, createPostgresLogStore } from '@defi-workflow-engine/cloud-runtime';
 import type { EngineRuntime } from '../../platform/index.ts';
 import { betaAccessMode } from '../../flight/beta-access.ts';
 import { mcpBetaIdentity } from '../../mcp/beta-access.ts';
@@ -41,13 +42,16 @@ export async function nativeSigningService(env: Env = process.env, overrides: Pa
   const origin = publicOrigin(env) ?? (() => { throw new Error('NATIVE_SIGNING_ORIGIN_REQUIRED'); })();
   const host = overrides.host ?? await platformStateHost(env);
   const store = createNativeSessionStore(createPostgresLogStore({ db: host.db, tenantId: host.tenantId, namespace: NATIVE_SIGNING_NAMESPACE }));
-  return createNativeSigning({ env, origin, store, sealer: nativeSealer(walletSessionKey(env), host.tenantId),
+  // One confirmation per approval at a time, across every instance (the platform's durable leases, the same namespace as the journal).
+  const leases = createPostgresLeaseStore({ db: host.db, tenantId: host.tenantId, namespace: NATIVE_SIGNING_NAMESPACE, busyCode: 'NATIVE_SIGNING_BUSY',
+    holderId: `native-${randomUUID()}` });
+  return createNativeSigning({ env, origin, store, sealer: nativeSealer(walletSessionKey(env), host.tenantId), lock: (key, action) => leases.hold(key, action),
     surface: () => approvalSurface(env, () => undefined, { host, ...overrides.runtime ? { runtime: overrides.runtime } : {} }),
     flow: overrides.flow ?? cloudNativeFlow(env),
-    notify: overrides.notify ?? (async (session, event) => {
+    notify: overrides.notify ?? (async (session, event, confirmRef) => {
       // An MCP host's panel reads the session status; a conversation gets each event as a message.
       if (session.requester.kind !== 'CHANNEL_CONVERSATION') return;
-      const message = nativeMessage(origin, session, event);
+      const message = nativeMessage(origin, session, event, confirmRef);
       if (!message) return;
       const { deliverNativeNotice } = await import('../../channels/native-signing.ts');
       await deliverNativeNotice(env, { conversationId: session.requester.ref, handoffId: session.handoffId, ...message }, { host,

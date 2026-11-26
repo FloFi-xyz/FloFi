@@ -26,7 +26,9 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native Review', () => {
     expect(noWorse(transfer, { ...transfer, recipient: OWNER })).toBe(false);
     expect(noWorse(transfer, { ...transfer, pay: { ...transfer.pay, amount: '10000001' } })).toBe(false);
     expect(noWorse(transfer, { ...transfer, maximumNetworkCostLamports: null, feeToken: { symbol: 'USDC', amount: '1', decimals: 6 } })).toBe(false);
-    expect(noWorse(swap, { ...swap, receive: { ...swap.receive!, amount: '6000000', minimum: '6778283' } })).toBe(true);
+    expect(noWorse(swap, { ...swap, receive: { ...swap.receive!, amount: '6790000', minimum: '6778283' } })).toBe(true);
+    // An incoherent fresh quote (its estimate below its own guaranteed minimum) never passes.
+    expect(noWorse(swap, { ...swap, receive: { ...swap.receive!, amount: '6000000', minimum: '6778283' } })).toBe(false);
     expect(noWorse(swap, { ...swap, receive: { ...swap.receive!, minimum: '6778282' } })).toBe(false);
     expect(noWorse(swap, { ...swap, receive: { ...swap.receive!, symbol: 'USDT' } })).toBe(false);
     expect(noWorse(swap, { ...swap, owner: RECIPIENT })).toBe(false);

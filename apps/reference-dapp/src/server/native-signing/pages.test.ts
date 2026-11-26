@@ -28,5 +28,13 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: transit pages', () => {
     expect(back.html).toContain('href="https://chatgpt.com/"'); expect(back.html).toContain('Your Review is in your conversation');
     expect(statusPage('RETURN', { returnTo: 'TELEGRAM', state: 'SUBMITTED' } as never, 'PT', { telegramBot: 'FloFiBot' }).html).toContain('href="tg://resolve?domain=FloFiBot"');
     for (const kind of ['RETURN', 'IGNORED', 'ENDED', 'REFRESHED'] as const) expect(statusPage(kind, null, 'EN').html).not.toMatch(/SOL|USDC|lamport|<script/);
+    // After the proof, the signer sees FloFi's own Review and where the request came from (text only: the confirmation stays in the conversation).
+    const review = { flow: 'solana-transfer', runId: 'soltx-' + 'a'.repeat(32), commitment: 'c'.repeat(64), expiresAt: '2026-11-26T12:00:59.000Z', owner: 'Owner1111111111111111111111111111111111111',
+      network: 'Solana', action: 'transfer', pay: { symbol: 'SOL', amount: '10000000', decimals: 9 }, receive: null, recipient: 'Recipient<b>111111111111111111111111111111',
+      maximumNetworkCostLamports: '5000', feeToken: null };
+    const signer = statusPage('REVIEW', { returnTo: 'TELEGRAM', state: 'REVIEW_READY', review } as never, 'EN').html;
+    expect(signer).toContain('This request came from a Telegram conversation'); expect(signer).toContain('You send: 0.01 SOL');
+    expect(signer).toContain('Recipient&lt;b&gt;'); expect(signer).toContain('If you did not ask for this in your own conversation');
+    expect(signer).not.toMatch(/<script|<form|<button/);
   });
 });

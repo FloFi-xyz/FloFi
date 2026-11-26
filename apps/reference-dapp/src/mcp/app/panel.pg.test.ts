@@ -10,7 +10,8 @@ import { session } from '../gateway.test-harness.ts';
 import { oauthClient, oauthEnv, ORIGIN, signIn } from '../oauth/oauth-test-harness.ts';
 import { createPgOAuthStore } from '../oauth/pg-store.ts';
 import { stateOf } from '../oauth/state.ts';
-import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, PREVIOUS_PANEL_URI, panelHtml } from './panel.ts';
+import { APP_ONLY_TOOLS } from '../tools.ts';
+import { LEGACY_PANEL_URI, OLDER_PANEL_URI, PANEL_MIME, PANEL_URI, PREVIOUS_PANEL_URI, panelHtml } from './panel.ts';
 
 let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); });
@@ -40,7 +41,7 @@ describe('BUILD-MCP-002 MCP App panel resource', () => {
     const c = await client();
     const listed = ((await c.request('resources/list')).result as { resources: { uri: string; mimeType: string }[] }).resources;
     expect(listed).toEqual([expect.objectContaining({ uri: PANEL_URI, mimeType: PANEL_MIME }), expect.objectContaining({ uri: PREVIOUS_PANEL_URI, mimeType: PANEL_MIME }),
-      expect.objectContaining({ uri: LEGACY_PANEL_URI, mimeType: PANEL_MIME })]);
+      expect.objectContaining({ uri: OLDER_PANEL_URI, mimeType: PANEL_MIME }), expect.objectContaining({ uri: LEGACY_PANEL_URI, mimeType: PANEL_MIME })]);
     expect(PANEL_URI).not.toBe(PREVIOUS_PANEL_URI);
     const legacy = ((await c.request('resources/read', { uri: LEGACY_PANEL_URI })).result as { contents: { uri: string; text: string }[] }).contents[0]!;
     expect(legacy.uri).toBe(LEGACY_PANEL_URI); expect(legacy.text).toContain('Authorize in chat');
@@ -52,7 +53,8 @@ describe('BUILD-MCP-002 MCP App panel resource', () => {
     expect(tools.find(x => x.name === 'request_user_approval')?._meta).toMatchObject({ ui: { resourceUri: PANEL_URI }, 'openai/outputTemplate': PANEL_URI,
       securitySchemes: [{ type: 'oauth2', scopes: ['flofi.approval'] }] });
     // App-only tools never reach the model's tool list on a compliant host (visibility ["app"]).
-    for (const name of ['open_approval_session', 'get_execution_progress']) expect(tools.find(x => x.name === name)?._meta?.ui).toEqual({ visibility: ['app'] });
+    // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: every app-only tool, the native wallet signing ones included.
+    for (const name of APP_ONLY_TOOLS) expect(tools.find(x => x.name === name)?._meta?.ui, name).toEqual({ visibility: ['app'] });
   });
 
   it('can be switched off: no resource and no UI pointer, the approval link still works as text', async () => {

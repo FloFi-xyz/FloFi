@@ -2046,12 +2046,12 @@
       "path": "apps/reference-dapp/src/mcp/oauth/linked-wallet.pg.test.ts",
       "stage": "postgres"
     },
-    "app.wallet.deeplink.nacl-box": {
-      "path": "apps/reference-dapp/src/wallet/deeplink/nacl-box.test.ts",
+    "app.server.native-signing.deeplink.nacl-box": {
+      "path": "apps/reference-dapp/src/server/native-signing/deeplink/nacl-box.test.ts",
       "stage": "unit"
     },
-    "app.wallet.deeplink.protocol": {
-      "path": "apps/reference-dapp/src/wallet/deeplink/protocol.test.ts",
+    "app.server.native-signing.deeplink.protocol": {
+      "path": "apps/reference-dapp/src/server/native-signing/deeplink/protocol.test.ts",
       "stage": "unit"
     },
     "app.server.native-signing.review": {
@@ -2281,8 +2281,8 @@
     "app.mcp.app.panel",
     "app.domain.approval-notice",
     "app.domain.run-outcome-amounts",
-    "app.wallet.deeplink.nacl-box",
-    "app.wallet.deeplink.protocol",
+    "app.server.native-signing.deeplink.nacl-box",
+    "app.server.native-signing.deeplink.protocol",
     "app.server.native-signing.review",
     "app.channels.core.native-start"
   ],
@@ -9372,9 +9372,9 @@
         "apps/reference-dapp/src/server/native-signing/runtime.ts",
         "apps/reference-dapp/src/server/native-signing/service.ts",
         "apps/reference-dapp/src/server/native-signing/session-store.ts",
-        "apps/reference-dapp/src/wallet/deeplink/base58.ts",
-        "apps/reference-dapp/src/wallet/deeplink/nacl-box.ts",
-        "apps/reference-dapp/src/wallet/deeplink/protocol.ts"
+        "apps/reference-dapp/src/server/native-signing/deeplink/base58.ts",
+        "apps/reference-dapp/src/server/native-signing/deeplink/nacl-box.ts",
+        "apps/reference-dapp/src/server/native-signing/deeplink/protocol.ts"
       ],
       "suites": [
         "app.channels.telegram.native-signing.pg",
@@ -9382,8 +9382,8 @@
         "app.server.native-signing.pages",
         "app.server.native-signing.pg",
         "app.server.native-signing.review",
-        "app.wallet.deeplink.nacl-box",
-        "app.wallet.deeplink.protocol"
+        "app.server.native-signing.deeplink.nacl-box",
+        "app.server.native-signing.deeplink.protocol"
       ],
       "gaps": [
         "The Phantom/Solflare deeplink tests use a test wallet that speaks the documented protocol with real NaCl encryption on a MOCKED Solana flow; they do not certify the wallet apps, universal-link handling on iOS/Android, in-app browsers or a real signature on mainnet.",

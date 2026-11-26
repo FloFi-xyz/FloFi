@@ -39,11 +39,11 @@ import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, 
 /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the deployment's native signing service behind the panel's app-only tools (loaded on first use). */
 function deploymentNativeSigning(env: Env): McpNativeSigning {
   const service = async () => (await import('../server/native-signing/runtime.ts')).nativeSigningService(env);
-  const view = async (session: unknown) => session ? (await import('../server/native-signing/service.ts')).publicNativeSession(session as never) as Record<string, unknown> : null;
   return {
     start: async input => (await service()).start(input),
     confirm: async input => (await service()).confirm(input),
-    latest: async (handoffId, requester) => view(await (await service()).latest(handoffId, requester)),
+    reopen: async (handoffId, sessionId, requester) => (await service()).reopen(handoffId, sessionId, requester),
+    latest: async (handoffId, requester) => (await service()).view(handoffId, requester) as Promise<{ public: Record<string, unknown>; panel: Record<string, unknown> } | null>,
   };
 }
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
@@ -276,10 +276,11 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const { listPublishedStudioIntegrations } = await import('../platform/studio-catalog.ts');
     return listPublishedStudioIntegrations(host.db, host.tenantId);
   };
-  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: Claude's dedicated sandbox host for the exact connector URL this request came to (Claude hashes the URL the
-  // person configured), only for a Claude client and only where FLOFI_MCP_CLAUDE_UI_DOMAIN=enabled: a mismatch makes Claude show an error instead of the panel.
+  // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: Claude's dedicated sandbox host for FloFi's canonical connector URL (the OAuth resource; Claude hashes the URL
+  // the person configured, so a connector added under another form — e.g. a trailing slash, which Next redirects — would not match), only for a Claude
+  // client and only where FLOFI_MCP_CLAUDE_UI_DOMAIN=enabled: a mismatch makes Claude show an error instead of the panel.
   const claudeDomain = ui && oauth && active.kind === 'mcp-oauth' && active.clientId.startsWith('https://claude.ai/') && env.FLOFI_MCP_CLAUDE_UI_DOMAIN === 'enabled'
-    ? claudeAppDomain(`${oauth.origin}${new URL(request.url).pathname}`) : null;
+    ? claudeAppDomain(oauth.resource) : null;
   const report = (fields: Readonly<Record<string, string | number | boolean | null>>) => logger?.info('mcp.panel.diagnostic', { request_id: budget.requestId, principal: active.id, ...fields });
   const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui: ui ? { ...ui, claudeDomain } : ui, scope, budget, automations, portfolio,
     publicStudioIntegrations, native, report,

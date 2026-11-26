@@ -7,9 +7,9 @@
  * single use, made before anything else happens. Secrets (FloFi's one-time X25519 key, the wallet's session token) are sealed with AES-256-GCM
  * under a key derived from the deployment's wallet-session key and bound to this session and field; nothing here is ever returned to a client.
  */
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto';
 import type { PostgresLogStore } from '@defi-workflow-engine/cloud-runtime';
-import type { DeeplinkWallet } from '../../wallet/deeplink/protocol.ts';
+import type { DeeplinkWallet } from './deeplink/protocol.ts';
 
 export const NATIVE_SESSION_ID = /^nsg_[a-z2-7]{26}$/;
 export const NATIVE_TAG = /^[A-Za-z0-9_-]{22}$/;
@@ -36,24 +36,30 @@ export type NativeSession = {
   readonly createdAt: string; readonly expiresAt: string; readonly dappPublicKey: string; readonly dappSecret: string;
   /** The sealed Sign-In With Solana challenge, issued when the wallet connects (five minutes, single use within this session). */
   readonly challenge: string | null;
-  readonly state: NativeState; readonly step: { readonly kind: NativeStep; readonly tag: string } | null;
+  /**
+   * The step a wallet's answer is awaited for. Its callback tag is never stored: it is an HMAC of the session, the step and this nonce under the
+   * deployment's key (`Sealer.mac`), so the journal alone cannot answer for the wallet.
+   */
+  readonly state: NativeState; readonly step: { readonly kind: NativeStep; readonly nonce: string } | null;
   /** Set by `connect` (an unverified claim until the proof): the account, the wallet's encryption key and its sealed session token. */
   readonly connected: { readonly account: string; readonly walletKey: string; readonly walletSession: string } | null;
   /** The account proven by its Sign-In With Solana signature over this session's challenge. */
   readonly owner: string | null;
   readonly review: NativeReview | null;
-  /** The single-use tag the in-channel confirmation must present for exactly this Review. */
-  readonly confirmTag: string | null;
+  /** The nonce of the single-use reference the in-conversation confirmation must present for exactly this Review (the reference itself is derived). */
+  readonly confirmNonce: string | null;
+  /** The nonce of the confirmation already used, so the same confirmation repeated gets the same wallet request again (never a second one). */
+  readonly confirmedNonce: string | null;
   /** `afterSignature`: the session ended after the wallet returned signed bytes (whether they were broadcast is then the flow's to say). */
   readonly outcome: { readonly code: string | null; readonly signature: string | null; readonly attemptState: string | null; readonly afterSignature?: boolean } | null;
-  /** The wallet request this session waits for (the exact deeplink: encrypted for the wallet), so the conversation can re-open it; null otherwise. */
+  /** The wallet request this session waits for (the exact deeplink: its payload encrypted for the wallet), so the owner's panel can re-open it; null otherwise. */
   readonly walletRequest: string | null;
   readonly updatedAt: string };
 
 const fail = (code: string): never => { throw new Error(code); };
 const ALLOWED: Readonly<Record<NativeState, readonly NativeState[]>> = Object.freeze({
   AWAITING_CONNECT: ['AWAITING_PROOF', 'ENDED'], AWAITING_PROOF: ['PREPARING_REVIEW', 'ENDED'], PREPARING_REVIEW: ['REVIEW_READY', 'ENDED'],
-  REVIEW_READY: ['PREPARING_SIGNATURE', 'PREPARING_REVIEW', 'ENDED'], PREPARING_SIGNATURE: ['AWAITING_SIGNATURE', 'REVIEW_READY', 'ENDED'],
+  REVIEW_READY: ['PREPARING_SIGNATURE', 'ENDED'], PREPARING_SIGNATURE: ['AWAITING_SIGNATURE', 'REVIEW_READY', 'ENDED'],
   AWAITING_SIGNATURE: ['SUBMITTING', 'ENDED'], SUBMITTING: ['SUBMITTED', 'ENDED'], SUBMITTED: [], ENDED: [] });
 const IMMUTABLE = ['v', 'id', 'wallet', 'handoffId', 'requester', 'flow', 'returnTo', 'createdAt', 'expiresAt', 'dappPublicKey', 'dappSecret'] as const;
 
@@ -64,22 +70,26 @@ export function validateNativeJournal(bytes: Uint8Array): void {
   let prior: NativeSession | null = null;
   for (const line of text.trimEnd().split('\n')) {
     const s = JSON.parse(line) as NativeSession;
-    if (s.v !== 1 || !NATIVE_SESSION_ID.test(s.id) || !(s.state in ALLOWED) || (s.step && !NATIVE_TAG.test(s.step.tag))) fail('NATIVE_SESSION_STORE_CORRUPT');
+    if (s.v !== 1 || !NATIVE_SESSION_ID.test(s.id) || !(s.state in ALLOWED) || (s.step && !NATIVE_TAG.test(s.step.nonce))
+      || (s.confirmNonce !== null && !NATIVE_TAG.test(s.confirmNonce)) || (s.confirmedNonce !== null && !NATIVE_TAG.test(s.confirmedNonce))) fail('NATIVE_SESSION_STORE_CORRUPT');
     if (prior) {
       if (IMMUTABLE.some(key => JSON.stringify(s[key]) !== JSON.stringify(prior![key]))) fail('NATIVE_SESSION_STORE_CORRUPT');
       if (!ALLOWED[prior.state].includes(s.state)) fail('NATIVE_SESSION_STORE_CORRUPT');
       // What a proof established never changes; a connected account is never replaced.
       if (prior.owner && s.owner !== prior.owner || prior.connected && s.connected?.account !== prior.connected.account
         || prior.challenge && s.challenge !== prior.challenge) fail('NATIVE_SESSION_STORE_CORRUPT');
-    } else if (s.state !== 'AWAITING_CONNECT' || s.owner || s.connected || s.review || s.challenge) fail('NATIVE_SESSION_STORE_CORRUPT');
+    } else if (s.state !== 'AWAITING_CONNECT' || s.owner || s.connected || s.review || s.challenge || s.confirmNonce || s.confirmedNonce) fail('NATIVE_SESSION_STORE_CORRUPT');
     prior = s;
   }
 }
 
-/** Seals a short secret for one session field (AES-256-GCM, 96-bit random nonce, AAD = tenant, session and field). */
-export type Sealer = { readonly seal: (sessionId: string, field: string, plain: Uint8Array) => string; readonly open: (sessionId: string, field: string, sealed: string) => Uint8Array };
+/** Seals a short secret for one session field (AES-256-GCM, 96-bit random nonce, AAD = tenant, session and field); derives its references. */
+export type Sealer = { readonly seal: (sessionId: string, field: string, plain: Uint8Array) => string; readonly open: (sessionId: string, field: string, sealed: string) => Uint8Array;
+  /** A 22-character reference bound to the session, its purpose and a stored nonce (HMAC-SHA-256 under its own HKDF label). */
+  readonly mac: (sessionId: string, purpose: string, nonce: string) => string };
 export function nativeSealer(walletSessionKey: Buffer, tenantId: string): Sealer {
   const key = Buffer.from(hkdfSync('sha256', walletSessionKey, 'flofi', 'flofi/native-signing/v1', 32));
+  const macKey = Buffer.from(hkdfSync('sha256', walletSessionKey, 'flofi', 'flofi/native-signing/tags/v1', 32));
   const aad = (sessionId: string, field: string) => Buffer.from(`${tenantId}\u0000${sessionId}\u0000${field}`, 'utf8');
   return {
     seal(sessionId, field, plain) {
@@ -97,6 +107,7 @@ export function nativeSealer(walletSessionKey: Buffer, tenantId: string): Sealer
         return new Uint8Array(Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]));
       } catch { return fail('NATIVE_SESSION_SEAL_INVALID'); }
     },
+    mac: (sessionId, purpose, nonce) => createHmac('sha256', macKey).update(`${tenantId}\u0000${sessionId}\u0000${purpose}\u0000${nonce}`).digest('base64url').slice(0, 22),
   };
 }
 
@@ -141,6 +152,9 @@ export function createNativeSessionStore(log: PostgresLogStore): NativeSessionSt
       try { return await log.extendAt(name, version, bytes, validateNativeJournal); }
       catch (error) {
         if (error instanceof Error && error.message === 'EXECUTION_VERSION_CONFLICT') return fail('NATIVE_SESSION_CHANGED');
+        // The log checks that these bytes extend what is stored before it checks the version: another write that landed first reads as a
+        // non-extension. Only when the stored version moved is that the lost race it is (anything else stays the corruption it reports).
+        if (error instanceof Error && error.message === 'JOURNAL_CORRUPT' && (await log.readVersioned(name))?.version !== version) return fail('NATIVE_SESSION_CHANGED');
         throw error;
       }
     },

@@ -3,7 +3,8 @@
  * BUILD-FLOFI-UX-UI-002 (UX/UI-008 A): what each conversational surface does inside the conversation itself, and what still needs
  * FloFi. Repository truth, not a live acceptance claim: every cell restates a code path that `channel-capabilities.test.ts` checks
  * (tool names, channel switches, the WhatsApp clearance gate, the disabled in-frame wallet). A deployment's own switches can narrow any of
- * it, and none of it is financial authority: a signature always comes from the owner's wallet in FloFi.
+ * it, and none of it is financial authority: a signature always comes from the owner's own wallet (in FloFi, or — BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001
+ * — in Phantom or Solflare for one Solana step, after the Review in the conversation).
  */
 export type SurfaceId = 'chatgpt' | 'claude' | 'telegram' | 'whatsapp';
 export type SurfaceCapability = {
@@ -27,14 +28,15 @@ const MCP: Omit<SurfaceCapability, 'id' | 'name' | 'activation'> = {
   compose: 'Yes. Your assistant interprets the request; compose_strategy, validate_strategy and review_strategy build and check the canonical workflow.',
   simulation: 'Yes. simulate_strategy runs the flow’s read-only preview for a public address you name: nothing is stored and it grants no authority.',
   progress: 'The FloFi panel follows the approval. Run status and evidence require the owner’s consent. Without MCP Apps, use get_approval_status.',
-  signing: 'Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified.',
+  signing: 'Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. For one Solana step, also natively in Phantom or Solflare from the panel: the Review in the panel, then the exact transaction in the wallet app. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified.',
   coverage: 'Asked live with get_supported_networks and get_capabilities; mainnet handoffs only for networks the operator lists.',
 };
 const CHANNEL = (name: string): Omit<SurfaceCapability, 'id' | 'name' | 'activation'> => ({
   compose: 'With channel access, use exact commands or natural language if Copilot is enabled (FLOFI_CHANNEL_COPILOT).',
   simulation: 'Yes, when enabled (FLOFI_CHANNEL_SIMULATION): a read-only preview before the link if it needs no account or the strategy names the one to read.',
   progress: 'STATUS at any time; “loaded”, “started” and “reconciled” notices after you share run status in FloFi (off by default).',
-  signing: `Your wallet, in FloFi. The link opens the signing surface with an optional Canvas; ${name} has no wallet signer, and no message (“yes”, “confirm”) authorizes anything.`,
+  signing: `Your wallet, in FloFi. The link opens the signing surface with an optional Canvas; ${name} has no wallet signer, and no message (“yes”, “confirm”) authorizes anything.`
+    + (name === 'Telegram' ? ' For one Solana step outside the Flight beta, also Phantom or Solflare: the Review in this conversation, then the exact transaction in the wallet app.' : ''),
   coverage: 'Hosted channels use registered mainnet routes subject to channel and beta policy. Test-fund routes require local engineering.',
 });
 export const SURFACE_CAPABILITIES: readonly SurfaceCapability[] = Object.freeze([

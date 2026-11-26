@@ -6,6 +6,7 @@
  * wallet); no external resource, no form, no frame. Only the start page runs a small fixed script (its hash is the only script the CSP allows).
  */
 import { createHash } from 'node:crypto';
+import { nativeReviewLines } from './review.ts';
 import type { NativeReturn, NativeSession } from './session-store.ts';
 
 export type PageLanguage = 'EN' | 'PT';
@@ -13,7 +14,7 @@ type Page = { readonly status: number; readonly html: string; readonly headers: 
 const escape = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const STYLE = 'body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:#fff;color:#14233a}main{max-width:520px;margin:12vh auto;padding:0 20px}'
   + 'h1{font-size:20px;margin:0 0 8px}p{margin:0 0 16px;color:#52627a}a.button{display:inline-block;background:#1d5fca;color:#fff;text-decoration:none;font-weight:700;'
-  + 'padding:12px 18px;border-radius:10px}@media (prefers-color-scheme:dark){body{background:#0f141b;color:#e8edf4}p{color:#9aa8ba}}';
+  + 'padding:12px 18px;border-radius:10px}.review{border:1px solid #dce4ef;border-radius:10px;padding:10px 12px;margin:0 0 16px}.review p{margin:0 0 4px;color:inherit;overflow-wrap:anywhere}@media (prefers-color-scheme:dark){body{background:#0f141b;color:#e8edf4}p{color:#9aa8ba}}';
 const headers = (script: string | null): Record<string, string> => ({
   'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
   'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; ${script ? `script-src 'sha256-${createHash('sha256').update(script).digest('base64')}'; connect-src 'self'; ` : ''}`
@@ -43,10 +44,22 @@ export function walletPage(url: string, walletName: string, language: PageLangua
     + `<p>${pt ? 'Se o app não abrir sozinho, toque no botão.' : 'If the app does not open by itself, tap the button.'}</p>`
     + `<p><a class="button" href="${escape(url)}">${pt ? `Abrir o ${escape(walletName)}` : `Open ${escape(walletName)}`}</a></p>`, { refresh: url });
 }
-/** Where a wallet's answer lands: done (back to the conversation), already handled, ended, or the wallet reading this link for its own display. */
-export function statusPage(kind: 'METADATA' | 'RETURN' | 'IGNORED' | 'ENDED' | 'REFRESHED', session: NativeSession | null, language: PageLanguage,
+const SOURCES: Readonly<Record<NativeReturn, readonly [string, string]>> = Object.freeze({ CHATGPT: ['a ChatGPT conversation', 'uma conversa no ChatGPT'],
+  CLAUDE: ['a Claude conversation', 'uma conversa no Claude'], TELEGRAM: ['a Telegram conversation', 'uma conversa no Telegram'],
+  NONE: ['an assistant connected to FloFi', 'um assistente conectado à FloFi'] });
+/** Where a wallet's answer lands: the signer's Review, done (back to the conversation), already handled, ended, or the wallet reading this link. */
+export function statusPage(kind: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 'ENDED' | 'REFRESHED', session: NativeSession | null, language: PageLanguage,
   options: { readonly telegramBot?: string | null; readonly ended?: string | null } = {}): Page {
   const pt = language === 'PT', back = returnTo(session?.returnTo ?? null, language, options.telegramBot ?? null);
+  // After the wallet proved the account: the signer sees FloFi's own Review here, and where the request came from, before any transaction is asked
+  // of their wallet (whoever confirms it in the conversation). Text only; the confirmation stays in the conversation.
+  if (kind === 'REVIEW' && session?.review) {
+    const source = SOURCES[session.returnTo] ?? SOURCES.NONE, lines = nativeReviewLines(session.review, language);
+    return page(language, 'FloFi', `<h1>${pt ? 'Carteira verificada' : 'Wallet verified'}</h1><p>${pt ? `Este pedido veio de ${source[1]}. Confirme por lá; depois a sua carteira mostra exatamente isto:`
+      : `This request came from ${source[0]}. Confirm it there; your wallet then shows exactly this:`}</p>`
+      + `<div class="review">${lines.map(line => `<p>${escape(line)}</p>`).join('')}</div>`
+      + `<p>${pt ? 'Se não foi você quem pediu isto na sua própria conversa, não confirme e recuse na carteira.' : 'If you did not ask for this in your own conversation, do not confirm it, and reject it in your wallet.'}</p>${back}`);
+  }
   if (kind === 'METADATA') return page(language, 'FloFi', `<h1>FloFi</h1><p>${pt ? 'Assinatura pela sua carteira, revisada na sua conversa.' : 'Signing with your wallet, reviewed in your conversation.'}</p>`);
   if (kind === 'IGNORED') return page(language, 'FloFi', `<h1>${pt ? 'Nada mudou' : 'Nothing changed'}</h1><p>${pt
     ? 'Este passo já foi tratado ou o link não vale mais. Nada foi assinado nem enviado por ele.' : 'This step was already handled or the link is no longer valid. Nothing was signed or sent by it.'}</p>${back}`, { status: 409 });
@@ -56,8 +69,10 @@ export function statusPage(kind: 'METADATA' | 'RETURN' | 'IGNORED' | 'ENDED' | '
   if (kind === 'ENDED') return page(language, 'FloFi', `<h1>${pt ? 'Encerrado' : 'Ended'}</h1><p>${escape(options.ended ?? (pt ? 'Este pedido foi encerrado.' : 'This request ended.'))}</p>${back}`);
   const state = session?.state;
   const line = state === 'REVIEW_READY' ? (pt ? 'Carteira verificada. A Revisão está na sua conversa: confira e confirme por lá.' : 'Wallet verified. Your Review is in your conversation: check it and confirm there.')
-    : state === 'SUBMITTED' ? (pt ? 'Assinado e enviado uma única vez. A FloFi publica o recibo verificado na sua conversa.' : 'Signed and sent once. FloFi posts the verified receipt in your conversation.')
-      : (pt ? 'Feito. Continue na sua conversa.' : 'Done. Continue in your conversation.');
+    : state === 'SUBMITTED' ? (pt ? 'Assinado e entregue à rede uma única vez. A FloFi publica o resultado verificado na sua conversa.' : 'Signed and handed to the network once. FloFi posts the verified result in your conversation.')
+      : state === 'SUBMITTING' ? (pt ? 'Assinado. A FloFi está confirmando o envio, que nunca acontece duas vezes; o status segue na sua conversa.'
+        : 'Signed. FloFi is confirming the sending, which never happens twice; the status follows in your conversation.')
+        : (pt ? 'Feito. Continue na sua conversa.' : 'Done. Continue in your conversation.');
   return page(language, 'FloFi', `<h1>${pt ? 'Pronto' : 'Done'}</h1><p>${line}</p>${back}`);
 }
 /**

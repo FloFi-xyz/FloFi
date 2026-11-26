@@ -5,7 +5,7 @@
  * FloFi; codes never reach the person.
  */
 import { userFacingError } from '../../platform/conversation-state.ts';
-import { DEEPLINK_WALLETS } from '../../wallet/deeplink/protocol.ts';
+import { DEEPLINK_WALLETS } from './deeplink/protocol.ts';
 import { nativeReviewLines } from './review.ts';
 import type { NativeEvent } from './service.ts';
 import type { NativeSession } from './session-store.ts';
@@ -25,6 +25,12 @@ export function nativeEndedText(s: NativeSession, wallet: string = DEEPLINK_WALL
     HANDOFF_ALREADY_CLAIMED: { EN: 'Another wallet already took this proposal. Nothing was sent from this request.', PT: 'Outra carteira já assumiu esta proposta. Nada foi enviado por este pedido.' },
     CHANNEL_INTENDED_WALLET_MISMATCH: { EN: 'This proposal was prepared for another wallet. Connect the wallet it names. Nothing was sent.',
       PT: 'Esta proposta foi preparada para outra carteira. Conecte a carteira indicada nela. Nada foi enviado.' },
+    NATIVE_PROOF_EXPIRED: { EN: `The sign-in in ${wallet} came after its five minutes. Nothing was signed or sent. Tap Sign with ${wallet} again to start over.`,
+      PT: `O login no ${wallet} chegou depois dos cinco minutos dele. Nada foi assinado nem enviado. Toque em Assinar com ${wallet} de novo para recomeçar.` },
+    NATIVE_SIGNING_ALREADY_SENT: { EN: 'This proposal may already have been sent from your wallet, so FloFi does not ask your wallet for it again. Check its status here.',
+      PT: 'Esta proposta pode já ter sido enviada pela sua carteira, então a FloFi não pede de novo à carteira. Confira o status aqui.' },
+    NATIVE_SIGNING_WALLET_REQUEST_OPEN: { EN: 'Another wallet request for this proposal is still open. Answer or reject it in your wallet first. Nothing was sent by this one.',
+      PT: 'Outro pedido à carteira para esta proposta ainda está aberto. Responda ou recuse na sua carteira primeiro. Nada foi enviado por este.' },
   };
   if (known[code]) return known[code]!;
   if (/^BETA_/.test(code)) return { EN: 'Signing from this conversation is not open to your account in this beta yet. Use the Authorize button to finish in FloFi. Nothing was sent.',
@@ -34,19 +40,26 @@ export function nativeEndedText(s: NativeSession, wallet: string = DEEPLINK_WALL
   return { EN: `${plain.EN}${sent ? '' : ' Nothing was sent.'}`, PT: `${plain.PT}${sent ? '' : ' Nada foi enviado.'}` };
 }
 
-/** The message for one session event, or null when the event says nothing new to the conversation. */
-export function nativeMessage(origin: string, s: NativeSession, event: NativeEvent): NativeMessage | null {
+/** The message for one session event (`confirmRef`: the Review's single-use reference), or null when the event says nothing new to the conversation. */
+export function nativeMessage(origin: string, s: NativeSession, event: NativeEvent, confirmRef: string | null = null): NativeMessage | null {
   const wallet = DEEPLINK_WALLETS[s.wallet].name;
   if (event === 'REVIEW_READY') {
-    if (!s.review || !s.confirmTag) return null;
-    const tail = { EN: `Tap Confirm in ${wallet} and ${wallet} asks you to sign exactly this. If the Review lapses first, FloFi simulates again and only continues when the terms are no worse; otherwise it shows you a new Review here.`,
-      PT: `Toque em Confirmar no ${wallet} e o ${wallet} pede que você assine exatamente isto. Se a Revisão vencer antes, a FloFi simula de novo e só continua se os termos não forem piores; caso contrário, mostra uma nova Revisão aqui.` };
+    if (!s.review || !confirmRef) return null;
+    const tail = { EN: `Tap Confirm in ${wallet} and ${wallet} asks you to sign exactly this. If the Review lapses first, FloFi simulates again and only continues when the terms are no worse; otherwise it shows you a new Review here. FloFi posts this operation's status and receipt in this conversation.`,
+      PT: `Toque em Confirmar no ${wallet} e o ${wallet} pede que você assine exatamente isto. Se a Revisão vencer antes, a FloFi simula de novo e só continua se os termos não forem piores; caso contrário, mostra uma nova Revisão aqui. A FloFi publica o status e o recibo desta operação nesta conversa.` };
     return { dedupeKey: `native:${s.id}:review:${s.review.runId}`,
       text: { EN: [...nativeReviewLines(s.review, 'EN'), tail.EN].join('\n'), PT: [...nativeReviewLines(s.review, 'PT'), tail.PT].join('\n') },
-      link: { label: { EN: `Confirm in ${wallet}`, PT: `Confirmar no ${wallet}` }, url: `${origin}/api/native-signing/${s.handoffId}/${s.id}/confirm/${s.confirmTag}` } };
+      link: { label: { EN: `Confirm in ${wallet}`, PT: `Confirmar no ${wallet}` }, url: `${origin}/api/native-signing/${s.handoffId}/${s.id}/confirm/${confirmRef}` } };
+  }
+  if (event === 'REVIEW_RENEWED') {
+    if (!s.review) return null;
+    const head = { EN: `FloFi simulated again just before asking ${wallet}. These terms are no worse than the ones you confirmed, and they are what ${wallet} shows you:`,
+      PT: `A FloFi simulou de novo logo antes de chamar o ${wallet}. Estes termos não são piores que os que você confirmou, e são os que o ${wallet} mostra:` };
+    return { dedupeKey: `native:${s.id}:renewed:${s.review.runId}`, link: null,
+      text: { EN: [head.EN, ...nativeReviewLines(s.review, 'EN')].join('\n'), PT: [head.PT, ...nativeReviewLines(s.review, 'PT')].join('\n') } };
   }
   if (event === 'SUBMITTED') return { dedupeKey: `native:${s.id}:submitted`, link: null,
-    text: { EN: `Signed in ${wallet} and sent once by FloFi. FloFi now follows the network and posts the verified receipt here; nothing else needs your wallet.`,
-      PT: `Assinado no ${wallet} e enviado uma única vez pela FloFi. A FloFi acompanha a rede e publica o recibo verificado aqui; nada mais precisa da sua carteira.` } };
+    text: { EN: `Signed in ${wallet} and handed to the network once by FloFi (never again). FloFi now follows the network and posts the verified result here; nothing else needs your wallet.`,
+      PT: `Assinado no ${wallet} e entregue à rede uma única vez pela FloFi (nunca de novo). A FloFi acompanha a rede e publica o resultado verificado aqui; nada mais precisa da sua carteira.` } };
   return { dedupeKey: `native:${s.id}:ended`, link: null, text: nativeEndedText(s, wallet) };
 }

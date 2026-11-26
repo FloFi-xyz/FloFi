@@ -1600,7 +1600,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Onde assina",
             "text": [
-             "Sua própria carteira, pela tela de assinatura do FloFi, embutida no MCP Apps quando o app permite o quadro do FloFi e a carteira oferece um provedor compatível ali. Abrir o FloFi é uma alternativa externa opcional; o Canvas é opcional. O suporte real do app e da carteira precisa ser verificado."
+             "Sua própria carteira, pela tela de assinatura do FloFi, embutida no MCP Apps quando o app permite o quadro do FloFi e a carteira oferece um provedor compatível ali. Para uma etapa na Solana, também direto no Phantom ou no Solflare pelo painel: a Revisão no painel e depois a transação exata no app da carteira. Abrir o FloFi é uma alternativa externa opcional; o Canvas é opcional. O suporte real do app e da carteira precisa ser verificado."
             ]
            },
            {
@@ -1641,7 +1641,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Onde assina",
             "text": [
-             "Sua própria carteira, pela tela de assinatura do FloFi, embutida no MCP Apps quando o app permite o quadro do FloFi e a carteira oferece um provedor compatível ali. Abrir o FloFi é uma alternativa externa opcional; o Canvas é opcional. O suporte real do app e da carteira precisa ser verificado."
+             "Sua própria carteira, pela tela de assinatura do FloFi, embutida no MCP Apps quando o app permite o quadro do FloFi e a carteira oferece um provedor compatível ali. Para uma etapa na Solana, também direto no Phantom ou no Solflare pelo painel: a Revisão no painel e depois a transação exata no app da carteira. Abrir o FloFi é uma alternativa externa opcional; o Canvas é opcional. O suporte real do app e da carteira precisa ser verificado."
             ]
            },
            {
@@ -1682,7 +1682,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Onde assina",
             "text": [
-             "Sua carteira, na FloFi. O link abre a tela de assinatura com Canvas opcional; o Telegram não tem assinador de carteira, e nenhuma mensagem (“sim”, “confirmo”) autoriza nada."
+             "Sua carteira, na FloFi. O link abre a tela de assinatura com Canvas opcional; o Telegram não tem assinador de carteira, e nenhuma mensagem (“sim”, “confirmo”) autoriza nada. Para uma etapa na Solana fora do beta Flight, também Phantom ou Solflare: a Revisão nesta conversa e depois a transação exata no app da carteira."
             ]
            },
            {
@@ -3658,7 +3658,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Signing path",
             "text": [
-             "Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified."
+             "Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. For one Solana step, also natively in Phantom or Solflare from the panel: the Review in the panel, then the exact transaction in the wallet app. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified."
             ]
            },
            {
@@ -3699,7 +3699,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Signing path",
             "text": [
-             "Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified."
+             "Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. For one Solana step, also natively in Phantom or Solflare from the panel: the Review in the panel, then the exact transaction in the wallet app. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified."
             ]
            },
            {
@@ -3740,7 +3740,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            {
             "term": "Signing path",
             "text": [
-             "Your wallet, in FloFi. The link opens the signing surface with an optional Canvas; Telegram has no wallet signer, and no message (“yes”, “confirm”) authorizes anything."
+             "Your wallet, in FloFi. The link opens the signing surface with an optional Canvas; Telegram has no wallet signer, and no message (“yes”, “confirm”) authorizes anything. For one Solana step outside the Flight beta, also Phantom or Solflare: the Review in this conversation, then the exact transaction in the wallet app."
             ]
            },
            {
