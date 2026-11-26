@@ -55,7 +55,7 @@ const explorerTx = (network: RouterNetwork, chain: 'source' | 'destination', has
 export function RouterForm({ nodeId, onDone, network: initialNetwork, options = false }: { nodeId?: string; onDone?: () => void; network?: RouterNetwork; options?: boolean }) {
   const { t: tr } = useLocale();
   const { walletEnvironment } = useExecutionEnvironment();
-  const { state, propose, dispatch, dismissProposal, context, amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, sequence, amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? routerDetails(node) : null;
   const start = ROUTER_NETWORK_OPTIONS[existing?.network ?? initialNetwork ?? 'mainnet'];
   const [input, setInput] = useState<RouterBridgeInput>(existing ? routerInputOf(existing)
@@ -107,7 +107,7 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
    */
   function commitSlippage(slippage: string): string | null {
     if (!nodeId) return null;
-    const result = appliedSlippageCommand(state, nodeId, slippage, context);
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: Boolean(sequence?.completed.some(step => step.nodeId === nodeId)) });
     if ('code' in result) return appliedSlippageMessage(result.code, maximumSlippageBps);
     // The form's own draft follows the applied value too (its later "Review bridge change" never proposes the earlier limit).
     // Only the slippage changes: applied at once. Otherwise (the bridge cannot be rebuilt exactly) the same edit is a proposal the owner reviews.

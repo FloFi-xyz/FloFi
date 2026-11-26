@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { createUniversalBridgeNode, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
-import { appliedSlippageCommand } from './applied-slippage';
+import { appliedSlippageCommand, settingsKeyOf } from './applied-slippage';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Command } from './commands';
 import { routerDetails, ROUTER_NETWORK_OPTIONS } from './router-authoring';
@@ -49,6 +49,8 @@ describe('PR #254 follow-up: an existing bridge or Jupiter swap applies its max 
     // Nothing but the slippage constraint changed on the step (amount, assets, networks, recipient and routing stay as applied).
     const strip = (node: typeof before) => JSON.stringify({ ...node, userConstraints: node.userConstraints.filter(c => c.kind !== 'MAXIMUM_SLIPPAGE_BPS') }, (key, value) => /slippage/i.test(key) ? undefined : value);
     expect(strip(only(next))).toBe(strip(before));
+    // The settings form stays mounted for a slippage-only edit (its key ignores slippage) and is rebuilt after any other change.
+    expect(settingsKeyOf(only(next))).toBe(settingsKeyOf(before));
     // Re-applying the applied value is the same edit target (the control never sends it: it compares exact basis points first).
     expect(slippageOf(apply(next, '250').next)).toBe('250');
   });
@@ -73,6 +75,14 @@ describe('PR #254 follow-up: an existing bridge or Jupiter swap applies its max 
     const result = appliedSlippageCommand(authored, node.nodeId, '250', context);
     if ('code' in result) throw new Error(result.code);
     // Rebuilding it from the settings would change its routing too, so it is not applied at once (the forms propose it instead).
+    expect(result.exact).toBe(false);
+    expect(settingsKeyOf(only(editorReducer(authored, result.command, context)))).not.toBe(settingsKeyOf(custom as typeof node));
+  });
+
+  it('workflow review: a step a step-by-step sequence already executed is never edited in one click (the edit is proposed instead)', () => {
+    const state = router(), nodeId = only(state).nodeId;
+    const result = appliedSlippageCommand(state, nodeId, '250', context, { executed: true });
+    if ('code' in result) throw new Error(result.code);
     expect(result.exact).toBe(false);
   });
 

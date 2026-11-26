@@ -50,7 +50,7 @@ export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: 
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
-  const { state, propose, dispatch, dismissProposal, context } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, sequence } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId);
   const existing = node ? solanaSwapDetails(node) : null;
   const devnet = (existing?.network ?? initialNetwork) === 'Solana Devnet';
@@ -80,7 +80,7 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
    */
   function commitSlippage(slippage: string): string | null {
     if (!nodeId) return null;
-    const result = appliedSlippageCommand(state, nodeId, slippage, context);
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: Boolean(sequence?.completed.some(step => step.nodeId === nodeId)) });
     if ('code' in result) return appliedSlippageMessage(result.code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS);
     // The form's own draft follows the applied value too (its later "Review swap change" never proposes the earlier limit).
     // Only the slippage changes: applied at once. Otherwise (the step cannot be rebuilt exactly) the same edit is a proposal the owner reviews.

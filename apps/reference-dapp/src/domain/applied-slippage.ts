@@ -16,9 +16,11 @@ import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
  * `exact` (security review): the edit is applied at once only when the resulting step equals the applied one apart from its slippage. The
  * authoring input cannot express every valid step (a universal bridge with a provider list that is not a routing preset, a Router bridge whose
  * stricter earlier editing bounds are kept on purpose), and rebuilding such a step from it would also change those: then the same edit is
- * offered as a proposal instead, so the owner sees every change before applying it.
+ * offered as a proposal instead, so the owner sees every change before applying it. The same holds when anything else in the workflow would change
+ * (another step, a resource edge), and for a step a step-by-step sequence already EXECUTED (`executed`): editing it ends that sequence's history
+ * for this workflow, so it is never done in one click (workflow review).
  */
-export function appliedSlippageCommand(state: EditorState, nodeId: string, slippage: string, context?: ReviewContext):
+export function appliedSlippageCommand(state: EditorState, nodeId: string, slippage: string, context?: ReviewContext, options: { readonly executed?: boolean } = {}):
   { readonly command: Command; readonly exact: boolean } | { readonly code: string } {
   const node = state.workflow.nodes.find(item => item.nodeId === nodeId);
   if (!node) return { code: 'NODE_NOT_FOUND' };
@@ -42,8 +44,19 @@ export function appliedSlippageCommand(state: EditorState, nodeId: string, slipp
   } catch (cause) { return { code: cause instanceof Error ? cause.message : 'INVALID_SLIPPAGE' }; }
   const preview = editorReducer(state, command, context);
   if (preview.error) return { code: preview.error };
+  const others = (workflow: EditorState['workflow']) => JSON.stringify({ nodes: workflow.nodes.filter(item => item.nodeId !== nodeId), edges: workflow.resourceEdges });
   const after = preview.workflow.nodes.find(item => item.nodeId === nodeId);
-  return { command, exact: Boolean(after) && withoutSlippage(after!) === withoutSlippage(node) };
+  return { command, exact: !options.executed && Boolean(after) && withoutSlippage(after!) === withoutSlippage(node) && others(preview.workflow) === others(state.workflow) };
+}
+/**
+ * A short key of a step apart from its slippage: the inspector keys a step's settings form by it, so a slippage commit (the only change) keeps the
+ * form mounted (a "Review … change" press that committed it still lands, and other unapplied fields stay), while any other change remounts it
+ * from the applied step as before.
+ */
+export function settingsKeyOf(node: EditorState['workflow']['nodes'][number]): string {
+  let hash = 0x811c9dc5;
+  for (const char of withoutSlippage(node)) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;
+  return `${node.nodeId}:${hash.toString(16)}`;
 }
 /** A step's canonical form without its slippage (its MAXIMUM_SLIPPAGE_BPS constraint and slippage fields). */
 function withoutSlippage(node: EditorState['workflow']['nodes'][number]): string {

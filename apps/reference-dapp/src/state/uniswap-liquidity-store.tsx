@@ -36,7 +36,7 @@ function errorValue(value: unknown): unknown {
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
 
 export function UniswapLiquidityProvider({ children }: { children: ReactNode }) {
-  const { runtimeWorkflow, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
+  const { runtimeWorkflow, sequenceRestore, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<UniswapLiquidityRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   // BUILD-RH-002: the testnet pools and each catalog network (real funds: Robinhood Chain, BUILD-BASE-001 Base) are enabled separately; the
   // authored position (else the run) selects one.
@@ -97,8 +97,9 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     return () => { mounted = false; };
   }, [restoreLiquidityCanvas, trackCanvasRestoration]);
   useEffect(() => {
-    if (record && retired && record.authorization) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
-  }, [record, retired]);
+    // While a sequence's completed steps are being re-proven after a reload the runtime step is not settled yet: nothing is invalidated then.
+    if (record && retired && record.authorization && !sequenceRestore) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
+  }, [record, retired, sequenceRestore]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
     // EXEC-01: a refusal refreshed in place leaves no error (its updated Review is valid; `requoted` explains it).

@@ -15,7 +15,8 @@ import { createPgDelegationStore } from '../delegation/pg-store.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { createPgWorkflowRunStore, type WorkflowRunStore } from './pg-store.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
-import { WORKFLOW_RUN_ADVANCE_KIND } from './state-machine.ts';
+import { ADVANCE_TRANSIENT_RETRY_MS, ADVANCE_TRANSIENT_WINDOW_MS, WORKFLOW_RUN_ADVANCE_KIND } from './state-machine.ts';
+import { backoffMs } from '@defi-workflow-engine/cloud-runtime';
 import { userFundedRuntime } from '../user-funded/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -28,7 +29,17 @@ export function workflowRunHandlers(deps: RunnerDeps): Record<(typeof WORKFLOW_R
     [WORKFLOW_RUN_ADVANCE_KIND]: async (item, settle) => {
       const runId = item.payload.runId;
       if (typeof runId !== 'string' || !RUN_ID.test(runId)) { await settle({ outcome: 'DEAD', reason: 'WORK_PAYLOAD_INVALID' }); return; }
-      const result = await advanceRun(deps, runId);
+      let result: Awaited<ReturnType<typeof advanceRun>>;
+      try { result = await advanceRun(deps, runId); }
+      catch (error) {
+        // A transient failure inside the window is retried within a minute (`ADVANCE_TRANSIENT_RETRY_MS`); outside it, the worker's own backoff.
+        // Nothing was signed or submitted by the failed pass; the next one re-reads the run (idempotent, at-least-once).
+        if (deps.now().getTime() - item.createdAt.getTime() >= ADVANCE_TRANSIENT_WINDOW_MS) throw error;
+        const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'WORKFLOW_RUN_ADVANCE_FAILED';
+        deps.log('workflow_run.advance_failed', { run: runId, code });
+        await settle({ outcome: 'RETRY', delayMs: Math.min(backoffMs(item.deliveries), ADVANCE_TRANSIENT_RETRY_MS), reason: code });
+        return;
+      }
       deps.log('workflow_run.advanced', { run: runId, state: result.state, code: result.code });
       await settle(result.retryMs === null ? { outcome: 'DONE' } : { outcome: 'RETRY', delayMs: result.retryMs, reason: 'WORKFLOW_RUN_WAITING' });
     },

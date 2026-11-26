@@ -70,6 +70,13 @@ export const CONFIRM_RUN_SECONDS = 7 * 86_400;
 export const DELEGATED_AUTHORIZATION_SECONDS = 24 * 3_600;
 /** How often the advance work item re-observes an open run (the flows' own reconciliation is the source of truth). */
 export const ADVANCE_RETRY_MS = 20_000;
+/**
+ * PR #254 follow-up: an advance that failed for a moment (an RPC read of a bridge's delivery, the database) is retried within a minute while the
+ * work item is younger than an hour, as the reconcile worker does for its flow runs; never after the generic doubling backoff (up to ten minutes),
+ * which kept a delivered bridge of a multi-step run "in progress". Past the window the generic backoff and observation budget apply.
+ */
+export const ADVANCE_TRANSIENT_RETRY_MS = 60_000;
+export const ADVANCE_TRANSIENT_WINDOW_MS = 60 * 60_000;
 export const WORKFLOW_RUN_ADVANCE_KIND = 'workflow-run.advance';
 
 /** Ending only skips unsubmitted work; reconciled steps and their evidence remain final. */

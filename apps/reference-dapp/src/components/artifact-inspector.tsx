@@ -44,6 +44,7 @@ import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksConfiguration } from './stocks-settings';
 import { DEFAULT_SLIPPAGE, bpsToPercent, priceDifferenceLabel } from '../domain/slippage-policy';
 import { priceDifferenceBps, SlippageChoices } from './price-difference-input';
+import { settingsKeyOf } from '../domain/applied-slippage';
 import { plainFinding } from '../domain/editor-overview';
 import { withoutChainId } from '../domain/approved-ux';
 import { workflowPositionManagement } from '../domain/liquidity-positions';
@@ -325,7 +326,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
       {lending&&<LendingNodeEditor key={`${node.nodeId}:${state.workflow.revision}`} nodeId={node.nodeId} {...(supply || node.actionType === 'borrow' ? { reviewFormId: supplyReviewFormId(node.nodeId) } : {})}/>}
       {!lending&&!lendingDraft&&node.actionType==='borrow'&&<BorrowAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
       {!lending && !lendingDraft && supply && <SupplyAuthoringForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
-      {solana && !cryptoSwap && <><p className="muted">{tr(solana.network)} {tr(solana.from)} → {tr(solana.to)}{tr(" via ")}{tr(solanaSwapLabels(solana.network).provider)}{tr(solanaSwapLabels(solana.network).testTokens ? ' · valueless test tokens' : '')}{tr(" · simulate for a live quote. Changes require review.")}</p><SolanaSwapForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
+      {solana && !cryptoSwap && <><p className="muted">{tr(solana.network)} {tr(solana.from)} → {tr(solana.to)}{tr(" via ")}{tr(solanaSwapLabels(solana.network).provider)}{tr(solanaSwapLabels(solana.network).testTokens ? ' · valueless test tokens' : '')}{tr(" · simulate for a live quote. Changes require review.")}</p><SolanaSwapForm key={settingsKeyOf(node)} nodeId={node.nodeId}/></>}
       {cryptoSwap && selection && <form className="inspector-form" aria-label={tr("Swap amount")} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(node.nodeId) ?? ''); }}>
         <label>{tr("Input amount (")}{tr(selection.from)})<TokenAmountInput value={amountInputs[node.nodeId] ?? cryptoSwap.amount} aria-invalid={Boolean(error) || undefined} onValueChange={value => { setError(''); editCanvasAmount(node.nodeId, value); }}/></label>
         {amountInputs[node.nodeId] !== undefined && <p className="muted">{tr("Press Enter to apply the amount.")}</p>}
@@ -333,8 +334,9 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
       {cryptoSwap && selection && node.userConstraints.some(constraint => constraint.kind === 'MAXIMUM_SLIPPAGE_BPS') && <SlippageField auto={jupiterSlippage} value={slippage} current={Number(cryptoSwap.slippage)} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }}
         onCommit={value => applySlippage(value, bps => ({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, slippage: bps }, source: 'CANVAS', baseRevision: state.workflow.revision }))}/>}
       {/* BUILD-FLOFI-UX-FIX-003: a bridge's settings are only what its card does not edit (recipient, routing, slippage), without protocol text. */}
-      {universalBridge && <UniversalBridgeForm options key={node!.nodeId + ':' + state.workflow.revision} nodeId={node!.nodeId}/>}
-      {routed && <RouterForm options key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/>}
+      {/* PR #254 follow-up: keyed by the step apart from its slippage, which these settings apply at once (`settingsKeyOf`). */}
+      {universalBridge && <UniversalBridgeForm options key={settingsKeyOf(node!)} nodeId={node!.nodeId}/>}
+      {routed && <RouterForm options key={settingsKeyOf(node)} nodeId={node.nodeId}/>}
       {uniPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(uniPosition.network)}{tr(" USDC / WETH via ")}{tr(uniPosition.provider)}{tr(" · fee 0.05% · test tokens · simulate against the live pool. Changes require review.")}</p><UniswapLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {managed && <p className="muted">{tr(liquidityPositionOperationPhrase(managed.protocol, managed.management.operation, managed.management.close))}{managed.management.partBps !== null ? ` · ${managed.management.partBps / 100}%` : ''}{' · '}{tr("Prepared from your position. Change it from the Dashboard or in chat; Simulate shows the exact Review.")}</p>}
       {orcaPosition && !managed && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(orcaPosition.network === 'Solana Devnet' ? " SOL / devUSDC via " : " SOL / USDC via ")}{tr(orcaPosition.provider)}{tr(orcaPosition.network === 'Solana Devnet' ? " · valueless test tokens · simulate against the live pool. Changes require review." : " · real funds · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
