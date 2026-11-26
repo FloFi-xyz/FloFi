@@ -5,7 +5,7 @@
  * of its SINGLE_FLOW plan. Every condition is the server's; any failure keeps SINGLE_FLOW exactly as before. MOCKED runtime doubles only.
  */
 import { randomBytes } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { readHandoffPolicy, workflowPlan } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
@@ -23,8 +23,9 @@ const USER_FUNDED = (chains: string[], bridgeRoutes: string[] = []) => ({ enable
 const runtime = (facts: Facts | null): McpRuntime => ({ kind: 'embedded', mode: async () => 'harness', info: async () => ({ executionEnabled: true }),
   preview: async () => ({ ok: false, code: 'PREVIEW_NOT_USED' }), ...facts ? { sequences: async () => facts } : {} }) as unknown as McpRuntime;
 const policy = readHandoffPolicy({ FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base,arbitrum-one' });
-// Nothing in `prepareApprovalRequest` may touch the store: the double throws if it does.
-const untouched = new Proxy({}, { get: () => () => { throw new Error('STORE_TOUCHED'); } }) as unknown as HandoffStore;
+// Nothing in `prepareApprovalRequest` may touch the store but its opportunistic retention purge (2% of requests, `Math.random`), which the
+// double answers; anything else throws (main run 64a4a961 drew the purge).
+const untouched = new Proxy({}, { get: (_target, key) => key === 'purge' ? async () => 0 : () => { throw new Error('STORE_TOUCHED'); } }) as unknown as HandoffStore;
 const deps = (requester: ApprovalRequester, facts: Facts | null, singleStepRuns: (() => Promise<boolean>) | null = async () => true): ApprovalDeps => ({
   origin: 'http://localhost:3999', scheme: approvalLinkScheme('flofi_hs_', randomBytes(32), [requester.kind]), handoffs: untouched, allow: async () => true,
   runtime: runtime(facts), policy, rules: { handoffSeconds: 900, maxPending: 3, rate: [20, 3_600], supersedeSameWorkflow: true }, now: new Date(),
@@ -85,6 +86,9 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the approval servi
     }
   });
   it('keeps SINGLE_FLOW, exactly as before, whenever any condition fails', async () => {
+    // Deterministically take the retention purge path the CI run drew by chance; the decision must not depend on it.
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    onTestFinished(() => random.mockRestore());
     const single = async (d: ApprovalDeps, requester: ApprovalRequester, options: Parameters<typeof prepareApprovalRequest>[4] = { externalOneStep: true }) => {
       const prepared = await prepareApprovalRequest(d, requester, composed.strategy, composed.workflowHash, options);
       if (!prepared.ok) throw new Error(prepared.code);
