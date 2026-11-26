@@ -23,6 +23,8 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: approval notice ph
       [[null, { state: 'HALTED', nextAction: 'OWNER_DECIDES' }], 'attention'], [[null, { state: 'ATTENTION' }], 'attention'],
       [[null, { state: 'FAILED' }], 'ended'], [[null, { state: 'CANCELLED' }], 'ended'], [[null, { state: 'EXPIRED' }], 'ended'],
       [['complete', { state: 'RUNNING', nextAction: 'OWNER_SIGNS_GROUP' }], 'complete'],
+      [[null, { state: 'CANCELLED', steps: [{ code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] }], 'attention'],
+      [[null, { state: 'EXPIRED', groups: [{ code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] }], 'attention'],
     ];
     for (const [args, phase] of cases) expect(approvalNoticePhase(...args), JSON.stringify(args)).toBe(phase);
   });

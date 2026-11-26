@@ -24,7 +24,8 @@ describe('MCP signing frame isolation', () => {
     const env = { FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', VERCEL_ENV: 'production', VERCEL: '1', FLOFI_MCP_FRAME_ANCESTORS: [
       'https://flofi-xyz.oaiusercontent.com', ' https://abc123.web-sandbox.oaiusercontent.com ', 'https://0123456789abcdef.claudemcpcontent.com',
       'https://*.oaiusercontent.com', 'https://evil.test', 'http://flofi-xyz.oaiusercontent.com', 'https://a.oaiusercontent.com/path', 'https://a.oaiusercontent.com:444',
-      'https://user@a.oaiusercontent.com', 'https://oaiusercontent.com', 'https://a.oaiusercontent.com.evil.test', "'unsafe-inline'", '*'].join(',') };
+      'https://user@a.oaiusercontent.com', 'https://oaiusercontent.com', 'https://a.oaiusercontent.com.evil.test', "'unsafe-inline'", '*',
+      'https://files.oaiusercontent.com', 'https://A.oaiusercontent.com', 'https://a.oaiusercontent.com;script-src', 'https://evil-oaiusercontent.com'].join(',') };
     expect(configuredFrameAncestors(env)).toEqual(['https://flofi-xyz.oaiusercontent.com', 'https://abc123.web-sandbox.oaiusercontent.com',
       'https://0123456789abcdef.claudemcpcontent.com']);
     const list = approvalFrameAncestorList(env);

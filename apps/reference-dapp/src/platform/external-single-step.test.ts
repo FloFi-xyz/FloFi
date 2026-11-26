@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { readHandoffPolicy, workflowPlan } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
-import { approvalLinkScheme, prepareApprovalRequest, requestApproval, type ApprovalDeps, type ApprovalRequester, type HandoffStore } from './index.ts';
+import { approvalLinkScheme, approvalProgress, prepareApprovalRequest, requestApproval, type ApprovalDeps, type ApprovalRequester, type HandoffRecord, type HandoffStore } from './index.ts';
+import { approvalState } from './conversation-state.ts';
 import { compositionChain, externalOneStepPlan, groupedSingleStepFlow, oneStepFactsAllow, ONE_STEP_RUN_REQUESTERS } from './external-single-step.ts';
 
 const BASE = 'eip155:8453';
@@ -35,7 +36,8 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the external one-s
     for (const flow of ['base-swap', 'arbitrum-swap', 'ethereum-swap', 'robinhood-swap', 'crosschain-router-arbitrum-to-base', 'crosschain-router-testnet',
       'base-mainnet-transfer', 'arbitrum-aave', 'ethereum-aave', 'aave-supply', 'base-sepolia-swap']) expect(groupedSingleStepFlow(flow), flow).toBe(true);
     for (const flow of ['crosschain-universal', 'uniswap-liquidity', 'arbitrum-liquidity', 'orca-liquidity-mainnet', 'jupiter-swap', 'solana-transfer', 'pix-payment',
-      'lending-composition', 'crosschain-router', 'base-swap ', '', null, 7]) expect(groupedSingleStepFlow(flow), String(flow)).toBe(false);
+      'lending-composition', 'crosschain-router-solana', 'base-swap ', '', null, 7]) expect(groupedSingleStepFlow(flow), String(flow)).toBe(false);
+    expect(groupedSingleStepFlow('crosschain-router')).toBe(true);
   });
   it('applies only to MCP accounts and channel conversations, and only to a stored run of exactly one grouped step', () => {
     expect([...ONE_STEP_RUN_REQUESTERS].sort()).toEqual(['CHANNEL_CONVERSATION', 'MCP_ACCOUNT']);
@@ -107,5 +109,27 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the approval servi
     const prepared = await prepareApprovalRequest(deps(MCP, { enabled: true, delegation: null, userFunded: USER_FUNDED([BASE, 'solana:devnet']) } as Facts), MCP,
       solana.strategy, solana.workflowHash, { externalOneStep: true });
     expect(prepared.ok && prepared.value.executionPlan).toBe('SINGLE_FLOW');
+  });
+});
+
+describe('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the one-step consent contract is kept for a run (flofi-workflow/security reviews)', () => {
+  const composed = composeWorkflow(V1_SWAP);
+  if (!composed.ok) throw new Error(composed.code);
+  const handoff = (requesterKind: string, shareStatus: boolean) => ({ handoffId: 'apr_' + 'a'.repeat(26), requesterKind, requesterRef: 'ref', status: 'CLAIMED',
+    workflowHash: composed.workflowHash, expiresAt: new Date(), networkEnvironment: 'MAINNET', fundsClass: 'REAL_FUNDS', plan: workflowPlan(composed, { run: true }),
+    claimed: { namespace: 'eip155', address: '0x' + '1'.repeat(40) }, appliedAt: null, shareStatus, runIds: [] }) as unknown as HandoffRecord;
+  const run = { runId: 'wfr_' + 'a'.repeat(26), state: 'COMPLETED' };
+  const runs = { byHandoff: async () => run, steps: async () => { throw new Error('RUN_READ'); }, groups: async () => [] } as never;
+  it('without status sharing the requester reads NOT_SHARED, never the run\'s outcome (as for a SINGLE_FLOW proposal)', async () => {
+    for (const kind of ['MCP_ACCOUNT', 'CHANNEL_CONVERSATION']) {
+      const progress = await approvalProgress(handoff(kind, false), runtime(null), untouched, 'https://flofi.test', runs);
+      expect(progress, kind).toMatchObject({ workflowRun: null, runsVisible: false, statusHidden: true, runs: [] });
+      expect(approvalState(progress)).toMatchObject({ state: 'STATUS_UNKNOWN', reason: 'NOT_SHARED' });
+    }
+  });
+  it('a shared one-step run, and any multi-step or Editor run, still reads its run (the existing rule)', async () => {
+    // Shared: the run is read (the double throws on the step read, proving it is consulted).
+    await expect(approvalProgress(handoff('MCP_ACCOUNT', true), runtime(null), untouched, 'https://flofi.test', runs)).rejects.toThrow('RUN_READ');
+    await expect(approvalProgress(handoff('EDITOR_SESSION', false), runtime(null), untouched, 'https://flofi.test', runs)).rejects.toThrow('RUN_READ');
   });
 });

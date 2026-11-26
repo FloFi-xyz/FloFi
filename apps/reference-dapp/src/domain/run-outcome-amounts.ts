@@ -19,7 +19,7 @@ export function reconciledReceived(step: { readonly state: string; readonly outc
     if (!chain || !reference) continue;
     const evm = chain.startsWith('eip155:');
     const id = evm && /^native:/i.test(reference) ? `${chain}/slip44:60` : evm ? `${chain}/${reference.toLowerCase()}` : fact.asset;
-    let asset: ReturnType<typeof resolveNetworkAsset> = null;
+    let asset: ReturnType<typeof resolveNetworkAsset>;
     try { asset = resolve(chain, { id }); } catch { asset = null; }
     if (asset && Number.isInteger(asset.decimals)) out.push({ asset: fact.asset, units: fact.amount, decimals: asset.decimals, symbol: asset.symbol });
   }

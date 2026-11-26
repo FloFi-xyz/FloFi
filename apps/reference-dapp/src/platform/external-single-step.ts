@@ -24,7 +24,8 @@ import type { ApprovalRequesterKind } from './handoff-store.ts';
 export const ONE_STEP_RUN_REQUESTERS: readonly ApprovalRequesterKind[] = Object.freeze(['MCP_ACCOUNT', 'CHANNEL_CONVERSATION'] as ApprovalRequesterKind[]);
 const EVM = '(?:base|arbitrum|ethereum|robinhood)';
 /** The flows the user-funded EVM groups build for one card (mainnet flows and their engineering test-network counterparts). */
-const GROUPED_FLOW = new RegExp(`^(?:${EVM}-swap|base-sepolia-swap|crosschain-router-testnet|crosschain-router-${EVM}-to-${EVM}|${EVM}-mainnet-transfer|robinhood-transfer|(?:base|arbitrum|ethereum)-aave|aave-supply)$`);
+// `crosschain-router` (no suffix) is the certified Base → Arbitrum One mainnet Router (backend/flows.ts).
+const GROUPED_FLOW = new RegExp(`^(?:${EVM}-swap|base-sepolia-swap|crosschain-router|crosschain-router-testnet|crosschain-router-${EVM}-to-${EVM}|${EVM}-mainnet-transfer|robinhood-transfer|(?:base|arbitrum|ethereum)-aave|aave-supply)$`);
 const BRIDGE_FLOW = /^crosschain-router-/;
 
 export const groupedSingleStepFlow = (flow: unknown): flow is string => typeof flow === 'string' && GROUPED_FLOW.test(flow);

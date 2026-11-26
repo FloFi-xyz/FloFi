@@ -111,7 +111,9 @@ function inFlightState(run: WorkflowRunFacts): ConversationState {
   return conversationState('STATUS_UNKNOWN', 'STEP_IN_SIGNING_FLOW');
 }
 export type ApprovalFacts = { readonly status: string; readonly runs?: readonly ApprovalRunFacts[]; readonly runsVisible?: boolean; readonly runsComplete?: boolean;
-  readonly runsTruncated?: boolean; readonly workflowRun?: WorkflowRunFacts | null; readonly executionPlan?: string; readonly claimed?: boolean };
+  readonly runsTruncated?: boolean; readonly workflowRun?: WorkflowRunFacts | null; readonly executionPlan?: string; readonly claimed?: boolean;
+  /** A one-step run's state withheld because its owner did not share status (`approvalProgress`): read exactly as an unshared one-step proposal. */
+  readonly statusHidden?: boolean };
 
 /** A multi-step workflow run (`workflow-runs/service.ts` RunView) in the conversational vocabulary. */
 export function workflowRunState(run: WorkflowRunFacts): ConversationState {
@@ -149,6 +151,7 @@ export function approvalState(approval: ApprovalFacts): ConversationState {
   // A multi-step workflow's run starts when the owner claims it and can sign steps while the handoff still reads CLAIMED (or, after the claim
   // window, EXPIRED/REVOKED): once a run exists it decides, whatever the handoff says.
   if (approval.workflowRun) return workflowRunState(approval.workflowRun);
+  if (approval.statusHidden === true && approval.status !== 'PENDING') return conversationState('STATUS_UNKNOWN', 'NOT_SHARED');
   // A claimed multi-step proposal whose run was not read here may have signed steps: never "awaiting", "expired" or "cancelled".
   if (approval.executionPlan === 'SEQUENTIAL' && approval.status !== 'PENDING' && approval.claimed !== false) return conversationState('STATUS_UNKNOWN', 'WORKFLOW_RUN_NOT_READ');
   switch (approval.status) {

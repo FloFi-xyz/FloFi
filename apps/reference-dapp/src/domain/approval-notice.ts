@@ -8,7 +8,12 @@ export type ApprovalNoticePhase = 'review' | 'active' | 'complete' | 'attention'
 export type ApprovalNoticeExecution = 'active' | 'complete' | 'attention' | null | undefined;
 const WAITING = new Set(['WAITING_FOR_RECONCILIATION', 'NONE']);
 
-export function approvalNoticePhase(execution: ApprovalNoticeExecution, run: { readonly state?: string; readonly nextAction?: string } | null | undefined): ApprovalNoticePhase {
+type CodedList = readonly { readonly code?: string | null }[] | undefined;
+export function approvalNoticePhase(execution: ApprovalNoticeExecution, run: { readonly state?: string; readonly nextAction?: string; readonly code?: string | null;
+  readonly steps?: CodedList; readonly groups?: CodedList } | null | undefined): ApprovalNoticePhase {
+  // A batch handed to the wallet whose answer never arrived may have executed: never "Ended" or "Nothing more" (flofi-workflow/security reviews).
+  const unknown = (list: CodedList) => (list ?? []).some(item => item?.code === 'WALLET_BATCH_OUTCOME_UNKNOWN');
+  if (run && (run.code === 'WALLET_BATCH_OUTCOME_UNKNOWN' || unknown(run.steps) || unknown(run.groups))) return 'attention';
   if (run?.state === 'COMPLETED') return 'complete';
   if (run?.state === 'FAILED' || run?.state === 'CANCELLED' || run?.state === 'EXPIRED') return 'ended';
   if (run?.state === 'HALTED' || run?.state === 'ATTENTION') return 'attention';

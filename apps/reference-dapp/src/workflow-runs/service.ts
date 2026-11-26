@@ -15,7 +15,7 @@ import { externalOneStepPlan } from '../platform/external-single-step.ts';
 import type { ApprovalRequesterKind, HandoffRecord, WalletRef } from '../platform/handoff-store.ts';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
-import { ENGINE_VERSION, evaluateGates, evaluateWorkflowGates, handoffFindings, type HandoffPolicy } from '../mcp/execution.ts';
+import { ENGINE_VERSION, evaluateGates, evaluateWorkflowGates, handoffFindings, workflowPlan, type HandoffPolicy } from '../mcp/execution.ts';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { executionRefusal } from '../server/execution-guard.ts';
 import { executionExplorer } from '../domain/execution-lifecycle';
@@ -79,7 +79,10 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
   const externalLive = h.requesterKind === 'DEVELOPER_PROJECT' && h.requesterRef.endsWith('.production') && h.fundsClass === 'REAL_FUNDS';
   // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: an MCP or channel proposal stored as a run of ONE grouped EVM step (decided by the server at
   // request time, `external-single-step.ts`) is re-checked here from its own stored plan; any other one-step plan of theirs is still refused.
-  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' || externalLive || externalOneStepPlan(h.requesterKind, h.plan) ? 1 : 2;
+  // flofi-security review: both the stored plan and the workflow's plan composed now must be that one grouped step (a flow mapping changed since the
+  // request never slips through); the deployment facts were decided at the request and every gate is re-verified at the claim (`verifyHandoff`).
+  const externalOneStep = externalOneStepPlan(h.requesterKind, h.plan) && externalOneStepPlan(h.requesterKind, workflowPlan(workflow, { run: true }));
+  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' || externalLive || externalOneStep ? 1 : 2;
   if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < minimumSteps || h.plan.steps.length !== workflow.steps.length
     || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
   // A database without migration 0032 refuses the row by its CHECK: refused here with a closed code first (e.g. a one-step handoff issued before an

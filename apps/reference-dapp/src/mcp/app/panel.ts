@@ -7,7 +7,10 @@
  */
 import { trustedFlofiUrl } from '../../platform/navigation.ts';
 
-export const PANEL_URI = 'ui://flofi/approval-panel-chat-first-v1.html';
+// BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: hosts cache a panel by its URI, so the bounded signing frame and state-aware panel ship under a
+// new one (flofi-mcp review). The earlier URIs stay registered and serve the same document for existing conversations.
+export const PANEL_URI = 'ui://flofi/approval-panel-chat-first-v2.html';
+export const PREVIOUS_PANEL_URI = 'ui://flofi/approval-panel-chat-first-v1.html';
 export const LEGACY_PANEL_URI = 'ui://flofi/approval-panel.html';
 export const PANEL_MIME = 'text/html;profile=mcp-app';
 /**
@@ -23,9 +26,10 @@ export type PanelPresentation = { readonly phase: PanelPhase; readonly heading: 
   readonly done: boolean; readonly actionable: boolean };
 
 /**
- * BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incident 9): what the panel's heading, badge and notice say, from the durable state only:
- * the approval status, the shared runs of a one-flow approval, and the workflow run of a run approval. "Review …" is said only while nothing
- * reached the owner's signing flow; a completed, ended or uncertain state is never presented as ready for review. Serialized into the panel
+ * BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incident 9): what the panel's heading, badge and notice say. They follow the server's own
+ * canonical lifecycle (`conversationState`, `platform/conversation-state.ts`, which `get_execution_progress` returns) so the panel never words a
+ * state differently from what the model and the other channels are told (flofi-mcp review). Only before the first read does it fall back to the
+ * approval status. "Review …" is said only while nothing reached the owner's signing flow. Serialized into the panel
  * (`Function.prototype.toString`): self-contained, no imports, no closure over module scope.
  */
 export function panelPresentation(input: { readonly status: string; readonly progress: Record<string, unknown> | null; readonly action: string | null;
@@ -33,62 +37,56 @@ export function panelPresentation(input: { readonly status: string; readonly pro
   const pt = input.language === 'PT';
   const t = (en: string, ptText: string) => pt ? ptText : en;
   const progress = input.progress ?? {}, status = String(progress.status ?? input.status);
-  const run = progress.workflowRun && typeof progress.workflowRun === 'object' ? progress.workflowRun as Record<string, unknown> : null;
-  const runs = Array.isArray(progress.runs) ? (progress.runs as unknown[]).filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === 'object') : [];
+  const cs = progress.conversationState && typeof progress.conversationState === 'object' ? progress.conversationState as Record<string, unknown> : null;
+  const state = cs ? String(cs.state ?? '') : '', reason = cs ? String(cs.reason ?? '') : '', final = cs?.final === true;
   const ACTIONS: Record<string, [string, string]> = { swap: ['swap', 'troca'], bridge: ['bridge', 'ponte'], transfer: ['transfer', 'transferência'], supply: ['supply', 'depósito'],
     borrow: ['borrow', 'empréstimo'], repay: ['repayment', 'pagamento'], withdraw: ['withdrawal', 'saque'], add_liquidity: ['liquidity', 'liquidez'] };
   const named = input.action ? ACTIONS[input.action] ?? [input.action, input.action] : null;
+  const open = status === 'PENDING' || status === 'CLAIMED';
   const make = (phase: PanelPhase, heading: string, notice: string, badge: string, done: boolean, actionable = false): PanelPresentation =>
-    ({ phase, heading, notice, badge, done, actionable });
-  const ENDED: Record<string, [string, string]> = { EXPIRED: ['Expired', 'Expirada'], SUPERSEDED: ['Replaced by a newer request', 'Substituída por um pedido mais recente'],
-    REVOKED: ['Withdrawn', 'Retirada'], STALE: ['No longer reproducible', 'Não é mais reproduzível'] };
-  if (run) {
-    const state = String(run.state ?? '');
-    if (state === 'COMPLETED') return make('COMPLETED', t('Completed', 'Concluído'), t('Reconciled on chain by FloFi. Nothing else needs your wallet.',
-      'Reconciliado na rede pela FloFi. Nada mais precisa da sua carteira.'), t('Completed', 'Concluído'), true);
-    if (state === 'FAILED') return make('ENDED', t('Failed', 'Falhou'), t('This operation did not complete. Check its details before trying again.',
-      'Esta operação não foi concluída. Verifique os detalhes antes de tentar de novo.'), t('Failed', 'Falhou'), true);
-    if (state === 'CANCELLED' || state === 'EXPIRED') return make('ENDED', t(state === 'CANCELLED' ? 'Ended' : 'Expired', state === 'CANCELLED' ? 'Encerrado' : 'Expirado'),
-      t('Nothing more will be requested from your wallet for this operation.', 'Nada mais será pedido à sua carteira para esta operação.'),
-      t(state === 'CANCELLED' ? 'Ended' : 'Expired', state === 'CANCELLED' ? 'Encerrado' : 'Expirado'), true);
-    if (state === 'HALTED' || state === 'ATTENTION') return make('ATTENTION', t('Needs your attention', 'Precisa da sua atenção'),
-      t('Something may already have been sent. Check the status before any other action; FloFi never sends it again.',
-        'Algo pode já ter sido enviado. Verifique o status antes de qualquer outra ação; a FloFi nunca envia de novo.'), t('Needs attention', 'Precisa de atenção'), false);
-    if (state === 'RUNNING') return run.nextAction === 'WAITING_FOR_RECONCILIATION' || run.nextAction === 'NONE'
-      ? make('IN_PROGRESS', t('Confirming on chain', 'Confirmando na rede'), t('FloFi follows the network and reconciles automatically. Nothing is sent again.',
-        'A FloFi acompanha a rede e reconcilia automaticamente. Nada é enviado de novo.'), t('In progress', 'Em andamento'), false)
-      : make('AWAITING_WALLET', t('Waiting for your wallet', 'Aguardando sua carteira'), t('Check the fresh simulation, then confirm in your wallet.',
-        'Confira a simulação recente e confirme na sua carteira.'), t('Awaiting signature', 'Aguardando assinatura'), false, true);
-    return make('AWAITING_WALLET', t('Waiting for your wallet', 'Aguardando sua carteira'), t('Loaded for your wallet. Check the fresh simulation, then confirm in your wallet.',
-      'Carregado para a sua carteira. Confira a simulação recente e confirme na sua carteira.'), t('Awaiting signature', 'Aguardando assinatura'), false, true);
-  }
-  if (progress.runsComplete === false) return make('UNKNOWN', t('Status unknown', 'Status desconhecido'), t('Some runs could not be read now: their state is unknown, which is not evidence that nothing was sent. FloFi keeps checking.',
-    'Algumas execuções não puderam ser lidas agora: o estado é desconhecido, o que não prova que nada foi enviado. A FloFi continua verificando.'), t('Unknown', 'Desconhecido'), false);
-  if (runs.length) {
-    const settled = runs.every(r => r.reconciled === true || r.terminal === true);
-    // A failed earlier attempt followed by a reconciled one is a completed operation; settled with nothing reconciled never is.
-    if (settled && runs.some(r => r.reconciled === true))
-      return make('COMPLETED', t('Completed', 'Concluído'), t('Reconciled on chain by FloFi. Nothing else needs your wallet.',
-        'Reconciliado na rede pela FloFi. Nada mais precisa da sua carteira.'), t('Completed', 'Concluído'), true);
-    if (settled) return make('ATTENTION', t('Needs your attention', 'Precisa da sua atenção'), t('This operation did not complete as reviewed. Check its details before any other action.',
-      'Esta operação não foi concluída como revisada. Verifique os detalhes antes de qualquer outra ação.'), t('Needs attention', 'Precisa de atenção'), true);
-    return make('IN_PROGRESS', t('Confirming on chain', 'Confirmando na rede'), t('FloFi follows the network and reconciles automatically. Nothing is sent again.',
-      'A FloFi acompanha a rede e reconcilia automaticamente. Nada é enviado de novo.'), t('In progress', 'Em andamento'), false);
-  }
-  if (ENDED[status]) return make('ENDED', t(ENDED[status]![0], ENDED[status]![1]), t('This approval can no longer be authorized. Ask for a new proposal to continue.',
-    'Esta aprovação não pode mais ser autorizada. Peça uma nova proposta para continuar.'), t(ENDED[status]![0], ENDED[status]![1]), true);
-  if (status === 'APPLIED') return progress.runsVisible === false
-    ? make('NOT_SHARED', t('In your FloFi signing flow', 'No seu fluxo de assinatura FloFi'), t('Status sharing is off, so this chat cannot see what ran. Open FloFi to check.',
-      'O compartilhamento de status está desligado; este chat não vê o que foi executado. Abra a FloFi para verificar.'), t('Shared status off', 'Status não compartilhado'), true)
-    : make('AWAITING_WALLET', t('Waiting for your wallet', 'Aguardando sua carteira'), t('Check the fresh simulation, then confirm in your wallet. This panel follows the recorded result.',
-      'Confira a simulação recente e confirme na sua carteira. Este painel acompanha o resultado registrado.'), t('Awaiting signature', 'Aguardando assinatura'), false, true);
-  if (status === 'CLAIMED') return make('AWAITING_WALLET', t('Waiting for your wallet', 'Aguardando sua carteira'), t('Loaded for your wallet. Check the fresh simulation, then confirm in your wallet.',
-    'Carregado para a sua carteira. Confira a simulação recente e confirme na sua carteira.'), t('Loaded for your wallet', 'Carregado para sua carteira'), false, true);
-  return make('REVIEW', named ? t(`Review ${named[0]}`, `Revisar ${named[1]}`) : t('Review your operation', 'Revisar sua operação'),
+    ({ phase, heading, notice, badge, done, actionable: actionable && open });
+  const review = () => make('REVIEW', named ? t(`Review ${named[0]}`, `Revisar ${named[1]}`) : t('Review your operation', 'Revisar sua operação'),
     t('Nothing is authorized yet. Only your own wallet can sign, after a fresh simulation and review.',
       'Nada está autorizado ainda. Só a sua carteira pode assinar, depois de uma simulação recente e da revisão.'), t('Waiting for you', 'Aguardando você'), false, true);
+  const awaiting = () => make('AWAITING_WALLET', t('Waiting for your wallet', 'Aguardando sua carteira'), t('Check the fresh simulation, then confirm in your wallet. This panel follows the recorded result.',
+    'Confira a simulação recente e confirme na sua carteira. Este painel acompanha o resultado registrado.'), t('Awaiting signature', 'Aguardando assinatura'), false, true);
+  const ENDED: Record<string, [string, string]> = { EXPIRED: ['Expired', 'Expirada'], SUPERSEDED: ['Replaced by a newer request', 'Substituída por um pedido mais recente'],
+    REVOKED: ['Withdrawn', 'Retirada'], STALE: ['No longer reproducible', 'Não é mais reproduzível'], CANCELLED: ['Ended', 'Encerrado'] };
+  if (!cs) {
+    if (ENDED[status]) return make('ENDED', t(ENDED[status]![0], ENDED[status]![1]), t('This approval can no longer be authorized. Ask for a new proposal to continue.',
+      'Esta aprovação não pode mais ser autorizada. Peça uma nova proposta para continuar.'), t(ENDED[status]![0], ENDED[status]![1]), true);
+    return status === 'PENDING' ? review() : make('UNKNOWN', t('Checking the status', 'Verificando o status'), t('FloFi is reading the recorded status of this approval.',
+      'A FloFi está lendo o status registrado desta aprovação.'), t('Checking', 'Verificando'), false, true);
+  }
+  switch (state) {
+    case 'CONFIRMED': return make('COMPLETED', t('Completed', 'Concluído'), t('Reconciled on chain by FloFi. Nothing else needs your wallet.',
+      'Reconciliado na rede pela FloFi. Nada mais precisa da sua carteira.'), t('Completed', 'Concluído'), final);
+    case 'SUBMITTED': case 'PENDING_CONFIRMATION': return make('IN_PROGRESS', t('Confirming on chain', 'Confirmando na rede'),
+      reason === 'WALLET_BATCH_REPORT_PENDING' ? t('Your wallet was asked to send this batch. Reopen FloFi in this browser so your wallet can report it; never sign it again.',
+        'A carteira foi chamada para enviar este lote. Reabra a FloFi neste navegador para a carteira informá-lo; nunca assine de novo.')
+        : t('FloFi follows the network and reconciles automatically. Nothing is sent again.', 'A FloFi acompanha a rede e reconcilia automaticamente. Nada é enviado de novo.'),
+      t('In progress', 'Em andamento'), false, reason === 'WALLET_BATCH_REPORT_PENDING');
+    case 'PARTIALLY_EXECUTED': return make('ATTENTION', t('Partially completed', 'Parcialmente concluído'), t('Some steps reconciled and stay done. Check what stopped before any other action.',
+      'Algumas etapas foram reconciliadas e continuam feitas. Verifique o que parou antes de qualquer outra ação.'), t('Partially completed', 'Parcialmente concluído'), final, !final);
+    case 'NEEDS_ATTENTION': return make('ATTENTION', t('Needs your attention', 'Precisa da sua atenção'), reason === 'BATCH_OUTCOME_UNKNOWN' || reason === 'OUTCOME_NOT_PROVEN'
+      ? t('A request handed to your wallet may have executed. Check your wallet\'s activity before any other action; FloFi never sends it again.',
+        'Um pedido entregue à sua carteira pode ter sido executado. Verifique a atividade da carteira antes de qualquer outra ação; a FloFi nunca o envia de novo.')
+      : t('Something may already have been sent. Check the status before any other action; FloFi never sends it again.',
+        'Algo pode já ter sido enviado. Verifique o status antes de qualquer outra ação; a FloFi nunca envia de novo.'), t('Needs attention', 'Precisa de atenção'), false, true);
+    case 'FAILED': return make('ENDED', t('Failed', 'Falhou'), t('This operation did not complete. Check its details before trying again.',
+      'Esta operação não foi concluída. Verifique os detalhes antes de tentar de novo.'), t('Failed', 'Falhou'), final);
+    case 'CANCELLED': case 'EXPIRED': { const words = ENDED[reason] ?? ENDED[state] ?? ENDED.CANCELLED!;
+      return make('ENDED', t(words[0], words[1]), t('Nothing more will be requested from your wallet for this proposal. Ask for a new proposal to continue.',
+        'Nada mais será pedido à sua carteira para esta proposta. Peça uma nova proposta para continuar.'), t(words[0], words[1]), final); }
+    case 'AWAITING_SIGNATURE': return awaiting();
+    case 'STATUS_UNKNOWN': return reason === 'NOT_SHARED'
+      ? make('NOT_SHARED', t('In your FloFi signing flow', 'No seu fluxo de assinatura FloFi'), t('Status sharing is off, so this chat cannot see what ran. Open FloFi to check.',
+        'O compartilhamento de status está desligado; este chat não vê o que foi executado. Abra a FloFi para verificar.'), t('Shared status off', 'Status não compartilhado'), false, true)
+      : make('UNKNOWN', t('Status unknown', 'Status desconhecido'), t('The status could not be confirmed now, which is not evidence that nothing was sent. FloFi keeps checking.',
+        'O status não pôde ser confirmado agora, o que não prova que nada foi enviado. A FloFi continua verificando.'), t('Unknown', 'Desconhecido'), false, true);
+    default: return status === 'PENDING' ? review() : awaiting();
+  }
 }
-
 /**
  * The panel's browser program. It is serialized with `Function.prototype.toString`, so it must stay self-contained: no imports,
  * no closure over module scope, only browser globals. Strings from the server are rendered with `textContent`, never as HTML.
@@ -122,7 +120,9 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const ancestors = (location as unknown as { ancestorOrigins?: { length: number; [index: number]: string } }).ancestorOrigins;
     const chain = [location.origin, ...ancestors ? Array.from({ length: ancestors.length }, (_, index) => String(ancestors[index])) : []].slice(0, 8);
     const allowed = settings.frameAncestors ?? [];
-    return { chain, blocked: allowed.length ? chain.filter(origin => !allowed.includes(origin)) : [] };
+    // flofi-security review: a masked ancestor ("null", e.g. under a no-referrer container) is unknown, not refused: only a named origin that is
+    // not listed shortens the wait, so a frame the browser would allow is never torn down early.
+    return { chain, blocked: allowed.length ? chain.filter(origin => origin !== 'null' && !allowed.includes(origin)) : [] };
   };
   const failFrame = (frame: HTMLIFrameElement, code: string) => {
     if (signingFrame !== frame || !frame.hidden) return;
@@ -250,14 +250,14 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
         // The host's sandbox still applies. No popup, top navigation or delegated signing permission is requested.
         // Bounded: a document that loaded but never answered was refused framing (the browser shows its own error page); a chain FloFi cannot
         // allow fails within seconds; anything else within 25 s. Each says what happened, never an indefinite "opening" notice.
-        const { blocked } = frameChain();
+        // The waits never depend on the panel's own chain check (flofi-mcp/security reviews): it only names the failure when one happens.
         frame.addEventListener('load', () => {
           if (signingFrame !== frame || !frame.hidden) return;
           if (frameTimeout) clearTimeout(frameTimeout);
-          frameTimeout = setTimeout(() => failFrame(frame, blocked.length ? 'HOST_FRAME_ORIGIN_NOT_ALLOWED' : 'HOST_FRAME_BLOCKED'), blocked.length ? 2_000 : 10_000);
+          frameTimeout = setTimeout(() => failFrame(frame, frameChain().blocked.length ? 'HOST_FRAME_ORIGIN_NOT_ALLOWED' : 'HOST_FRAME_BLOCKED'), 10_000);
         });
         document.body.insertBefore(frame, document.getElementById('app')); signingFrame = frame; view.frame = 'loading'; view.diagnostic = null;
-        frameTimeout = setTimeout(() => failFrame(frame, blocked.length ? 'HOST_FRAME_ORIGIN_NOT_ALLOWED' : 'HOST_FRAME_TIMEOUT'), blocked.length ? 5_000 : 25_000);
+        frameTimeout = setTimeout(() => failFrame(frame, frameChain().blocked.length ? 'HOST_FRAME_ORIGIN_NOT_ALLOWED' : 'HOST_FRAME_TIMEOUT'), 25_000);
       } else await openLink(url);
       view.opened = target;
       schedule(2_000);
@@ -300,8 +300,9 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const runs = Array.isArray(view.progress?.runs) ? view.progress!.runs as Json[] : [];
     // BUILD-FLOFI-E2E-RELIABILITY-001: an incomplete run list (a run read failed) is never "done": an unread run may still be in flight.
     const incomplete = view.progress?.runsComplete === false;
-    const done = !incomplete && (terminal(view.progress?.status) && !view.progress?.workflowRun || runs.length > 0 && runs.every(r => r.reconciled === true || r.terminal === true)
-      || presentation().done);
+    // The server's canonical lifecycle decides when nothing can change any more (its `final`); the older run checks remain for a response without it.
+    const done = !incomplete && (view.progress?.conversationState ? presentation().done
+      : terminal(view.progress?.status) && !view.progress?.workflowRun || runs.length > 0 && runs.every(r => r.reconciled === true || r.terminal === true));
     // Reconciliation continues server-side whether or not this panel is open; the panel only reads it (automatic, never a signature).
     if (!done) schedule(view.opened || view.frame === 'shown' ? 5_000 : 15_000);
   }
@@ -319,20 +320,27 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       terminal: r.terminal === true, evidenceEnvironment: token(r.evidenceEnvironment), evidenceBundleHash: hash(r.evidenceBundleHash), receiptUrl: receipt(r) }));
     // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: a run approval (one step or several) reports its run's state, next action and step states.
     const wr = progress.workflowRun && typeof progress.workflowRun === 'object' ? progress.workflowRun as Json : null;
-    const workflowRun = wr ? { state: token(wr.state), nextAction: token(wr.nextAction), steps: (Array.isArray(wr.steps) ? wr.steps as Json[] : []).slice(0, 8)
+    const workflowRun = wr ? { state: token(wr.state), nextAction: token(wr.nextAction), code: token(wr.code), halted: token(wr.halted), steps: (Array.isArray(wr.steps) ? wr.steps as Json[] : []).slice(0, 8)
       .filter(step => step && typeof step === 'object').map(step => ({ index: Number.isInteger(step.index) ? step.index as number : null, action: token(step.action), state: token(step.state),
-        receiptUrl: stepReceipt(step) })) } : null;
+        code: token(step.code), receiptUrl: stepReceipt(step) })) } : null;
     const status = token(progress.status), runsComplete = progress.runsComplete !== false, phase = presentation().phase;
-    const summary = JSON.stringify({ status, runs, runsComplete, workflowRun });
+    // The canonical lifecycle the model is told to report (closed tokens only); the panel's phase is presentation.
+    const csRaw = progress.conversationState && typeof progress.conversationState === 'object' ? progress.conversationState as Json : null;
+    const conversationState = csRaw ? { state: token(csRaw.state), final: csRaw.final === true, completed: csRaw.completed === true, nextStep: token(csRaw.nextStep),
+      reason: token(csRaw.reason) } : null;
+    const summary = JSON.stringify({ status, runs, runsComplete, workflowRun, conversationState });
     if (summary === view.reported) return;
     view.reported = summary;
-    const lines = [`FloFi approval ${view.approval?.approvalId}: ${String(status)} (${phase}).`, ...runs.map(r =>
+    const lines = [`FloFi approval ${view.approval?.approvalId}: ${String(status)}${conversationState ? `, conversationState ${String(conversationState.state)}${conversationState.reason ? ` (${conversationState.reason})` : ''}, final ${String(conversationState.final)}` : ''}.`, ...runs.map(r =>
       `Run ${String(r.executionId)} (${String(r.flow)}): ${String(r.status)}${r.evidenceEnvironment ? `, evidence ${String(r.evidenceEnvironment)} ${String(r.evidenceBundleHash ?? '')}` : ''}.${r.receiptUrl ? ` Receipt: ${r.receiptUrl}` : ''}`),
-      ...workflowRun ? [`Workflow run: ${String(workflowRun.state)}, next ${String(workflowRun.nextAction)}.`, ...workflowRun.steps.map(step =>
-        `Step ${String((step.index ?? 0) + 1)} (${String(step.action)}): ${String(step.state)}.${step.receiptUrl ? ` Receipt: ${step.receiptUrl}` : ''}`)] : [],
+      ...workflowRun ? [`Workflow run: ${String(workflowRun.state)}, next ${String(workflowRun.nextAction)}${workflowRun.code ? `, code ${workflowRun.code}` : ''}${workflowRun.halted ? `, halted ${workflowRun.halted}` : ''}.`,
+        ...workflowRun.steps.map(step => `Step ${String((step.index ?? 0) + 1)} (${String(step.action)}): ${String(step.state)}${step.code ? ` (${step.code})` : ''}.${step.receiptUrl ? ` Receipt: ${step.receiptUrl}` : ''}`),
+        ...workflowRun.code === 'WALLET_BATCH_OUTCOME_UNKNOWN' || workflowRun.steps.some(step => step.code === 'WALLET_BATCH_OUTCOME_UNKNOWN')
+          ? ['A batch handed to the owner\'s wallet may have executed: never report it as not run and never propose it again before the owner checks the wallet activity.'] : []] : [],
       ...runsComplete ? [] : ['Some runs of this approval could not be read now: their state is UNKNOWN — this is not evidence that nothing was sent.']];
     void request('ui/update-model-context', { content: [{ type: 'text', text: lines.join(' ') }],
-      structuredContent: { flofiApproval: { approvalId: view.approval?.approvalId, status, phase, runs, runsComplete, ...workflowRun ? { workflowRun } : {} } } }).catch(() => undefined);
+      structuredContent: { flofiApproval: { approvalId: view.approval?.approvalId, status, panelPhase: phase, runs, runsComplete, ...conversationState ? { conversationState } : {},
+        ...workflowRun ? { workflowRun } : {} } } }).catch(() => undefined);
   }
   /** A step's verified receipt: only FloFi's own Dashboard run page for that execution (the page itself still requires the owner's wallet). */
   function stepReceipt(step: Json): string | null {
@@ -342,8 +350,9 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
   }
   const STEP_STATE: Record<string, [string, string]> = { PENDING: ['Waiting', 'Aguardando'], READY: ['Ready for your wallet', 'Pronto para sua carteira'],
     AWAITING_OWNER: ['Awaiting your signature', 'Aguardando sua assinatura'], DELEGATED: ['Authorized', 'Autorizado'], RECONCILED: ['Reconciled', 'Reconciliado'],
-    FAILED: ['Failed', 'Falhou'], UNCERTAIN: ['Outcome unknown: never sent again', 'Resultado desconhecido: nunca reenviado'], SKIPPED: ['Already done', 'Já feito'],
+    FAILED: ['Failed', 'Falhou'], UNCERTAIN: ['Outcome unknown: never sent again', 'Resultado desconhecido: nunca reenviado'], SKIPPED: ['Not run', 'Não executado'],
     BLOCKED: ['Blocked', 'Bloqueado'] };
+  // `SKIPPED` means never ran (workflow-runs/state-machine.ts), e.g. the remaining steps of an ended run.
 
   function render() {
     const root = document.getElementById('app')!;
@@ -394,7 +403,7 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       }
       root.append(el('h2', L('Execution', 'Execução')), list);
     }
-    if (shown.actionable && (status === 'PENDING' || status === 'CLAIMED') && !terminal(status)) {
+    if (shown.actionable && !terminal(status)) {
       const actions = el('div', undefined, 'actions');
       if (!signingFrame) actions.append(button(L('Authorize in chat', 'Autorizar no chat'), () => void connect('chat'), true));
       actions.append(button(L('Open FloFi', 'Abrir a FloFi'), () => void connect('window')));

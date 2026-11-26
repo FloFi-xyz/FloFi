@@ -147,7 +147,9 @@ reads `0.000589872 WETH`; `0.0000089732844 ETH` reads `0.00000897329 ETH`. `form
 | --- | --- |
 | `platform/external-single-step.test.ts` (new) | Rule, eligibility, never forced, Solana keeps SINGLE_FLOW |
 | `editor/single-card-run.pg.test.ts` (+1 case, PostgreSQL 16 locally) | Incident shape: a channel request of the Arbitrum swap becomes ONE run and ONE atomic batch `[exact approve, swap]`, nothing sent by FloFi |
-| `editor/single-card-strategy.test.ts` (intentional change) | MCP/channel stored one-step runs now reach the certified-schema gate; automations and Developer sandbox still refused; ungrouped flows refused |
+| `editor/single-card-strategy.test.ts` (intentional change) | MCP/channel stored one-step runs now reach the certified-schema gate; automations and Developer sandbox still refused; ungrouped flows and stored-plan-only forgeries refused |
+| Affected suites after review fixes (`mcp`, `platform`, `channels`, `editor`, `workflow-runs`, unit + PostgreSQL 16) | 123 files, 1019 tests passed locally |
+| Full unit suite (`pnpm test`, before the review fixes) | 802 files passed, 2 skipped (pre-existing); 10351 tests passed |
 | `mcp/app/panel.test.ts` (new) | State-aware heading/badge, never "Review" after the signing flow, EN/PT, serialized function closes over nothing, bounded frame codes |
 | `server/embedded-approval.test.ts` (+1) | Exact-origin configuration, pattern rejection |
 | `domain/approval-notice.test.ts` (new), `components/signing-surface.test.tsx` (+1) | Notice phases; six-significant-digit incident amounts EN/PT |
@@ -155,6 +157,42 @@ reads `0.000589872 WETH`; `0.0000089732844 ETH` reads `0.00000897329 ETH`. `form
 
 Local PostgreSQL was 16.15; CircleCI certifies on 18.6. Browser profiles (`mcp-in-chat`, `channel-signing`) were updated for the renamed labels
 but not run here. The 45 scenarios of the build request are mapped in the PR description; most real-host scenarios remain owner acceptance.
+
+## 10a. Specialist findings (read-only reviewers: flofi-security, flofi-workflow, flofi-mcp)
+
+No blocker. Fixed in this PR:
+
+- **Panel wording diverged from the canonical lifecycle (mcp, major).** `panelPresentation` now derives heading, badge, notice, actions and
+  polling from the server's `conversationState` (`approvalState`); a table test runs both on the same progress. The model-context report carries
+  `conversationState` and the run's `code`/`halted`.
+- **Unknown batch outcome shown as "Ended" (security, workflow, mcp).** A run or step/group with `WALLET_BATCH_OUTCOME_UNKNOWN` reads "may have
+  executed" in the panel and on `/approve`, never "Ended", and polling continues. Never-run steps read "Not run" (was "Already done").
+- **Panel URI cache (mcp, major).** New URI `ui://flofi/approval-panel-chat-first-v2.html`; v1 and the legacy URI stay registered with the same
+  document.
+- **Fast-fail could tear down a working frame (security, mcp).** Waits are fixed (10 s after load, 25 s overall); the chain check only names the
+  failure, and a masked `null` ancestor is unknown, not refused.
+- **One-step consent (workflow major, security).** Without the owner's status sharing, an external one-step run's state is withheld exactly as
+  for a SINGLE_FLOW proposal (`statusHidden`, `STATUS_UNKNOWN NOT_SHARED`).
+- **Refusal after the claim committed (workflow).** `/approve` checks one-step support before the claim, so nothing is left CLAIMED without a run.
+- **Claim re-check (security).** `ensureForClaim` requires both the stored plan and the freshly composed plan to be one grouped step.
+- **Base to Arbitrum One Router (workflow).** `crosschain-router` added to the allowlist.
+- **Cheap refusals first (security).** The one-step reads run after the test-network refusal.
+- **Shared OpenAI file host (security).** `https://files.oaiusercontent.com` is refused in `FLOFI_MCP_FRAME_ANCESTORS`; only FloFi-exclusive
+  sandbox origins may be listed.
+- **Tool descriptions (workflow, mcp).** `get_approval_status` and `cancel_approval` describe one-step run approvals.
+
+Documented, not changed:
+
+- A claimed one-step run cannot be withdrawn from the conversation (`cancel_approval` refuses `WORKFLOW_RUN_STARTED`; Telegram treats it as
+  started). Conservative; the owner ends it on `/approve`.
+- Request-time eligibility does not prove the step can be batched (ERC-20 to native, Stock Tokens, contract recipients, slippage above the batch
+  limit, Robinhood Gasless): such a proposal becomes a run whose Review plans the card's own flow (no one-confirmation benefit, same safety).
+- A bridge is eligible when any certified batch route starts from its chain; the exact pair is checked by the batch builder at preparation.
+- Telegram sends no "loaded in FloFi" notice for a one-step run; it reports the outcome when shared.
+- `ui.domain` / `openai/widgetDomain` not declared (a host-dependent value could break the other host); `get_capabilities` still lists the
+  per-step plan.
+- Not reviewed in this pass: flofi-wallet-execution, flofi-channels, flofi-developers, flofi-automations, flofi-transfer-payments. The diff
+  reuses the existing user-funded batch path unchanged; automations and the Developer API behavior are unchanged.
 
 ## 11. FinOps and infrastructure
 

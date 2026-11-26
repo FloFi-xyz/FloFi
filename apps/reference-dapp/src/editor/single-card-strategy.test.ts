@@ -160,6 +160,11 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists
       // …but never for a stored one-step plan of a flow the groups do not build (here: the plan's flow replaced by a liquidity flow).
       const ungrouped = { ...handoff, plan: { ...plan, steps: plan.steps.map(step => ({ ...step, flow: 'uniswap-liquidity' })) } } as unknown as HandoffRecord;
       await expect(ensureForClaim(schemaless, ungrouped, composed, wallets), `${requesterKind} ungrouped`).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
+      // …nor when the stored plan claims a grouped flow but the workflow composed now does not plan one (flofi-security review: fresh re-check).
+      const solana = composeWorkflow({ version: 1, action: 'swap', network: 'solana-devnet', inputAsset: 'SOL', outputAsset: 'devUSDC', amount: '0.1' });
+      if (!solana.ok) throw new Error(solana.code);
+      const forged = { ...handoff, workflowHash: solana.workflowHash } as unknown as HandoffRecord;
+      await expect(ensureForClaim(schemaless, forged, solana, wallets), `${requesterKind} stored plan only`).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
     }
     // A one-step plan stored as SINGLE_FLOW never becomes a run, whoever asked.
     const single = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind: 'EDITOR_SESSION', requesterRef: 'ref', plan: workflowPlan(composed), workflowHash: composed.workflowHash,
