@@ -685,14 +685,19 @@ test.describe('post-#254 hotfix: Agents connects Claude and ChatGPT', () => {
     // A phone keeps every control on screen with no sideways scrolling (the address wraps).
     await page.setViewportSize({ width: 320, height: 800 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(chatgptSetup.getByRole('button', { name: 'Copy FloFi MCP server URL', exact: true })).toBeInViewport();
+    const copyOnPhone = chatgptSetup.getByRole('button', { name: 'Copy FloFi MCP server URL', exact: true });
+    await copyOnPhone.scrollIntoViewIfNeeded();
+    await expect(copyOnPhone).toBeInViewport();
+    expect(await copyOnPhone.evaluate(element => element.getBoundingClientRect().right <= innerWidth)).toBe(true);
     // Portuguese.
     await chooseLanguage(context, 'PT');
     await page.reload();
     await expect(main(page).getByRole('button', { name: 'Conectar Claude', exact: true })).toBeVisible();
     await main(page).getByRole('button', { name: 'Conectar ChatGPT', exact: true }).click();
-    await expect(main(page).getByRole('region', { name: 'Conectar o ChatGPT à FloFi', exact: true })).toContainText('ative o Modo de desenvolvedor');
-    await expect(main(page).getByText('URL do servidor MCP da FloFi', { exact: true })).toBeVisible();
+    const ptSetup = main(page).getByRole('region', { name: 'Conectar o ChatGPT à FloFi', exact: true });
+    await expect(ptSetup).toContainText('ative o Modo de desenvolvedor');
+    await expect(ptSetup.getByText('URL do servidor MCP da FloFi', { exact: true })).toBeVisible();
+    await expect(ptSetup.getByRole('button', { name: 'Copiar a URL do servidor MCP da FloFi', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     networkGuard.assertClean();
   });
