@@ -120,6 +120,41 @@ async function setup(t: TestDatabase, options: { readonly weth?: bigint; readonl
 }
 const groupOf = (prepared: { prepared: unknown }) => prepared.prepared as unknown as { group: EvmGroupCalls; request: { atomicRequired: boolean; id: string; calls: unknown[] } };
 
+describe('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the same Arbitrum swap from a conversation (Telegram / MCP) in ONE wallet confirmation', { timeout: 120_000 }, () => {
+  it('incident shape: a channel one-step request becomes ONE run of one step, and its group is ONE atomic batch [exact approval, swap]', async () => {
+    const t = await schema32();
+    const { h, owner, wallets, runCount, chain } = await setup(t);
+    const composed = composeWorkflow(SWAP);
+    if (!composed.ok) throw new Error(composed.code);
+    // The deployment's own sequence facts, as `workflow-runs/facts.ts` reports them where user-funded groups are enabled for Arbitrum One.
+    const runtime = { ...h.flows.runtime, sequences: async () => ({ enabled: true, delegation: null, userFunded: h.runs.userFundedFacts! }) };
+    const d = { ...h.deps(), runtime, singleStepRuns: () => singleStepRunsSupported(t.db) };
+    // Without the server's schema answer the request keeps its SINGLE_FLOW contract.
+    const plain = await requestApproval(h.deps(), h.requester, composed.strategy, composed.workflowHash, { externalOneStep: true });
+    if (!plain.ok) throw new Error(plain.code);
+    expect(plain.value.executionPlan).toBe('SINGLE_FLOW');
+    const result = await requestApproval(d, h.requester, composed.strategy, composed.workflowHash, { externalOneStep: true });
+    if (!result.ok) throw new Error(result.code);
+    expect(result.value).toMatchObject({ executionPlan: 'SEQUENTIAL', workflowHash: composed.workflowHash, authority: 'NONE' });
+    const handoff = (await t.db.query(`SELECT plan->>'kind' AS kind, jsonb_array_length(plan->'steps') AS steps, requester_kind FROM mcp_handoffs WHERE handoff_id = $1`,
+      [result.value.approvalId])).rows[0]!;
+    expect(handoff).toEqual({ kind: 'SEQUENTIAL', steps: 1, requester_kind: 'CHANNEL_CONVERSATION' });
+    // The owner proves the wallet and opens the run on /approve (the same surface the MCP panel embeds); nothing is sent by FloFi.
+    const secret = decodeURIComponent(new URL(result.value.approvalUrl).hash.slice(1));
+    await claimApproval(h.surface, secret, wallets, true, h.d.now());
+    expect(await runCount()).toBe(1);
+    const proposal = await workflowRunUserFundedStart(h.surface, result.value.approvalId, wallets, METAMASK);
+    expect(proposal.view.workflowRun!.run).toMatchObject({ state: 'RUNNING', mode: 'USER_FUNDED', stepCount: 1, nextAction: 'OWNER_SIGNS_GROUP',
+      groups: [{ index: 0, strategy: 'EVM_WALLET_BATCH', steps: [0, 0], feePayer: owner }] });
+    const p = groupOf(await workflowRunUserFundedPrepare(h.surface, result.value.approvalId, wallets, 0));
+    expect(p.group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE']);
+    expect(p.group.calls[0]).toEqual({ kind: 'ERC20_APPROVE', token: WETH, spender: ROUTER, amount: AMOUNT_IN.toString() });
+    expect(p.request).toMatchObject({ atomicRequired: true });
+    // Preparation sends nothing: the owner's wallet confirmation is still the only thing that can send it.
+    expect(chain.control.sends()).toBe(0);
+  });
+});
+
 describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on Arbitrum One in ONE wallet confirmation (MOCKED chain, PostgreSQL)', { timeout: 120_000 }, () => {
   it('acceptance: insufficient allowance → one Authorize, ONE atomic batch [exact approval, swap], automatic independent reconciliation, nothing resent', async () => {
     const t = await schema32();

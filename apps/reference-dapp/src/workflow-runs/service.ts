@@ -11,6 +11,7 @@
  *   view             the run's public status: steps, states, transaction hashes, explorer links, reconciled amounts, evidence and the
  *                    authorization plan. A requester sees step outcomes only when the owner shares status (the existing consent rule)
  */
+import { externalOneStepPlan } from '../platform/external-single-step.ts';
 import type { ApprovalRequesterKind, HandoffRecord, WalletRef } from '../platform/handoff-store.ts';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
@@ -71,12 +72,14 @@ export function assertRunWallets(run: RunRecord, wallets: readonly WalletRef[]):
 
 /**
  * The run of a claimed SEQUENTIAL handoff (created once; only for the same proven wallets). BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of
- * ONE step exists only for the Editor's own single-card handoff (`requestApproval`'s `singleStepRun`, EDITOR_SESSION only; its row needs migration
- * 0032). Every other requester's run still needs at least two steps.
+ * ONE step exists for the Editor's own single-card handoff (`requestApproval`'s `singleStepRun`; its row needs migration 0032), the live Developer
+ * API, and (BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001) an MCP or channel proposal of one grouped EVM step. Every other run needs two steps.
  */
 export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, workflow: WorkflowComposition, wallets: readonly WalletRef[]): Promise<RunRecord> {
   const externalLive = h.requesterKind === 'DEVELOPER_PROJECT' && h.requesterRef.endsWith('.production') && h.fundsClass === 'REAL_FUNDS';
-  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' || externalLive ? 1 : 2;
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: an MCP or channel proposal stored as a run of ONE grouped EVM step (decided by the server at
+  // request time, `external-single-step.ts`) is re-checked here from its own stored plan; any other one-step plan of theirs is still refused.
+  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' || externalLive || externalOneStepPlan(h.requesterKind, h.plan) ? 1 : 2;
   if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < minimumSteps || h.plan.steps.length !== workflow.steps.length
     || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
   // A database without migration 0032 refuses the row by its CHECK: refused here with a closed code first (e.g. a one-step handoff issued before an

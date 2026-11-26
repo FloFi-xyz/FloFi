@@ -762,7 +762,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
   const requester: ApprovalRequester = { kind: 'MCP_ACCOUNT', ref: principal.accountId, grantId: principal.id, clientId: principal.clientId, displayName: principal.clientName };
   const deps = (): ApprovalDeps => ({ origin: oauth.origin, scheme: mcpApprovalLinkScheme(oauth), handoffs: state.handoffs,
     allow: (bucket, limit, windowSeconds, now) => state.oauth.allow(bucket, limit, windowSeconds, now), runtime: ctx.runtime, policy: ctx.policy ?? DEFAULT_POLICY,
-    rules: MCP_HANDOFF_RULES, now: new Date() });
+    rules: MCP_HANDOFF_RULES, now: new Date(), singleStepRuns: () => state.workflowRuns.singleStepRuns() });
   const owned = (approvalId: string) => approvalForRequester(state.handoffs, requester, approvalId, new Date());
   /**
    * One of this requester's approvals with its runs (only when the owner shares them). A Pix approval lists its durably bound Pix runs
@@ -792,7 +792,9 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'the owner\'s own wallet pays every fee and FloFi never does; each step or group runs only after the previous one reconciled. ' +
     'The same approvalUrl reopens the next step for the owner.', SCHEMAS[ctx.scope ?? networkScope()].request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
-    const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
+    // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: one eligible EVM step may be handed off as a run of that step (one wallet batch where the
+    // owner's wallet supports it); the server decides, and anything else keeps the one-step SINGLE_FLOW plan.
+    const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash, { externalOneStep: true });
     if (!result.ok) return failWith(result.code, result.extra ?? {});
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
     const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()));

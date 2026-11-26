@@ -136,6 +136,9 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: what a completed one-ste
 });
 
 describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists only for the Editor\'s own handoff', () => {
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (intentional contract change, owner-authorized): an MCP or channel handoff whose STORED plan
+  // is a run of one grouped EVM step (only the server stores one, `external-single-step.ts`) now passes the step-count rule and then needs the
+  // certified one-step schema like the Editor's. The Developer sandbox and automations are still refused, and a SINGLE_FLOW plan never becomes a run.
   it('ensureForClaim refuses a one-step SEQUENTIAL handoff of any other requester before anything is created', async () => {
     const composed = composeWorkflow(V1_SWAP);
     if (!composed.ok) throw new Error(composed.code);
@@ -143,9 +146,20 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists
     const untouched = new Proxy({}, { get: () => () => { throw new Error('STORE_TOUCHED'); } });
     const deps = { store: untouched, now: () => new Date(), newId: () => 'wfr_' + 'a'.repeat(26) } as unknown as Parameters<typeof ensureForClaim>[0];
     const wallets = [{ namespace: 'eip155' as const, address: OWNER }];
-    for (const requesterKind of ['MCP_ACCOUNT', 'CHANNEL_CONVERSATION', 'DEVELOPER_PROJECT', 'AUTOMATION_RULE'] as const) {
+    for (const requesterKind of ['DEVELOPER_PROJECT', 'AUTOMATION_RULE'] as const) {
       const handoff = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind, requesterRef: 'ref', plan, workflowHash: composed.workflowHash, claimed: null } as unknown as HandoffRecord;
       await expect(ensureForClaim(deps, handoff, composed, wallets), requesterKind).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
+    }
+    // MCP and channels: a stored run of one grouped step reaches the schema gate (a database without 0032/0033 answers no: fails closed there, and
+    // nothing is created).
+    const schemaless = { ...deps, store: new Proxy({ singleStepRuns: async () => false }, { get: (target, key) => key === 'singleStepRuns' ? target.singleStepRuns
+      : () => { throw new Error('STORE_TOUCHED'); } }) } as unknown as Parameters<typeof ensureForClaim>[0];
+    for (const requesterKind of ['MCP_ACCOUNT', 'CHANNEL_CONVERSATION'] as const) {
+      const handoff = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind, requesterRef: 'ref', plan, workflowHash: composed.workflowHash, claimed: null } as unknown as HandoffRecord;
+      await expect(ensureForClaim(schemaless, handoff, composed, wallets), requesterKind).rejects.toThrow('WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED');
+      // …but never for a stored one-step plan of a flow the groups do not build (here: the plan's flow replaced by a liquidity flow).
+      const ungrouped = { ...handoff, plan: { ...plan, steps: plan.steps.map(step => ({ ...step, flow: 'uniswap-liquidity' })) } } as unknown as HandoffRecord;
+      await expect(ensureForClaim(schemaless, ungrouped, composed, wallets), `${requesterKind} ungrouped`).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
     }
     // A one-step plan stored as SINGLE_FLOW never becomes a run, whoever asked.
     const single = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind: 'EDITOR_SESSION', requesterRef: 'ref', plan: workflowPlan(composed), workflowHash: composed.workflowHash,
