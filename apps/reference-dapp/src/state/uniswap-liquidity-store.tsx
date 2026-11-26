@@ -98,8 +98,8 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   }, [restoreLiquidityCanvas, trackCanvasRestoration]);
   useEffect(() => {
     // While a sequence's completed steps are being re-proven after a reload the runtime step is not settled yet: nothing is invalidated then.
-    // Post-#254 hotfix: the server keeps the authorization of a run whose execution is in flight (or settled); that unchanged run is not shown again
-    // (which would only ask again), it is updated by its own observation and invalidated once its attempt concluded, if the edit still stands.
+    // Post-#254 hotfix: a settled run keeps its authorization on the server (nothing more can run from it); that unchanged run is not shown again,
+    // which would only ask again. An in-flight attempt keeps its state, error and evidence; only its authorization ends.
     if (record && retired && record.authorization && !sequenceRestore) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok && r.value.authorization === null) setRecord(r.value); })
       .catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
   }, [record, retired, sequenceRestore]);
@@ -224,6 +224,9 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       await validateSession(begun.attempt.nonce);
       accept(unwrap(await uniswapLiquidityHandoff(id)));
       if (latestWallet.current.account !== session.account || latestWallet.current.chainId !== session.chainId) throw new Error('UNISWAP_WRONG_OWNER');
+      // Post-#254 hotfix (flofi-liquidity and flofi-security reviews): an edit made after the last session check (while the wallet answered its
+      // nonce read, or during the hand-off) stops the request here, before the wallet is asked; the attempt is concluded unsent below.
+      if (latest.current !== editing) throw new Error('UNISWAP_SEMANTIC_REVISION_CHANGED');
       // The sole submission point, reachable only from the owner's Execute click. The wallet assigns the reviewed nonce.
       setSigning(true); diagnostic.invoked = true; busyRef.current = false; setBusy(false);
       let hash: unknown;

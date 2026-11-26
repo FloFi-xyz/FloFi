@@ -120,7 +120,8 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   }, []);
   // A semantic edit after Review invalidates the authorization; any existing transaction stays observable.
   // While a sequence's completed steps are being re-proven after a reload the runtime step is not settled yet: nothing is invalidated then.
-  useEffect(() => { if (record && retired && record.authorization && !sequenceRestore) runtimes[networkOfRecord(record)].invalidate(record.id).then(result => { if (result.ok) setRecord(result.value); })
+  // A settled run (a completed step once the sequence moved on) keeps its result as reconciled; only a pending run's authorization is ended.
+  useEffect(() => { if (record && retired && record.authorization && !sequenceRestore && record.verdict === 'PENDING') runtimes[networkOfRecord(record)].invalidate(record.id).then(result => { if (result.ok) setRecord(result.value); })
     .catch(() => setError('ORCA_LIQUIDITY_AUTHORIZATION_INVALIDATION_FAILED')); }, [record, retired, sequenceRestore]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);

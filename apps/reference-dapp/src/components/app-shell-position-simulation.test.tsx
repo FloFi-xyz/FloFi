@@ -20,7 +20,8 @@ vi.mock('react', async original => ({ ...await original<typeof import('react')>(
 const f = vi.hoisted(() => ({ workflow: null as unknown, staged: null as unknown, mainnet: [] as unknown[], devnet: [] as unknown[] }));
 const OWNER = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
 vi.mock('../state/workflow-store', async original => ({ ...await original<typeof import('../state/workflow-store')>(),
-  useWorkflow: () => ({ state: { workflow: f.workflow }, stagedPosition: f.staged }) }));
+  // Outside a step-by-step sequence the runtime workflow is the canonical workflow (post-#254 hotfix: the Orca store runs `runtimeWorkflow`).
+  useWorkflow: () => ({ state: { workflow: f.workflow }, runtimeWorkflow: f.workflow, sequenceRestore: null, stagedPosition: f.staged }) }));
 vi.mock('../state/jupiter-store', () => ({ useJupiter: () => ({ session: { chain: 'solana:mainnet', account: { address: OWNER } } }) }));
 vi.mock('../wallet/position-mint-signer', () => ({ createPositionMintSigner: async () => ({ address: '9'.repeat(43), sign: async () => new Uint8Array() }),
   signOrcaLiquidityTransaction: async () => { throw new Error('NEVER_SIGNED_HERE'); } }));

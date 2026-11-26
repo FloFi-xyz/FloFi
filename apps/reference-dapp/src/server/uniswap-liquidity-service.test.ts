@@ -82,75 +82,104 @@ describe('Base Sepolia Uniswap v3 liquidity: simulation and Review binding', () 
   });
 });
 
-describe('post-#254 hotfix: a semantic edit never invalidates the authorization of an execution in flight', () => {
-  it('a prepared, submitting, pending or unknown-outcome attempt keeps its authorization, error and evidence; the execution continues and reconciles', async () => {
+describe('post-#254 hotfix: a semantic edit ends the authorization, never the execution in flight', () => {
+  /** The run after an edit: only its authorization ended; its attempts, evidence and the error naming their state are exactly as before. */
+  async function editedDuring(service: Awaited<ReturnType<typeof setup>>['service'], id: string) {
+    const before = await service.load(id);
+    const after = await service.invalidate(id);
+    expect(after).toEqual({ ...before, authorization: null });
+    expect(await service.load(id)).toEqual(after);
+    return after;
+  }
+
+  it('a prepared request is refused at the hand-off (nothing sent); a submitted one still reports, reconciles and gates the next step on a new Review', async () => {
     const { service, chain } = await setup(), w = workflow();
-    const run = await reviewed(service, w);
-    const unchanged = async () => { const before = await service.load(run.id); expect(await service.invalidate(run.id)).toEqual(before); expect(await service.load(run.id)).toEqual(before); };
-    // PREPARED: the durable wallet request exists; the edit does not cancel the owner's Execute, which hands off as reviewed.
-    const begun = await service.begin(run.id, UNI_OWNER, w);
-    await unchanged();
-    await service.handoff(run.id);
-    // SUBMITTING: the wallet may be signing.
-    await unchanged();
+    let run = await reviewed(service, w);
+    // PREPARED: the wallet has not been asked. The edit stops it at the hand-off; observation then concludes it as not submitted.
+    await service.begin(run.id, UNI_OWNER, w);
+    await editedDuring(service, run.id);
+    await expect(service.handoff(run.id)).rejects.toThrow('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
+    expect((await service.observe(run.id)).attempts[0]).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_WALLET_NOT_SUBMITTED' });
+    expect(chain.counters.sends).toBe(0);
+    // Re-reviewed: SUBMITTING (the wallet may be signing) and PENDING (a hash that may land) keep their state and evidence through an edit.
+    run = await service.review(run.id, (await service.refresh(run.id)).review.commitment, w);
+    const begun = await service.begin(run.id, UNI_OWNER, w); await service.handoff(run.id);
+    await editedDuring(service, run.id);
     const hash = chain.wallet.send(begun.transaction, { hold: true });
-    // PENDING: the hash is evidence of a transaction that may land.
-    expect((await service.report(run.id, { kind: 'HASH', hash })).attempts[0]).toMatchObject({ state: 'PENDING', transactionHash: hash });
-    await unchanged();
+    expect((await service.report(run.id, { kind: 'HASH', hash })).attempts.at(-1)).toMatchObject({ state: 'PENDING', transactionHash: hash });
+    expect((await service.observe(run.id)).error).toBe('UNISWAP_TRANSACTION_PENDING');
+    // While it may land, the run cannot be re-reviewed (or re-authorized) at all.
+    await expect(service.review(run.id, run.review.commitment, w)).rejects.toThrow('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
+    expect((await editedDuring(service, run.id)).error).toBe('UNISWAP_TRANSACTION_PENDING');
     chain.wallet.release();
-    let record = await service.observe(run.id);
-    expect(record.attempts).toMatchObject([{ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', transactionHash: hash, reconciled: true }]);
-    // SUBMISSION_RESULT_UNKNOWN: the wallet's answer was lost; the uncertainty it names is never overwritten by the edit.
-    const second = await service.begin(run.id, UNI_OWNER, w); await service.handoff(run.id);
-    chain.wallet.send(second.transaction);
-    record = await service.report(run.id, { kind: 'UNKNOWN' });
-    expect([record.attempts[1]!.state, record.error]).toEqual(['SUBMISSION_RESULT_UNKNOWN', 'UNISWAP_SUBMISSION_UNKNOWN']);
-    await unchanged();
-    record = await service.observe(run.id);
-    expect(record.attempts[1]).toMatchObject({ step: 'APPROVE_TOKEN1', state: 'CONFIRMED', reconciled: true });
-    // Nothing was resent, and no second attempt was ever created for a step.
-    expect(chain.counters.sends).toBe(2);
-    expect(record.attempts.map(a => a.step)).toEqual(['APPROVE_TOKEN0', 'APPROVE_TOKEN1']);
+    const record = await service.observe(run.id);
+    expect(record.attempts.at(-1)).toMatchObject({ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', transactionHash: hash, reconciled: true });
+    // The edit stands: the next step needs a new Review, and nothing was resent.
+    await expect(service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_REVIEW_REQUIRED');
+    expect(chain.counters.sends).toBe(1);
   });
 
-  it('concurrent invalidations never interleave with begin, the handoff or the hash report: one send, the hash recorded, the run reconciled', async () => {
+  it('an unknown wallet outcome keeps the uncertainty it names through an edit, and is observed to its end without a resend', async () => {
+    const { service, chain } = await setup(), w = workflow();
+    const run = await reviewed(service, w);
+    const begun = await service.begin(run.id, UNI_OWNER, w); await service.handoff(run.id);
+    chain.wallet.send(begun.transaction);
+    expect((await service.report(run.id, { kind: 'UNKNOWN' })).error).toBe('UNISWAP_SUBMISSION_UNKNOWN');
+    const edited = await editedDuring(service, run.id);
+    expect([edited.attempts[0]!.state, edited.error]).toEqual(['SUBMISSION_RESULT_UNKNOWN', 'UNISWAP_SUBMISSION_UNKNOWN']);
+    expect((await service.observe(run.id)).attempts[0]).toMatchObject({ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', reconciled: true });
+    await expect(service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_REVIEW_REQUIRED');
+    expect(chain.counters.sends).toBe(1);
+  });
+
+  it('concurrent edits never interleave with begin, the hand-off or the hash report: at most one send, its hash recorded, nothing resent', async () => {
     const { service, chain } = await setup(), w = workflow();
     const run = await reviewed(service, w);
     // The run lease admits one operation at a time: a concurrent call runs before or after, or is refused BUSY (never interleaved, never queued).
-    const together = async <T,>(operation: () => Promise<T>, edits = 2): Promise<T> => {
+    const together = async <T,>(operation: () => Promise<T>): Promise<{ value: T } | { refused: string }> => {
       for (;;) {
-        const [result, ...others] = await Promise.allSettled([operation(), ...Array.from({ length: edits }, () => service.invalidate(run.id))]);
-        for (const other of others) if (other.status === 'rejected') expect((other.reason as Error).message).toBe('UNISWAP_LIQUIDITY_BUSY');
-        if (result.status === 'fulfilled') return result.value;
-        expect((result.reason as Error).message).toMatch(/^UNISWAP_(LIQUIDITY_BUSY|REVIEW_REQUIRED)$/);
-        if ((result.reason as Error).message === 'UNISWAP_REVIEW_REQUIRED') return null as T;
+        const [result, ...edits] = await Promise.allSettled([operation(), service.invalidate(run.id), service.invalidate(run.id)]);
+        for (const edit of edits) if (edit.status === 'rejected') expect((edit.reason as Error).message).toBe('UNISWAP_LIQUIDITY_BUSY');
+        if (result.status === 'fulfilled') return { value: result.value };
+        const code = (result.reason as Error).message;
+        if (code !== 'UNISWAP_LIQUIDITY_BUSY') return { refused: code };
       }
     };
     const begun = await together(() => service.begin(run.id, UNI_OWNER, w));
-    if (!begun) {
-      // An edit that ran first cleared the still unused authorization: nothing was prepared or sent.
+    if ('refused' in begun) {
+      // An edit ran first: the unused authorization ended and nothing was prepared or sent.
+      expect(begun.refused).toBe('UNISWAP_REVIEW_REQUIRED');
       expect(await service.load(run.id)).toMatchObject({ authorization: null, error: 'UNISWAP_SEMANTIC_EDIT_REQUIRES_REVIEW', attempts: [] });
       expect(chain.counters.sends).toBe(0);
       return;
     }
-    // From the prepared attempt on, every edit leaves the run's authorization to the execution.
-    expect((await service.load(run.id)).authorization).toBe(begun.record.review.commitment);
-    expect((await together(() => service.handoff(run.id))).attempts[0]!.state).toBe('SUBMITTING');
-    const hash = chain.wallet.send(begun.transaction);
-    expect((await together(() => service.report(run.id, { kind: 'HASH', hash }))).attempts[0]).toMatchObject({ state: 'PENDING', transactionHash: hash });
-    const record = await together(() => service.observe(run.id));
-    expect(record.attempts).toMatchObject([{ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', transactionHash: hash, reconciled: true }]);
-    expect(record.authorization).toBe(record.review.commitment);
+    const handed = await together(() => service.handoff(run.id));
+    if ('refused' in handed) {
+      // An edit ended the authorization before the hand-off: the prepared request is refused there and concluded unsent.
+      expect(handed.refused).toBe('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
+      expect((await service.observe(run.id)).attempts[0]).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_WALLET_NOT_SUBMITTED' });
+      expect(chain.counters.sends).toBe(0);
+      return;
+    }
+    const hash = chain.wallet.send(begun.value.transaction);
+    const reported = await together(() => service.report(run.id, { kind: 'HASH', hash }));
+    expect(reported).toMatchObject({ value: { attempts: [{ state: 'PENDING', transactionHash: hash }] } });
+    const observed = await together(() => service.observe(run.id));
+    expect(observed).toMatchObject({ value: { attempts: [{ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', transactionHash: hash, reconciled: true }] } });
+    // Every concurrent edit may have been refused BUSY; one more edit, alone, ends the authorization and leaves the confirmed evidence intact.
+    const edited = await service.invalidate(run.id);
+    expect(edited.authorization).toBeNull();
+    expect(edited.attempts).toMatchObject([{ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', transactionHash: hash, reconciled: true }]);
+    await expect(service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_REVIEW_REQUIRED');
     expect(chain.counters.sends).toBe(1);
   });
 
-  it('an unused authorization is still invalidated: before any attempt, and between steps once the attempt concluded; a settled run is left as it is', async () => {
+  it('an unused authorization is invalidated with its reason, before any attempt and between steps; a settled run is left as it is', async () => {
     const { service, chain } = await setup(), w = workflow();
     let run = await reviewed(service, w);
     let record = await service.invalidate(run.id);
     expect([record.authorization, record.error]).toEqual([null, 'UNISWAP_SEMANTIC_EDIT_REQUIRES_REVIEW']);
     await expect(service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_REVIEW_REQUIRED');
-    // Re-reviewed, the approval confirms; the edit then invalidates the authorization the next step would use, keeping the confirmed evidence.
     run = await service.review(run.id, record.review.commitment, w);
     const approval = await execute(service, chain, run.id, w);
     await service.observe(run.id);

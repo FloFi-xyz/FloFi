@@ -22,7 +22,7 @@ import { createOrcaLiquidityService, type OrcaLiquidityService } from '../server
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({
-  canonical: null as unknown, runtime: null as unknown, sequenceRestore: null as unknown, service: null as unknown, owner: '',
+  canonical: null as unknown, runtime: null as unknown, sequenceRestore: null as unknown, service: null as unknown, owner: '', statusRecord: null as unknown,
   simulated: [] as unknown[], invalidated: [] as string[],
 }));
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.canonical }, runtimeWorkflow: f.runtime, sequenceRestore: f.sequenceRestore, stagedPosition: null }) }));
@@ -46,7 +46,8 @@ vi.mock('../app/solana-mainnet-liquidity-action', () => {
     solanaMainnetLiquidityBegin: (id: string, owner: string, workflow: SemanticWorkflow) => wrap(() => svc().begin(id, owner, workflow)),
     solanaMainnetLiquidityWalletFailure: (id: string, diagnostic: Parameters<OrcaLiquidityService['walletFailure']>[1]) => wrap(() => svc().walletFailure(id, diagnostic)),
     solanaMainnetLiquiditySubmit: (id: string, signed: string) => wrap(() => svc().submit(id, signed)),
-    solanaMainnetLiquidityObserve: (id: string) => wrap(() => svc().observe(id)), solanaMainnetLiquidityStatus: (id: string) => wrap(() => svc().load(id)),
+    solanaMainnetLiquidityObserve: (id: string) => wrap(() => svc().observe(id)),
+    solanaMainnetLiquidityStatus: (id: string) => f.statusRecord ? Promise.resolve({ ok: true as const, value: f.statusRecord }) : wrap(() => svc().load(id)),
   };
 });
 // Imported after the mocks.
@@ -80,7 +81,7 @@ async function settle() { for (let i = 0; i < 20; i++) { await new Promise(resol
 async function act(action: () => Promise<void>) { const done = action(); await settle(); await done; await settle(); }
 
 beforeEach(async () => {
-  host = new HookHarness(); f.simulated = []; f.invalidated = []; f.sequenceRestore = null;
+  host = new HookHarness(); f.simulated = []; f.invalidated = []; f.sequenceRestore = null; f.statusRecord = null;
   const env = createMockedSolanaDevnetOrca({ liquidityProfile: mainnet }), wallet = createMockedSolanaWallet();
   env.fund(wallet.owner, 3_000_000_000n, 50_000_000n);
   f.owner = wallet.owner;
@@ -89,7 +90,7 @@ beforeEach(async () => {
   const canonical = bridgeThenPool();
   f.canonical = canonical; f.runtime = poolStep(canonical, '200000');
 });
-afterEach(async () => { host.unmount(); await rm(dir, { recursive: true, force: true }); });
+afterEach(async () => { host.unmount(); vi.unstubAllGlobals(); await rm(dir, { recursive: true, force: true }); });
 
 describe('post-#254 hotfix: an Orca pool step of a step-by-step sequence is simulated alone (Bridge to Solana → Orca Pool)', () => {
   it('simulates the runtime step (bound to the delivered 0.2 USDC), never the whole Canvas, and its Review stays current', async () => {
@@ -123,5 +124,21 @@ describe('post-#254 hotfix: an Orca pool step of a step-by-step sequence is simu
     read(); await settle();
     expect(f.invalidated).toEqual([store.record!.id]);
     expect(store.record?.authorization).toBeNull();
+  });
+
+  it('flofi-liquidity review: never invalidates a settled run (a completed Orca step once the sequence moved on), keeping its reconciled result', async () => {
+    read(); await settle();
+    await act(() => store.simulate('OPEN'));
+    await act(() => store.review());
+    // The step's run, reconciled (fixture), recovered after a reload; the sequence's runtime step is no longer the one it reviewed.
+    const settled = { ...store.record!, verdict: 'RECONCILED' as const };
+    host.unmount(); host = new HookHarness(); f.statusRecord = settled;
+    vi.stubGlobal('window', { localStorage: { getItem: () => JSON.stringify({ id: settled.id, network: 'Solana' }), setItem: () => undefined } });
+    f.runtime = poolStep(f.canonical as Workflow, '150000');
+    read(); await settle();
+    expect(store.record?.verdict).toBe('RECONCILED');
+    expect(store.retired).toBe(true);
+    expect(f.invalidated).toEqual([]);
+    expect(store.record?.authorization).toBe(settled.authorization);
   });
 });

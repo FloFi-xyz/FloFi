@@ -28,7 +28,7 @@ const f = vi.hoisted(() => ({
   simulated: [] as SemanticWorkflow[],
   // Stable, as the real store's callbacks are (useCallback with no dependencies).
   track: (read: Promise<unknown>) => read,
-  refreshes: 0, failures: [] as string[], invalidations: 0,
+  refreshes: 0, failures: [] as string[], invalidations: 0, afterHandoff: null as null | (() => void),
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: observations made, observations that still find no receipt (scripted), and the follow's delays.
   observes: 0, pendingObservations: 0, sleeps: [] as number[],
 }));
@@ -57,7 +57,7 @@ vi.mock('../app/uniswap-liquidity-action', () => {
     uniswapLiquidityReview: (id: string, commitment: string, workflow: SemanticWorkflow) => wrap(() => svc().review(id, commitment, workflow)),
     uniswapLiquidityInvalidate: (id: string) => { f.invalidations++; return wrap(() => svc().invalidate(id)); },
     uniswapLiquidityBegin: (id: string, owner: string, workflow: SemanticWorkflow) => wrap(() => svc().begin(id, owner, workflow)),
-    uniswapLiquidityHandoff: (id: string) => wrap(() => svc().handoff(id)),
+    uniswapLiquidityHandoff: async (id: string) => { const result = await wrap(() => svc().handoff(id)); f.afterHandoff?.(); return result; },
     uniswapLiquidityReport: (id: string, result: Parameters<UniswapLiquidityService['report']>[1]) => wrap(() => svc().report(id, result)),
     uniswapLiquidityWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['walletFailure']>[1]) => { f.failures.push(diagnostic.code); return wrap(() => svc().walletFailure(id, diagnostic)); },
     uniswapLiquidityObserve: (id: string) => {
@@ -106,7 +106,7 @@ async function act(action: () => Promise<void>) { const done = action(); await s
 
 beforeEach(async () => {
   host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0; f.canonical = null; f.simulated = [];
-  f.observes = 0; f.pendingObservations = 0; f.sleeps = []; f.invalidations = 0;
+  f.observes = 0; f.pendingObservations = 0; f.sleeps = []; f.invalidations = 0; f.afterHandoff = null;
   chain = createUniswapLiquidityChain();
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unilp-store-'));
   f.service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: chain.rpc, provenance: 'MOCKED',
@@ -157,8 +157,8 @@ describe('PR #254 follow-up: a pool step of a step-by-step sequence is simulated
   });
 });
 
-describe('post-#254 hotfix: an edit while a transaction is in flight leaves its authorization to the execution', () => {
-  it('asks once, keeps the pending run as it is (no repeated invalidation), and invalidates the unused authorization once the attempt concluded', async () => {
+describe('post-#254 hotfix: an edit ends the authorization, never the transaction in flight', () => {
+  it('asks once while the approval is pending: the run keeps its attempt and state, its authorization ends, and the next step needs a new Review', async () => {
     await act(() => store.simulate());
     await act(() => store.review());
     const id = store.record!.id, service = f.service as UniswapLiquidityService, w = f.workflow as SemanticWorkflow;
@@ -168,20 +168,54 @@ describe('post-#254 hotfix: an edit while a transaction is in flight leaves its 
     f.pendingObservations = 1;
     await act(() => store.observe());
     expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'PENDING']]);
+    const pendingError = store.record!.error;
     f.workflow = workflow2();
     read(); await settle(); await settle();
     expect(store.retired).toBe(true);
     expect(f.invalidations).toBe(1);
-    expect(store.record?.authorization).toBe(store.record?.review.commitment);
-    expect(store.error).toBeNull();
-    // The approval lands and is reconciled; the edit still stands, so the authorization the next step would use is now invalidated.
+    expect(store.record?.authorization).toBeNull();
+    expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'PENDING']]);
+    expect(store.record?.error).toBe(pendingError);
+    // The approval lands and is reconciled from the same run; nothing asks again, and the mint is never prepared on the old authorization.
     chain.wallet.release();
     await act(() => store.observe());
     expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'CONFIRMED']]);
     await settle();
-    expect(f.invalidations).toBe(2);
+    expect(f.invalidations).toBe(1);
+    await expect(service.begin(id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_REVIEW_REQUIRED');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('an edit made while the wallet answers its nonce read never reaches the wallet; the unsent attempt is concluded as not submitted', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    const request = (f.provider as { request: (input: { method: string; params?: unknown[] }) => Promise<unknown> }).request;
+    let edited = false;
+    f.provider = { request: async (input: { method: string; params?: unknown[] }) => {
+      const result = await request(input);
+      // The owner edits the Canvas right after the wallet's last nonce answer (after the store's final session check).
+      if (input.method === 'eth_getTransactionCount' && !edited) { edited = true; f.workflow = workflow2(); read(); }
+      return result;
+    } };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
     expect(store.record?.authorization).toBeNull();
-    expect(store.record?.error).toBe('UNISWAP_SEMANTIC_EDIT_REQUIRES_REVIEW');
+    // Never handed to the wallet: concluded at once, or (when the store's own invalidation held the run lease) by the next observation.
+    expect(['PREPARED', 'CANCELLED']).toContain(store.record?.attempts.at(-1)?.state);
+    await act(() => store.observe());
+    expect(store.record?.attempts.map(a => a.state)).toEqual(['CANCELLED']);
+    expect(sent).toEqual([]);
+  });
+
+  it('flofi-liquidity/security review: an edit made during the hand-off stops the request before the wallet is asked', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // The hand-off has made SUBMITTING durable when the owner edits; only the store's last check can still keep the wallet from being asked.
+    f.afterHandoff = () => { f.afterHandoff = null; f.workflow = workflow2(); read(); };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(store.error).toBe('UNISWAP_SEMANTIC_REVISION_CHANGED');
+    expect(store.record?.attempts.at(-1)?.state).not.toBe('PENDING');
   });
 });
 
