@@ -34,6 +34,18 @@ function errorValue(value: unknown): unknown {
   return { code: typeof v.code === 'number' || typeof v.code === 'string' ? v.code : null, message: typeof v.message === 'string' ? v.message.slice(0, 512) : null };
 }
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
+/**
+ * Post-#254 hotfix (flofi-wallet-execution review): a call refused only because another operation held the run's lease (fail-fast) wrote nothing,
+ * so it is retried briefly. Used where giving up would leave the run wrongly classified: concluding an unsent attempt, ending an authorization.
+ */
+async function whileLeaseBusy<T>(call: () => Promise<{ ok: true; value: T } | { ok: false; code: string }>): Promise<{ ok: true; value: T } | { ok: false; code: string }> {
+  let result = await call();
+  for (let attempt = 1; attempt < 6 && !result.ok && result.code === 'UNISWAP_LIQUIDITY_BUSY'; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+    result = await call();
+  }
+  return result;
+}
 
 export function UniswapLiquidityProvider({ children }: { children: ReactNode }) {
   const { runtimeWorkflow, sequenceRestore, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
@@ -100,9 +112,11 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     // While a sequence's completed steps are being re-proven after a reload the runtime step is not settled yet: nothing is invalidated then.
     // Post-#254 hotfix: a settled run keeps its authorization on the server (nothing more can run from it); that unchanged run is not shown again,
     // which would only ask again. An in-flight attempt keeps its state, error and evidence; only its authorization ends.
-    if (record && retired && record.authorization && !sequenceRestore) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok && r.value.authorization === null) setRecord(r.value); })
-      .catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
-  }, [record, retired, sequenceRestore]);
+    // An Execute that is preparing its wallet request concludes the run itself (it re-checks the editor before the wallet), so the edit waits for it
+    // instead of contending for the run's lease (flofi-wallet-execution review).
+    if (record && retired && record.authorization && !sequenceRestore && !busy) whileLeaseBusy(() => uniswapLiquidityInvalidate(record.id))
+      .then(r => { if (r.ok && r.value.authorization === null) setRecord(r.value); }).catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
+  }, [record, retired, sequenceRestore, busy]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
     // EXEC-01: a refusal refreshed in place leaves no error (its updated Review is valid; `requoted` explains it).
@@ -180,6 +194,8 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     }
   }); }
   async function request() {
+    // The editor as the owner clicked Execute (before any wallet prompt): an edit made at any later point stops the request (wallet-execution review).
+    const editing = latest.current;
     if (!record || retired || record.authorization !== record.review.commitment) throw new Error('UNISWAP_REVIEW_REQUIRED');
     const reviewedChain = chainHexOf(record.review.chainId);
     if (!reviewedChain) throw new Error('UNISWAP_WRONG_CHAIN');
@@ -188,7 +204,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     if (session.account !== record.owner) throw new Error('UNISWAP_WRONG_OWNER');
     const provider = injected(); if (!provider) throw new Error('UNISWAP_WALLET_REQUIRED');
     // The reviewed IR is the server-held run's (it survives reloads; `begin` re-validates it). The editor must not change mid-operation.
-    const snapshot = record.workflow, editing = latest.current, id = record.id;
+    const snapshot = record.workflow, id = record.id;
     const diagnostic: UniswapWalletDiagnostic = { invoked: false, calls: [], code: 'UNISWAP_WALLET_PREFLIGHT' };
     const request = async (method: string, params: unknown[] = []) => {
       const call: UniswapWalletDiagnostic['calls'][number] = { method, ...method === 'eth_sendTransaction' ? { submission: true } : {} }; diagnostic.calls.push(call);
@@ -242,7 +258,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       if (prepared && (!diagnostic.invoked || refused)) {
         // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a hand-off refusal is concluded by the server itself (its attempt is provably
         // unsent), so the report is then refused; the run's current record (CANCELLED, authorization cleared) replaces the stale PREPARED one.
-        const reported = await uniswapLiquidityWalletFailure(id, diagnostic);
+        const reported = await whileLeaseBusy(() => uniswapLiquidityWalletFailure(id, diagnostic));
         const failure = reported.ok ? reported : await uniswapLiquidityStatus(id).catch(() => reported);
         // A refusal that execute() refreshes in place hands its record over instead of showing it (see execute()).
         if (!diagnostic.invoked && UNISWAP_REFRESH_IN_PLACE.test(diagnostic.code)) throw Object.assign(new Error(diagnostic.code, { cause }), { interim: failure.ok ? failure.value : null });

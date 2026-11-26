@@ -28,7 +28,7 @@ const f = vi.hoisted(() => ({
   simulated: [] as SemanticWorkflow[],
   // Stable, as the real store's callbacks are (useCallback with no dependencies).
   track: (read: Promise<unknown>) => read,
-  refreshes: 0, failures: [] as string[], invalidations: 0, afterHandoff: null as null | (() => void),
+  refreshes: 0, failures: [] as string[], invalidations: 0, afterHandoff: null as null | (() => void), busyWalletFailures: 0, onSession: null as null | (() => void),
   // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: observations made, observations that still find no receipt (scripted), and the follow's delays.
   observes: 0, pendingObservations: 0, sleeps: [] as number[],
 }));
@@ -42,7 +42,7 @@ vi.mock('../domain/observation-schedule', async original => {
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.canonical ?? f.workflow }, runtimeWorkflow: f.workflow, restoreLiquidityCanvas: f.restore,
   trackCanvasRestoration: f.track }) }));
 vi.mock('./build009-wallet-store', () => ({
-  useBuild009Wallet: () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34', session: async () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34' }),
+  useBuild009Wallet: () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34', session: async () => { f.onSession?.(); return { account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34' }; },
     connect: async () => null, switchTo: async () => undefined }),
   injected: () => f.provider,
 }));
@@ -59,7 +59,9 @@ vi.mock('../app/uniswap-liquidity-action', () => {
     uniswapLiquidityBegin: (id: string, owner: string, workflow: SemanticWorkflow) => wrap(() => svc().begin(id, owner, workflow)),
     uniswapLiquidityHandoff: async (id: string) => { const result = await wrap(() => svc().handoff(id)); f.afterHandoff?.(); return result; },
     uniswapLiquidityReport: (id: string, result: Parameters<UniswapLiquidityService['report']>[1]) => wrap(() => svc().report(id, result)),
-    uniswapLiquidityWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['walletFailure']>[1]) => { f.failures.push(diagnostic.code); return wrap(() => svc().walletFailure(id, diagnostic)); },
+    uniswapLiquidityWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['walletFailure']>[1]) => { f.failures.push(diagnostic.code);
+      if (f.busyWalletFailures > 0) { f.busyWalletFailures--; return Promise.resolve({ ok: false as const, code: 'UNISWAP_LIQUIDITY_BUSY' }); }
+      return wrap(() => svc().walletFailure(id, diagnostic)); },
     uniswapLiquidityObserve: (id: string) => {
       f.observes++;
       // A scripted observation that finds no receipt yet: the durable record as it stands (its submitted attempt still PENDING), read-only.
@@ -106,7 +108,7 @@ async function act(action: () => Promise<void>) { const done = action(); await s
 
 beforeEach(async () => {
   host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0; f.canonical = null; f.simulated = [];
-  f.observes = 0; f.pendingObservations = 0; f.sleeps = []; f.invalidations = 0; f.afterHandoff = null;
+  f.observes = 0; f.pendingObservations = 0; f.sleeps = []; f.invalidations = 0; f.afterHandoff = null; f.busyWalletFailures = 0; f.onSession = null;
   chain = createUniswapLiquidityChain();
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unilp-store-'));
   f.service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: chain.rpc, provenance: 'MOCKED',
@@ -200,11 +202,7 @@ describe('post-#254 hotfix: an edit ends the authorization, never the transactio
     await act(() => store.execute());
     expect(sent).toEqual([]);
     expect(store.record?.authorization).toBeNull();
-    // Never handed to the wallet: concluded at once, or (when the store's own invalidation held the run lease) by the next observation.
-    expect(['PREPARED', 'CANCELLED']).toContain(store.record?.attempts.at(-1)?.state);
-    await act(() => store.observe());
-    expect(store.record?.attempts.map(a => a.state)).toEqual(['CANCELLED']);
-    expect(sent).toEqual([]);
+    expect(store.record?.attempts.map(a => [a.state, a.note])).toEqual([['CANCELLED', 'UNISWAP_SEMANTIC_REVISION_CHANGED']]);
   });
 
   it('flofi-liquidity/security review: an edit made during the hand-off stops the request before the wallet is asked', async () => {
@@ -215,7 +213,31 @@ describe('post-#254 hotfix: an edit ends the authorization, never the transactio
     await act(() => store.execute());
     expect(sent).toEqual([]);
     expect(store.error).toBe('UNISWAP_SEMANTIC_REVISION_CHANGED');
-    expect(store.record?.attempts.at(-1)?.state).not.toBe('PENDING');
+    // Concluded as unsent (never left SUBMITTING, which would hold the owner's nonce reservation).
+    expect(store.record?.attempts.map(a => a.state)).toEqual(['CANCELLED']);
+    expect(store.record?.authorization).toBeNull();
+  });
+
+  it('flofi-wallet-execution review: concluding an unsent attempt survives a moment when another operation holds the run lease', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // The worker (or another tab) holds the run's lease when the store concludes the attempt: the first conclusion is refused BUSY.
+    f.busyWalletFailures = 1;
+    f.afterHandoff = () => { f.afterHandoff = null; f.workflow = workflow2(); read(); };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(f.failures.length).toBeGreaterThanOrEqual(2);
+    expect(store.record?.attempts.map(a => a.state)).toEqual(['CANCELLED']);
+  });
+
+  it('flofi-wallet-execution review: an edit made while the wallet session prompt is open stops the request too', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // The wallet's session prompt (connect / account) answers after the owner edited the Canvas.
+    f.onSession = () => { f.onSession = null; f.workflow = workflow2(); read(); };
+    await act(() => store.execute());
+    expect(sent).toEqual([]);
+    expect(store.error).toBe('UNISWAP_SEMANTIC_REVISION_CHANGED');
   });
 });
 
