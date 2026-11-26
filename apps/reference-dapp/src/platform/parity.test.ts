@@ -101,7 +101,9 @@ describe('BUILD-DEVELOPER-001 platform parity: MCP ≡ platform ≡ engine', () 
         .toEqual(facts.map(f => [f.row.action, f.row.network, f.gates.enabledByDeployment, f.gates.enabledByPolicy, f.gates.supportedByCode.reason, f.previewable,
           f.previewUnavailableReason, f.flow]));
     }
-  });
+    // Every capability row × every network filter × two runtimes (BUILD-FLOFI-POST-257-HOTFIX-001 added the 12 EVM Universal Bridge rows): a
+    // budget for the enumeration, not a weaker check.
+  }, 30_000);
 
   it('previews the same flow call and projection, with no executable material', async () => {
     const strategy = STRATEGY_EXAMPLES[3]!.strategy, request = { strategy, workflowHash: hashOf(strategy), simulationSubject: A };

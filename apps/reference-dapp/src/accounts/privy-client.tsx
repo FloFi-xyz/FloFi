@@ -47,7 +47,11 @@ export function floFiPrivyConfig(config: Pick<PrivyBrowserConfig, 'apple'>): Pri
   return {
     loginMethods: config.apple ? ['google', 'apple', 'email', 'wallet'] : ['google', 'email', 'wallet'],
     appearance: { theme: 'dark', accentColor: '#2343D9', logo: '/brand/flofi-wordmark-dark.png', landingHeader: 'Sign in to FloFi',
-      walletChainType: 'ethereum-and-solana', showWalletLoginFirst: false,
+      // BUILD-FLOFI-POST-257-HOTFIX-001 (P0-1): no `walletChainType` here. Privy derives it from the app's own dashboard settings
+      // (`wallet_auth`, `solana_wallet_auth`), so a wallet family the app does not accept is never offered. Forcing 'ethereum-and-solana'
+      // listed Phantom and Solflare as Solana wallets while production had Solana wallet login off: Privy then refused every SIWS sign-in
+      // ("Could not log in with wallet", then "Unable to connect wallet").
+      showWalletLoginFirst: false,
       // Named catalog wallets make Privy fetch WalletConnect's explorer even with WalletConnect disabled.
       // Detected entries retain installed EVM/Solana wallets; Coinbase uses its existing separate relay.
       walletList: [...PRIVY_WALLET_LIST] },
@@ -206,7 +210,7 @@ function PrivyBridge({ children, page }: { children: ReactNode; page: string }) 
       onLinkResult: listener => links.current.subscribe(listener),
       sendEmailCode: address => wrap(() => email.sendCode({ email: address }), 'PRIVY_EMAIL_CODE_FAILED'),
       loginWithEmailCode: code => wrap(() => email.loginWithCode({ code }), 'PRIVY_EMAIL_CODE_INVALID'),
-      loginWithWallet: () => login({ loginMethods: ['wallet'], walletChainType: 'ethereum-and-solana' }),
+      loginWithWallet: () => login({ loginMethods: ['wallet'] }), // the wallet families the Privy app accepts (see `appearance`)
       createWallet: ecosystem => wrap(async () => {
         const wallet = ecosystem === 'evm' ? await createEvm() : (await createSolana()).wallet;
         return { address: ecosystem === 'evm' ? wallet.address.toLowerCase() : wallet.address };

@@ -88,7 +88,8 @@ describe('Arbitrum capability certification matrix — Canvas / exact Chat / nat
       const catalog = resolveNetworkAsset(chain, { symbol })!;
       expect(assets.find(asset => asset.symbol === symbol)).toMatchObject({ address: catalog.address, decimals: catalog.decimals });
     }
-    expect(assets.find(asset => asset.symbol === 'ETH')).toMatchObject({ address: null, decimals: 18, actions: ['transfer'] });
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): native ETH swaps and bridges too (it was advertised as transfer-only).
+    expect(assets.find(asset => asset.symbol === 'ETH')).toMatchObject({ address: null, decimals: 18, actions: ['bridge', 'swap', 'transfer'] });
     // BUILD AAVE-V3-EXPANSION-001: ARB is also a reserve of the Arbitrum Aave V3 Core market.
     expect(assets.find(asset => asset.symbol === 'ARB')?.actions).toEqual(['add_liquidity', 'borrow', 'repay', 'supply', 'swap', 'transfer', 'withdraw']);
     resetNetworkCatalogs();

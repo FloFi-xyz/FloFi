@@ -1275,6 +1275,330 @@
       "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
+      "id": "bridge-base-arbitrum-one-native-to-stable",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-base-ethereum-native-to-stable",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-base-robinhood-native-to-stable",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-one-base-native-to-stable",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-one-ethereum-native-to-stable",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-one-robinhood-native-to-stable",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-base-native-to-stable",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-arbitrum-one-native-to-stable",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-robinhood-native-to-stable",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-base-native-to-stable",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-arbitrum-one-native-to-stable",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-ethereum-native-to-stable",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
       "id": "remove-liquidity-solana",
       "action": "remove_liquidity",
       "network": "solana",

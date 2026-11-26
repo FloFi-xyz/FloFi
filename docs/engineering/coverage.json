@@ -2037,6 +2037,10 @@
     "app.domain.run-outcome-amounts": {
       "path": "apps/reference-dapp/src/domain/run-outcome-amounts.test.ts",
       "stage": "unit"
+    },
+    "app.mcp.post-257-hotfix": {
+      "path": "apps/reference-dapp/src/mcp/post-257-hotfix.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -5785,7 +5789,8 @@
         "apps/reference-dapp/src/mcp/runtime.ts",
         "apps/reference-dapp/src/mcp/simulation.ts",
         "apps/reference-dapp/src/mcp/tools.ts",
-        "apps/reference-dapp/src/platform/output-guard.ts"
+        "apps/reference-dapp/src/platform/output-guard.ts",
+        "apps/reference-dapp/src/mcp/financial-display.ts"
       ],
       "suites": [
         "app.mcp.automation-status",
@@ -5796,6 +5801,7 @@
         "app.mcp.handoff.workflow.pg",
         "app.mcp.link-integrity.pg",
         "app.mcp.mainnet-only",
+        "app.mcp.post-257-hotfix",
         "app.mcp.oauth.foundation",
         "app.mcp.oauth.no-model",
         "app.mcp.oauth.server.pg",

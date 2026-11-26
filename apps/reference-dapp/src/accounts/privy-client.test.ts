@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ARBITRUM_ONE, ETHEREUM_MAINNET, ROBINHOOD_CHAIN_MAINNET } from '@defi-workflow-engine/action-registry';
 import { embeddedWallets, floFiPrivyConfig, PRIVY_EVM_CHAINS, privyErrorCode, privyOwnSolanaWallets, signerDocument } from './privy-client';
@@ -33,11 +33,26 @@ describe('FloFi’s Privy configuration', () => {
       connector('phantom', 'ethereum', 'injected'), connector('phantom', 'solana', 'solana_adapter'),
       connector('solflare', 'solana', 'solana_adapter'), connector('backpack', 'solana', 'solana_adapter'),
       connector('coinbase_wallet', 'ethereum', 'coinbase_wallet')];
-    const result = new WalletFilterer(config.appearance!.walletChainType!, list).getWallets(connectors, []);
-    expect(result.walletCount).toBe(6); // Phantom's two ecosystems share one entry.
-    expect(result.wallets.map(wallet => wallet.id).sort()).toEqual(['backpack', 'coinbase', 'metamask', 'phantom', 'rabby', 'solflare']);
-    expect(result.wallets.every(wallet => wallet.source === 'connector')).toBe(true);
-    expect(result.wallets.find(wallet => wallet.id === 'phantom')?.chainType).toBe('multi');
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P0-1): the wallet families come from the Privy app's own settings, as the SDK derives them.
+    expect(config.appearance!.walletChainType).toBeUndefined();
+    const both = new WalletFilterer('ethereum-and-solana', list).getWallets(connectors, []);
+    expect(both.walletCount).toBe(6); // Phantom's two ecosystems share one entry.
+    expect(both.wallets.map(wallet => wallet.id).sort()).toEqual(['backpack', 'coinbase', 'metamask', 'phantom', 'rabby', 'solflare']);
+    expect(both.wallets.every(wallet => wallet.source === 'connector')).toBe(true);
+    expect(both.wallets.find(wallet => wallet.id === 'phantom')?.chainType).toBe('multi');
+    // Solana wallet login off at Privy (production on 26-11-2026): no Solana-only wallet is offered, Phantom signs in through its EVM side.
+    const evmOnly = new WalletFilterer('ethereum-only', list).getWallets(connectors, []);
+    expect(evmOnly.wallets.map(wallet => wallet.id).sort()).toEqual(['coinbase', 'metamask', 'phantom', 'rabby']);
+  });
+  it('lets Privy derive the wallet families from the app settings instead of forcing Solana wallets the app refuses (Phantom/Solflare P0)', () => {
+    // The pinned SDK's own rule: an explicit `appearance.walletChainType` wins; otherwise `wallet_auth` / `solana_wallet_auth` decide.
+    const require = createRequire(import.meta.url), sdk = dirname(require.resolve('@privy-io/react-auth'));
+    const context = readdirSync(sdk).find(name => /^privy-context-.*\.js$/.test(name))!;
+    const source = readFileSync(join(sdk, context), 'utf8');
+    expect(source).toContain('walletChainType:t?.appearance?.walletChainType??(({evmWalletAuth:e,solanaWalletAuth:t})=>e&&t?"ethereum-and-solana":e?"ethereum-only"'
+      + ':t?"solana-only":"ethereum-only")({evmWalletAuth:e.wallet_auth??!1,solanaWalletAuth:e.solana_wallet_auth??!1})');
+    const client = readFileSync(new URL('./privy-client.tsx', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+    expect(client).not.toMatch(/walletChainType\s*:/);
   });
   it('creates no wallet at sign-in, always shows Privy’s confirmation screens and offers no WalletConnect', () => {
     const config = floFiPrivyConfig({ apple: false });

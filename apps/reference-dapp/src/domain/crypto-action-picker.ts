@@ -44,7 +44,7 @@ const robinhoodSwap: CryptoPickerProfile = { network: ROBINHOOD_NETWORK, chain: 
 const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.map(runtime => ({ network: runtime.network, chain: runtime.chain, provider: runtime.providerLabel, tokens: Object.keys(runtime.tokens) })),
   robinhoodSwap, ...Object.entries(CATALOG_SWAP_NETWORKS).filter(([network]) => network !== BASE_NETWORK && network !== ROBINHOOD_NETWORK)
     .map(([network, chain]): CryptoPickerProfile => ({ network, chain, provider: 'Uniswap', get tokens() { return featuredNetworkSymbols(chain); }, catalog: true }))];
-/** Swaps and pools on a catalog network take ERC-20s only (native ETH is wrapped first); transfers may also send ETH. */
+/** Pools on a catalog network take ERC-20s only; swaps take ERC-20s and native ETH (a native swap or a WETH9 wrap/unwrap); transfers may also send ETH. */
 const erc20Only = (action: CryptoAction) => action === 'swap' || action === 'pool';
 /** Aave V3 actions: one reserve of the network's market, identified by the registry (chain + address + decimals), never by the token list. */
 export const lendingAction = (action: CryptoAction): action is 'supply' | 'borrow' | 'repay' | 'withdraw' =>

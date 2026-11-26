@@ -51,6 +51,8 @@ export function supportedNetworks(scope: NetworkScope): readonly NetworkInfo[] {
 export type AssetInfo = { readonly network: NetworkId; readonly chainId: string; readonly symbol: string; readonly address: string | null; readonly decimals: number;
   readonly actions: readonly StrategyAction[]; readonly sources: readonly string[] };
 type Entry = { chain: string; symbol: string; address: string | null; decimals: number; action: StrategyAction; source: string };
+/** The catalog tokens discovery offers as Universal Bridge assets (besides the native coin). */
+const UNIVERSAL_BRIDGE_TOKENS: readonly string[] = Object.freeze(['USDC', 'USDG', 'USDT', 'WETH']);
 function assetEntries(): Entry[] {
   const out: Entry[] = [];
   for (const pair of ROUTER_PAIRS) for (const t of [pair.source, pair.destination])
@@ -83,12 +85,17 @@ function assetEntries(): Entry[] {
     if (token) out.push({ chain: SOLANA_MAINNET_CHAIN, symbol: token.symbol, address: token.mint, decimals: token.decimals, action: 'bridge', source: 'crosschain-universal:solana' });
   }
   // Discover the same currently loaded, validated catalog authoring reads. Without an official source, pinned assets alone
-  // remain; no recorded catalog is substituted. Native currencies have transfer support only. Aave and Router membership above
-  // remains narrower than catalog membership.
+  // remain; no recorded catalog is substituted. Aave and Router membership above remains narrower than catalog membership.
+  // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5, P0-3): the native coin swaps too (catalog swaps accept native ETH since BUILD-FLOFI-CHAT-E2E-001;
+  // `catalog-swap-authoring.ts`), and the native coin, the dollar stablecoins and WETH are source or destination assets of a Universal Bridge (the
+  // route converts in flight). Discovery said "transfer only" for native ETH, so a host model refused or split ETH swaps and ETH bridges. Other list
+  // tokens (Robinhood Stock Tokens included: their issuer checks live on the swap path) are not advertised for bridges (flofi-bridge review).
   for (const [catalog, name] of [[ROBINHOOD_BASE_ASSETS, 'robinhood'], [BASE_BASE_ASSETS, 'base'], [ARBITRUM_BASE_ASSETS, 'arbitrum-one'], [ETHEREUM_BASE_ASSETS, 'ethereum']] as const)
     for (const t of (networkCatalog(catalog.chain) ?? catalog).assets)
-      for (const action of (t.kind === 'NATIVE' ? ['transfer'] as const : ['swap', 'add_liquidity', 'transfer'] as const).filter(action => actionsOn(name).includes(action)))
-        out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address, decimals: t.decimals, action, source: `${name}-catalog:${action}` });
+      for (const action of (t.kind === 'NATIVE' ? ['swap', 'bridge', 'transfer'] as const : UNIVERSAL_BRIDGE_TOKENS.includes(t.symbol)
+        ? ['swap', 'add_liquidity', 'bridge', 'transfer'] as const : ['swap', 'add_liquidity', 'transfer'] as const).filter(action => actionsOn(name).includes(action)))
+        out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address, decimals: t.decimals, action,
+          source: action === 'bridge' ? `crosschain-universal:${name}` : `${name}-catalog:${action}` });
   const aave = AAVE_V3_LENDING_PROFILES.find(p => p.network === 'Base Sepolia')!;
   out.push({ chain: aave.chain, symbol: aave.symbol, address: aave.asset, decimals: aave.decimals, action: 'lending_composition', source: 'lending-composition:Base Sepolia' });
   out.push({ chain: aave.chain, symbol: 'WETH', address: LENDING_BASE_SEPOLIA.weth, decimals: 18, action: 'lending_composition', source: 'lending-composition:Base Sepolia' });

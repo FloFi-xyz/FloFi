@@ -422,7 +422,11 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         considered.push({ provider: id, outcome: AVAILABILITY.test(code) ? 'UNAVAILABLE' : 'REFUSED', code, minimumOutput: null, feeTotal: null, routeCommitment: null });
       }
     }
-    if (!selected) fail('ROUTER_NO_EXECUTABLE_ROUTE');
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): a provider's own definitive refusal (FloFi's closed codes, e.g. LIFI_NO_ROUTE, a route FloFi cannot
+    // reconcile), as the Universal Router reports it, instead of a generic "no route". An outage reads as ROUTER_PROVIDER_UNAVAILABLE ("try again"),
+    // never the provider's HTTP status (no 401/403 detail reaches a person; flofi-security review). The generic code remains when neither applies.
+    if (!selected) fail(considered.find(c => c.outcome === 'REFUSED' && c.code !== 'ROUTER_PROVIDER_FAILED')?.code
+      ?? (considered.some(c => c.outcome === 'UNAVAILABLE') ? 'ROUTER_PROVIDER_UNAVAILABLE' : 'ROUTER_NO_EXECUTABLE_ROUTE'));
     const route = selected!;
     if (!routeMatchesIntent(route, { owner, recipient, amount: f.amount })) fail('ROUTER_ROUTE_INTENT_MISMATCH');
     const allowance = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(owner) + addrWord(route.approval.spender), tag(probe.block.number)), 0);

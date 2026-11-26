@@ -42,8 +42,9 @@ describe('BUILD-FLOFI-UNIVERSAL-E2E-001 owner-wallet runtime selection', () => {
     for (const [id, kind] of Object.entries(kinds)) {
       const action = STRATEGY_EXAMPLES.find(example => example.id === id)!.strategy.action;
       const expected = { swap: id.includes('solana') ? 'solana-swap' : 'public', transfer: id.includes('solana') ? 'solana-transfer' : 'transfer',
-        // P0 catalog reliability: the Solana ⇄ EVM directions are Universal Router rows; every other bridge example is a certified Router route.
-        bridge: id.includes('solana') ? 'universal' : 'router',
+        // P0 catalog reliability: the Solana ⇄ EVM directions are Universal Router rows, and (BUILD-FLOFI-POST-257-HOTFIX-001) so are the EVM bridges
+        // with their own destination asset; every other bridge example is a certified Router route.
+        bridge: id.includes('solana') || id.endsWith('-native-to-stable') ? 'universal' : 'router',
         supply: 'supply', borrow: 'supply', repay: 'supply', withdraw: 'supply', add_liquidity: id.includes('solana') ? 'solana-pool' : 'uniswap-pool',
         lending_composition: 'lending' }[action];
       expect([id, kind]).toEqual([id, expected]);

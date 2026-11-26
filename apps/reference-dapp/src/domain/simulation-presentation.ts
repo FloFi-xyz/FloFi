@@ -187,6 +187,11 @@ export function destinationWalletMessage(error: string): string | null {
   if (error === 'UNIVERSAL_DESTINATION_WALLET_INVALID') return 'The destination wallet is not a valid address on the destination network. Check it on the Bridge card, then simulate again. Nothing was signed or sent.';
   return null;
 }
+/**
+ * BUILD-FLOFI-POST-257-HOTFIX-001: a bridge provider's definitive refusal of every route it could offer (no route, a route or transaction FloFi cannot
+ * verify or reconcile), from the certified Router or the Universal Router. Expiry, unsupported routes, rate limits and outages keep their own wording.
+ */
+const BRIDGE_ROUTE_REFUSAL = /^(?:LIFI|ACROSS)_(?:NO_ROUTE|UNDERLYING_PROTOCOL_NOT_RECONCILABLE|TRANSACTION_UNSUPPORTED|ROUTE_STEPS_UNSUPPORTED|CALLDATA_MISMATCH|OUTPUT_MISMATCH|SPENDER_UNEXPECTED|STATUS_MISMATCH|FEES_INCONSISTENT|FEES_INVALID|FEE_ASSET_UNSUPPORTED|QUOTE_MISMATCH)$|^ROUTER_ROUTE_INTENT_MISMATCH$/;
 export function simulationError(error: string, kind?: SimulationSource['kind']): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
   const refusal = flightRefusalMessage(error) ?? (kind === 'public' ? stockTradingRefusal(error) : null);
@@ -222,7 +227,9 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?AMOUNT_TOO_LOW$|^(?:BRIDGE_)?BELOW_MINIMUM$/.test(error)) return 'The amount is below the bridge provider’s minimum for this route, so this step was not simulated or sent. Choose a larger amount, then simulate again.';
   // P0 hotfix (FIX 3, 2026-11-13): Relay answers a WETH bridge with a native-ETH order through its own router contracts, which FloFi does not verify.
   if (error === 'RELAY_WRAPPED_NATIVE_INPUT_UNSUPPORTED') return 'FloFi cannot bridge WETH on this route: the bridge provider converts it to native ETH through contracts FloFi does not verify, so this step was not simulated or sent. Bridge ETH (unwrap the WETH first) or USDC instead.';
-  if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
+  // BUILD-FLOFI-POST-257-HOTFIX-001: the certified Router now reports its providers' own definitive refusal (as the Universal Router already did) or
+  // ROUTER_PROVIDER_UNAVAILABLE, instead of ROUTER_NO_EXECUTABLE_ROUTE; these mean "no route FloFi can verify and execute" for either router.
+  if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error) || BRIDGE_ROUTE_REFUSAL.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
   // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): a simulation never waits forever — an unanswered wallet sign-in or quote read becomes this
   // refusal (nothing was signed or sent) and the owner can simply try again.
   if (error === 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT') return 'Your wallet did not answer the sign-in request, so this step was not simulated and nothing was signed or sent. Open your wallet and choose Review to try again.';

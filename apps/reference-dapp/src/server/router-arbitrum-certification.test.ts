@@ -164,7 +164,8 @@ describe.each(pairs)('$id certification through shared Router', p => {
   });
   it('allows discovery fallback only under AUTO and invalidates provider/amount changes after Review', async () => {
     const f = setup(p); f.h.controls.lifi = 'down';
-    await expect(f.s.simulate(workflow(p, 'LIFI'), f.h.owner)).rejects.toThrow('ROUTER_NO_EXECUTABLE_ROUTE');
+    // BUILD-FLOFI-POST-257-HOTFIX-001: an outage of the only allowed provider reads "unavailable, try again" (never its HTTP status), not "no route".
+    await expect(f.s.simulate(workflow(p, 'LIFI'), f.h.owner)).rejects.toThrow('ROUTER_PROVIDER_UNAVAILABLE');
     const w = workflow(p), run = await f.s.simulate(w, f.h.owner); expect(run.review.selection.selected).toBe('across');
     await f.s.review(run.id, run.review.commitment, w);
     await expect(f.s.begin(run.id, f.h.owner, workflow(p, 'AUTO', '11'))).rejects.toThrow('ROUTER_SEMANTIC_REVISION_CHANGED');
@@ -216,7 +217,8 @@ describe.each(pairs)('$id certification through shared Router', p => {
         return packet;
       } });
       f.providers(providers);
-      await expect(f.create().simulate(workflow(p, 'ACROSS'), f.h.owner)).rejects.toThrow('ROUTER_NO_EXECUTABLE_ROUTE');
+      // Fails closed with the specific refusal of that packet (BUILD-FLOFI-POST-257-HOTFIX-001), never the generic "no route".
+      await expect(f.create().simulate(workflow(p, 'ACROSS'), f.h.owner)).rejects.toThrow(/^(?!ROUTER_NO_EXECUTABLE_ROUTE$)(?:ACROSS|ROUTER)_[A-Z0-9_]+$/);
     }
   });
 });

@@ -218,7 +218,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     return reject(403, 'MCP_INSUFFICIENT_SCOPE', oauth && principal.kind === 'mcp-oauth'
       ? { 'www-authenticate': challenge(oauth, [...new Set([...held, ...missing])], 'insufficient_scope') } : {});
   }
-  let simulationWallets: ToolContext['simulationWallets'];
+  let simulationWallets: ToolContext['simulationWallets'], accountWallets: ToolContext['accountWallets'];
   // Owner reads require link storage. Simulation loads the same consented links only when it needs a compatible subject.
   if (principal.kind === 'mcp-oauth' && state && held.includes('flofi.runs')) {
     const linkState = state, account = principal.accountId;
@@ -242,6 +242,9 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
       principal = Object.freeze({ ...principal, ...linked });
     }
     if (portfolioFrom) simulationWallets = async () => (await wallets())?.portfolioOwners ?? [];
+    // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the same eligible links, loaded lazily (plan_strategy reads them only for a supply step whose
+    // beneficiary the person left out).
+    accountWallets = async () => (await wallets())?.owners ?? [];
   }
   // Every runtime call of this request is bounded by its budget (an injected runtime too).
   const runtime = options.runtime ? boundedRuntime(options.runtime, budget) : deploymentRuntime(env, budget), active = principal;
@@ -258,7 +261,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     return listPublishedStudioIntegrations(host.db, host.tenantId);
   };
   const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, portfolio, publicStudioIntegrations,
-    ...simulationWallets ? { simulationWallets } : {},
+    ...simulationWallets ? { simulationWallets } : {}, ...accountWallets ? { accountWallets } : {},
     ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;
       logger?.info('mcp.tool', { request_id: budget.requestId, principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }); } }),
