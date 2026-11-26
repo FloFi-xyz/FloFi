@@ -25,6 +25,7 @@
  * `final` means nothing changes without a new action by the person. Only CONFIRMED is ever reported as completion.
  */
 import { canonicalRunLifecycle, type CanonicalExecutionStatus, type CanonicalLifecycle } from '../domain/canonical-execution-status.ts';
+import { MAX_WORKFLOW_STEPS } from '../engine/strategy-spec';
 
 export const CONVERSATION_STATES = Object.freeze(['DRAFT_CREATED', 'MISSING_INFORMATION', 'VALIDATION_REQUIRED', 'SIMULATION_COMPLETED', 'REVIEW_REQUIRED',
   'AWAITING_WALLET_CONNECTION', 'AWAITING_SIGNATURE', 'SUBMITTED', 'PENDING_CONFIRMATION', 'PARTIALLY_EXECUTED', 'CONFIRMED', 'FAILED', 'CANCELLED', 'EXPIRED',
@@ -211,9 +212,10 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
     PT: 'A cotação atual está temporariamente indisponível. Você pode tentar de novo sem refazer o seu fluxo.' }],
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): a workflow longer than FloFi accepts, or a step list that arrived with fewer steps than the
   // person asked for, is said so (before the TOO_MANY rate-limit family): FloFi never drops, merges or reorders a requested step.
-  [/^WORKFLOW_TOO_MANY_STEPS$/, { EN: 'FloFi accepts at most 8 steps in one workflow, and this one has more. Nothing was dropped, signed or sent. Remove steps or split it ' +
-      'into two workflows.',
-    PT: 'O FloFi aceita no máximo 8 etapas em um fluxo, e este tem mais. Nenhuma etapa foi descartada, assinada ou enviada. Remova etapas ou divida-o em dois fluxos.' }],
+  [/^WORKFLOW_TOO_MANY_STEPS$/, { EN: `FloFi accepts at most ${MAX_WORKFLOW_STEPS} steps in one workflow, and this one has more. Nothing was dropped, signed or sent. ` +
+      'Remove steps or split it into two workflows.',
+    PT: `O FloFi aceita no máximo ${MAX_WORKFLOW_STEPS} etapas em um fluxo, e este tem mais. Nenhuma etapa foi descartada, assinada ou enviada. Remova etapas ou ` +
+      'divida-o em dois fluxos.' }],
   [/^WORKFLOW_STEP_COUNT_MISMATCH$/, { EN: 'FloFi received a different number of steps than you asked for, so it stopped. Nothing was signed or sent. Check the steps and ' +
       'try again.',
     PT: 'O FloFi recebeu um número de etapas diferente do que você pediu, então parou. Nada foi assinado nem enviado. Confira as etapas e tente de novo.' }],

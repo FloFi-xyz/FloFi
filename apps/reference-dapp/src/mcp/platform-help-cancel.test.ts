@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): the external review's exact question, "Can I cancel a request before signing, and what if a
- * transaction has already been sent?", returned PLATFORM_TOPIC_UNKNOWN (and "cancel an approval" was answered with token approvals). Over the real
+ * transaction has already been sent?", returned PLATFORM_TOPIC_UNKNOWN. Over the real
  * gateway, the question and common EN/PT equivalents reach one deterministic answer that keeps apart withdrawing a request, rejecting in the wallet, a
  * sent or pending transaction, an unknown outcome and a confirmed one, never calls a sent transaction cancelled, and claims only chain behaviour that
  * FloFi has; earlier topics keep their questions.
@@ -64,6 +64,9 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 P2: cancelling a reque
       ['Não quero mais receber essas notificações.', 'NOTIFICATIONS'], ['qual o status da transação?', 'EXECUTION_STATUS'],
       ['Como vejo as transações anteriores?', 'HISTORY'], ['how do I delete my account?', 'DELETE_ACCOUNT'],
       ['Can I collect my fees from Telegram?', 'LIQUIDITY_POSITIONS'], ['Como uso a FloFi pelo ChatGPT?', 'AI_AGENTS'],
+      // Notifications and status questions keep their topics (flofi-mcp review); "cancel an approval" stays token approvals (unchanged).
+      ['Como cancelo o envio de notificações?', 'NOTIFICATIONS'], ['How do I cancel notifications sent by FloFi?', 'NOTIFICATIONS'],
+      ['Como interrompo o envio de alertas?', 'NOTIFICATIONS'], ['qual o status da transação pendente?', 'EXECUTION_STATUS'], ['Can I cancel an approval?', 'AUTHORIZATIONS'],
       // A request with an amount or an address is never a help question.
       ['cancel the transfer of 5 USDC', null], ['envia 10 USDC para 0x1111111111111111111111111111111111111111', null]];
     for (const [text, topic] of kept) expect([text, matchPlatformTopic(text)]).toEqual([text, topic]);

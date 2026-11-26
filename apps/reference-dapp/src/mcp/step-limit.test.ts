@@ -82,6 +82,24 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 P1: the workflow step 
     expect(logger.lines.filter(l => l.event === 'mcp.request').map(l => l.fields.outcome)).toEqual(['MCP_INPUT_INVALID', 'MCP_INPUT_INVALID']);
   });
 
+  it('only strategy tools take the oversized path: other tools keep their whole schema; invalid siblings never reach a handler', async () => {
+    const logger = memoryLogger(), client = session({ env: ENVS.PUBLIC_MAINNET, token: alice.token, logger });
+    const nine = { version: 2, steps: steps(9) };
+    // A tool without a strategy argument refuses the extra property at its schema, as before.
+    const junk = await client.callTool('get_supported_networks', { strategy: nine });
+    expect(junk.isError).toBe(true);
+    expect(junk.output).not.toHaveProperty('code', 'WORKFLOW_TOO_MANY_STEPS');
+    // Oversized plus an invalid workflowHash and an unknown property: the coded refusal, nothing composed or previewed.
+    const mixed = await client.callTool('simulate_strategy', { strategy: nine, workflowHash: 'nope', extra: true });
+    expect(mixed.output).toMatchObject({ ok: false, code: 'WORKFLOW_TOO_MANY_STEPS', receivedSteps: 9 });
+    // The step count is the one the person was told: a cross-chain conversion is ONE bridge step.
+    const bridge = { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'ETH', outputAsset: 'USDC', amount: '0.0003' };
+    expect((await client.callTool('compose_strategy', { strategy: bridge, expectedStepCount: 1 })).output).toMatchObject({ ok: true, stepCount: 1 });
+    const mismatch = (await client.callTool('compose_strategy', { strategy: bridge, expectedStepCount: 2 })).output;
+    expect(mismatch).toMatchObject({ code: 'WORKFLOW_STEP_COUNT_MISMATCH', next: expect.stringMatching(/Compose again with every step/) });
+    for (const value of [0, 65]) expect((await client.callTool('compose_strategy', { strategy: bridge, expectedStepCount: value })).isError, String(value)).toBe(true);
+  });
+
   it('bindings and their order are part of the hash: an eight-step list with bindings is preserved exactly', async () => {
     const client = session({ env: ENVS.PUBLIC_MAINNET, token: alice.token });
     const transfer = { action: 'transfer', network: 'base', asset: 'WETH', amount: '0.001', recipient: '0x' + '2'.repeat(40) };

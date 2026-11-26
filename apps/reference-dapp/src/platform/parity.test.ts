@@ -82,8 +82,8 @@ describe('BUILD-DEVELOPER-001 platform parity: MCP ≡ platform ≡ engine', () 
         expect(validation, `${id} ${workflowHash}`).toEqual({ ok: true, ...platformValidation });
         expect(validated, `${id} ${workflowHash}`).toEqual(validationState(platformValidation));
         expect(readiness, `${id} ${workflowHash}`).toMatchObject(platformValidation.valid
-          ? { authoring: 'VALID', review: platformValidation.reviewSummary.block ? 'BLOCKERS_FOUND' : 'NO_BLOCKERS', execution: 'NOT_EVALUATED', ownerAuthorization: 'NONE',
-            submission: 'NOT_SUBMITTED' }
+          ? { authoring: 'VALID', review: platformValidation.reviewSummary.block ? expect.stringMatching(/^(?:BLOCKERS_FOUND|OWNER_PRE_EXECUTION_PENDING)$/) : 'NO_BLOCKERS',
+            execution: 'NOT_EVALUATED', ownerAuthorization: 'NONE', submission: 'NOT_SUBMITTED' }
           : { authoring: 'INVALID', execution: 'NOT_EVALUATED', ownerAuthorization: 'NONE', submission: 'NOT_SUBMITTED' });
         const review = (await client.callTool('review_strategy', args)).output as Record<string, unknown>;
         const refusal = refusalOf(() => composeWorkflowOrRefuse(strategy, workflowHash));

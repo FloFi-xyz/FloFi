@@ -58,8 +58,16 @@ export function portfolioLinksFrom(env: Env): Date | null {
   const raw = env.FLOFI_MCP_PORTFOLIO_LINKS_FROM?.trim();
   if (!raw || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/.test(raw)) return null;
   const at = new Date(raw);
-  return Number.isNaN(at.getTime()) ? null : at;
+  // A calendar date that does not exist (2026-11-31) is invalid, never rolled forward into another day.
+  return Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== raw.slice(0, 10) ? null : at;
 }
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0, flofi-data-privacy review): no link made before FloFi's Connections page disclosed balance and
+ * position reads can carry that consent. The disclosure was introduced by e470945 (PR #248) and went live in production with deployment
+ * dpl_F4z2qXAHRrAt2VABL9K6hmwWtWzy (READY 2026-11-24T04:39:34Z); this floor rounds that up. A configured FLOFI_MCP_PORTFOLIO_LINKS_FROM earlier than it
+ * would backdate consent, so it reads nothing (NOT_ENABLED) instead of widening access. Later is always allowed.
+ */
+export const PORTFOLIO_DISCLOSURE_LIVE_FROM = '2026-11-24T04:40:00Z';
 /**
  * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): the deployment's portfolio consent state at `now`.
  *   ENABLED            links made at or after `since` may be read (a link made before it is re-linked on `/connections` to renew consent)
@@ -69,11 +77,12 @@ export function portfolioLinksFrom(env: Env): Date | null {
  */
 export type PortfolioConsent =
   | { readonly status: 'ENABLED'; readonly since: string }
-  | { readonly status: 'NOT_ENABLED' }
+  | { readonly status: 'NOT_ENABLED'; readonly cause: 'UNSET_OR_INVALID' | 'BEFORE_DISCLOSURE' }
   | { readonly status: 'NOT_YET_EFFECTIVE'; readonly since: string };
 export function portfolioConsent(env: Env, now: Date): PortfolioConsent {
   const from = portfolioLinksFrom(env);
-  if (!from) return { status: 'NOT_ENABLED' };
+  if (!from) return { status: 'NOT_ENABLED', cause: 'UNSET_OR_INVALID' };
+  if (from.getTime() < Date.parse(PORTFOLIO_DISCLOSURE_LIVE_FROM)) return { status: 'NOT_ENABLED', cause: 'BEFORE_DISCLOSURE' };
   return from.getTime() > now.getTime() ? { status: 'NOT_YET_EFFECTIVE', since: from.toISOString() } : { status: 'ENABLED', since: from.toISOString() };
 }
 export const principalOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principal.kind === 'mcp-oauth' ? principal.owners ?? []

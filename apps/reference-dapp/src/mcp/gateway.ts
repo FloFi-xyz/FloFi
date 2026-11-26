@@ -243,9 +243,10 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
       if (!links) { logger?.warn('mcp.oauth.store_unavailable', { request_id: budget.requestId }); return null; }
       const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
       const owners = Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address })));
-      // Balance reads require links made after the connections disclosure took effect.
-      const portfolioOwners = Object.freeze(portfolioFrom ? owners.filter(e => links.some(l => l.namespace === e.namespace && l.address === e.address
-        && l.createdAt.getTime() >= portfolioFrom.getTime())) : []);
+      // Balance reads require links made after the connections disclosure took effect, and only while that consent instant is in effect here
+      // (BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: tied to the consent state by construction, so wallet states and get_portfolio always agree).
+      const portfolioOwners = Object.freeze(portfolioFrom && portfolioReads.status === 'ENABLED' ? owners.filter(e => links.some(l => l.namespace === e.namespace
+        && l.address === e.address && l.createdAt.getTime() >= portfolioFrom.getTime())) : []);
       return { wallets: Object.freeze(owners.map(l => l.address)), owners, portfolioOwners, portfolioReads };
     }
     let lookup: ReturnType<typeof loadWallets> | undefined;
@@ -255,7 +256,9 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
       if (!linked) return reject(503, 'MCP_OAUTH_STORE_UNAVAILABLE');
       principal = Object.freeze({ ...principal, ...linked });
     }
-    if (portfolioFrom) simulationWallets = async () => (await wallets())?.portfolioOwners ?? [];
+    if (portfolioReads.status === 'ENABLED') simulationWallets = async () => (await wallets())?.portfolioOwners ?? [];
+    // A configured consent instant earlier than the disclosure would backdate consent: nothing is read, and the operator is told (no addresses logged).
+    if (portfolioReads.status === 'NOT_ENABLED' && portfolioReads.cause === 'BEFORE_DISCLOSURE') logger?.warn('mcp.portfolio_consent_before_disclosure');
     // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the same eligible links, loaded lazily (plan_strategy reads them only for a supply step whose
     // beneficiary the person left out).
     accountWallets = async () => (await wallets())?.owners ?? [];

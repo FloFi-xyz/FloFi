@@ -65,6 +65,8 @@ const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
   // here is what FloFi observes today: an EVM wallet's speed-up of the same transaction is recognized, a different transaction at the reviewed nonce needs
   // attention, and a Solana transaction is never cancelled (it lands or provably expires).
   CANCEL_AND_SENT_TRANSACTIONS: { modes: ['EXPLAIN', 'NAVIGATE'], path: 'connections', requires: 'NONE', surfaces: ALL,
+    // Notifications and a status question keep their own topics (flofi-mcp review): "cancel the notifications sent", "status of the pending transaction".
+    unless: /(?:notifica|notification|alerta|alert|aviso|status|andamento|progress)/,
     keywords: [/(?:cancel|desfaz|undo|revert|interromp)\w*\b.{0,60}?\b(?:request|pedido|solicitac|transac|transaction|tx\b|envio|signing|sign\b|assinar|assinatura|sent|enviad|pending|pendente|broadcast|confirmad|confirmed)/,
       /(?:transac|transaction|tx\b)\w*\s+(?:has\s+|have\s+|was\s+|is\s+)?(?:already\s+|ja\s+)?(?:been\s+|foi\s+|esta\s+|estiver\s+|ficou\s+|tiver\s+sido\s+)?(?:sent|enviad|submitted|broadcast|pending|pendente|stuck|presa|travad)/,
       /(?:rejeit|reject|recus|declin)\w*\s+(?:\w+\s+){0,3}(?:na|no|in|on)\s+(?:minha\s+|meu\s+|my\s+|the\s+|a\s+|o\s+)?(?:carteira|wallet)/,

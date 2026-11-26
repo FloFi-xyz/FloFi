@@ -88,7 +88,7 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 P0: portfolio consent 
   });
 
   it('another account never reads the linked wallet; a consent instant still in the future renews nothing yet', async () => {
-    const env = { FLOFI_MCP: 'enabled', ...oauthEnv(), FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-01-01T00:00:00Z' };
+    const env = { FLOFI_MCP: 'enabled', ...oauthEnv(), FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-11-24T05:00:00Z' };
     const owner = await account(env), other = await account(env);
     await linkAt(owner.accountId, A, new Date());
     reads.length = 0;

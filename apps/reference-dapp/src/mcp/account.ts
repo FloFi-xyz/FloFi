@@ -92,8 +92,8 @@ export function accountView(principal: McpPrincipal, origin: string) {
   });
   const readable = wallets.some(w => w.balancesReadable), predates = wallets.some(w => w.balancesUnreadableReason === 'LINK_PREDATES_PORTFOLIO_CONSENT');
   const portfolioStep = readable ? ['get_portfolio for balances and positions of the wallets whose balancesReadable is true'] : [];
-  const consentStep = predates ? ['A wallet linked before FloFi asked for balance reads (balancesUnreadableReason LINK_PREDATES_PORTFOLIO_CONSENT) becomes readable once the ' +
-    'person links it again on linkWallet.url and agrees there; nothing is read meanwhile.'] : [];
+  const consentStep = predates ? ['A wallet linked before FloFi disclosed balance reads (balancesUnreadableReason LINK_PREDATES_PORTFOLIO_CONSENT) becomes ' +
+    'readable once the person links it again on linkWallet.url, where linking a wallet also allows balance and position reads; nothing is read meanwhile.'] : [];
   const deploymentStep = owners.length && (reads.status === 'NOT_ENABLED' || reads.status === 'NOT_YET_EFFECTIVE')
     ? ['This FloFi deployment does not read balances or positions through this connection yet. Linking the wallet again does not change that; tell the ' +
       'person it is a FloFi setting. Runs, evidence and history of these wallets are still readable.'] : [];
@@ -105,7 +105,8 @@ export function accountView(principal: McpPrincipal, origin: string) {
     portfolioReads: { status: reads.status, ...reads.since ? { consentSince: reads.since } : {} },
     identity: 'The account is identified by the wallets linked to it on FloFi, each proven by that wallet\'s own sign-in message — never by an e-mail, ' +
       'username or app metadata. Runs, evidence and execution history follow these wallets across the FloFi web app, ChatGPT and Claude. Approval requests ' +
-      'belong to this FloFi account: every connection of the account (list_approvals) sees and can withdraw them, and they are claimed only by the wallet proven on FloFi.',
+      'belong to this FloFi account: every connection of the account (list_approvals) sees and can withdraw them. Any wallet that proves itself on FloFi\'s ' +
+      'approval page can claim one (it need not be a linked wallet); claiming authorizes nothing until that wallet signs.',
     ...principal.kind === 'mcp-oauth' ? { linkWallet: { url: linkUrl, how: 'Open this FloFi page, sign in with the same FloFi connection, connect the wallet and confirm ' +
       'its sign-in message. That message moves no funds and grants no spending authority. The same page removes a link or withdraws an open approval request.' } } : {},
     nextSteps: owners.length ? [...portfolioStep, ...consentStep, ...deploymentStep, 'list_executions for their recent runs']
