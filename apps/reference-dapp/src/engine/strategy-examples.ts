@@ -79,4 +79,11 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
     { id: `bridge-solana-${evm}`, strategy: { action: 'bridge', sourceNetwork: 'solana', destinationNetwork: evm, asset: 'USDC', amount: '5', routing: 'best' } as StrategySpec },
     { id: `bridge-${evm}-solana`, strategy: { action: 'bridge', sourceNetwork: evm, destinationNetwork: 'solana', asset: evm === 'robinhood' ? 'USDG' : 'USDC', amount: '5', routing: 'best' } as StrategySpec },
   ]),
+  // BUILD-FLOFI-POST-257-HOTFIX-001 (P0-3): the Universal Bridge between EVM mainnets with a destination asset of its own, e.g. ETH on Base → USDC
+  // on Arbitrum One as ONE bridge step (the route converts in flight). Discovery listed only the certified USDC/USDG Router pairs, so a host
+  // model split such a request into a swap plus a bridge. Route availability for an amount is still answered at Simulate.
+  ...(['base', 'arbitrum-one', 'ethereum', 'robinhood'] as const).flatMap(source => (['base', 'arbitrum-one', 'ethereum', 'robinhood'] as const)
+    .filter(destination => destination !== source).map(destination => ({ id: `bridge-${source}-${destination}-native-to-stable`, strategy: { action: 'bridge',
+      sourceNetwork: source, destinationNetwork: destination, asset: 'ETH', outputAsset: destination === 'robinhood' ? 'USDG' : 'USDC', amount: '0.001',
+      routing: 'best' } as StrategySpec }))),
 ]);

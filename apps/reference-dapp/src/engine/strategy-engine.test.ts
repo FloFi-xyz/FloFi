@@ -104,6 +104,12 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'borrow-arbitrum': 'borrow 1 USDC from Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
       'repay-arbitrum': 'repay 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
       'withdraw-arbitrum': 'withdraw 1 USDC from Aave on Arbitrum One',
+      // BUILD-FLOFI-POST-257-HOTFIX-001 (P0-3): the Universal Bridge between EVM mainnets with its own destination asset, as the chat writes it.
+      ...Object.fromEntries((['base', 'arbitrum-one', 'ethereum', 'robinhood'] as const).flatMap(source => (['base', 'arbitrum-one', 'ethereum', 'robinhood'] as const)
+        .filter(destination => destination !== source).map(destination => {
+          const name = { base: 'Base', 'arbitrum-one': 'Arbitrum One', ethereum: 'Ethereum', robinhood: 'Robinhood Chain' }, output = destination === 'robinhood' ? 'USDG' : 'USDC';
+          return [`bridge-${source}-${destination}-native-to-stable`, `bridge 0.001 ETH from ${name[source]} to ${name[destination]} receive ${output} via best slippage 100 bps`];
+        }))),
     };
     expect(Object.keys(sentences).sort()).toEqual(STRATEGY_EXAMPLES.map(e => e.id).sort());
     for (const example of STRATEGY_EXAMPLES) {

@@ -86,6 +86,16 @@ describe('BUILD-MCP-001 simulate_strategy: the flows\' own simulation as a read-
     expect((await simulate(off.client, strategy, ROUTER_OWNER)).output).toEqual({ ok: false, code: 'ROUTER_NOT_ENABLED' });
   });
 
+  it('BUILD-FLOFI-POST-257-HOTFIX-001: a Router no-route reaches MCP with its unchanged code and each provider\'s own refusal', async () => {
+    const h = createRouterHarness();
+    const refuse = (id: 'lifi' | 'across') => ({ ...h.providers[id], quote: async () => { throw new Error(`${id.toUpperCase()}_NO_ROUTE`); } });
+    const { client } = previewRuntime({ GRYLOO_ROUTER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, { rpc: { 'crosschain-router': h.baseRpc },
+      routers: { 'crosschain-router': { destinationRpc: h.arbitrumRpc, providers: { ...h.providers, lifi: refuse('lifi'), across: refuse('across') } } } });
+    const result = await simulate(client, { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '10' }, ROUTER_OWNER);
+    expect(result.output).toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE', reason: 'LIFI_NO_ROUTE',
+      providerRefusals: [{ provider: 'lifi', outcome: 'REFUSED', code: 'LIFI_NO_ROUTE' }, { provider: 'across', outcome: 'REFUSED', code: 'ACROSS_NO_ROUTE' }] });
+  });
+
   it('Aave V3 supply preview on the MOCKED Base Sepolia reserve', async () => {
     const model = supplyModel(), methods: string[] = [];
     const { client } = previewRuntime({ GRYLOO_SUPPLY_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, { rpc: { 'aave-supply': recording(model.rpc as Rpc, methods) } });

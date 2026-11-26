@@ -19,17 +19,18 @@ import { COPILOT_INSTRUCTIONS_V2 } from '../server/copilot-service';
 import { copilotSupportsSection } from '../server/copilot-capabilities';
 import { AUTHORING_CAPABILITIES, bridgeOffers, capabilityNetworks, capabilityText, catalogCapabilityNetworks, copilotCapabilityNetworks, copilotNetworksFor, lendingOffers } from './authoring-capabilities';
 import { agentRolloutAllows, PENDING_AGENT_CAPABILITIES } from './agent-rollout';
-import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
+import { resetNetworkCatalogs } from './asset-catalogs';
+import { registerFixtureCatalogs } from './intelligence/intelligence.test-harness';
 import { cryptoProfiles, type CryptoAction } from './crypto-action-picker';
 import { copilotCopy } from './copilot-messages';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { COPILOT_NETWORK_IDS, NETWORKS, networkIdentity, networkOfCopilot } from './network-registry';
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { activeNetworkScope, networkAllowed, setActiveNetworkScope } from './network-scope';
-import { baseCatalog } from '../server/base-mainnet.test-harness';
-import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
 
-beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(officialCatalog()); });
+// BUILD-FLOFI-POST-257-HOTFIX-001: the Arbitrum One and Ethereum fixture catalogs too, so a Universal Bridge example naming its destination asset there
+// is checked against a catalog, as in production.
+beforeAll(() => registerFixtureCatalogs());
 afterAll(() => resetNetworkCatalogs());
 const EXAMPLE_ACCOUNT = '0x0000000000000000000000000000000000000001';
 const names = (networks: readonly { name: string }[]) => networks.map(network => network.name).sort();
@@ -57,8 +58,11 @@ function naturalTurn(strategy: StrategySpec): { text: string; model: Record<stri
     case 'swap': return { text: `Please swap ${s.amount} ${s.inputAsset} for ${s.outputAsset} on ${on(s.network).name}${s.slippageBps === undefined ? '' : ` with slippage ${s.slippageBps} bps`}`,
       model: intent.action(act.swap({ network: on(s.network).copilot, inputAsset: reported(s.inputAsset as string), outputAsset: reported(s.outputAsset as string), amount: s.amount,
         ...s.slippageBps === undefined ? {} : { slippageBps: String(s.slippageBps) } })) };
-    case 'bridge': return { text: `Please move ${s.amount} ${s.asset} from ${on(s.sourceNetwork).name} over to ${on(s.destinationNetwork).name}`,
-      model: intent.action(act.bridge({ sourceNetwork: on(s.sourceNetwork).copilot, destinationNetwork: on(s.destinationNetwork).copilot, asset: s.asset, amount: s.amount })) };
+    // BUILD-FLOFI-POST-257-HOTFIX-001: a bridge that names its destination asset is said with it (the EVM Universal Bridge examples).
+    case 'bridge': return { text: s.outputAsset ? `Please move ${s.amount} ${s.asset} from ${on(s.sourceNetwork).name} to ${s.outputAsset} on ${on(s.destinationNetwork).name}`
+      : `Please move ${s.amount} ${s.asset} from ${on(s.sourceNetwork).name} over to ${on(s.destinationNetwork).name}`,
+      model: intent.action(act.bridge({ sourceNetwork: on(s.sourceNetwork).copilot, destinationNetwork: on(s.destinationNetwork).copilot, asset: s.asset, amount: s.amount,
+        ...s.outputAsset ? { outputAsset: s.outputAsset } : {} })) };
     case 'supply': case 'borrow': case 'repay': return { text: `Please ${strategy.action} ${s.amount} ${s.asset} on Aave on ${on(s.network).name} for ${s.beneficiary}`,
       model: intent.action(act.lending(strategy.action.toUpperCase(), { network: on(s.network).copilot, asset: s.asset, amount: s.amount, beneficiary: s.beneficiary })) };
     case 'withdraw': return { text: `Please withdraw ${s.amount} ${s.asset} from Aave on ${on(s.network).name}`,

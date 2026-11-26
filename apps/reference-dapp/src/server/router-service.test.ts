@@ -142,6 +142,9 @@ describe('BUILD-ROUTER-001 Quote → Simulation → Review → route-bound Manif
     const noRoute = await setup({}, { h: { ...h, arbitrumRpc: destinationDown, providers: { ...h.providers, lifi: refuse('lifi'), across: refuse('across') } } });
     // No provider route: the route refusal wins over the destination outage (as when the destination was read after selection).
     await expect(noRoute.service.simulate(workflow(), ROUTER_OWNER)).rejects.toThrow('ROUTER_NO_EXECUTABLE_ROUTE');
+    // BUILD-FLOFI-POST-257-HOTFIX-001: the same contract code, now carrying each provider's own closed refusal.
+    await expect(noRoute.service.simulate(workflow(), ROUTER_OWNER)).rejects.toMatchObject({ message: 'ROUTER_NO_EXECUTABLE_ROUTE',
+      providerRefusals: [{ provider: 'lifi', outcome: 'REFUSED', code: 'LIFI_NO_ROUTE' }, { provider: 'across', outcome: 'REFUSED', code: 'ACROSS_NO_ROUTE' }] });
     const routed = await setup({}, { h: { ...h, arbitrumRpc: destinationDown } });
     // A route was selected: the destination outage surfaces (after the allowance read), and nothing is reviewed.
     await expect(routed.service.simulate(workflow(), ROUTER_OWNER)).rejects.toThrow('PUBLIC_RPC_UNAVAILABLE');
@@ -180,6 +183,8 @@ describe('BUILD-ROUTER-001 Quote → Simulation → Review → route-bound Manif
     expect(b.review.route.routingProvider).toBe('across');
     const only = await setup(); only.h.controls.lifi = 'stargate';
     await expect(only.service.simulate(workflow({ routing: 'LIFI' }), ROUTER_OWNER)).rejects.toThrow('ROUTER_NO_EXECUTABLE_ROUTE');
+    await expect(only.service.simulate(workflow({ routing: 'LIFI' }), ROUTER_OWNER)).rejects.toMatchObject({
+      providerRefusals: [{ provider: 'lifi', outcome: 'REFUSED', code: 'LIFI_UNDERLYING_PROTOCOL_NOT_RECONCILABLE' }] });
   });
   it('fails closed on insufficient balance, missing simulation and unexpected contracts', async () => {
     await expect((await setup({ usdc: 1_000_000n })).service.simulate(workflow(), ROUTER_OWNER)).rejects.toThrow('ROUTER_INSUFFICIENT_USDC');

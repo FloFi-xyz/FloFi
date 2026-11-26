@@ -8,6 +8,7 @@
  * BUILD-JOURNEY-001: the wallet session principal (verified from the HttpOnly session cookie by the caller) travels in a
  * server-to-server header; the API binds runs to it. The browser never talks to the API, so it can never set that header.
  */
+import { routeRefusalsFor, type ProviderRefusal } from '../domain/route-refusals.ts';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
 import { WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow.ts';
@@ -16,7 +17,8 @@ import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
 import { betaIdentityHeaders, currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
 import type { PreviewPurpose } from '../../backend/preview.ts';
 
-export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
+export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string;
+  /** BUILD-FLOFI-POST-257-HOTFIX-001: a Router no-route's providers' closed refusal codes (domain/route-refusals.ts). */ refusals?: readonly ProviderRefusal[] };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const READ_ONLY = new Set(['status', 'mode']);
 
@@ -128,7 +130,11 @@ export async function previewCloudFlow<T>(flow: string, args: readonly unknown[]
     // An API deployed before BUILD-MCP-001 has no preview route.
     if (response.status === 404) return { ok: false, code: 'CLOUD_API_PREVIEW_UNAVAILABLE' };
     if (response.ok && result?.ok === true && 'value' in result) return { ok: true, value: result.value as T };
-    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {} };
+    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) {
+      const refusals = routeRefusalsFor(result.code, (result as { refusals?: unknown }).refusals);
+      return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {},
+        ...refusals ? { refusals } : {} };
+    }
     return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
   }
   return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };

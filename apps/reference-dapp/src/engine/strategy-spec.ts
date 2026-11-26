@@ -48,9 +48,15 @@ const CatalogSymbol = Type.String({ pattern: '^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f
   description: 'A symbol or whole name of the selected network\'s validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.' });
 const strict = { additionalProperties: false } as const;
 
-const BridgeAsset = Type.Union([CatalogSymbol, Type.String({
+const bridgeAsset = (description: string) => Type.Union([CatalogSymbol, Type.String({
   pattern: '^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$', maxLength: 48,
-  description: 'Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.' })]);
+  description: 'Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.' })], { description });
+// BUILD-FLOFI-POST-257-HOTFIX-001 (P0-3): the bridge contract says what the engine already does, so a host model never splits a cross-asset
+// bridge into a swap plus a bridge (which also forced it to invent a cap for the second step).
+const BridgeAsset = bridgeAsset('Asset spent on sourceNetwork: its native coin (ETH, SOL) or a catalog token (USDC, WETH, …).');
+const BridgeOutputAsset = bridgeAsset('Asset received on destinationNetwork when it differs from `asset` (e.g. ETH on base → USDC on arbitrum-one). ' +
+  'The route converts it in flight: this is ONE bridge step (a Universal Bridge card); never add a separate swap step and never invent an amount for it. ' +
+  'Omit to receive the same asset (USDC/USDG → the destination\'s dollar stablecoin, a native coin → the destination\'s native coin).');
 const Bridge = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('bridge'),
   sourceNetwork: enumOf(['base-sepolia', 'base', 'arbitrum-one', 'robinhood', 'ethereum', 'solana'] as const, 'Source network. Every mainnet (solana, base, arbitrum-one, ethereum, ' +
@@ -59,7 +65,7 @@ const Bridge = Type.Object({
   asset: BridgeAsset,
   amount: Decimal('Source token amount as a decimal string, e.g. "5".'),
   /** BUILD-CROSSCHAIN-UNIVERSAL-001 */
-  outputAsset: Type.Optional(BridgeAsset),
+  outputAsset: Type.Optional(BridgeOutputAsset),
   routing: Type.Optional(enumOf(['auto', 'best', 'relay', 'lifi', 'mayan', 'across'] as const, 'Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, ' +
     'otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, mayan, across = only that provider (execution eligibility is checked separately). Default auto.')),
   slippageBps: Type.Optional(Slippage),
@@ -143,7 +149,8 @@ export const MAX_WORKFLOW_STEPS = 8;
  * min(cap, the actual reconciled amount of the step's input asset that the earlier step delivered to the owner).
  */
 export const WorkflowBindingSchema = Type.Object({
-  step: Type.Integer({ minimum: 1, maximum: MAX_WORKFLOW_STEPS - 1, description: 'The dependent step (0-based index). Its amount is a cap.' }),
+  step: Type.Integer({ minimum: 1, maximum: MAX_WORKFLOW_STEPS - 1, description: 'The dependent step (0-based index). Its amount is a cap, and must be an amount ' +
+    'the person stated. A cross-chain change of asset is never a binding: it is one bridge step with `outputAsset`.' }),
   amountFrom: Type.Integer({ minimum: 0, maximum: MAX_WORKFLOW_STEPS - 2, description: 'An earlier step (0-based index) whose actual reconciled output of the ' +
     'dependent step\'s input asset funds it: min(cap, received). Never an estimate.' }),
 }, strict);

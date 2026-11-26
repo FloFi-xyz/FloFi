@@ -202,6 +202,11 @@ type Plain = { readonly EN: string; readonly PT: string };
 const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
   [/(?:TIMEOUT|DEADLINE|REQUEST_CANCELLED)/, { EN: 'FloFi did not get an answer in time. Check the status before trying again; nothing is repeated automatically.',
     PT: 'O FloFi não recebeu resposta a tempo. Consulte o status antes de tentar de novo; nada é repetido automaticamente.' }],
+  // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): a bridge with no route FloFi can verify and execute (the providers' own definitive refusals included)
+  // says so, instead of the generic "could not complete this step".
+  [/(?:NO_EXECUTABLE_ROUTE|^(?:LIFI|ACROSS|RELAY|MAYAN|UNIVERSAL|BRIDGE)_NO_ROUTE$|^LIFI_UNDERLYING_PROTOCOL_NOT_RECONCILABLE$|^ROUTER_ROUTE_INTENT_MISMATCH$)/, {
+    EN: 'No bridge route that FloFi can verify and execute is available for this amount right now. Nothing was signed or sent. Try again later or change the amount.',
+    PT: 'Nenhuma rota de bridge que o FloFi consiga verificar e executar está disponível para esse valor agora. Nada foi assinado nem enviado. Tente mais tarde ou mude o valor.' }],
   [/(?:QUOTE|PREVIEW|SIMULATION_UNAVAILABLE|PROVIDER|UPSTREAM|ROUTE_UNAVAILABLE)/, { EN: 'The current quote is temporarily unavailable. You can try again without rebuilding your workflow.',
     PT: 'A cotação atual está temporariamente indisponível. Você pode tentar de novo sem refazer o seu fluxo.' }],
   [/(?:PENDING_LIMIT|HANDOFF_LIMIT)/, { EN: 'You already have the maximum number of open approval requests. Cancel one or let it expire, then try again.',
@@ -229,6 +234,15 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
   [/NOT_CANCELLABLE|IN_EXECUTION/, { EN: 'This request can no longer be cancelled from here. Reject it in your wallet or decide in the FloFi signing page.',
     PT: 'Esta solicitação não pode mais ser cancelada por aqui. Rejeite-a na sua carteira ou decida na página de assinatura do FloFi.' }],
   [/(?:NOT_FOUND|UNKNOWN_ID)/, { EN: 'FloFi could not find that for your account.', PT: 'O FloFi não encontrou isso na sua conta.' }],
+  // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): a deployment or policy gate is not an unsupported asset (a host relayed "the destination asset is not
+  // supported" for a Universal Bridge this deployment simply did not hand off), and a read-only preview without a wallet subject never needs an
+  // address typed in chat.
+  [/^(?:EVM|SOLANA)_WALLET_REQUIRED$/, { EN: 'This read-only preview needs a wallet, and FloFi could not pick one of your linked wallets for it. You can skip the preview: ' +
+      'requesting approval needs no address, and FloFi simulates again with your own wallet before you sign.',
+    PT: 'Esta prévia somente leitura precisa de uma carteira, e o FloFi não conseguiu escolher uma das suas carteiras vinculadas. Você pode pular a prévia: ' +
+      'pedir a aprovação não exige endereço, e o FloFi simula de novo com a sua própria carteira antes de você assinar.' }],
+  [/(?:_IN_DEPLOYMENT$|_BY_POLICY$)/, { EN: 'FloFi supports this operation, but this FloFi deployment does not hand it off for signing right now. Nothing was signed or sent.',
+    PT: 'O FloFi suporta esta operação, mas esta implantação do FloFi não a envia para assinatura agora. Nada foi assinado nem enviado.' }],
   [/(?:TEST_NETWORK|NETWORK_NOT|NOT_ENABLED|NOT_SUPPORTED|UNSUPPORTED|DISABLED|NOT_AVAILABLE)/, { EN: 'That network, asset or action is not available on FloFi right now.',
     PT: 'Essa rede, ativo ou ação não está disponível no FloFi agora.' }],
   [/(?:RUNTIME_REQUIRED|RUNTIME_NOT_CONFIGURED|NOT_CONFIGURED)/, { EN: 'FloFi cannot read this here right now. Try again later or use another FloFi connection.',

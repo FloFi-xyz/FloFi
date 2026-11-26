@@ -4,7 +4,8 @@
  * typed bindings (`{ step, amountFrom }`: the step spends what the earlier step actually delivered, capped by its own amount). MCP, the Developer
  * contract and the parity tests compose it with the same deterministic engine (`composeWorkflow`) as every other strategy; nothing here
  * composes, quotes or authorizes by itself. A supply needs its beneficiary (Aave credits that account): the caller passes the owner's address
- * the user gave, or the plan asks for it — FloFi never substitutes one.
+ * the user gave, or the plan asks for it — FloFi never substitutes one. BUILD-FLOFI-POST-257-HOTFIX-001: MCP asks with the person's own linked
+ * wallets as the options to confirm (`goalBeneficiary` in mcp/tools.ts), never choosing one itself.
  */
 import type { StrategyInput, StrategySpec } from '../../engine/strategy-spec';
 import type { GoalStep } from './goal-planner';

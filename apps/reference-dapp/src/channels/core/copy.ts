@@ -28,7 +28,10 @@ const previewWalletMessage: Readonly<Record<string, Record<ChannelLanguage, stri
   UNIVERSAL_DESTINATION_WALLET_REQUIRED: { EN: 'Choose the wallet that will receive the bridge delivery', PT: 'Escolha a carteira que receberá os fundos da ponte' },
   SIMULATION_REQUIRES_OWNER_BROWSER: { EN: 'Continue in FloFi for wallet simulation', PT: 'Continue no FloFi para simular com sua carteira' },
 };
-const previewDetails = (codes: readonly string[], language: ChannelLanguage) => [...new Set(codes.map(code => previewWalletMessage[code]?.[language] ?? code))].join('. ');
+// BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5, flofi-channels review): a preview refusal is never shown by its code (e.g. ROUTER_NO_EXECUTABLE_ROUTE): the
+// same plain wording MCP gives, without its final period (the line adds its own).
+const previewDetails = (codes: readonly string[], language: ChannelLanguage) => [...new Set(codes.map(code => previewWalletMessage[code]?.[language]
+  ?? userFacingError(code)[language].replace(/\.$/, '')))].join('. ');
 const marketQuote = (q: MarketQuoteNote, language: ChannelLanguage) => {
   const amount = formatDisplayTokenAmount(q, { language, symbol: q.symbol });
   return language === 'EN' ? `Market quote${q.provenance === 'MOCKED' ? ' (MOCKED)' : ''} estimates ${amount}.`

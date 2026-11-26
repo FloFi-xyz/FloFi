@@ -2526,6 +2526,7 @@
                     ]
                   },
                   "asset": {
+                    "description": "Asset spent on sourceNetwork: its native coin (ETH, SOL) or a catalog token (USDC, WETH, …).",
                     "anyOf": [
                       {
                         "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
@@ -2548,6 +2549,7 @@
                     "type": "string"
                   },
                   "outputAsset": {
+                    "description": "Asset received on destinationNetwork when it differs from `asset` (e.g. ETH on base → USDC on arbitrum-one). The route converts it in flight: this is ONE bridge step (a Universal Bridge card); never add a separate swap step and never invent an amount for it. Omit to receive the same asset (USDC/USDG → the destination's dollar stablecoin, a native coin → the destination's native coin).",
                     "anyOf": [
                       {
                         "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
@@ -3311,6 +3313,7 @@
                               ]
                             },
                             "asset": {
+                              "description": "Asset spent on sourceNetwork: its native coin (ETH, SOL) or a catalog token (USDC, WETH, …).",
                               "anyOf": [
                                 {
                                   "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
@@ -3333,6 +3336,7 @@
                               "type": "string"
                             },
                             "outputAsset": {
+                              "description": "Asset received on destinationNetwork when it differs from `asset` (e.g. ETH on base → USDC on arbitrum-one). The route converts it in flight: this is ONE bridge step (a Universal Bridge card); never add a separate swap step and never invent an amount for it. Omit to receive the same asset (USDC/USDG → the destination's dollar stablecoin, a native coin → the destination's native coin).",
                               "anyOf": [
                                 {
                                   "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
@@ -4024,7 +4028,7 @@
                         "step": {
                           "minimum": 1,
                           "maximum": 7,
-                          "description": "The dependent step (0-based index). Its amount is a cap.",
+                          "description": "The dependent step (0-based index). Its amount is a cap, and must be an amount the person stated. A cross-chain change of asset is never a binding: it is one bridge step with `outputAsset`.",
                           "type": "integer"
                         },
                         "amountFrom": {
