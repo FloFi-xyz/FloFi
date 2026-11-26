@@ -2033,6 +2033,10 @@
     "app.domain.approval-notice": {
       "path": "apps/reference-dapp/src/domain/approval-notice.test.ts",
       "stage": "unit"
+    },
+    "app.domain.run-outcome-amounts": {
+      "path": "apps/reference-dapp/src/domain/run-outcome-amounts.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2234,7 +2238,8 @@
     "app.domain.flofi-wallet-bridge",
     "app.platform.external-single-step",
     "app.mcp.app.panel",
-    "app.domain.approval-notice"
+    "app.domain.approval-notice",
+    "app.domain.run-outcome-amounts"
   ],
   "modules": [
     {
@@ -4900,7 +4905,8 @@
         "apps/reference-dapp/src/domain/amount-shortcuts.ts",
         "apps/reference-dapp/src/components/amount-shortcuts.tsx",
         "apps/reference-dapp/src/domain/relative-amount.ts",
-        "apps/reference-dapp/src/domain/approval-notice.ts"
+        "apps/reference-dapp/src/domain/approval-notice.ts",
+        "apps/reference-dapp/src/domain/run-outcome-amounts.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -4941,7 +4947,8 @@
         "app.e2e.chat-liquidity-positions",
         "app.domain.relative-amount",
         "app.domain.intelligence.beta-critical-recovery",
-        "app.domain.approval-notice"
+        "app.domain.approval-notice",
+        "app.domain.run-outcome-amounts"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",

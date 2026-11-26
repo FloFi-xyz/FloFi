@@ -29,6 +29,8 @@ import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs, walletBatchRefu
 import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
 import { awaitedDelivery, runProgress, runStepPhase } from '../workflow-runs/run-step-phase';
 import { useLocale } from '../i18n/locale';
+import { reconciledReceived } from '../domain/run-outcome-amounts';
+import { TokenUnitsText } from './token-amount-text';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { WorkflowRunClaim } from '../platform/workflow-run-approvals';
 import { signWorkflowGrant } from './delegation-browser';
@@ -416,6 +418,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {step.outcome?.submissions.map(tx => tx.explorerUrl
           ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a>
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
+        {/* BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incident 10): the amount the reconciled step really received, at six significant digits. */}
+        {reconciledReceived(step).map(r => <span key={r.asset} className="workflow-run-received">{tr('Received (reconciled)')}{' '}
+          <TokenUnitsText units={r.units} decimals={r.decimals} symbol={r.symbol} rounding="down"/></span>)}
       </li>)}
     </ol>
     {/* Review B1/LQ1: before anything of the run was signed or reconciled, a later step on a network that needs its native coin for its fee after an
