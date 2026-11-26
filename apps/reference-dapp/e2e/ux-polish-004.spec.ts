@@ -672,8 +672,8 @@ test.describe('post-#254 hotfix: Agents connects Claude and ChatGPT', () => {
     const openClaude = setup.getByRole('link', { name: 'Open Claude', exact: true });
     await expect(openClaude).toHaveAttribute('href', 'https://claude.ai/settings/connectors');
     await expect(openClaude).toHaveAttribute('target', '_blank'); await expect(openClaude).toHaveAttribute('rel', 'noopener noreferrer');
-    await setup.getByRole('button', { name: 'Copy', exact: true }).click();
-    await expect(setup.getByRole('status')).toHaveText('FloFi MCP address copied.');
+    await setup.getByRole('button', { name: 'Copy FloFi MCP server URL', exact: true }).click();
+    await expect(setup.getByRole('status')).toHaveText('FloFi MCP server URL copied.');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(endpoint);
     await expect(setup).toContainText('Nothing runs until you review it in FloFi and sign with your own wallet.');
     // One assistant's steps at a time; ChatGPT names its own setup.
@@ -685,14 +685,15 @@ test.describe('post-#254 hotfix: Agents connects Claude and ChatGPT', () => {
     // A phone keeps every control on screen with no sideways scrolling (the address wraps).
     await page.setViewportSize({ width: 320, height: 800 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(chatgptSetup.getByRole('button', { name: 'Copy', exact: true })).toBeInViewport();
+    await expect(chatgptSetup.getByRole('button', { name: 'Copy FloFi MCP server URL', exact: true })).toBeInViewport();
     // Portuguese.
     await chooseLanguage(context, 'PT');
     await page.reload();
     await expect(main(page).getByRole('button', { name: 'Conectar Claude', exact: true })).toBeVisible();
     await main(page).getByRole('button', { name: 'Conectar ChatGPT', exact: true }).click();
     await expect(main(page).getByRole('region', { name: 'Conectar o ChatGPT à FloFi', exact: true })).toContainText('ative o Modo de desenvolvedor');
-    await expect(main(page).getByText('Endereço MCP da FloFi', { exact: true })).toBeVisible();
+    await expect(main(page).getByText('URL do servidor MCP da FloFi', { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     networkGuard.assertClean();
   });
 });

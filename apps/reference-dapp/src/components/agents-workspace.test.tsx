@@ -25,7 +25,8 @@ describe('post-#254 hotfix: Agents shows Connected only for a live connection', 
     read(); const html = await settle();
     expect(f.calls).toBe(1);
     expect(html.match(/Connected to FloFi/g)).toHaveLength(1);
-    expect(html).toContain('<a class="ux-button" href="/connections">Manage</a>');
+    expect(html).toContain('<a class="ux-button" href="/connections" aria-label="Manage FloFi connections">Manage</a>');
+    expect(html).not.toContain('id="agent-setup-claude"');
     expect(html).not.toContain('aria-label="Connect Claude"');
     expect(html).toContain('aria-label="Connect ChatGPT"');
   });

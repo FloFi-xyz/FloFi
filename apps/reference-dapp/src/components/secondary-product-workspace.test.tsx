@@ -103,7 +103,7 @@ describe('secondary product workspaces', () => {
   it('post-#254 hotfix: offers Claude and ChatGPT with decorative official assets and a Connect button each; nothing reads In testing or Connected unasked (board 14)', () => {
     const html = markup('agents');
     for (const label of ['Connect with Claude', 'Connect with ChatGPT', 'Use FloFi from inside Claude.', 'Use FloFi from inside ChatGPT.']) expect(html).toContain(label);
-    expect(html).toContain('Describe what you want in the chat; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet here.');
+    expect(html).toContain('Describe what you want there; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet in FloFi.');
     expect(html).toContain('src="/brand/providers/claude-spark.svg"');
     expect(html).toContain('src="/brand/providers/openai-blossom-black.svg"');
     expect(html).toContain('src="/brand/providers/openai-blossom-white.svg"');
@@ -114,7 +114,9 @@ describe('secondary product workspaces', () => {
     expect(html).not.toMatch(/In testing|data-tone="testing"/);
     for (const provider of ['Claude', 'ChatGPT']) expect(html).toContain(`aria-expanded="false" aria-controls="agent-setup-${provider.toLowerCase()}" aria-label="Connect ${provider}"`);
     expect(html.match(/<button type="button" class="ux-button"[^>]*>Connect<\/button>/g)).toHaveLength(2);
-    expect(html).not.toMatch(/Connected to FloFi|agent-setup-steps/);
+    expect(html).not.toContain('Connected to FloFi');
+    // Each setup region is mounted collapsed (hidden), so aria-controls always resolves.
+    for (const provider of ['claude', 'chatgpt']) expect(html).toMatch(new RegExp(`<div id="agent-setup-${provider}" class="agent-setup" role="region" aria-label="Connect [A-Za-z]+ to FloFi" hidden="">`));
     // "API clients · Coming soon" is unchanged; nothing else is offered.
     expect(html).not.toContain('Create client'); expect(html.match(/API clients/g)).toHaveLength(1); expect(html.match(/data-tone="soon">Coming soon/g)).toHaveLength(1);
     expect(html).not.toMatch(/>C<|>GPT<|>G<|Grok|API key|signing key/i);

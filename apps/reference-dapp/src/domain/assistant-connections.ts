@@ -14,11 +14,11 @@ export const FLOFI_MCP_ENDPOINT = `${FLOFI_PRODUCTION_ORIGIN}/api/mcp`;
 export const ASSISTANT_SETUP: Readonly<Record<AssistantProvider, { readonly open: string; readonly steps: readonly string[] }>> = Object.freeze({
   Claude: { open: 'https://claude.ai/settings/connectors', steps: [
     'In Claude, open Settings › Connectors and choose Add custom connector.',
-    'Name it FloFi, paste the FloFi address below and choose Add.',
+    'Name it FloFi, paste the FloFi MCP server URL below and choose Add.',
     'Choose Connect, then allow the connection on FloFi\'s page.'] },
   ChatGPT: { open: 'https://chatgpt.com/', steps: [
     'In ChatGPT, open Settings › Apps › Advanced settings and turn on Developer mode (available on eligible plans).',
-    'Choose Create, name it FloFi, paste the FloFi address below and choose OAuth.',
+    'Choose Create, name it FloFi, paste the FloFi MCP server URL below and choose OAuth.',
     'Choose Connect, then allow the connection on FloFi\'s page.'] },
 });
 const HOSTS: Readonly<Record<AssistantProvider, readonly string[]>> = { Claude: ['claude.ai', 'claude.com'], ChatGPT: ['chatgpt.com', 'chat.openai.com'] };

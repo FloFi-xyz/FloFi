@@ -581,7 +581,7 @@ const PROVIDER_MARKS: Readonly<Record<AssistantProvider, { readonly light: strin
 };
 /**
  * Board 14, post-#254 hotfix: Claude and ChatGPT connect to FloFi's existing MCP server and OAuth consent. "Connect" opens that platform's own setup
- * steps with FloFi's MCP address to copy (neither platform adds a connector from a link); "Connected" appears only for a live connection of this
+ * steps with FloFi's MCP server URL to copy (neither platform adds a connector from a link); "Connected" appears only for a live connection of this
  * browser's FloFi connection account (`assistantConnections`), never assumed. Nothing here signs, approves or executes.
  */
 function AgentsWorkspace() {
@@ -595,10 +595,12 @@ function AgentsWorkspace() {
   }, []);
   const endpoint = connections?.endpoint ?? FLOFI_MCP_ENDPOINT;
   async function copy() {
-    try { await navigator.clipboard.writeText(endpoint); setCopied(tr('FloFi MCP address copied.')); } catch { setCopied(tr('Copy the address above by hand.')); }
+    // Cleared first, so a second copy is announced again.
+    setCopied(null);
+    try { await navigator.clipboard.writeText(endpoint); setCopied(tr('FloFi MCP server URL copied.')); } catch { setCopied(tr('Copy the URL above by hand.')); }
   }
   return <div className="ux-page agents">
-    <header className="ux-page-head"><div><h1>{tr("Agents")}</h1><p>{tr("Connect Claude or ChatGPT to FloFi. Describe what you want in the chat; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet here.")}</p></div></header>
+    <header className="ux-page-head"><div><h1>{tr("Agents")}</h1><p>{tr("Connect Claude or ChatGPT to FloFi. Describe what you want there; FloFi prepares and simulates the workflow, and you review it and sign each transaction with your own wallet in FloFi.")}</p></div></header>
     <section className="ux-panel" aria-labelledby="connect-agent">
       <div className="ux-panel-head"><div><h2 id="connect-agent">{tr("Connect an assistant")}</h2></div></div>
       <ul className="ux-list">{ASSISTANT_PROVIDERS.map(provider => {
@@ -610,17 +612,18 @@ function AgentsWorkspace() {
           </span>
           <div className="ux-row-main"><h3 className="ux-row-name">{tr('Connect with {0}', provider)}</h3><p className="ux-row-meta">{tr('Use FloFi from inside {0}.', provider)}</p></div>
           <div className="ux-row-actions">{connected
-            ? <><StatusTag tone="success">{tr("Connected to FloFi")}</StatusTag><a className="ux-button" href="/connections">{tr("Manage")}</a></>
+            ? <><StatusTag tone="success">{tr("Connected to FloFi")}</StatusTag><a className="ux-button" href="/connections" aria-label={tr("Manage FloFi connections")}>{tr("Manage")}</a></>
             : <button type="button" className="ux-button" aria-expanded={open === provider} aria-controls={setupId}
               aria-label={tr('Connect {0}', provider)} onClick={() => { setOpen(current => current === provider ? null : provider); setCopied(null); }}>{tr("Connect")}</button>}</div>
         </div>
-        {!connected && open === provider && <div id={setupId} className="agent-setup" role="region" aria-label={tr('Connect {0} to FloFi', provider)}>
+        {/* Mounted while collapsed (hidden), so the button's aria-controls always names it. */}
+        {!connected && <div id={setupId} className="agent-setup" role="region" aria-label={tr('Connect {0} to FloFi', provider)} hidden={open !== provider}>
           <ol className="ux-panel-text agent-setup-steps">{ASSISTANT_SETUP[provider].steps.map(step => <li key={step}>{tr(step)}</li>)}</ol>
-          <p className="ux-row-meta">{tr("FloFi MCP address")}</p>
-          <div className="agent-setup-endpoint"><code>{endpoint}</code>
-            <button type="button" className="ux-button" onClick={() => void copy()}>{tr("Copy")}</button>
+          <p className="ux-row-meta">{tr("FloFi MCP server URL")}</p>
+          <div><div className="agent-setup-endpoint"><code>{endpoint}</code>
+            <button type="button" className="ux-button" aria-label={tr("Copy FloFi MCP server URL")} onClick={() => void copy()}>{tr("Copy")}</button>
             <a className="ux-button" href={ASSISTANT_SETUP[provider].open} target="_blank" rel="noopener noreferrer">{tr('Open {0}', provider)}</a></div>
-          <p className="ux-row-meta" role="status">{copied ?? ''}</p>
+          <p className="ux-row-meta" role="status">{open === provider ? copied ?? '' : ''}</p></div>
           <p className="ux-row-meta">{tr("Your assistant drafts and previews workflows and asks for your approval. Nothing runs until you review it in FloFi and sign with your own wallet.")}</p>
         </div>}</li>;
       })}</ul>
