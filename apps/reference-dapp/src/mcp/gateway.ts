@@ -26,7 +26,7 @@ import { mcpBetaIdentity, mcpBetaWallets, type McpBetaHost } from './beta-access
 import { mcpStateHost } from './oauth/runtime.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
-import { portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
+import { portfolioConsent, portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { approvalFrameAncestorList, claudeAppDomain } from '../server/embedded-approval.ts';
 import { nativeSigningSwitch } from '../platform/native-signing.ts';
 import { PANEL_URI } from './app/panel.ts';
@@ -237,7 +237,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   if (principal.kind === 'mcp-oauth' && state && held.includes('flofi.runs')) {
     const linkState = state, account = principal.accountId;
     const productIdentity = betaIdentity;
-    const portfolioFrom = portfolioLinksFrom(env);
+    const portfolioFrom = portfolioLinksFrom(env), portfolioReads = portfolioConsent(env, now);
     async function loadWallets() {
       const links = await store(() => linkState.links.active(account, now)).catch(() => null);
       if (!links) { logger?.warn('mcp.oauth.store_unavailable', { request_id: budget.requestId }); return null; }
@@ -246,7 +246,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
       // Balance reads require links made after the connections disclosure took effect.
       const portfolioOwners = Object.freeze(portfolioFrom ? owners.filter(e => links.some(l => l.namespace === e.namespace && l.address === e.address
         && l.createdAt.getTime() >= portfolioFrom.getTime())) : []);
-      return { wallets: Object.freeze(owners.map(l => l.address)), owners, portfolioOwners };
+      return { wallets: Object.freeze(owners.map(l => l.address)), owners, portfolioOwners, portfolioReads };
     }
     let lookup: ReturnType<typeof loadWallets> | undefined;
     const wallets = () => lookup ??= loadWallets();

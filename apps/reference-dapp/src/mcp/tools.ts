@@ -66,7 +66,8 @@ import { CONCEPT_IDS, CONCEPT_LEVELS, CONCEPT_PROTOCOLS } from '../domain/intell
 import { matchPlatformTopic, platformAnswer, platformGuide, type PlatformTopic } from '../domain/intelligence/platform-guide';
 import { explainConcept, explainWorkflow } from '../platform/explain.ts';
 import { AUTOMATION_MANAGEMENT, AUTOMATION_RULE_ID, automationStatus, automationTypes, type AutomationReadPort } from './automations.ts';
-import { accountView, historyView, linkedOwners, MAX_ACCOUNT_WALLETS, omittedOwners, portfolioOwners, portfolioView, positionsView, type PortfolioReadPort } from './account.ts';
+import { accountView, balancesUnreadableReason, historyView, linkedOwners, MAX_ACCOUNT_WALLETS, omittedOwners, portfolioOwners, portfolioReadState, portfolioView, positionsView,
+  type PortfolioReadPort } from './account.ts';
 import { approvalState, authoringState, conversationState, executionState, simulationState, userFacingError, validationState } from '../platform/conversation-state.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
@@ -109,6 +110,11 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'get_approval_status (list_approvals finds earlier requests); report only its conversationState — CONFIRMED is the only completed state, and STATUS_UNKNOWN or ' +
   'NEEDS_ATTENTION is never "not run". To change a step before signing, compose again and request a new approval; a changed workflow does not replace the older ' +
   'request, so offer cancel_approval for the older one (only with the person\'s consent). Steps already confirmed are never repeated. When a tool fails, tell the person its userMessage, not the code. ' +
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1, P2)
+  'Never drop, merge, reorder or shorten a step the person asked for: a workflow holds at most 8 steps, so when they ask for more, tell them and ask which ' +
+  'to remove or how to split it. Pass expectedStepCount (the number of steps the person asked for) with every strategy; a WORKFLOW_TOO_MANY_STEPS or ' +
+  'WORKFLOW_STEP_COUNT_MISMATCH refusal is told to the person, never retried with fewer steps. `readiness` says what a result establishes: a valid or ' +
+  'reviewed strategy is not authorized and not necessarily executable. ' +
   'When a result carries `display` lines, show those amounts verbatim in the person\'s language; never re-round or convert those amounts yourself.';
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
 export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
@@ -118,8 +124,40 @@ export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every str
  * TypeBox + Ajv (the repo's strict schema stack) behind the Standard Schema interface the SDK consumes. Issues name paths and
  * rules only, never values; a `strategy` is reported against its own action's schema rather than every union branch.
  */
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): a step list longer than MAX_WORKFLOW_STEPS (up to this bound) passes input validation so the tool
+ * itself refuses it with a coded, explained WORKFLOW_TOO_MANY_STEPS (`stepListGuard`), which a host relays to the person; the SDK's plain-text schema
+ * error carried neither a code nor a message, and a model could quietly retry with a shortened list. Nothing beyond MAX_WORKFLOW_STEPS is ever composed.
+ */
+export const MCP_STEP_LIST_REFUSAL_MAX = 64;
+const oversizedStepList = (value: unknown): number | null => {
+  const strategy = value && typeof value === 'object' ? (value as { strategy?: unknown }).strategy : undefined;
+  const steps = strategy && typeof strategy === 'object' && (strategy as { version?: unknown }).version === 2 ? (strategy as { steps?: unknown }).steps : undefined;
+  return Array.isArray(steps) && steps.length > MAX_WORKFLOW_STEPS && steps.length <= MCP_STEP_LIST_REFUSAL_MAX ? steps.length : null;
+};
+/** The number of strategy steps of a tool's `strategy` argument (a v1 strategy is one step), or null when the argument has none. */
+const strategyStepCount = (args: unknown): number | null => {
+  const strategy = args && typeof args === 'object' ? (args as { strategy?: unknown }).strategy : undefined;
+  if (!strategy || typeof strategy !== 'object') return null;
+  const steps = (strategy as { version?: unknown; steps?: unknown }).version === 2 ? (strategy as { steps?: unknown }).steps : null;
+  return Array.isArray(steps) ? steps.length : 1;
+};
+/**
+ * The step-list refusals every strategy tool applies before anything else: more steps than FloFi accepts, or a different number than the person asked for
+ * (`expectedStepCount`): a list shortened on its way to FloFi — by a host, a model or a client — is refused, never composed as if it were complete.
+ */
+function stepListGuard(args: unknown): void {
+  const received = strategyStepCount(args);
+  if (received === null) return;
+  const next = 'Tell the person: never drop, merge, reorder or shorten a step they asked for. Ask which steps to remove, or split the request into separate workflows.';
+  if (received > MAX_WORKFLOW_STEPS) failWith('WORKFLOW_TOO_MANY_STEPS', { maxSteps: MAX_WORKFLOW_STEPS, receivedSteps: received,
+    issues: [{ path: '/strategy/steps', rule: 'maxItems' }], next });
+  const expected = (args as { expectedStepCount?: unknown }).expectedStepCount;
+  if (typeof expected === 'number' && expected !== received) failWith('WORKFLOW_STEP_COUNT_MISMATCH', { expectedStepCount: expected, receivedSteps: received,
+    maxSteps: MAX_WORKFLOW_STEPS, next });
+}
 function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWORK_IDS,
-  networksFor: (action: unknown) => readonly string[] = () => networks): StandardSchemaWithJSON<T, T> {
+  networksFor: (action: unknown) => readonly string[] = () => networks, onRefused?: () => void): StandardSchemaWithJSON<T, T> {
   const compiled = compileSchema<T>(schema), json = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
   // P0 catalog reliability: a network field naming a network of this scope by its registry name, alias or CAIP-2 id is read as that network's id.
   // A refused network names the ids its own action accepts (a bridge field: bridge networks; a filter without an action: every network), once.
@@ -146,6 +184,9 @@ function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWO
     validate: raw => {
       const value = canonicalNetworkFields(raw, networks);
       if (compiled.check(value)) return { value: value as T };
+      // The tool refuses an oversized step list itself, with its code and message (never composed: `stepListGuard` runs before anything else).
+      if (oversizedStepList(value) !== null) return { value: value as T };
+      onRefused?.();
       const hinted = new Set<string>();
       return { issues: issuesOf(value).map(i => {
         // A refused network names the accepted ids, so the caller can correct it (values are still never echoed).
@@ -158,6 +199,10 @@ function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWO
 const strict = { additionalProperties: false } as const;
 const pure = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const Hash = Type.String({ pattern: '^0x[0-9a-f]{64}$', description: 'The workflowHash returned by compose_strategy.' });
+/** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): the number of steps the person asked for, checked against the strategy that arrives. */
+const ExpectedStepCount = Type.Optional(Type.Integer({ minimum: 1, maximum: MCP_STEP_LIST_REFUSAL_MAX, description: 'The number of steps the person asked for ' +
+  '(1 for a single action). Always pass it: FloFi refuses (WORKFLOW_STEP_COUNT_MISMATCH) a strategy that carries a different number, so a step list ' +
+  'shortened on its way is never accepted as complete.' }));
 const ExecutionId = Type.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', description: 'A FloFi execution (run) id. It is a lookup key, not an access grant.' });
 const Language = Type.Optional(Type.Union([Type.Literal('EN'), Type.Literal('PT')], { description: 'Answer language: EN (default) or PT (Portuguese).' }));
 /** A short phrase in the user's own words (never echoed back): letters, digits, spaces and ordinary punctuation, no control characters. */
@@ -176,10 +221,10 @@ function schemasFor(scope: NetworkScope) {
   none: Type.Object({}, strict),
   assets: Type.Object({ network: Type.Optional(NetworkFilter) }, strict),
   capabilities: Type.Object({ network: Type.Optional(NetworkFilter), action: Type.Optional(Type.Union(actions.map(a => Type.Literal(a)))) }, strict),
-  compose: Type.Object({ strategy: StrategyInput }, strict),
-  bound: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash) }, strict),
-  request: Type.Object({ strategy: StrategyInput, workflowHash: Hash }, strict),
-  simulate: Type.Object({ strategy: StrategyInput, workflowHash: Hash,
+  compose: Type.Object({ strategy: StrategyInput, expectedStepCount: ExpectedStepCount }, strict),
+  bound: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), expectedStepCount: ExpectedStepCount }, strict),
+  request: Type.Object({ strategy: StrategyInput, workflowHash: Hash, expectedStepCount: ExpectedStepCount }, strict),
+  simulate: Type.Object({ strategy: StrategyInput, workflowHash: Hash, expectedStepCount: ExpectedStepCount,
     simulationSubject: Type.Optional(Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
       description: 'The account whose PUBLIC balances and allowances the read-only simulation uses (EVM address or Solana public key). It is not authenticated, ' +
         'not an owner and grants nothing; nothing is stored for it. Omit for wallet-independent flows or to use an eligible linked wallet.' })),
@@ -192,7 +237,7 @@ function schemasFor(scope: NetworkScope) {
     level: Type.Optional(Type.Union(CONCEPT_LEVELS.map(level => Type.Literal(level)), { description: 'STANDARD (default), SIMPLE, EXAMPLE (illustrative numbers only) or ADVANCED.' })),
     protocol: Type.Optional(Type.Union(CONCEPT_PROTOCOLS.map(protocol => Type.Literal(protocol)), { description: 'Explain it as it works on this protocol.' })),
     language: Language }, strict),
-  explain: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), language: Language }, strict),
+  explain: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), expectedStepCount: ExpectedStepCount, language: Language }, strict),
   help: Type.Object({ topic: Type.Optional(Type.Union(MCP_PLATFORM_TOPICS.map(topic => Type.Literal(topic)), { description: 'A FloFi platform topic. Give this, `question`, or neither for the whole guide.' })),
     question: Type.Optional(Phrase(160, 'A "how / where" question about FloFi in the user\'s words.')), language: Language }, strict),
   language: Type.Object({ language: Language }, strict),
@@ -308,6 +353,26 @@ const MCP_CODES: Readonly<Record<string, string>> = Object.freeze({ SIMULATION_B
   HANDOFF_RATE_LIMITED: 'MCP_HANDOFF_RATE_LIMITED', HANDOFF_PENDING_LIMIT: 'MCP_HANDOFF_LIMIT' });
 const mcpCode = (code: string) => Object.hasOwn(MCP_CODES, code) ? MCP_CODES[code]! : code;
 const AUTHORITY = 'NONE: this result authorizes nothing. Only the owner, in the FloFi app, can review the Strategy Manifest and sign with their own wallet.';
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): what a result does and does not establish, one stage at a time (additive: `ok`, `valid`,
+ * `conversationState` and every existing field keep their meaning). A structurally valid strategy is never authorized and not necessarily executable:
+ * only request_user_approval evaluates this deployment's execution and policy gates, only the owner's wallet authorizes, and only reconciliation completes.
+ */
+type Readiness = { readonly authoring: 'VALID' | 'INVALID'; readonly review: 'NOT_REVIEWED' | 'NO_BLOCKERS' | 'BLOCKERS_FOUND';
+  readonly simulation: 'NOT_RUN' | 'PREVIEW_COMPLETED' | 'PREVIEW_INCOMPLETE' | 'MARKET_QUOTE_ONLY';
+  readonly execution: 'NOT_EVALUATED' | 'GATES_PASSED_AWAITING_OWNER'; readonly ownerAuthorization: 'NONE' | 'PENDING_OWNER_WALLET';
+  readonly submission: 'NOT_SUBMITTED'; readonly reconciliation: 'NONE'; readonly meaning: string };
+function readiness(stage: Partial<Pick<Readiness, 'authoring' | 'review' | 'simulation' | 'execution' | 'ownerAuthorization'>>): Readiness {
+  const execution = stage.execution ?? 'NOT_EVALUATED';
+  return { authoring: stage.authoring ?? 'VALID', review: stage.review ?? 'NOT_REVIEWED', simulation: stage.simulation ?? 'NOT_RUN', execution,
+    ownerAuthorization: stage.ownerAuthorization ?? 'NONE', submission: 'NOT_SUBMITTED', reconciliation: 'NONE',
+    meaning: execution === 'NOT_EVALUATED'
+      ? 'Authoring validity only: this result does not check whether this FloFi deployment and its policy can execute the workflow (request_user_approval does), ' +
+        'it authorizes nothing, and nothing was signed or submitted.'
+      : 'Handed to the owner: FloFi\'s gates allowed the request, but nothing is authorized until the owner\'s own wallet signs in FloFi, and nothing is ' +
+        'complete until chain confirmation and reconciliation (get_approval_status).' };
+}
+const reviewReadiness = (block: number): Readiness['review'] => block > 0 ? 'BLOCKERS_FOUND' : 'NO_BLOCKERS';
 
 const DEFAULT_POLICY = readHandoffPolicy({});
 
@@ -428,13 +493,16 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     // OAuth clients read `securitySchemes` to know which scope to request before calling (ChatGPT reads the `_meta` mirror).
     const security = ctx.oauth ? { securitySchemes: [{ type: 'oauth2', scopes: [scope] }] } : {};
     const meta = Object.keys(security).length || Object.keys(toolMeta).length ? { _meta: { ...security, ...toolMeta } } : {};
-    server.registerTool(name, { title, description, inputSchema: standard<Static<S>>(schema, scopeNetworks, networksFor), annotations: { title, ...annotations }, ...meta }, async (args: Static<S>): Promise<CallToolResult> => {
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): an argument the SDK refuses before the tool runs is recorded as such (it was logged as OK).
+    const refusedInput = () => ctx.onTool?.({ tool: name, outcome: 'MCP_INPUT_INVALID', durationMs: 0 });
+    server.registerTool(name, { title, description, inputSchema: standard<Static<S>>(schema, scopeNetworks, networksFor, refusedInput), annotations: { title, ...annotations }, ...meta }, async (args: Static<S>): Promise<CallToolResult> => {
       const started = now();
       let result: CallToolResult, outcome = 'OK';
       try {
         // The whole tool — catalog preparation, runtime reads, presentation — waits at most until the request's tool deadline.
         result = await withinBudget(ctx.budget, toolCap(ctx.budget, TIMEOUT_CLASS[name] === 'EFFECT_UNKNOWN' ? MCP_TOOL_TIMEOUTS.approvalWrite : MCP_TOOL_TIMEOUTS.default), async () => {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
+        stepListGuard(args);
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
         const named = args && typeof args === 'object' ? 'strategy' in args ? (args as { strategy: unknown }).strategy : 'goal' in args
@@ -559,7 +627,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       const c = w.steps[0]!, plan = workflowPlan(w);
       return { ok: true, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision, fundsClass: c.fundsClass, workflow: c.workflow,
         steps: stepViews(c), explanation: c.explanation, summary: c.summary, notes: c.notes, authority: AUTHORITY, stepCount: 1,
-        executionPlan: { kind: plan.kind, reason: plan.reason }, visual, conversationState: conversationState('DRAFT_CREATED'),
+        executionPlan: { kind: plan.kind, reason: plan.reason }, visual, conversationState: conversationState('DRAFT_CREATED'), readiness: readiness({}),
         nextSteps: canRequestApproval(ctx) ? ['request_user_approval with this strategy and workflowHash to hand it to its owner in FloFi (it re-checks the review; nothing executes from MCP)',
           'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
           : ['review_strategy with this strategy and workflowHash', 'simulate_strategy for a read-only preview (optional)'] };
@@ -569,7 +637,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP', bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })) },
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
         fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),
-      notes: w.notes, authority: AUTHORITY, visual, conversationState: conversationState('DRAFT_CREATED'),
+      notes: w.notes, authority: AUTHORITY, visual, conversationState: conversationState('DRAFT_CREATED'), readiness: readiness({}),
       nextSteps: canRequestApproval(ctx) ? ['request_user_approval to hand the whole workflow to its owner (it re-checks every step\'s review): it reports how many ' +
         'authorizations each mode needs. Each step runs only after the previous one reconciled.', 'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
         : ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview'] };
@@ -618,7 +686,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   register('validate_strategy', 'Validate strategy', 'Check a strategy against FloFi\'s authoring rules (networks, assets, amounts, limits) and, when given, the workflowHash ' +
     'from compose_strategy (a mismatch means the strategy changed or FloFi\'s rules changed: compose again).', Schemas.bound, pure, args => {
     const validation = validateStrategy(args.strategy, args.workflowHash, scope);
-    return { ok: true, ...validation, conversationState: validationState(validation) };
+    return { ok: true, ...validation, conversationState: validationState(validation),
+      readiness: readiness(validation.valid ? { review: reviewReadiness(validation.reviewSummary.block) } : { authoring: 'INVALID' }) };
   });
 
   register('review_strategy', 'Review strategy', 'FloFi\'s deterministic Strategy Review: linter findings, capability blockers for the network\'s public environment and ' +
@@ -629,6 +698,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       return { ok: true, workflowHash: w.workflowHash, reviewKind: 'DETERMINISTIC_STRATEGY_REVIEW', authority: AUTHORITY, stepCount: w.steps.length,
         summary: reviewed.summary, executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP' }, workflowSteps: reviewed.steps,
         conversationState: authoringState('REVIEWED', reviewed.summary.block),
+        readiness: readiness({ review: reviewReadiness(reviewed.summary.block) }),
         nextSteps: ['Steps run in order, each after the previous step reconciled. Confirm each step: every step gets a fresh simulation and the owner\'s Review ' +
           'and wallet confirmation before it runs. User-funded groups (where request_user_approval reports them available): the owner\'s own wallet ' +
           'authorizes each group of same-network steps once and pays every fee.'] };
@@ -639,6 +709,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       summary: review.summary,
       findings: review.findings, capability: review.capability,
       deployment: { flow, mode: mode ?? 'UNKNOWN_IN_LOCAL_RUNTIME' }, conversationState: authoringState('REVIEWED', review.summary.block),
+      readiness: readiness({ review: reviewReadiness(review.summary.block) }),
       nextSteps: ['A fresh simulation (simulate_strategy previews it; the FloFi app runs the authoritative one).',
         'The owner reviews the route-bound Strategy Manifest in the FloFi app and signs with their own wallet. MCP cannot do either.'] };
   });
@@ -656,6 +727,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
       return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true,
         conversationState: preview.status === 'INCOMPLETE' ? conversationState('DRAFT_CREATED') : simulationState(),
+        readiness: readiness({ simulation: preview.status === 'INCOMPLETE' ? 'PREVIEW_INCOMPLETE' : 'PREVIEW_COMPLETED' }),
         subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
         notes: ['Each step uses the corresponding provider preview. A market quote leaves wallet simulation incomplete.',
           'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',
@@ -673,6 +745,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the amounts as FloFi presents them everywhere (six significant digits), for the host to quote verbatim.
       display: previewDisplay(view.kind, view.facts, view.provenance),
       conversationState: marketOnly ? conversationState('DRAFT_CREATED', 'SOLANA_WALLET_REQUIRED') : simulationState(),
+      readiness: readiness({ simulation: marketOnly ? 'MARKET_QUOTE_ONLY' : 'PREVIEW_COMPLETED' }),
       notes: [previewDisplay(view.kind, view.facts) ? 'Show `display.EN` or `display.PT` (the person\'s language) verbatim for these amounts: FloFi\'s own rounding ' +
         '(six significant digits, ≈ marks an estimate, a minimum is rounded down). `facts` stay exact integer native units, for machine use.'
         : 'Amounts are integer native units of the named tokens.', 'Quotes and state expire; the FloFi app re-simulates before any Review.',
@@ -766,14 +839,24 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     if (!principalOwners(ctx.principal).length) return linkRequired();
     const port = ctx.portfolio;
     if (!port) return failWith('PORTFOLIO_NOT_AVAILABLE');
-    // An OAuth account's hourly portfolio budget: each call reads public chains through the readers (and limiters) the Dashboard uses.
-    const principal = ctx.principal, state = ctx.state;
-    if (principal.kind === 'mcp-oauth' && state && !await state.oauth.allow(`portfolio:account:${principal.accountId}`, PORTFOLIO_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
-      return failWith('PORTFOLIO_RATE_LIMITED');
+    const principal = ctx.principal, state = ctx.state, reads = portfolioReadState(principal);
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): a deployment that reads no balances is said so (an operator setting): "link again" would ask the
+    // person for something that cannot help. Decided before the hourly budget, so asking spends nothing.
+    if (reads.status === 'NOT_ENABLED' || reads.status === 'NOT_YET_EFFECTIVE') return failWith('PORTFOLIO_READS_NOT_ENABLED', { deployment: reads.status,
+      ...reads.since ? { consentSince: reads.since } : {}, relinkHelps: false,
+      next: 'Tell the person that this FloFi deployment does not read balances or positions through this connection yet; linking the wallet again does not ' +
+        'change it. Their runs, evidence and history remain readable (list_executions, get_execution_status). Never report this as a zero balance.' });
+    if (reads.status === 'NOT_AN_ACCOUNT') return failWith('PORTFOLIO_REQUIRES_FLOFI_ACCOUNT', { relinkHelps: false });
     const readable = portfolioOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
     // Linked before the Connections page disclosed balance reads: the owner re-links the wallet there to allow them (nothing is read meanwhile).
-    if (!readable.length) return failWith('PORTFOLIO_RELINK_REQUIRED', { linkWalletUrl: `${origin}/connections`,
+    if (!readable.length) return failWith('PORTFOLIO_RELINK_REQUIRED', { linkWalletUrl: `${origin}/connections`, consentSince: reads.since, relinkHelps: true,
       next: 'The person opens FloFi Connections, links the wallet again (sign-in message only) and agrees to balance and position reads; then ask again.' });
+    // An OAuth account's hourly portfolio budget: each call reads public chains through the readers (and limiters) the Dashboard uses.
+    if (principal.kind === 'mcp-oauth' && state && !await state.oauth.allow(`portfolio:account:${principal.accountId}`, PORTFOLIO_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
+      return failWith('PORTFOLIO_RATE_LIMITED');
+    // Linked wallets this call does not read because their link predates consent: named, never silently left out and never shown as zero.
+    const relink = principalOwners(principal).filter(o => balancesUnreadableReason(principal, o) === 'LINK_PREDATES_PORTFOLIO_CONSENT')
+      .map(o => ({ namespace: o.namespace, address: o.address }));
     // One wallet after another, each read only while the request still has time for it: a skipped read is UNKNOWN, and the rest of the answer survives.
     const timeLeft = () => ctx.budget ? ctx.budget.remaining() >= PORTFOLIO_READ_RESERVE_MS : true;
     const code = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
@@ -795,9 +878,13 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       }
       wallets.push({ read: true, ...view, positions });
     }
-    const omitted = principalOwners(principal).length - readable.length;
-    if (omitted) complete = false;
+    // Beyond MAX_ACCOUNT_WALLETS consented wallets (the relink list is reported on its own).
+    const omitted = principalOwners(principal).length - readable.length - relink.length;
+    if (omitted || relink.length) complete = false;
     return { ok: true, readOnly: true, wallets, complete, authority: AUTHORITY, ...omitted ? { walletsOmitted: omitted } : {},
+      ...relink.length ? { relinkRequired: { code: 'PORTFOLIO_RELINK_REQUIRED', wallets: relink, linkWalletUrl: `${origin}/connections`,
+        note: 'These linked wallets were linked before FloFi asked for balance reads, so nothing was read for them (UNKNOWN, not zero). Linking them again on ' +
+          'linkWalletUrl renews consent.' } } : {},
       ...complete ? {} : { note: 'Some balances, positions, networks or wallets could not be read now; they are UNKNOWN (not zero). Try again.' },
       notes: ['Show displayUnits at decimals; rawUnits is the on-chain base amount. Balances are public chain state at observedAt, not a quote.',
         'Before any action FloFi re-reads balances and simulates again in the signing page.'] };
@@ -906,10 +993,11 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     // The approval exists from here on: a failed read only leaves the offer out (never an error for a created approval).
     const created = native ? await owned(result.value.approvalId).catch(() => null) : null;
     const nativeSigning = created && nativeSigningEligible(created) ? { wallets: [...NATIVE_SIGNING_WALLETS] } : null;
-    return { ok: true, ...result.value, visual, ...nativeSigning ? { nativeSigning } : {}, conversationState: approvalState({ status: 'PENDING' }), message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
+    return { ok: true, ...result.value, visual, ...nativeSigning ? { nativeSigning } : {}, conversationState: approvalState({ status: 'PENDING' }),
+      readiness: readiness({ review: 'NO_BLOCKERS', execution: 'GATES_PASSED_AWAITING_OWNER', ownerAuthorization: 'PENDING_OWNER_WALLET' }), message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
       'Confirm each step: confirm each exact transaction in your wallet. User-funded groups: your own wallet authorizes each group of steps on one network and pays every fee. Opening the FloFi signing link is an optional external fallback, not in-chat completion. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
   }, ui ? { ui: { resourceUri: ui.resourceUri }, 'openai/outputTemplate': ui.resourceUri, 'openai/toolInvocation/invoking': 'Preparing approval…',
-    'openai/toolInvocation/invoked': 'Approval ready' } : {});
+    'openai/toolInvocation/invoked': 'Approval request created' } : {});
 
   register('get_approval_status', 'Approval status', 'The status of an approval request this account created: PENDING, CLAIMED, APPLIED, EXPIRED, SUPERSEDED, ' +
     'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A run approval (several steps, or one ' +

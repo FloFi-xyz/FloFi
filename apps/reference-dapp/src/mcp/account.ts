@@ -59,24 +59,56 @@ export const linkedOwners = (principal: McpPrincipal): readonly McpWalletOwner[]
 /** The linked wallets whose balances and positions may be read (links made after `/connections` disclosed those reads); OAuth accounts only. */
 export const portfolioOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principal.kind === 'mcp-oauth' ? principal.portfolioOwners ?? [] : [];
 const sameWallet = (a: McpWalletOwner, b: McpWalletOwner) => a.namespace === b.namespace && a.address === b.address;
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): why a linked wallet's balances cannot be read, or null when they can. A deployment that reads no
+ * balances (FLOFI_MCP_PORTFOLIO_LINKS_FROM unset, invalid or still in the future) is an operator setting that re-linking cannot change; only a link
+ * made before a configured, effective consent instant is renewed by re-linking. A static credential has no FloFi account, so no consent at all.
+ */
+export type BalancesUnreadableReason = 'DEPLOYMENT_PORTFOLIO_READS_NOT_ENABLED' | 'DEPLOYMENT_PORTFOLIO_READS_NOT_YET_EFFECTIVE' | 'LINK_PREDATES_PORTFOLIO_CONSENT'
+  | 'NO_FLOFI_ACCOUNT';
+export function portfolioReadState(principal: McpPrincipal): { readonly status: 'ENABLED' | 'NOT_ENABLED' | 'NOT_YET_EFFECTIVE' | 'NOT_AN_ACCOUNT'; readonly since: string | null } {
+  if (principal.kind !== 'mcp-oauth') return { status: 'NOT_AN_ACCOUNT', since: null };
+  const reads = principal.portfolioReads;
+  // A principal built without the gateway's consent state (an older caller) is judged by its consented links alone, as before.
+  if (!reads) return { status: (principal.portfolioOwners ?? []).length ? 'ENABLED' : 'NOT_ENABLED', since: null };
+  return { status: reads.status, since: reads.status === 'NOT_ENABLED' ? null : reads.since };
+}
+export function balancesUnreadableReason(principal: McpPrincipal, wallet: McpWalletOwner): BalancesUnreadableReason | null {
+  if (portfolioOwners(principal).some(p => sameWallet(p, wallet))) return null;
+  const state = portfolioReadState(principal).status;
+  return state === 'NOT_AN_ACCOUNT' ? 'NO_FLOFI_ACCOUNT' : state === 'NOT_ENABLED' ? 'DEPLOYMENT_PORTFOLIO_READS_NOT_ENABLED'
+    : state === 'NOT_YET_EFFECTIVE' ? 'DEPLOYMENT_PORTFOLIO_READS_NOT_YET_EFFECTIVE' : 'LINK_PREDATES_PORTFOLIO_CONSENT';
+}
 /** How many linked wallets a call did not read (beyond MAX_ACCOUNT_WALLETS): a call that skipped any is never complete. */
 export const omittedOwners = (principal: McpPrincipal): number => Math.max(0, principalOwners(principal).length - MAX_ACCOUNT_WALLETS);
 
 export function accountView(principal: McpPrincipal, origin: string) {
-  const owners = principalOwners(principal), linkUrl = `${origin}/connections`;
+  const owners = principalOwners(principal), linkUrl = `${origin}/connections`, reads = portfolioReadState(principal);
+  const wallets = owners.map(o => {
+    // Balances and positions are read only for a link made after the Connections page asked for that; re-linking there renews consent.
+    const reason = balancesUnreadableReason(principal, o);
+    return { namespace: o.namespace, network: o.namespace === 'eip155' ? 'EVM' : 'SOLANA', address: o.address, label: label(o), balancesReadable: reason === null,
+      ...reason ? { balancesUnreadableReason: reason } : {} };
+  });
+  const readable = wallets.some(w => w.balancesReadable), predates = wallets.some(w => w.balancesUnreadableReason === 'LINK_PREDATES_PORTFOLIO_CONSENT');
+  const portfolioStep = readable ? ['get_portfolio for balances and positions of the wallets whose balancesReadable is true'] : [];
+  const consentStep = predates ? ['A wallet linked before FloFi asked for balance reads (balancesUnreadableReason LINK_PREDATES_PORTFOLIO_CONSENT) becomes readable once the ' +
+    'person links it again on linkWallet.url and agrees there; nothing is read meanwhile.'] : [];
+  const deploymentStep = owners.length && (reads.status === 'NOT_ENABLED' || reads.status === 'NOT_YET_EFFECTIVE')
+    ? ['This FloFi deployment does not read balances or positions through this connection yet. Linking the wallet again does not change that; tell the ' +
+      'person it is a FloFi setting. Runs, evidence and history of these wallets are still readable.'] : [];
   return {
     authenticated: true, kind: principal.kind === 'mcp-oauth' ? 'FLOFI_ACCOUNT_VIA_OAUTH' : 'DEVELOPER_CREDENTIAL',
     ...principal.kind === 'mcp-oauth' ? { client: principal.clientName } : {}, scopes: [...principalScopes(principal)],
-    wallets: owners.map(o => ({ namespace: o.namespace, network: o.namespace === 'eip155' ? 'EVM' : 'SOLANA', address: o.address, label: label(o),
-      // Balances and positions are read only for a link made after the Connections page asked for that; re-linking there renews consent.
-      balancesReadable: portfolioOwners(principal).some(p => sameWallet(p, o)) })),
-    walletCount: owners.length,
+    wallets, walletCount: owners.length,
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): the deployment's own balance-read state, so wallet states and get_portfolio always agree.
+    portfolioReads: { status: reads.status, ...reads.since ? { consentSince: reads.since } : {} },
     identity: 'The account is identified by the wallets linked to it on FloFi, each proven by that wallet\'s own sign-in message — never by an e-mail, ' +
       'username or app metadata. Runs, evidence and execution history follow these wallets across the FloFi web app, ChatGPT and Claude. Approval requests ' +
-      'belong to the conversation or connection that made them (list_approvals: this connection\'s), and are claimed only by the wallet proven on FloFi.',
+      'belong to this FloFi account: every connection of the account (list_approvals) sees and can withdraw them, and they are claimed only by the wallet proven on FloFi.',
     ...principal.kind === 'mcp-oauth' ? { linkWallet: { url: linkUrl, how: 'Open this FloFi page, sign in with the same FloFi connection, connect the wallet and confirm ' +
       'its sign-in message. That message moves no funds and grants no spending authority. The same page removes a link or withdraws an open approval request.' } } : {},
-    nextSteps: owners.length ? ['get_portfolio for balances and positions of these wallets', 'list_executions for their recent runs']
+    nextSteps: owners.length ? [...portfolioStep, ...consentStep, ...deploymentStep, 'list_executions for their recent runs']
       : principal.kind === 'mcp-oauth' ? ['No wallet is linked yet: share linkWallet.url with the person. Composing, reviewing, simulating and requesting approval work without a linked wallet.']
         : ['This developer credential has no granted wallets.'],
   };

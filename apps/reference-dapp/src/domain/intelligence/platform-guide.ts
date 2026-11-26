@@ -24,8 +24,11 @@ export type PlatformSurface = (typeof PLATFORM_SURFACES)[number];
 /** What the owner needs for the action on that screen. */
 export type PlatformRequirement = 'NONE' | 'ACCOUNT_SESSION' | 'WALLET_PROOF' | 'OWNER_SIGNATURE';
 // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: LIQUIDITY_POSITIONS is matched first, so "can I collect my fees from Telegram / MCP?" is answered plainly.
-export const PLATFORM_TOPICS = ['LIQUIDITY_POSITIONS', 'CONNECT_WALLET', 'SUPPORTED_NETWORKS', 'SAVED_WALLETS', 'SAVED_RECIPIENTS', 'AUTOMATIONS', 'AUTHORIZATIONS',
-  'NOTIFICATIONS', 'ACCOUNT_SETTINGS', 'PRIVACY_SECURITY', 'HISTORY', 'EXECUTION_STATUS', 'WORKFLOW_SAVING', 'DELETE_ACCOUNT', 'AI_AGENTS'] as const;
+// BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): CANCEL_AND_SENT_TRANSACTIONS is matched before AUTHORIZATIONS, so "can I cancel a request before
+// signing, and what if it was already sent?" is answered by the request and transaction lifecycle, not by token approvals.
+export const PLATFORM_TOPICS = ['LIQUIDITY_POSITIONS', 'CANCEL_AND_SENT_TRANSACTIONS', 'CONNECT_WALLET', 'SUPPORTED_NETWORKS', 'SAVED_WALLETS', 'SAVED_RECIPIENTS',
+  'AUTOMATIONS', 'AUTHORIZATIONS', 'NOTIFICATIONS', 'ACCOUNT_SETTINGS', 'PRIVACY_SECURITY', 'HISTORY', 'EXECUTION_STATUS', 'WORKFLOW_SAVING', 'DELETE_ACCOUNT',
+  'AI_AGENTS'] as const;
 export type PlatformTopic = (typeof PLATFORM_TOPICS)[number];
 
 const route = (id: string): string => [...SECONDARY_WORKSPACES, ...ACCOUNT_WORKSPACES].find(item => item.id === id)!.href;
@@ -57,6 +60,32 @@ const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
       PT: { label: 'Painel', text: `Suas posições de liquidez na ${positionNetworksText('PT')} são gerenciadas no app web do FloFi: Painel → Minhas posições DeFi, ou peça ` +
       'no chat web ("coleta minhas taxas", "retira metade da minha liquidez", "fecha minha posição na Orca"). Cada operação é preparada para o Simular e autorizada em Executar, e ' +
       'sua carteira assina. Telegram, WhatsApp, MCP e a API para desenvolvedores não gerenciam posições de liquidez nesta versão.' } } },
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): a request withdrawn before signing, a wallet rejection, a sent or pending transaction, an unknown
+  // outcome and a confirmed one are different things. Withdrawing an approval never cancels a transaction that was already sent. Chain behaviour stated
+  // here is what FloFi observes today: an EVM wallet's speed-up of the same transaction is recognized, a different transaction at the reviewed nonce needs
+  // attention, and a Solana transaction is never cancelled (it lands or provably expires).
+  CANCEL_AND_SENT_TRANSACTIONS: { modes: ['EXPLAIN', 'NAVIGATE'], path: 'connections', requires: 'NONE', surfaces: ALL,
+    keywords: [/(?:cancel|desfaz|undo|revert|interromp)\w*\b.{0,60}?\b(?:request|pedido|solicitac|transac|transaction|tx\b|envio|signing|sign\b|assinar|assinatura|sent|enviad|pending|pendente|broadcast|confirmad|confirmed)/,
+      /(?:transac|transaction|tx\b)\w*\s+(?:has\s+|have\s+|was\s+|is\s+)?(?:already\s+|ja\s+)?(?:been\s+|foi\s+|esta\s+|estiver\s+|ficou\s+|tiver\s+sido\s+)?(?:sent|enviad|submitted|broadcast|pending|pendente|stuck|presa|travad)/,
+      /(?:rejeit|reject|recus|declin)\w*\s+(?:\w+\s+){0,3}(?:na|no|in|on)\s+(?:minha\s+|meu\s+|my\s+|the\s+|a\s+|o\s+)?(?:carteira|wallet)/,
+      /(?:speed up|acelerar|substituir|replace)\w*\s+(?:a\s+|uma\s+|my\s+|minha\s+|the\s+)?(?:transac|transaction)/],
+    copy: { EN: { label: 'Connections', text: 'Before you sign, you can withdraw an approval request that has not reached your FloFi signing flow yet: ask your assistant to ' +
+      'cancel it, tap Cancel request in Telegram, or withdraw it on the Connections page. Once it is in your signing flow, reject the request in your wallet: ' +
+      'nothing is sent while you have not signed. Withdrawing or rejecting signs, sends and refunds nothing. Once a transaction has been sent, FloFi cannot ' +
+      'cancel it, and withdrawing the approval does not undo it. While it waits for confirmation, FloFi keeps checking its status. On EVM networks some wallets ' +
+      'offer to speed up or cancel a pending transaction by replacing it at the same nonce; FloFi never does that for you. It recognizes a speed-up of the same ' +
+      'transaction, and a different transaction at that nonce is shown as needing your attention. A Solana transaction cannot be cancelled: it either lands or ' +
+      'expires, and FloFi reports it as not executed only when it can prove that. If FloFi cannot tell whether a transaction was sent, its status is unknown ' +
+      'and FloFi never sends it again on its own. A confirmed transaction is final; undoing it would be a new transaction that you review and sign.' },
+      PT: { label: 'Ligações', text: 'Antes de assinar, você pode retirar uma solicitação de aprovação que ainda não chegou ao seu fluxo de assinatura na FloFi: peça ao seu ' +
+      'assistente para cancelá-la, toque em Cancelar pedido no Telegram ou retire-a na página Ligações (Connections). Depois que ela estiver no seu fluxo de assinatura, ' +
+      'rejeite o pedido na sua carteira: nada é enviado enquanto você não assina. Retirar ou rejeitar não assina, não envia e não reembolsa nada. Depois que uma ' +
+      'transação foi enviada, a FloFi não consegue cancelá-la, e retirar a aprovação não a desfaz. Enquanto ela aguarda confirmação, a FloFi continua ' +
+      'acompanhando o status. Em redes EVM, algumas carteiras oferecem acelerar ou cancelar uma transação pendente substituindo-a no mesmo nonce; a FloFi ' +
+      'nunca faz isso por você. Ela reconhece uma aceleração da mesma transação, e uma transação diferente nesse nonce aparece como precisando da sua atenção. ' +
+      'Uma transação na Solana não pode ser cancelada: ela entra na rede ou expira, e a FloFi só a informa como não executada quando consegue provar isso. Se ' +
+      'a FloFi não consegue saber se uma transação foi enviada, o status fica desconhecido e a FloFi nunca a envia de novo por conta própria. Uma transação ' +
+      'confirmada é definitiva; desfazê-la seria uma nova transação que você revisa e assina.' } } },
   CONNECT_WALLET: { modes: ['EXPLAIN', 'NAVIGATE'], path: 'credentials', requires: 'NONE', surfaces: ALL,
     keywords: [/(?:conect|connect|ligar|vincul|link|usar|use|adicionar|add|trocar de|switch)\w*\s+(?:a\s+|o\s+|my\s+|minha\s+|meu\s+)?(?:phantom|metamask|meta mask|rabby|coinbase wallet|backpack|solflare|carteira|wallet)/, /(?:como|how)\s+(?:eu\s+)?(?:conecto|connect)/],
     copy: { EN: { label: 'Credentials', text: 'Use Connect wallet in FloFi and choose your wallet: Phantom (Solana or EVM), MetaMask, Rabby, Coinbase Wallet, Backpack or Solflare. FloFi only reads your public address; your wallet asks you to approve every signature, and FloFi never asks for a seed phrase. Connected and saved wallets are listed in Credentials.' },
@@ -117,7 +146,8 @@ const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
 };
 
 /** A "how/where" question about FloFi itself (never an action request with amounts or addresses). */
-const CUE = /(?:^|\s)(?:como|onde|where|how|qual|quais|which|what|o que|quero|nao quero|i want|i don t want|dont want|posso|can i|da pra|tem como|is there|existe|preciso|need to|stop|parar|desativar|turn off|disable)(?:\s|$)/;
+// BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): "e se" ("what if", PT) cues a question too ("e se a transação já foi enviada?").
+const CUE = /(?:^|\s)(?:como|onde|where|how|qual|quais|which|what|o que|e se|quero|nao quero|i want|i don t want|dont want|posso|can i|da pra|tem como|is there|existe|preciso|need to|stop|parar|desativar|turn off|disable)(?:\s|$)/;
 export function matchPlatformTopic(text: string): PlatformTopic | null {
   const folded = foldText(text);
   if (!folded || folded.length > 160 || /\d/.test(folded) || /0x[0-9a-f]{6}/i.test(text) || !CUE.test(folded)) return null;

@@ -209,6 +209,22 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
     PT: 'Nenhuma rota de bridge que o FloFi consiga verificar e executar está disponível para esse valor agora. Nada foi assinado nem enviado. Tente mais tarde ou mude o valor.' }],
   [/(?:QUOTE|PREVIEW|SIMULATION_UNAVAILABLE|PROVIDER|UPSTREAM|ROUTE_UNAVAILABLE)/, { EN: 'The current quote is temporarily unavailable. You can try again without rebuilding your workflow.',
     PT: 'A cotação atual está temporariamente indisponível. Você pode tentar de novo sem refazer o seu fluxo.' }],
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): a workflow longer than FloFi accepts, or a step list that arrived with fewer steps than the
+  // person asked for, is said so (before the TOO_MANY rate-limit family): FloFi never drops, merges or reorders a requested step.
+  [/^WORKFLOW_TOO_MANY_STEPS$/, { EN: 'FloFi accepts at most 8 steps in one workflow, and this one has more. Nothing was dropped, signed or sent. Remove steps or split it ' +
+      'into two workflows.',
+    PT: 'O FloFi aceita no máximo 8 etapas em um fluxo, e este tem mais. Nenhuma etapa foi descartada, assinada ou enviada. Remova etapas ou divida-o em dois fluxos.' }],
+  [/^WORKFLOW_STEP_COUNT_MISMATCH$/, { EN: 'FloFi received a different number of steps than you asked for, so it stopped. Nothing was signed or sent. Check the steps and ' +
+      'try again.',
+    PT: 'O FloFi recebeu um número de etapas diferente do que você pediu, então parou. Nada foi assinado nem enviado. Confira as etapas e tente de novo.' }],
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): balance reads that this FloFi deployment has not turned on (an operator setting), before the
+  // generic portfolio family: re-linking the wallet cannot change it, and it is never a zero balance.
+  [/^PORTFOLIO_READS_NOT_ENABLED$/, { EN: 'This FloFi deployment does not read wallet balances through this connection yet. Linking your wallet again does not change ' +
+      'that; your runs and history are still available.',
+    PT: 'Esta implantação do FloFi ainda não lê saldos de carteira por esta conexão. Vincular a carteira de novo não muda isso; as suas execuções e o histórico ' +
+      'continuam disponíveis.' }],
+  [/^PORTFOLIO_REQUIRES_FLOFI_ACCOUNT$/, { EN: 'Wallet balances are read only for a FloFi account connection. This connection cannot read them.',
+    PT: 'Saldos de carteira só são lidos para uma conexão de conta FloFi. Esta conexão não consegue lê-los.' }],
   [/(?:PENDING_LIMIT|HANDOFF_LIMIT)/, { EN: 'You already have the maximum number of open approval requests. Cancel one or let it expire, then try again.',
     PT: 'Você já tem o número máximo de solicitações de aprovação abertas. Cancele uma ou deixe-a expirar e tente de novo.' }],
   [/(?:RATE_LIMIT|BUSY|_LIMIT$|TOO_MANY)/, { EN: 'There are too many requests right now. Wait a moment and try again.',

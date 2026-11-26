@@ -152,17 +152,44 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
   });
 
   it('balances and positions are read only for links made after the Connections page disclosed them (fail closed when unconfigured)', async () => {
-    for (const cutoff of [undefined, 'not-a-date', '2999-01-01T00:00:00Z']) {
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): a deployment that reads no balances (unset, invalid or a future instant) says so: re-linking
+    // cannot change an operator setting, so the person is never told to link again; the hourly budget is not spent; nothing is read or shown as zero.
+    for (const [cutoff, deployment] of [[undefined, 'NOT_ENABLED'], ['not-a-date', 'NOT_ENABLED'], ['2999-01-01T00:00:00Z', 'NOT_YET_EFFECTIVE']] as const) {
       const { port: p, calls } = port(), configured = { ...env, FLOFI_MCP_PORTFOLIO_LINKS_FROM: cutoff as unknown as string };
       if (cutoff === undefined) delete (configured as Record<string, unknown>).FLOFI_MCP_PORTFOLIO_LINKS_FROM;
-      const client = session({ env: configured, token: tokens.X, state: state(handoffs([])), portfolio: p });
-      expect((await client.callTool('get_portfolio', {})).output, String(cutoff)).toMatchObject({ ok: false, code: 'PORTFOLIO_RELINK_REQUIRED',
-        linkWalletUrl: `${config.origin}/connections` });
+      const buckets: string[] = [];
+      const client = session({ env: configured, token: tokens.X, state: state(handoffs([]), undefined, { allow: bucket => { buckets.push(bucket); return true; } }), portfolio: p });
+      const out = (await client.callTool('get_portfolio', {})).output;
+      expect(out, String(cutoff)).toMatchObject({ ok: false, code: 'PORTFOLIO_READS_NOT_ENABLED', deployment, relinkHelps: false });
+      expect(out, String(cutoff)).not.toHaveProperty('linkWalletUrl');
       expect(calls, String(cutoff)).toEqual([]);
-      expect(((await client.callTool('get_account', {})).output.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([false, false]);
+      expect(buckets.filter(b => b.startsWith('portfolio:')), String(cutoff)).toEqual([]);
+      const account = (await client.callTool('get_account', {})).output;
+      expect((account.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([false, false]);
+      expect((account.wallets as { balancesUnreadableReason: string }[]).map(w => w.balancesUnreadableReason))
+        .toEqual(Array(2).fill(deployment === 'NOT_ENABLED' ? 'DEPLOYMENT_PORTFOLIO_READS_NOT_ENABLED' : 'DEPLOYMENT_PORTFOLIO_READS_NOT_YET_EFFECTIVE'));
+      expect(account.portfolioReads).toMatchObject({ status: deployment });
+      // get_account never sends the person to get_portfolio (or to link again) for balances this deployment does not read.
+      expect((account.nextSteps as string[]).some(step => step.startsWith('get_portfolio'))).toBe(false);
+      expect((account.nextSteps as string[]).some(step => /Linking the wallet again does not change that/.test(step))).toBe(true);
     }
     const account = (await session({ env, token: tokens.X, state: state(handoffs([])) }).callTool('get_account', {})).output;
     expect((account.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([true, true]);
+    for (const wallet of account.wallets as Record<string, unknown>[]) expect(wallet).not.toHaveProperty('balancesUnreadableReason');
+    expect(account.portfolioReads).toEqual({ status: 'ENABLED', consentSince: '2026-01-01T00:00:00.000Z' });
+  });
+
+  it('a link made before an effective consent instant is renewed by re-linking; every other link is still read and none is shown as zero', async () => {
+    // The cutoff is now: X's links (made a moment before, by the double) predate it.
+    const now = new Date(), later = { ...env, FLOFI_MCP_PORTFOLIO_LINKS_FROM: new Date(now.getTime() + 3_000).toISOString().replace(/\.\d{3}Z$/, 'Z') };
+    const { port: p, calls } = port();
+    const predating = session({ env: later, token: tokens.X, state: state(handoffs([])), portfolio: p, now: () => new Date(now.getTime() + 10_000) });
+    const out = (await predating.callTool('get_portfolio', {})).output;
+    expect(out).toMatchObject({ ok: false, code: 'PORTFOLIO_RELINK_REQUIRED', relinkHelps: true, linkWalletUrl: `${config.origin}/connections` });
+    expect(calls).toEqual([]);
+    const account = (await predating.callTool('get_account', {})).output;
+    expect((account.wallets as { balancesUnreadableReason: string }[]).map(w => w.balancesUnreadableReason)).toEqual(['LINK_PREDATES_PORTFOLIO_CONSENT', 'LINK_PREDATES_PORTFOLIO_CONSENT']);
+    expect((account.nextSteps as string[]).some(step => /becomes readable once the person links it again/.test(step))).toBe(true);
   });
 
   it('a balance that cannot be interpreted carries no raw number; a partly checked network is incomplete; reads stop before the deadline', async () => {
