@@ -4,7 +4,7 @@
  * EIP-1193 requests the real Editor actually makes are counted by the wallet double (e2e/batch-wallet-fixtures.ts), never a button label.
  *
  *   one Uniswap V3 card (swap 0.0006 WETH → USDC on Base) → "Simulate workflow" (the read-only whole-workflow Review: `wallet_getCapabilities`,
- *   no prompt) → "Continue to authorization" → "Authorize workflow" (one click; a wallet sign-in session already exists) → exactly ONE `wallet_sendCalls`
+ *   no prompt) → "Continue to authorization" → "Execute workflow" (one click; a wallet sign-in session already exists) → exactly ONE `wallet_sendCalls`
  *   (atomic; the exact ERC-20 approval folded in only when the allowance is short, then the swap) → the page reads the batch's status and the
  *   run reconciles by itself to COMPLETED (no "Continue", no manual check) → reload: followed, never sent again.
  *   A declined batch executes nothing and is never retried automatically; a wallet without atomic batching on Base keeps the card's own flow.
@@ -134,7 +134,7 @@ async function simulateAndReview(page: Page, log: WalletRecorder) {
   await expect(panel(page).getByRole('heading', { name: 'Check your operation', exact: true })).toBeVisible({ timeout: 60_000 });
   await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText(/Swap\s*0\.0006 WETH → (≈ )?[\d.,]+ USDC/, { timeout: 60_000 });
   await expect(panel(page).locator('.review-block-rows')).toContainText('Expected wallet confirmations1');
-  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
+  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(1);
   expect(log.methods).toContain('wallet_getCapabilities');
   expect(log.asking()).toEqual([]);
   expect(log.sent).toEqual([]);
@@ -161,7 +161,7 @@ test('insufficient allowance: one Authorize asks the wallet for ONE wallet_sendC
 
   // The Authorize window: ONE click, then nothing but the wallet's batch and its status reads until the run completed.
   const authorizeFrom = log.mark();
-  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  await footerAction(page).getByRole('button', { name: 'Execute workflow', exact: true }).click();
   await expect(panel(page)).toHaveAttribute('data-run-state', 'COMPLETED', { timeout: 90_000 });
   await expect(panel(page)).toContainText('Every step reconciled.');
   const inWindow = log.counts(authorizeFrom);
@@ -196,7 +196,7 @@ test('insufficient allowance: one Authorize asks the wallet for ONE wallet_sendC
   // was ever offered.
   await expect(page.locator('.composer-card').filter({ hasText: 'Swap' }).first()).toContainText('Completed');
   await expect(panel(page)).toContainText('Received (reconciled)');
-  await expect(panel(page).getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  await expect(panel(page).getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
   expect(manual).toEqual([]);
 
   // Reload: the Canvas keeps its workflow id, so the run is THIS workflow's own; it is followed from FloFi (loaded by the owner's click where the
@@ -209,7 +209,7 @@ test('insufficient allowance: one Authorize asks the wallet for ONE wallet_sendC
   if (await load.isVisible()) await load.click();
   await expect(panel(page)).toHaveAttribute('data-run-state', 'COMPLETED', { timeout: 60_000 });
   await expect(panel(page)).toContainText('Every step reconciled.');
-  await expect(panel(page).getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  await expect(panel(page).getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
   const settledFrom = Date.now();
   await expect.poll(() => log.sent.length !== 1 ? `SENT ${log.sent.length}` : log.asking(reloaded).length ? `ASKED ${log.asking(reloaded).join(',')}`
     : Date.now() - settledFrom < 5_000 ? 'SETTLING' : 'SETTLED', { timeout: 15_000, intervals: [250] }).toBe('SETTLED');
@@ -227,7 +227,7 @@ test('existing sufficient allowance: ONE wallet_sendCalls with the swap only (no
   const { owner, log, manual } = await begin(page, { allowance: AMOUNT_IN });
   await simulateAndReview(page, log);
   const authorizeFrom = log.mark();
-  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  await footerAction(page).getByRole('button', { name: 'Execute workflow', exact: true }).click();
   await expect(panel(page)).toHaveAttribute('data-run-state', 'COMPLETED', { timeout: 90_000 });
   await expect(panel(page)).toContainText('Every step reconciled.');
   console.log(`[single-card] sufficient allowance: wallet requests in the Authorize window ${JSON.stringify(log.counts(authorizeFrom))}; whole test ${JSON.stringify(log.counts())}`);
@@ -253,7 +253,7 @@ test('declined in the wallet (EIP-1193 4001): nothing executes, the one request 
   const { owner, log, manual } = await begin(page, { sendCalls: 'reject' });
   await simulateAndReview(page, log);
   const authorizeFrom = log.mark();
-  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  await footerAction(page).getByRole('button', { name: 'Execute workflow', exact: true }).click();
   // The existing inline error of a declined wallet request.
   await expect(panel(page).getByRole('alert')).toContainText('You declined the request in your wallet. Nothing was sent.', { timeout: 90_000 });
   // No automatic retry: for 5 more seconds the wallet is asked nothing else that prompts.
@@ -280,7 +280,7 @@ test('declined in the wallet (EIP-1193 4001): nothing executes, the one request 
 test('an atomicity refusal stays on the same run after a reload and requires a chain check before separate confirmations', async ({ page, networkGuard }) => {
   const { owner, log } = await begin(page, { sendCalls: 'unsupported' });
   await simulateAndReview(page, log);
-  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  await footerAction(page).getByRole('button', { name: 'Execute workflow', exact: true }).click();
   const refusal = () => panel(page).getByRole('status').filter({ hasText: 'Your wallet refused the batch.' });
   await expect(refusal()).toContainText('FloFi can check the network for separate confirmations after', { timeout: 90_000 });
   const before = await stored(owner);
@@ -295,7 +295,7 @@ test('an atomicity refusal stays on the same run after a reload and requires a c
   if (await load.isVisible()) await load.click();
   await expect(refusal()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Confirm the batch steps separately' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
   expect((await stored(owner)).runs.map(run => run.run_id)).toEqual(before.runs.map(run => run.run_id));
   expect(log.asking()).toEqual(['wallet_sendCalls']);
   expect(await control<number>('MOCK_batches')).toBe(0);
@@ -320,7 +320,7 @@ test('a wallet without atomic batching on Base: no wallet_sendCalls; the card ke
   await page.waitForTimeout(5_000);
   console.log(`[single-card] no atomic batching: wallet requests ${JSON.stringify(log.counts())}`);
   await expect(page.getByText(/^(Review before authorizing|Check your operation)$/)).toHaveCount(0);
-  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
   // Execute after the fallback shows only the card's own flow: never the whole-workflow Review, its mechanism sentence or a second primary action
   // ("Review whole workflow" / "Review again") beside the card's own (final frontend-ux review).
   await openEditorSection(page, 'Execute');

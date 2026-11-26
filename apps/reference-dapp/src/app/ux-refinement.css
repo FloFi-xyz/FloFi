@@ -120,6 +120,14 @@
 .execution-receipt-notice p{margin:0}
 .execution-receipt-notice ul{margin:6px 0 0;padding-left:18px}
 .execution-receipt-notice .execution-receipt-readonly{margin-top:6px;color:var(--muted);font-size:13px}
+/* Execution UX regression fixes: the receipt's compact form inside the Execute status panel beside the Canvas. */
+.execution-result-compact{display:grid;gap:10px;min-width:0}
+.execution-result-compact .execution-receipt-amounts{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.execution-result-compact .execution-receipt-amounts>div{padding:10px 12px;border-radius:10px}
+.execution-result-compact .execution-receipt-amounts dd{font-size:16px}
+.execution-result-compact .execution-receipt-facts dt,.execution-result-compact .execution-receipt-facts dd{font-size:13px}
+.execution-result-compact .execution-receipt-facts>div{padding:8px 0}
+.execution-result-compact .execution-receipt-link{min-height:34px;padding:0 12px;font-size:13px}
 .execution-receipt-amounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:0}
 .execution-receipt-amounts>div{display:flex;flex-direction:column;gap:4px;min-width:0;padding:14px 16px;border-radius:14px;background:var(--surface-raised)}
 .execution-receipt-amounts dt{color:var(--muted);font-size:13px;font-weight:500}

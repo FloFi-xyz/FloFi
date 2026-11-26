@@ -248,7 +248,7 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
 /**
  * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the engineering (technical details) panel of a Uniswap position operation (collect, withdrawal, exit,
  * explicit close): READ-ONLY. BUILD-FLOFI-UX-EDITOR-FINOPS-001: the Editor's stages own every action — Simulate runs the simulation, Execute holds
- * the Review's ONE "Authorize workflow" (or "Refresh review") and the status checks — so this panel repeats none of them; it shows the same Review
+ * the Review's ONE "Execute workflow" (or "Refresh review") and the status checks — so this panel repeats none of them; it shows the same Review
  * rows (`uniswapPositionReviewLines`), the run's attempts and its reconciled result. FloFi never signs or sends; an unknown outcome is only observed.
  */
 function UniswapPositionPanel({ view }: { view: 'simulate' | 'execute' }) {

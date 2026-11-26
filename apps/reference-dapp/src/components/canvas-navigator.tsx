@@ -120,6 +120,11 @@ export function CanvasWheelNavigation({ onViewportChange }: { onViewportChange?:
  * license notice ships with the package). Nothing else of the canvas changes: no CSS hides it and no other element is removed.
  */
 export const CANVAS_PRO_OPTIONS: ProOptions = Object.freeze({ hideAttribution: true });
+/**
+ * The Canvas dot grid established on Create. Execution UX regression fixes: Simulate, Review and Execute (live and settled) draw exactly this
+ * grid on the same surface colour (`.simulate-flow-surface` in approved-ux-editor.css), so the Canvas never turns into a flat panel between stages.
+ */
+export const CANVAS_BACKGROUND = Object.freeze({ gap: 22, size: 1.5, color: 'var(--grid)' });
 
 /** React Flow owns the viewport, including zoom changes from gestures and automatic fitting.
  * P0 approved UX (board 04): the same three controls on every canvas, bottom right — Fit, zoom out (−) and zoom in (+); the zoom slider and the

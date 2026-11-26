@@ -48,7 +48,7 @@ export const portugueseApprovedUxPages: Readonly<Record<string, string>> = {
   'Waiting for you': 'Aguardando você', 'Your automations': 'Suas automações', 'No automations yet. Choose a routine above.': 'Nenhuma ainda. Escolha uma rotina acima.',
   'Max price difference': 'Diferença máxima de preço', 'Max price difference {0}': 'Diferença máxima de preço {0}',
   'Max price difference (%)': 'Diferença máxima de preço (%)', 'Max price difference limit': 'Limite da diferença máxima de preço',
-  'Max price difference options': 'Opções de diferença máxima de preço', 'Use Auto ({0})': 'Usar Automático ({0})', 'Manual {0}': 'Manual {0}',
+  'Max price difference options': 'Opções de diferença máxima de preço', 'Use Auto ({0})': 'Usar Automático ({0})',
   'Checking route…': 'Verificando rota…', 'Auto slippage': 'Diferença de preço automática',
   'Above 3%, the price can move substantially against you before the operation stops.': 'Acima de 3%, o preço pode se mover significativamente contra você antes que a operação seja interrompida.',
   'Max price difference limit (%)': 'Limite da diferença máxima de preço (%)', 'The max price difference is above your limit.': 'A diferença máxima de preço está acima do seu limite.',

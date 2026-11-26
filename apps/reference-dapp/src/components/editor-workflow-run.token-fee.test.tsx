@@ -52,8 +52,8 @@ const runOf = (patch: Partial<RunView>): RunView => ({ workflowRunId: 'wfr_' + '
   stepCount: 2, currentStep: 0, code: null, workflowHash: '0x' + '1'.repeat(64), expiresAt: FUTURE, completedAt: null, createdAt: PAST, updatedAt: PAST, stepsVisible: true,
   steps: [], nextAction: 'OWNER_SIGNS_GROUP', groups: [group(0)], halted: null, resumable: false, authority: 'NONE', note: null, ...patch });
 const state = (patch: Partial<EditorWorkflowRunState>): EditorWorkflowRunState => ({ available: true, phase: 'reviewed', review: circleReview(), error: null, run: null,
-  updated: [], started: false, grouped: true, unrecorded: false, visible: true, earlier: false, stepByStep: false, unloaded: false, canReview: true, following: false,
-  followEarlier: vi.fn(), hide: vi.fn(), resume: vi.fn(), startReview: vi.fn(), authorize: vi.fn(), confirmUpdate: vi.fn(), authorizeDue: vi.fn(), checkWallet: vi.fn(),
+  updated: [], started: false, grouped: true, unrecorded: false, visible: true, stepByStep: false, unloaded: false, canReview: true,
+  resume: vi.fn(), startReview: vi.fn(), authorize: vi.fn(), confirmUpdate: vi.fn(), authorizeDue: vi.fn(), checkWallet: vi.fn(),
   end: vi.fn(), dismiss: vi.fn(), endAndReview: vi.fn(), ...patch });
 const render = (s: EditorWorkflowRunState, language: Language = 'EN') =>
   renderToStaticMarkup(<LocaleProvider initialLanguage={language}><EditorWorkflowRunPanel state={s} actionsOutside/></LocaleProvider>);

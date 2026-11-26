@@ -41,7 +41,7 @@ export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: 
     const hash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
     const bps = result?.format === 'flofi.jupiter-rtse.v1' && result.workflowHash === hash && expires > Date.now() &&
       Number.isSafeInteger(result.slippageBps) && result.slippageBps >= 1 && result.slippageBps <= 300 ? result.slippageBps : null;
-    setStatus({ key, pending: false, bps, expires, error: bps === null ? 'Jupiter did not provide a usable slippage recommendation. Set a Manual limit or try again.' : null });
+    setStatus({ key, pending: false, bps, expires, error: bps === null ? 'Jupiter did not provide a usable slippage recommendation. Choose a preset or enter a limit, or try again.' : null });
   }
   return { autoBps: visible?.bps ?? null, autoPending: Boolean(visible?.pending), ...(key ? { onRequestAuto: () => void suggest() } : {}),
     autoError: visible?.error ?? null };

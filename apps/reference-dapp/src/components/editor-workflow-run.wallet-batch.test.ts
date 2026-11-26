@@ -511,3 +511,30 @@ describe('round 5: a USER_FUNDED_PREPARED_STILL_VALID refusal names its group an
     expect(render().error).toBe('SIMULATION_REVERTED');
   });
 });
+
+describe('execution UX regression fixes: a previous workflow never surfaces in the current one', () => {
+  const OTHER = { workflowId: 'wf-previous', approvalId: 'apr_' + 'c'.repeat(26), workflowHash: '0x' + '2'.repeat(64), owner: OWNER, revision: 3,
+    at: '2026-11-25T15:00:00.000Z', sent: { group: 0, batchId: GROUP_ID } };
+  it('a run this browser started for ANOTHER workflow is not offered, not followed and not read: the current workflow reviews and authorizes alone', async () => {
+    storage.set(STORAGE_KEY, JSON.stringify([OTHER]));
+    render(); await poll();
+    const state = render() as unknown as Record<string, unknown>;
+    expect(state).not.toHaveProperty('earlier');
+    expect(state).not.toHaveProperty('followEarlier');
+    expect(state.started).toBe(false);
+    expect(state.run).toBeNull();
+    expect(server.status).not.toHaveBeenCalled();
+    // The previous run's pointer (and its "handed to the wallet" record) stays stored for My Workflows: nothing is forgotten or resent.
+    expect(JSON.parse(storage.get(STORAGE_KEY)!)).toEqual([OTHER]);
+    // The current workflow is not blocked by it: its own Review and Authorize proceed (one wallet request for its own group).
+    await authorizeOnce();
+    expect(server.authorize).toHaveBeenCalledTimes(1);
+    expect(walletSent).toBe(1);
+  });
+  it('a run of the SHOWN workflow (a reload, another tab) is still followed in place, read from FloFi', async () => {
+    storage.set(STORAGE_KEY, JSON.stringify([{ ...OTHER, workflowId: workflow.workflowId, approvalId: APPROVAL, revision: workflow.revision }]));
+    render(); await poll();
+    expect(server.status).toHaveBeenCalledWith(APPROVAL);
+    expect(render().started).toBe(true);
+  });
+});

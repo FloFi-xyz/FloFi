@@ -28,7 +28,7 @@ export function GroupedSimulationPanel({ state, canvasWorkflow, context, action,
   const review = state.review;
   const now = Date.now();
   const expired = Boolean(review?.validUntil && Date.parse(review.validUntil) <= now);
-  const started = Boolean(state.started || state.following || state.run || state.unloaded);
+  const started = Boolean(state.started || state.run || state.unloaded);
   const view = started ? 'started' : state.phase === 'reviewing' ? 'busy' : !review ? 'pending' : expired ? 'expired' : review.refusal ? 'blocked' : 'ready';
   const until = view === 'ready' && review?.validUntil ? new Date(review.validUntil).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
   const title = view === 'ready' ? 'Simulation result' : view === 'expired' ? 'Simulation expired' : view === 'blocked' ? 'Simulation blocked' : view === 'started' ? 'Workflow simulation' : 'Simulate workflow';

@@ -55,7 +55,7 @@ describe('Review panel (board 06)', () => {
     expect(html).toContain('<strong>Swap</strong>');
     expect(html).toContain('What does the simulation do?');
     expect(html).toContain('<details class="review-panel-technical"><summary>Technical details</summary><div class="technical-body" role="region" aria-label="Technical details" tabindex="0"><p>SUMMARY</p>');
-    expect(html).not.toMatch(/Review before authorizing|You are authorizing|<button[^>]*class="primary"|Authorize in wallet|Authorize workflow/);
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|<button[^>]*class="primary"|Authorize in wallet|Authorize workflow|Execute workflow/);
     const hosted = renderToStaticMarkup(createElement(ReviewSummaryPanel, { workflow, context, source: { kind: 'unavailable', state: { error: null, busy: false } }, authorization, wallet,
       action: createElement('button', { type: 'button', className: 'primary' }, 'Simulate workflow') }));
     expect(hosted).toContain('<div class="simulation-panel-action"><button type="button" class="primary">Simulate workflow</button></div>');

@@ -33,6 +33,7 @@ import { createOwnerHistory, savedWorkflowDeleted, type HistoryDisposition, type
 import { investigateNonceConflict, NONCE_CONFLICT_CODE, nonceConflictPacing, nonceConflictSubject, STABLE_ESCALATION_CODE,
   type NonceConflictPacing } from '../src/server/nonce-conflict.ts';
 import { loadNonceConflict, markNonceConflictEscalated, peerAttempts, peersByTransaction, previousScan, recordNonceConflict } from '../src/server/nonce-conflict-store.ts';
+import { reconcileDelayMs } from './reconcile-pacing.ts';
 
 /** Methods that could put a transaction on any network. Observer (worker) transports reject them unconditionally. */
 const SUBMISSION_METHODS = new Set(['sendTransaction', 'eth_sendRawTransaction', 'eth_sendTransaction']);
@@ -709,14 +710,19 @@ export function createBackend(options: BackendOptions) {
         // Re-checked under the run lease: a stale item cannot act on an attempt created after it was queued.
         const record = await svc.load(runId);
         if (!definition.needsObservation(record)) { await settle({ outcome: 'DONE' }); return; }
-        const next = await svc.observe(runId) as { error?: string | null; verdict?: string; observation?: { outcome: string; reason: string } };
+        const next = await svc.observe(runId) as { error?: string | null; verdict?: string; phase?: string; source?: { confirmedAt?: string } | null;
+          observation?: { outcome: string; reason: string } };
         const pending = definition.needsObservation(next);
         log.info('reconcile.observed', { flow, run_id: runId, reconciliation_state: next.verdict ?? null, error_code: next.error ?? null,
           observation_outcome: next.observation?.outcome ?? null, observation_reason: next.observation?.reason ?? null, still_pending: pending });
         const reason = next.observation?.reason ?? next.error ?? 'OBSERVATION_PENDING';
         // P0: a nonce conflict is investigated after the run lease is released (its reads can take a while and change nothing in the run).
         if (pending && NONCE_CONFLICT_CODE.test(next.error ?? '')) { conflict = { record: next, reason }; return; }
-        await settle(pending ? { outcome: 'RETRY', delayMs: backoffMs(item.deliveries), reason } : { outcome: 'DONE' });
+        // A run that only waits for the chains (a confirming transaction, a bridge in flight, a delivery awaiting finality) is observed at the
+        // settlement cadence, so it reconciles within seconds of its evidence becoming final instead of after a backoff of up to ten minutes.
+        const delayMs = reconcileDelayMs({ outcome: next.observation?.outcome, phase: next.phase, settlingSince: next.source?.confirmedAt,
+          deliveries: item.deliveries, createdAt: item.createdAt, now: Date.now() });
+        await settle(pending ? { outcome: 'RETRY', delayMs, reason } : { outcome: 'DONE' });
       });
       if (conflict) {
         const { record, reason } = conflict as { record: unknown; reason: string };

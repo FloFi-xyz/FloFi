@@ -3,7 +3,7 @@
  * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 within BUILD-FLOFI-UX-EDITOR-FINOPS-001's Execute stage: what the Editor footer's ONE lifecycle action, its
  * status line and the Assistant's expired-Review note read for a position run — from real Reviews and runs of the Uniswap position service (MOCKED
  * in-process Base chain) and the Orca service (MOCKED Solana mainnet loopback). C1: "Review valid for m:ss" + Authorize (the shell words it
- * "Authorize workflow"); C2: the Review expired, the action is Simulate again (worded "Refresh review"); then waiting for the wallet, checking an
+ * "Execute workflow"); C2: the Review expired, the action is Simulate again (worded "Refresh review"); then waiting for the wallet, checking an
  * existing request, an uncertain outcome that is only observed (never resent), a reconciled run, a divergence and a request never sent.
  */
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';

@@ -67,11 +67,11 @@ if (profile === 'jupiter') test('Jupiter Auto recommends a bounded tolerance wit
   const recommendation = settings.getByRole('button', { name: 'Use Auto (1.25%)', exact: true });
   await expect(recommendation).toBeVisible();
   await expect(field).toHaveValue('1');
+  // Execution UX regression fixes: a recommendation (like a preset) is populated and applied in one click; there is no separate Apply button.
   await recommendation.click();
   await expect(field).toHaveValue('1.25');
-  await expect(settings).toContainText('Applied limit: 1%');
-  await settings.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
   await expect(settings).toContainText('Applied limit: 1.25%');
+  await expect(settings.getByRole('button', { name: 'Apply max price difference', exact: true })).toHaveCount(0);
   expect(await signRequests(page)).toBe(0); expect(await jupiterControl({ action: 'sent' })).toBe(0);
 });
 

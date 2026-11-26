@@ -92,7 +92,11 @@ const missing = (keys: readonly string[]) => keys.filter(key => !Object.hasOwn(p
 describe('central product locale catalog', () => {
   it('translates every dynamic financial observation and blocker through the active EN/PT-BR catalog', () => {
     const outcomes: FinancialObservation['outcome'][] = ['CONFIRMED', 'APPROVAL_CONFIRMED', 'DESTINATION_OBSERVED', 'REFUND_OBSERVED', 'PENDING', 'REVERTED', 'NOT_SUBMITTED', 'UNDETERMINED', 'TEMPORARY_FAILURE', 'RECONCILED'];
-    const messages = outcomes.map(outcome => financialObservationMessage({ outcome, checkedAt: '2026-10-28T00:00:00Z', reason: 'TEST' }));
+    const messages = [...outcomes.map(outcome => financialObservationMessage({ outcome, checkedAt: '2026-10-28T00:00:00Z', reason: 'TEST' })),
+      ...['UNIVERSAL_AWAITING_FINALITY', 'ROUTER_AWAITING_FINALITY'].map(reason => financialObservationMessage({ outcome: 'DESTINATION_OBSERVED', checkedAt: '', reason }))];
+    // Execution reconciliation regression: a delivery that only awaits finality says so (network, not FloFi) and asks for nothing.
+    expect(financialObservationMessage({ outcome: 'DESTINATION_OBSERVED', checkedAt: '', reason: 'UNIVERSAL_AWAITING_FINALITY' })).toMatch(/network finality, not a FloFi delay\. FloFi checks it again automatically; no action or signature/);
+    expect(financialObservationMessage({ outcome: 'DESTINATION_OBSERVED', checkedAt: '', reason: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE' })).toMatch(/^A destination transfer was verified/);
     for (const message of new Set([...messages, ...Object.keys(portugueseFinancialExecution)])) {
       expect(translate('EN', message)).toBe(message);
       expect(translate('PT', message), message).toBe(portuguese[message]);

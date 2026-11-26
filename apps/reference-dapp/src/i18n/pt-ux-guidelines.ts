@@ -16,5 +16,5 @@ export const portugueseUxGuidelines: Readonly<Record<string, string>> = {
   '{0}, show the full address {1}': '{0}, mostrar o endereço completo {1}', 'Full address': 'Endereço completo',
   'Paid by your wallet · at today\'s prices': 'Paga pela sua carteira · nos preços de agora', 'At today\'s prices': 'Nos preços de agora',
   // UX-05: the chat's hand-off names the panel's next action
-  'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.': 'Este fluxo roda como uma única execução: escolha Simular fluxo, depois Continuar para autorização e Autorizar fluxo.',
+  'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Execute workflow.': 'Este fluxo roda como uma única execução: escolha Simular fluxo, depois Continuar para autorização e Executar fluxo.',
 };

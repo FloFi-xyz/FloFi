@@ -40,7 +40,7 @@ const rows = (html: string) => Object.fromEntries([...html.matchAll(/<dt>(.*?)<\
 const TECHNICAL_ROWS = ['Liquidity removed', 'Liquidity remaining', 'Liquidity', 'Price range', 'Range state', 'Current price', 'Position Manager', 'Deadline',
   'Owed tokens and fees', 'Collected (expected)', 'Expected principal returned', 'Minimum principal (enforced)', 'Tokens returned'];
 const AMOUNTS = /^(?:≈ )?[\d.,]+(?:M| mi)? \S+ \+ (?:≈ )?[\d.,]+(?:M| mi)? \S+$/;
-const NO_AUTHORIZE = /data-lifecycle-action|Authorize workflow|Authorize in wallet|Autorizar fluxo|<button[^>]*class="primary"/;
+const NO_AUTHORIZE = /data-lifecycle-action|Authorize workflow|Execute workflow|Authorize in wallet|Autorizar fluxo|Executar fluxo|<button[^>]*class="primary"/;
 const NO_YIELD = /\byield\b|rendimento/i;
 
 async function uniswap(operation: 'COLLECT' | 'DECREASE' | 'EXIT', partBps: number | null = null, close = false) {

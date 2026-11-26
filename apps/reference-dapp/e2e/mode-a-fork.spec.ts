@@ -83,8 +83,8 @@ test('a semantic edit retires the reviewed fork action and no wallet request is 
   await openEditorSection(page, 'Build');
   await page.locator('.flow-card').nth(1).click();
   await page.locator('.inspector').getByLabel('Max price difference (%)', { exact: true }).fill('0.5');
-  // BUILD-FIX-UX-001: a slippage edit applies directly — still a new semantic revision that retires the reviewed fork action.
-  await page.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  // BUILD-FIX-UX-001: a slippage edit applies directly (committed with Enter) — still a new semantic revision that retires the reviewed fork action.
+  await page.locator('.inspector').getByLabel('Max price difference (%)', { exact: true }).press('Enter');
   await expect(page.locator('.summary-bar[data-workflow-revision="2"]')).toBeVisible();
   await openEditorSection(page, 'Simulate');
   await openTechnicalDetails(page);

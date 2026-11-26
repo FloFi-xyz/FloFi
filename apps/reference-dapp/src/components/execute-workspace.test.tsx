@@ -8,7 +8,7 @@ import { projectExecutionLifecycle, type ExecutionLifecycleSource } from '../dom
 import { canvasAddCommand } from '../domain/canvas-authoring';
 import { editorReducer, initialEditor } from '../domain/editor';
 import { lifecycleCanvasExecution } from '../domain/canvas-execution';
-vi.mock('./simulate-workflow-canvas', () => ({ SimulateWorkflowCanvas: ({ workflowName, stage, primaryAction }: { workflowName: string; stage: string; primaryAction: ReactNode }) => createElement('section', { 'aria-label': stage === 'execute' ? 'Execution plan' : 'Workflow simulation' }, workflowName, primaryAction) }));
+vi.mock('./simulate-workflow-canvas', () => ({ SimulateWorkflowCanvas: ({ workflowName, stage, primaryAction, dock }: { workflowName: string; stage: string; primaryAction: ReactNode; dock?: ReactNode }) => createElement('section', { 'aria-label': stage === 'execute' ? 'Execution plan' : 'Workflow simulation' }, workflowName, primaryAction, dock) }));
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(reviewNow); });
 afterEach(() => vi.useRealTimers());
 function fixture(): ExecuteWorkspaceProps {
@@ -271,8 +271,21 @@ describe('BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a live run stays on the C
     expect(html.match(/>Check confirmation</g)).toHaveLength(1);
     expect(html).not.toContain('>Authorize in wallet<'); expect(data.execution.start).not.toHaveBeenCalled();
   });
-  it('opens the details at once when the outcome needs attention or a result exists', () => {
-    for (const state of ['REVERTED', 'UNKNOWN', 'CONFIRMED']) expect(render(liveRun(state))).toMatch(/<details class="shell-details execution-details-disclosure" open="">/);
+  it('opens the details at once when the outcome needs attention', () => {
+    for (const state of ['REVERTED', 'UNKNOWN']) expect(render(liveRun(state))).toMatch(/<details class="shell-details execution-details-disclosure" open="">/);
+  });
+  it('execution UX regression fixes: a clean result keeps the long details collapsed; the compact result is in the panel beside the Canvas', () => {
+    const data = liveRun('CONFIRMED');
+    expect(render(data)).toMatch(/<details class="shell-details execution-details-disclosure">/);
+    // The product workspace (status panel docked inside the Canvas frame): sent, received as observed, the transaction link and the step count
+    // are inside the panel, before the collapsed details; nothing about the result needs the disclosure below the Canvas.
+    const html = render({ ...data, detailsOnly: true });
+    const panel = html.slice(html.indexOf('class="execution-summary execution-status-panel'), html.indexOf('execution-details-disclosure'));
+    expect(panel).toContain('data-execution-result="compact"');
+    expect(panel).toMatch(/<dt>(You sent|Configured amount)<\/dt>/);
+    expect(panel).toContain('class="execution-receipt-link"');
+    expect(panel).toMatch(/1 of 1/);
+    expect(html).toMatch(/<details class="shell-details execution-details-disclosure">/);
   });
   it('keeps the timeline as the view when the Canvas execution does not include this live run (another run, or none)', () => {
     const data = liveRun('PENDING');

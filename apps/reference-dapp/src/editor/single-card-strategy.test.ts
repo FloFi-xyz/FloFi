@@ -11,7 +11,7 @@ import { createReviewContext } from '@defi-workflow-engine/reference-linter';
 import { parseLocalCommand } from '../domain/commands';
 import { editorReducer, initialEditor, type EditorState } from '../domain/editor';
 import type { Workflow } from '../domain/initial-workflow';
-import { deliveredByRun, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES, singleCardFallsBack } from '../domain/workflow-sequence';
+import { deliveredByRun, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES, singleCardFallsBack, localExecutionHolds } from '../domain/workflow-sequence';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { evaluateWorkflowGates, readHandoffPolicy, workflowPlan } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
@@ -166,17 +166,32 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists
   });
 
   it('a single card goes back to its own flow when its Review is step by step, refuses, or could not answer at all; never once its run started', () => {
-    const base = { started: false, review: null, stepByStep: false, error: null, following: false };
+    const base = { started: false, review: null, stepByStep: false, error: null };
     expect(singleCardFallsBack(base)).toBe(false); // not reviewed yet: the whole-workflow path stays primary
     expect(singleCardFallsBack({ ...base, review: { mode: 'ONE_WALLET_CONFIRMATION', refusal: null } })).toBe(false);
     expect(singleCardFallsBack({ ...base, review: { mode: 'STEP_BY_STEP', refusal: null } })).toBe(true);
     expect(singleCardFallsBack({ ...base, review: { mode: 'ONE_WALLET_CONFIRMATION', refusal: { code: 'SIMULATION_REVERTED' } } })).toBe(true);
     // Final workflow review: a Review that could not answer (rate limited, RPC or server failure) never hides the card's own flow.
     for (const error of ['EDITOR_REVIEW_RATE_LIMITED', 'USER_FUNDED_RPC_UNAVAILABLE', 'EDITOR_EXECUTION_FAILED']) expect(singleCardFallsBack({ ...base, error })).toBe(true);
-    expect(singleCardFallsBack({ ...base, error: 'EDITOR_EXECUTION_FAILED', following: true })).toBe(false);
     // No connected wallet keeps the whole-workflow path and its connect reason (final frontend-ux review: no silent flip).
     expect(singleCardFallsBack({ ...base, error: 'EVM_WALLET_REQUIRED' })).toBe(false);
     // A started run always stays on its path, whatever its Review or errors say.
     expect(singleCardFallsBack({ ...base, started: true, review: { mode: 'STEP_BY_STEP', refusal: null }, error: 'EDITOR_EXECUTION_FAILED', stepByStep: true })).toBe(false);
+  });
+});
+
+describe('execution UX regression fixes: one wallet confirmation for a simple card after an earlier execution in the tab', () => {
+  const none = { current: false, started: false, recorded: false, sequence: null };
+  it('a FINISHED run of another workflow that the runtime still holds never sends a single card to its own multi-prompt flow', () => {
+    expect(localExecutionHolds({ ...none, started: true })).toBe(false);
+    expect(localExecutionHolds(none)).toBe(false);
+  });
+  it('anything still in flight, this workflow\'s own execution, or a started sequence keeps holding the whole-workflow path (never executed twice)', () => {
+    expect(localExecutionHolds({ ...none, current: true, started: true })).toBe(true);   // a run of this workflow, or any run in flight
+    expect(localExecutionHolds({ ...none, recorded: true })).toBe(true);                 // a start recorded for this workflow
+    expect(localExecutionHolds({ ...none, started: true, sequence: { cursor: 0, completed: [] } })).toBe(true);
+    expect(localExecutionHolds({ ...none, sequence: { cursor: 1, completed: [] } })).toBe(true);
+    expect(localExecutionHolds({ ...none, sequence: { cursor: 0, completed: [{}] } })).toBe(true);
+    expect(localExecutionHolds({ ...none, sequence: { cursor: 0, completed: [] } })).toBe(false);
   });
 });

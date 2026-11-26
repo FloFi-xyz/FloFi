@@ -17,7 +17,7 @@ const summary = (page: Page) => page.locator('.execution-summary');
 const falseWalletChange = 'Wallet changed. Simulate and review this workflow again with the connected wallet.';
 const pointer = (page: Page) => page.evaluate(() => localStorage.getItem('gryloo:public-testnet-execution-id'));
 /** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request). */
-// BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1): "Authorize workflow" where the Review covers the whole workflow, "Authorize in wallet" during a run.
+// BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1): "Execute workflow" where the Review covers the whole workflow, "Authorize in wallet" during a run.
 const authorize = (page: Page) => page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_REVIEW });
 async function durable(id: string) {
   const url = process.env.FLOFI_E2E_DATABASE_URL!;
@@ -185,7 +185,7 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   await expect(next).toBeEnabled(); await next.click(); await owner.confirm();
   await expect(summary(page)).toContainText('Execution status unresolved');
   await synchronizeWallet(page);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Retry|Try again/ })).toHaveCount(0);
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Execute workflow|Retry|Try again/ })).toHaveCount(0);
   expect((await durable(id!)).attempts).toMatchObject([{ step: 'APPROVAL', state: 'CONFIRMED' }, { step: 'SWAP', state: 'UNKNOWN' }]);
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   // BUILD-SOLANA-MAINNET-001 (requirement E): even on a new visit (no tab session), an execution that still needs the owner is brought back to observe.
@@ -193,5 +193,5 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   await reloadBuilder(page); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Execution status unresolved');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Retry|Try again/ })).toHaveCount(0);
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Execute workflow|Retry|Try again/ })).toHaveCount(0);
 });

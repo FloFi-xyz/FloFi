@@ -13,7 +13,7 @@ import { useWorkflowNetworkCatalogs } from '../state/asset-catalog-store';
 import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
 import { EditorHeadRow, useEditorStepper } from './editor-chrome';
-import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
+import { CANVAS_BACKGROUND, CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 import { CANVAS_VISUAL_LABEL, canvasExecutionFor, edgeExecution, type CanvasEdgeVisual, type CanvasExecution } from '../domain/canvas-execution';
 
@@ -181,7 +181,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
         deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES} proOptions={CANVAS_PRO_OPTIONS} onMoveEnd={(event, view) => { if (event) rememberView(view); }}>
         <InspectionViewport onState={setViewport} padding={padding} stacked={narrow}/>
-        <Background gap={18} size={1} color="var(--grid)"/>
+        <Background {...CANVAS_BACKGROUND}/>
         <DarkSpotlight/>
         {/* BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: one bottom control group laid out by the flow, never by offsets against each other: the
             Canvas navigator on its own centred line, then Back to the Canvas immediately left of the primary action, bottom-right. A step note

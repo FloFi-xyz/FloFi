@@ -225,3 +225,19 @@ describe('Live Canvas: connections', () => {
     expect(edgeExecution(unknown, 'swap', 'bridge')).toBe('attention');
   });
 });
+
+describe('execution UX regression fixes: a reconciled card shows the actual received amount', () => {
+  it('carries the amount the reconciled record observed (never the estimate), and nothing before reconciliation', async () => {
+    const { runDetailFixture } = await import('../test-utils/run-detail-fixture');
+    const { lifecycleNodeExecution } = await import('./canvas-execution');
+    const done = runDetailFixture('completed').view.progress!, pending = runDetailFixture('pending').view.progress!;
+    expect(lifecycleNodeExecution(done, done.steps[0]!)).toMatchObject({ visual: 'done', received: { amount: '0.0243', unit: 'WETH', label: 'You received' } });
+    // A bridge's destination delivery goes to the reviewed recipient: "Delivered", never "You received" (the receipt's rule).
+    const bridge = runDetailFixture('bridge-completed').view.progress!;
+    expect(lifecycleNodeExecution(bridge, bridge.steps[0]!).received).toEqual({ amount: '4.89', unit: 'USDC', label: 'Delivered' });
+    expect(lifecycleNodeExecution(pending, pending.steps[0]!)).not.toHaveProperty('received');
+    // A step whose record observed no received amount carries none (the card keeps its own wording; nothing is guessed).
+    const unobserved = { ...done, evidence: { ...done.evidence!, operations: {} } };
+    expect(lifecycleNodeExecution(unobserved, unobserved.steps[0]!)).not.toHaveProperty('received');
+  });
+});

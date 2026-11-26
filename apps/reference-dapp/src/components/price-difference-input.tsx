@@ -26,12 +26,21 @@ export function PriceDifferenceInput({ bps, onBpsChange, ...props }: { bps: stri
   }}/>;
 }
 
-/** Apply a concrete draft value. The workflow always stores the same numeric limit the person sees. */
+/**
+ * A preset as people read it in their language: "1%", "2.5%" (EN) or "2,5%" (PT), "5%". Presentation only: the value carried is exact basis
+ * points (`String(preset)`), never this text.
+ */
+export const presetLabel = (bps: number, language: string): string => language === 'PT' ? priceDifferenceLabel(bps).replace('.', ',') : priceDifferenceLabel(bps);
+
+/**
+ * Apply a concrete value. The workflow always stores the same numeric limit the person sees. Execution UX regression fixes: a preset is the value
+ * itself ("1%", "2,5%"/"2.5%", "5%"), never "Manual 1%"; where the form applies at once (`onBpsChange` of the action settings), one click applies it.
+ */
 export function SlippageChoices({ bps, maximumBps, onBpsChange, autoBps, onRequestAuto, onApplyAuto, autoPending }: {
   bps: string; maximumBps: number; onBpsChange(bps: string): void; autoBps?: number | null;
   onRequestAuto?: () => void; onApplyAuto?: (bps: string) => void; autoPending?: boolean;
 }) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const recommendation = autoBps != null && Number.isSafeInteger(autoBps) && autoBps >= 1 && autoBps <= maximumBps ? autoBps : null;
   return <>
     <div className="row" role="group" aria-label={t('Max price difference options')}>
@@ -41,7 +50,7 @@ export function SlippageChoices({ bps, maximumBps, onBpsChange, autoBps, onReque
         {t(autoPending ? 'Checking route…' : 'Auto slippage')}</button>}
       {[100, 250, 500].filter(preset => preset <= maximumBps).map(preset => <button key={preset} type="button"
         onClick={() => onBpsChange(String(preset))} aria-pressed={Number(bps) === preset}>
-        {t('Manual {0}', priceDifferenceLabel(preset))}</button>)}
+        {presetLabel(preset, language)}</button>)}
     </div>
     {Number(bps) > ELEVATED_SLIPPAGE_WARNING_BPS && Number(bps) <= maximumBps && <p className="muted" role="status">
       {t('Above 3%, the price can move substantially against you before the operation stops.')}</p>}

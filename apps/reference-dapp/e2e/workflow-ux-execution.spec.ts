@@ -23,7 +23,7 @@ async function openDetails(page: Page) {
 const cta = (page: Page) => lifecycleAction(page);
 const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="processing"]');
 /** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request); on the public Editor's
- * Execute it reads "Authorize workflow" (BUILD-FLOFI-UX-EDITOR-FINOPS-001, C1). */
+ * Execute it reads "Execute workflow" (BUILD-FLOFI-UX-EDITOR-FINOPS-001, C1). */
 const authorize = (page: Page) => cta(page).getByRole('button', { name: AUTHORIZE_REVIEW });
 /** One explicit click accepts the fresh Review and makes exactly the next wallet request; nothing is requested before it. "Continue to authorization"
  * (Simulate → Execute) only navigates. */
@@ -344,10 +344,18 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   await openFirstActionSettings(page);
   const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Max price difference (%)', { exact: true });
   await expect(field).toHaveValue('1'); await expect(inspector).toContainText('Applied limit: 1%');
-  await inspector.getByRole('button', { name: 'Manual 5%', exact: true }).click();
-  await expect(field).toHaveValue('5');
+  // Execution UX regression fixes: the presets read 1%, 2.5% and 5% (never "Manual …"), and one click populates the field AND applies the value
+  // to the action (a new revision). There is no separate Apply button.
+  await expect(inspector.getByRole('button', { name: 'Apply max price difference', exact: true })).toHaveCount(0);
+  await expect(inspector.getByRole('button', { name: /^Manual/ })).toHaveCount(0);
+  await expect(inspector.getByRole('button', { name: '2.5%', exact: true })).toBeVisible();
+  await inspector.getByRole('button', { name: '5%', exact: true }).click();
+  await expect(field).toHaveValue('5'); await expect(inspector).toContainText('Applied limit: 5%');
   await expect(inspector).toContainText('Above 3%, the price can move substantially against you');
-  expect(await slippageOf(page)).toBe(100);
+  await expect.poll(() => slippageOf(page)).toBe(500);
+  await inspector.getByRole('button', { name: '1%', exact: true }).click();
+  await expect(field).toHaveValue('1'); await expect(inspector).toContainText('Applied limit: 1%');
+  await expect.poll(() => slippageOf(page)).toBe(100);
   // Invalid values are refused with a reason and never silently reverted or applied.
   // Board 16: the limit is typed in percent; 0.125% has no whole basis-point value and is refused, never rounded.
   for (const bad of ['0', '5.01', 'abc', '0.125']) {
@@ -360,7 +368,8 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   expect(first.slippage).toBe('1.00%');
   // A slippage edit is one ordinary edit: it applies to the workflow and retires the earlier simulation and Review.
   await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
-  await field.fill('0.75'); await inspector.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  // A typed value is applied once committed (Enter), with no extra click.
+  await field.fill('0.75'); await field.press('Enter');
   await expect(inspector).toContainText('Applied limit: 0.75%');
   expect(await slippageOf(page)).toBe(75);
   await expect(authorize(page)).toHaveCount(0);

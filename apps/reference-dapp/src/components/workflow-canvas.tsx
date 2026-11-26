@@ -33,7 +33,7 @@ import { walletChainRef } from '../wallet/evm-networks';
 import { shellChainLabel } from '../domain/product-shell';
 import { WorkflowMoreMenu, WorkflowName } from './workflow-name';
 import { DarkSpotlight } from './dark-spotlight';
-import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator, CanvasWheelNavigation } from './canvas-navigator';
+import { CANVAS_BACKGROUND, CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator, CanvasWheelNavigation } from './canvas-navigator';
 import { PanelRevealer, PanelRevealProvider } from './canvas-panel-reveal';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardDestination, type CardRecipient, type ComposerCardData } from './composer-card';
@@ -1216,7 +1216,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onEdgeClick={(_event, edge) => { selectNodes([], null); setSelectedEdge({ from: edge.source, to: edge.target }); }}
         onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => runActive ? undefined : connect(source, target, sourceHandle, targetHandle)}>
         <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
-        <Background gap={22} size={1.5} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right" onViewportChange={rememberView} onFit={forgetCanvasViewport}/><PanelRevealer/>
+        <Background {...CANVAS_BACKGROUND}/><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right" onViewportChange={rememberView} onFit={forgetCanvasViewport}/><PanelRevealer/>
         {/* BUILD UX POLISH 004 (UXA-02): mouse wheel zooms at the cursor; lists in cards scroll; the page and chat keep their own scrolling. */}
         <CanvasWheelNavigation onViewportChange={rememberView}/>
         <SelectionToolbar ids={toolbarIds}>{selectionTools}</SelectionToolbar>
