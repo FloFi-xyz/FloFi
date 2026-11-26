@@ -346,7 +346,9 @@ test('PR #254 follow-up: a universal bridge applies a max price difference prese
   await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
   await card.getByRole('textbox').press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  const slippageBps = async () => Number(/"slippageBps":(\d+)/.exec(await readWorkflowIr(page))?.[1]);
+  // The applied limit, as the canonical workflow records it (the bridge's MAXIMUM_SLIPPAGE_BPS constraint).
+  const slippageBps = async () => (JSON.parse(await readWorkflowIr(page)) as { nodes: { userConstraints: { kind: string; maximumBps?: number }[] }[] }).nodes
+    .flatMap(node => node.userConstraints).find(constraint => constraint.kind === 'MAXIMUM_SLIPPAGE_BPS')?.maximumBps;
   const before = await counters();
   expect(await slippageBps()).toBe(100);
   await card.getByRole('button', { name: 'Action settings', exact: true }).click();
