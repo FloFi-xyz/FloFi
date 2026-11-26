@@ -113,7 +113,7 @@ export const portugueseApprovedUxPages: Readonly<Record<string, string>> = {
   'FloFi MCP address copied.': 'Endereço MCP da FloFi copiado.', 'Copy the address above by hand.': 'Copie o endereço acima manualmente.',
   'In Claude, open Settings › Connectors and choose Add custom connector.': 'No Claude, abra Configurações › Conectores e escolha Adicionar conector personalizado.',
   'Name it FloFi, paste the FloFi address below and choose Add.': 'Dê o nome FloFi, cole o endereço da FloFi abaixo e escolha Adicionar.',
-  'Choose Connect, then sign in to FloFi and approve the connection.': 'Escolha Conectar, depois entre na FloFi e aprove a conexão.',
+  "Choose Connect, then allow the connection on FloFi's page.": 'Escolha Conectar e depois permita a conexão na página da FloFi.',
   'In ChatGPT, open Settings › Apps › Advanced settings and turn on Developer mode (available on eligible plans).':
     'No ChatGPT, abra Configurações › Apps › Configurações avançadas e ative o Modo de desenvolvedor (disponível nos planos elegíveis).',
   'Choose Create, name it FloFi, paste the FloFi address below and choose OAuth.': 'Escolha Criar, dê o nome FloFi, cole o endereço da FloFi abaixo e escolha OAuth.',

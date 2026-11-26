@@ -15,6 +15,11 @@ describe('post-#254 hotfix: assistant connections (Agents page)', () => {
       ['http://claude.ai/cb'], ['not a url']]) expect(assistantProvidersOf([{ clientId: 'dcr_x', redirectUris }])).toEqual([]);
     // A client whose registration is gone (no redirect URIs, opaque id) names none: "Connected" is never assumed.
     expect(assistantProvidersOf([{ clientId: 'dcr_gone', redirectUris: [] }])).toEqual([]);
+    // flofi-mcp review: a loopback client hosted by a provider (a command-line tool's CIMD document on claude.ai) is not its web connector.
+    expect(assistantProvidersOf([{ clientId: 'https://claude.ai/oauth/claude-code-client-metadata', redirectUris: ['http://localhost/callback', 'http://127.0.0.1/callback'] }]))
+      .toEqual([]);
+    // Registered redirects decide over the client id's host.
+    expect(assistantProvidersOf([{ clientId: 'https://claude.ai/oauth/mcp-oauth-client-metadata', redirectUris: ['https://chatgpt.com/cb'] }])).toEqual(['ChatGPT']);
   });
 
   it('reuses the production MCP endpoint and gives each platform its own setup steps and settings page', () => {

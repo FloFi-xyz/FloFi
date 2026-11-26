@@ -209,6 +209,27 @@ describe('post-#254 hotfix: the clients an account is connected to (Agents page,
     expect(await store.connectedClients(d.accountId, now)).toEqual([]);
   });
 
+  it('flofi-mcp review: revoking an access token alone keeps the connection; two grants of one client are one; a replayed code ends it', async () => {
+    const store = createPgOAuthStore(t.db, 'tenant-a'), now = at(0), c = await consent(store, now), minted = issue(['flofi.strategy'], now);
+    expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => minted.tokens)).ok).toBe(true);
+    await store.revoke(credentialDigest(KEY, minted.access), CLIENT, now);
+    expect(await store.connectedClients(c.accountId, now)).toHaveLength(1);
+    // A second consent of the same client by the same account (a reconnect): still one client.
+    const requestId = newId('oar'), csrf = newCredential('csrf'), code = newCredential('code');
+    await store.createAuthorization({ requestId, clientId: CLIENT, clientName: 'Claude', redirectUri: REDIRECT, state: 'st-2', codeChallenge: CHALLENGE,
+      scopes: ['flofi.strategy'], resource: RESOURCE, csrfDigest: credentialDigest(CSRF, csrf), expiresAt: at(10 * MIN) });
+    expect(await store.decide(requestId, credentialDigest(CSRF, csrf), { decision: 'APPROVE', accountId: c.accountId, createAccount: false, grantId: newId('grt'),
+      codeDigest: credentialDigest(KEY, code), codeExpiresAt: at(MIN) }, now)).not.toBeNull();
+    const second = issue(['flofi.strategy'], now);
+    expect((await store.redeemCode(credentialDigest(KEY, code), now, verifyWith(VERIFIER), () => second.tokens)).ok).toBe(true);
+    expect(await store.connectedClients(c.accountId, now)).toHaveLength(1);
+    // Replaying either code revokes that grant and everything issued from it; the other grant alone keeps the client connected.
+    expect((await store.redeemCode(credentialDigest(KEY, code), now, verifyWith(VERIFIER), () => issue(['flofi.strategy'], now).tokens)).ok).toBe(false);
+    expect(await store.connectedClients(c.accountId, now)).toHaveLength(1);
+    expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => issue(['flofi.strategy'], now).tokens)).ok).toBe(false);
+    expect(await store.connectedClients(c.accountId, now)).toEqual([]);
+  });
+
   it('a live grant whose client registration is gone is still listed by its id, with no redirect URIs', async () => {
     const store = createPgOAuthStore(t.db, 'tenant-a'), now = at(0), c = await consent(store, now), minted = issue(['flofi.strategy'], now);
     expect((await store.redeemCode(credentialDigest(KEY, c.code), now, verifyWith(VERIFIER), () => minted.tokens)).ok).toBe(true);

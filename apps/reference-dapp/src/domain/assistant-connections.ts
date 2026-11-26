@@ -15,26 +15,27 @@ export const ASSISTANT_SETUP: Readonly<Record<AssistantProvider, { readonly open
   Claude: { open: 'https://claude.ai/settings/connectors', steps: [
     'In Claude, open Settings › Connectors and choose Add custom connector.',
     'Name it FloFi, paste the FloFi address below and choose Add.',
-    'Choose Connect, then sign in to FloFi and approve the connection.'] },
+    'Choose Connect, then allow the connection on FloFi\'s page.'] },
   ChatGPT: { open: 'https://chatgpt.com/', steps: [
     'In ChatGPT, open Settings › Apps › Advanced settings and turn on Developer mode (available on eligible plans).',
     'Choose Create, name it FloFi, paste the FloFi address below and choose OAuth.',
-    'Choose Connect, then sign in to FloFi and approve the connection.'] },
+    'Choose Connect, then allow the connection on FloFi\'s page.'] },
 });
 const HOSTS: Readonly<Record<AssistantProvider, readonly string[]>> = { Claude: ['claude.ai', 'claude.com'], ChatGPT: ['chatgpt.com', 'chat.openai.com'] };
 const hostOf = (value: string): string | null => { try { const url = new URL(value); return url.protocol === 'https:' ? url.hostname.toLowerCase() : null; } catch { return null; } };
 const providerOfHost = (host: string) => ASSISTANT_PROVIDERS.find(provider => HOSTS[provider].some(known => host === known || host.endsWith(`.${known}`))) ?? null;
 /**
- * The providers among connected clients, by the hosts of their redirect URIs (and of a CIMD client id, an https URL on its own host). A client
- * counts only when every host it names belongs to ONE provider; a client of any other or of mixed hosts names none.
+ * The providers among connected clients, by where the client returns: the hosts of its registered redirect URIs, which must ALL be https on ONE
+ * provider's hosts (a loopback client hosted by a provider, such as a command-line tool, is not that provider's web connector and names none).
+ * Only when the registration is gone does a CIMD client id (an https URL on its own host) name the provider. Any other client names none.
  */
 export function assistantProvidersOf(clients: readonly { readonly clientId: string; readonly redirectUris: readonly string[] }[]): AssistantProvider[] {
   const found = new Set<AssistantProvider>();
   for (const client of clients) {
-    const hosts = [client.clientId, ...client.redirectUris].map(hostOf).filter((host): host is string => host !== null);
-    const providers = new Set(hosts.map(providerOfHost));
+    const named = client.redirectUris.length ? client.redirectUris : [client.clientId];
+    const providers = new Set(named.map(value => { const host = hostOf(value); return host === null ? null : providerOfHost(host); }));
     const [only] = providers;
-    if (hosts.length && providers.size === 1 && only) found.add(only);
+    if (providers.size === 1 && only) found.add(only);
   }
   return ASSISTANT_PROVIDERS.filter(provider => found.has(provider));
 }
