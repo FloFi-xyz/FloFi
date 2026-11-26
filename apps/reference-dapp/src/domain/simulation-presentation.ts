@@ -108,7 +108,7 @@ export function simulationStatusPresentation(view: SimulationPresentation, inval
   if (view.message === 'Run a simulation to see the expected result.') return { label: 'No simulation yet', message: 'Run a simulation to see expected execution.', tone: 'neutral' };
   if (/expired/i.test(view.message)) return { label: 'Simulation expired', message: 'Simulate again to refresh the result before authorization.', tone: 'blocked' };
   if (/changed/i.test(view.message)) return { label: 'Review required again', message: view.message, tone: 'blocked' };
-  if (/balance.*low|Add funds for the network fee/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
+  if (/balance.*low|Add funds for the network fee|does not hold enough/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
   if (/Simulation is (?:currently unavailable|not available)/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
   if (/could not complete this simulation|rejected this transaction in simulation/i.test(view.message)) return { label: 'Simulation failed', message: view.message, tone: 'blocked' };
   if (/Connect the wallet that will sign/i.test(view.message)) return { label: 'Connect your wallet', message: view.message, tone: 'blocked' };
@@ -240,7 +240,7 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   if (error === 'INSUFFICIENT_GAS_FUNDS') return SINGLE_SWAP_NATIVE_FEE_MESSAGE;
   // PR #254 follow-up: a liquidity step short of WETH (wrapped ETH, a token) is not short of ETH for the network fee, which the rule below read
   // into "WETH". FloFi never wraps ETH, swaps or bridges on the owner's behalf to cover it.
-  if (/_INSUFFICIENT_WETH$/.test(error)) return LIQUIDITY_WETH_SHORTFALL_MESSAGE;
+  if (error === 'UNISWAP_INSUFFICIENT_WETH') return LIQUIDITY_WETH_SHORTFALL_MESSAGE;
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';

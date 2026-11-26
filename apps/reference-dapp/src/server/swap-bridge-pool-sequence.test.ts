@@ -90,7 +90,8 @@ describe('PR #254 follow-up: Swap → Bridge → Pool (production report) simula
     const node = runtime!.nodes[0]!, fields = readConcentratedLiquidity(node as SemanticWorkflow['nodes'][number]);
     // Ethereum's own USDC and WETH (a token, never native ETH), on Ethereum Mainnet.
     expect(node.chainId).toBe('eip155:1');
-    expect(JSON.stringify(node).toLowerCase()).toContain(usdc); expect(JSON.stringify(node).toLowerCase()).toContain(weth);
+    expect(fields.token0).toMatchObject({ chainId: 'eip155:1', address: usdc, decimals: 6 });
+    expect(fields.token1).toMatchObject({ chainId: 'eip155:1', address: weth, decimals: 18 });
     expect(fields).toMatchObject({ amount0Max: '982950', amount1Max: '1000000000000000' });
     // A larger delivery never raises the authored maximum; an unproven delivery binds nothing (the step waits, nothing is simulated).
     expect(readConcentratedLiquidity(poolStep(workflow, completedBefore(workflow, '1200000')).workflow!.nodes[0]! as SemanticWorkflow['nodes'][number]).amount0Max).toBe('1000000');
@@ -102,7 +103,9 @@ describe('PR #254 follow-up: Swap → Bridge → Pool (production report) simula
     await expect(service.simulate(workflow as unknown as SemanticWorkflow, UNI_OWNER)).rejects.toThrow('ROUTER_ISOLATED_ONLY');
     const { workflow: runtime } = poolStep(workflow, completedBefore(workflow));
     const run = await service.simulate(runtime as unknown as SemanticWorkflow, UNI_OWNER);
-    expect(run.review).toMatchObject({ chainId: 1 });
+    // The reviewed deposit (and so its USDC approval) is bounded by what the bridge delivered, never the authored 1 USDC.
+    expect(run.review).toMatchObject({ chainId: 1, intent: { amount0Max: '982950', amount1Max: '1000000000000000' } });
+    expect(run.review.approvals.filter(approval => approval.step === 'APPROVE_TOKEN0').every(approval => BigInt(approval.amount) <= 982_950n)).toBe(true);
     expect(run.review.calls.map(call => call.step).at(-1)).toBe('MINT');
   });
 
