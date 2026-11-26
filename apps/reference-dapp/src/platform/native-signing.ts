@@ -16,6 +16,6 @@ export const nativeSigningEligible = (h: Pick<HandoffRecord, 'plan'>): boolean =
 export const NATIVE_SIGNING_NAMESPACE = 'native-signing';
 /** The log-name prefix of one approval's native signing sessions. */
 export const nativeSessionPrefix = (handoffId: string) => `${handoffId}.nsg_`;
-/** The deployment's kill switch: on when `FLOFI_NATIVE_SIGNING` is unset or `enabled`; any other value (a typo included) turns it off (fail closed). */
+/** The deployment's kill switch: on when `FLOFI_NATIVE_SIGNING` is unset, empty or `enabled`; any other value (a typo included) turns it off (fail closed). */
 export const nativeSigningSwitch = (env: Readonly<Record<string, string | undefined>>): boolean =>
   env.FLOFI_NATIVE_SIGNING === undefined || env.FLOFI_NATIVE_SIGNING === '' || env.FLOFI_NATIVE_SIGNING === 'enabled';

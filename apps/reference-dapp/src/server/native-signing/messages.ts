@@ -35,6 +35,8 @@ export function nativeRefusalText(code: string, wallet: string): Both {
       PT: 'Esta proposta foi aberta na FloFi sem compartilhar o status com esta conversa, então não pode continuar aqui. Conclua na FloFi ou peça uma nova proposta. Nada foi enviado por este pedido.' },
     NATIVE_CONFIRMATION_LAPSED: { EN: `This ${wallet} request lapsed before it was signed. If you sign it now, FloFi refuses it and nothing is sent. Start again from the proposal while it is still open.`,
       PT: `Este pedido do ${wallet} venceu antes de ser assinado. Se você assinar agora, a FloFi recusa e nada é enviado. Recomece pela proposta enquanto ela estiver aberta.` },
+    NATIVE_REVIEW_LAPSED: { EN: `Your signature in ${wallet} arrived after the Review expired, so FloFi did not send it. Nothing was sent. Start again from the proposal while it is still open.`,
+      PT: `A sua assinatura no ${wallet} chegou depois que a Revisão venceu, então a FloFi não a enviou. Nada foi enviado. Recomece pela proposta enquanto ela estiver aberta.` },
     NATIVE_SIGNING_ALREADY_SENT: { EN: 'This proposal may already have been sent from your wallet, so FloFi does not ask your wallet for it again. Check its status here.',
       PT: 'Esta proposta pode já ter sido enviada pela sua carteira, então a FloFi não pede de novo à carteira. Confira o status aqui.' },
     NATIVE_SIGNING_WALLET_REQUEST_OPEN: { EN: 'Another wallet request for this proposal is still open. Answer or reject it in your wallet first. Nothing was sent by this one.',

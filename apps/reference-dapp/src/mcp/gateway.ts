@@ -28,6 +28,7 @@ import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { portfolioLinksFrom, authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { approvalFrameAncestorList, claudeAppDomain } from '../server/embedded-approval.ts';
+import { nativeSigningSwitch } from '../platform/native-signing.ts';
 import { PANEL_URI } from './app/panel.ts';
 import { readHandoffPolicy } from './execution.ts';
 import { DEFAULT_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from './oauth/config.ts';
@@ -60,7 +61,7 @@ export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime
   readonly automations?: AutomationReadPort;
   /** Tests: the read-only portfolio port of `get_portfolio` (default: the deployment's Dashboard portfolio and position reads). */
   readonly portfolio?: PortfolioReadPort;
-  /** Tests: the native wallet signing service (default: the deployment's, where `FLOFI_NATIVE_SIGNING` is not disabled; null: not offered). */
+  /** Tests: the native wallet signing service (default: the deployment's, where the `FLOFI_NATIVE_SIGNING` switch is on; null: not offered). */
   readonly native?: McpNativeSigning | null;
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
@@ -267,7 +268,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   const automations = options.automations ?? deploymentAutomationReader(env, budget);
   const portfolio = options.portfolio ?? deploymentPortfolioPort(env);
   // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the deployment's native signing service, loaded only when a panel tool asks for it.
-  const native = options.native !== undefined ? options.native : active.kind === 'mcp-oauth' && state && oauth && (env.FLOFI_NATIVE_SIGNING ?? 'enabled') !== 'disabled'
+  const native = options.native !== undefined ? options.native : active.kind === 'mcp-oauth' && state && oauth && nativeSigningSwitch(env)
     ? deploymentNativeSigning(env) : null;
   const publicStudioIntegrations = async () => {
     if (!env.DATABASE_URL) return [];

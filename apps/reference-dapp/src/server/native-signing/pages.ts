@@ -69,7 +69,8 @@ export function statusPage(kind: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 
     : 'The terms changed since your Review, so your wallet was not asked. FloFi showed a new Review in your conversation.'}</p>${back}`);
   if (kind === 'ENDED') return page(language, 'FloFi', `<h1>${pt ? 'Encerrado' : 'Ended'}</h1><p>${escape(options.ended ?? (pt ? 'Este pedido foi encerrado.' : 'This request ended.'))}</p>${back}`);
   // A step that could not go on while the session itself goes on (e.g. a lapsed confirmation while its wallet request is still out): never "nothing was sent".
-  if (kind === 'NOTICE') return page(language, 'FloFi', `<h1>FloFi</h1><p>${escape(options.ended ?? (pt ? 'Este passo não pôde continuar.' : 'This step could not go on.'))}</p>${back}`, { status: 409 });
+  if (kind === 'NOTICE') return page(language, 'FloFi', `<h1>FloFi</h1><p>${escape(options.ended ?? (pt ? 'Este link não vale mais. O pedido à sua carteira continua aberto: responda ou recuse na carteira.'
+    : 'This link is no longer valid. Your wallet request is still open: answer or reject it in your wallet.'))}</p>${back}`, { status: 409 });
   const state = session?.state;
   const line = state === 'REVIEW_READY' ? (pt ? 'Carteira verificada. A Revisão está na sua conversa: confira e confirme por lá.' : 'Wallet verified. Your Review is in your conversation: check it and confirm there.')
     : state === 'SUBMITTED' ? (pt ? 'Assinado e entregue à rede uma única vez. A FloFi publica o resultado verificado na sua conversa.' : 'Signed and handed to the network once. FloFi posts the verified result in your conversation.')

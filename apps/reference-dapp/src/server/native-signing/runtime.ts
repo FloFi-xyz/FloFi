@@ -3,7 +3,7 @@
  * BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the deployment's native signing service — its durable session journal (the platform's execution log,
  * namespace `native-signing`), the approval surface every FloFi requester shares, the flow runtime (the same `cloudFlow` the signing page uses,
  * with the execution pause honoured and the proven owner as principal), the requester's Flight identity, and each conversation's own delivery.
- * `FLOFI_NATIVE_SIGNING` other than unset or `enabled` turns the whole surface off (fail closed; default: on wherever approvals and the cloud runtime are).
+ * `FLOFI_NATIVE_SIGNING` other than unset, empty or `enabled` turns the whole surface off (fail closed; default: on wherever approvals and the cloud runtime are).
  */
 import { randomUUID } from 'node:crypto';
 import { createPostgresLeaseStore, createPostgresLogStore } from '@defi-workflow-engine/cloud-runtime';

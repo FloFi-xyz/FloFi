@@ -389,6 +389,10 @@ export async function approvalRunIds(h: HandoffRecord, runtime: EngineRuntime): 
   let complete = !(listed.value.length >= LISTING_PAGE && afterClaim.length === listed.value.length);
   for (const { runId } of afterClaim) {
     if (ids.has(runId)) continue;
+    // Created after the claim (a run of this approval on the signing page always is), so another approval's run of the same workflow is not counted.
+    const run = await runtime.run(runId, owner);
+    if (!run.ok) { complete = false; continue; }
+    if (!run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
     const record = await runtime.record(flow, runId, owner);
     if (!record.ok) { complete = false; continue; }
     if (reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) ids.add(runId);

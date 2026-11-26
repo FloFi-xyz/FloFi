@@ -10,7 +10,7 @@
  *   GET  <approval>/<session>/confirm/<ref>   the conversation's single-use confirmation of its Review → the wallet's signing request (the same request
  *                                      again for the same confirmation)
  *
- * Off unless `FLOFI_NATIVE_SIGNING` is unset or `enabled`. Nothing here signs: the wallet signs, and the flow verifies and broadcasts the exact reviewed bytes.
+ * Off unless `FLOFI_NATIVE_SIGNING` is unset, empty or `enabled`. Nothing here signs: the wallet signs, and the flow verifies and broadcasts the exact reviewed bytes.
  */
 import { after, NextResponse, type NextRequest } from 'next/server';
 import { nativeSigningEnabled, nativeSigningService, startFromChannelToken } from '../../../../server/native-signing/runtime';
@@ -50,8 +50,9 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Res
     if (path.length !== 3) return html(statusPage('IGNORED', null, language));
     const outcome = await service.callback(handoffId, sessionId, step, request.nextUrl.searchParams);
     // Just sent: a bounded follow-up after this response observes the run and posts its verified receipt to the conversation.
-    if (outcome.kind === 'PAGE' && outcome.page === 'RETURN' && outcome.session?.state === 'SUBMITTED')
-      after(() => service.follow(handoffId, sessionId, { attempts: 9, intervalMs: 5_000 }).then(() => undefined).catch(() => undefined));
+    // Only the answer that made the broadcast schedules it (a replayed or forged callback never does).
+    if (outcome.kind === 'PAGE' && outcome.submitted === true)
+      after(() => service.follow(handoffId, sessionId, { attempts: 7, intervalMs: 5_000 }).then(() => undefined).catch(() => undefined));
     if (outcome.kind === 'WALLET') { const session = await service.latestById(handoffId, sessionId);
       return html(walletPage(outcome.url, session ? DEEPLINK_WALLETS[session.wallet].name : 'wallet', language)); }
     return html(statusPage(outcome.page, outcome.session, language, { telegramBot: telegramBot(), ended: endedLine(outcome.session, language) }));
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Res
     if (session && (session.state === 'SUBMITTING' || session.state === 'SUBMITTED')) return html(statusPage('RETURN', session, language, { telegramBot: telegramBot() }));
     // A wallet request is still out (it may yet be signed): say why this step did not go on, never "nothing was signed or sent".
     if (session && session.state === 'AWAITING_SIGNATURE') return html(statusPage('NOTICE', session, language, { telegramBot: telegramBot(),
-      ended: nativeRefusalText(codeOf(error), DEEPLINK_WALLETS[session.wallet].name)[language] }));
+      ended: codeOf(error) === 'NATIVE_CONFIRMATION_LAPSED' ? nativeRefusalText('NATIVE_CONFIRMATION_LAPSED', DEEPLINK_WALLETS[session.wallet].name)[language] : null }));
     return html(statusPage(session?.state === 'ENDED' ? 'ENDED' : 'IGNORED', session, language, { telegramBot: telegramBot(),
       ended: session?.state === 'ENDED' ? endedLine(session, language) : codeOf(error) }));
   }

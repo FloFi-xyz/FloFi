@@ -40,7 +40,7 @@ export type ChannelCoreConfig = {
   readonly dispatchTokenDigest: Buffer | null;
   /** Global model-call budget (cost guard), shared by every instance through the store's fixed windows. */
   readonly modelBudget: { readonly hourly: number; readonly daily: number };
-  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: offer native wallet signing buttons on eligible approvals (`FLOFI_NATIVE_SIGNING`, default enabled). */
+  /** BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: offer native wallet signing buttons on eligible approvals (`nativeSigningSwitch`: `FLOFI_NATIVE_SIGNING` unset, empty or `enabled`). */
   readonly nativeSigning?: boolean;
 };
 export type ChannelCoreConfigResult = ChannelCoreConfig | { readonly enabled: false; readonly code: 'CHANNEL_CONFIGURATION_INVALID'; readonly reason: string };

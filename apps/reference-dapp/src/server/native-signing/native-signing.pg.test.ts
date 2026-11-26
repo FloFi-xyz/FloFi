@@ -30,8 +30,11 @@ let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); });
 afterAll(async () => { await t?.drop(); });
 
-/** `paused.submit`: the deployment's execution pause answers the wallet's signed bytes (refused before the flow is reached). */
-async function setup(clock: { offsetMs: number } = { offsetMs: 0 }, paused: { submit: boolean } = { submit: false }) {
+/**
+ * `paused.submit`: the deployment's execution pause answers the wallet's signed bytes (refused before the flow is reached). `paused.lose`: the flow
+ * broadcasts, but its answer is lost on the way back (FloFi cannot tell from the call whether anything was sent).
+ */
+async function setup(clock: { offsetMs: number } = { offsetMs: 0 }, paused: { submit: boolean; lose?: boolean } = { submit: false }) {
   const chain = createMockedSolanaTransferChain({ profile: SOLANA_DEVNET_TRANSFER, send: 'OK' }), key = createMockedSolanaWallet(), recipient = createMockedSolanaWallet().owner;
   chain.fundWallet(key.owner, 3_000_000_000n);
   const env = { FLOFI_RUNTIME: 'embedded', DATABASE_URL: t.url, VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'claude/native-channel-signing', FLOFI_MCP: 'enabled',
@@ -43,8 +46,11 @@ async function setup(clock: { offsetMs: number } = { offsetMs: 0 }, paused: { su
   const tool = (name: string, args: unknown) => session({ env, token: tokens.access_token, runtime: embeddedMcpRuntime(runtime), state }).callTool(name, args);
   const events: { event: NativeEvent; session: NativeSession; ref: string | null }[] = [];
   const native = await nativeSigningService(env, { host: { db: runtime.db, tenantId: runtime.tenantId }, runtime: embeddedMcpRuntime(runtime),
-    flow: async (flow, method, args, context) => paused.submit && method === 'submit' ? { ok: false, code: 'EXECUTION_PAUSED' } as never
-      : runtime.backend.callFlow(flow, method, args, undefined, context.principal) as never,
+    flow: async (flow, method, args, context) => {
+      if (paused.submit && method === 'submit') return { ok: false, code: 'EXECUTION_PAUSED' } as never;
+      const result = await runtime.backend.callFlow(flow, method, args, undefined, context.principal);
+      return (paused.lose && method === 'submit' ? { ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' } : result) as never;
+    },
     notify: async (s, event, ref) => { events.push({ event, session: s, ref }); }, now: () => new Date(Date.now() + clock.offsetMs) });
   const composed = (await tool('compose_strategy', { strategy: { action: 'transfer', network: 'solana-devnet', asset: 'SOL', amount: '0.01', recipient } })).output as
     { strategy: unknown; workflowHash: string };
@@ -63,29 +69,39 @@ async function setup(clock: { offsetMs: number } = { offsetMs: 0 }, paused: { su
   };
   /** FloFi's own signing page for this approval (the same platform calls it makes): claim with or without status sharing, apply, then the flow's
    *  simulate → review → begin → submit as the owner, broadcast once. No status is read afterwards, so nothing binds the run to the approval. */
-  const signOnPage = async (share: boolean) => {
-    const surface = await approvalSurface(env, () => undefined, { host: { db: runtime.db, tenantId: runtime.tenantId }, runtime: embeddedMcpRuntime(runtime) });
-    const h = (await surface.handoffs.forRequester(requested.approvalId, requester, new Date()))!;
-    const scheme = surface.schemes.find(candidate => candidate.kinds.includes(h.requesterKind))!;
-    const as: ApprovalRequester = { kind: 'MCP_ACCOUNT', ref: h.requesterRef, grantId: h.grantId!, clientId: h.clientId, displayName: h.clientName };
-    const opened = await openApprovalSession({ origin: 'https://flofi.test', scheme, handoffs: surface.handoffs }, as, h.handoffId);
-    const secret = decodeURIComponent(new URL(opened.approvalUrl).hash.slice(1)), wallets = [{ namespace: 'solana' as const, address: key.owner }];
+  const pageSurface = () => approvalSurface(env, () => undefined, { host: { db: runtime.db, tenantId: runtime.tenantId }, runtime: embeddedMcpRuntime(runtime) });
+  const pageWorkflow = async () => {
+    const surface = await pageSurface(), h = (await surface.handoffs.forRequester(requested.approvalId, requester, new Date()))!;
     const check = await verifyHandoff(h, surface.runtime, surface.profiles[h.requesterKind]!.policy);
     if (!check.ok) throw new Error(check.code);
-    await claimApproval(surface, secret, wallets, share, new Date());
-    await applyApproval(surface, secret, wallets, check.composition.workflow, new Date());
+    return check.composition.workflow;
+  };
+  /** The flow part of FloFi's signing page for an approval its owner already holds (claimed there, or resumed by id and wallet proof). */
+  const runOnPage = async () => {
+    const workflow = await pageWorkflow();
     const call = async <T,>(method: string, args: unknown[]) => {
       const r = await runtime.backend.callFlow('solana-devnet-transfer', method, args, undefined, key.owner) as { ok: boolean; value: T; code?: string };
       if (!r.ok) throw new Error(r.code); return r.value; };
-    const sim = await call<{ id: string; review: { commitment: string } }>('simulate', [check.composition.workflow, key.owner]);
-    await call('review', [sim.id, sim.review.commitment, check.composition.workflow]);
-    const begun = await call<{ unsignedTransaction: string }>('begin', [sim.id, key.owner, check.composition.workflow]);
+    const sim = await call<{ id: string; review: { commitment: string } }>('simulate', [workflow, key.owner]);
+    await call('review', [sim.id, sim.review.commitment, workflow]);
+    const begun = await call<{ unsignedTransaction: string }>('begin', [sim.id, key.owner, workflow]);
     await call('submit', [sim.id, key.sign(begun.unsignedTransaction)]);
     // A few blocks on (a new recent blockhash, as on any real cluster), so a second transfer would not be deduplicated by the chain itself.
     (chain.state as { blockHeight: number; slot: number }).blockHeight += 5; (chain.state as { slot: number }).slot += 5;
     return sim.id;
   };
-  return { chain, key, recipient, runtime, tool, state, native, requester, approvalId: requested.approvalId, events, deliver, ref, status, toReview, signOnPage };
+  /** FloFi's own signing page for this approval (the same platform calls it makes): claim with or without status sharing, apply, then run it once. */
+  const signOnPage = async (share: boolean) => {
+    const surface = await pageSurface(), h = (await surface.handoffs.forRequester(requested.approvalId, requester, new Date()))!;
+    const scheme = surface.schemes.find(candidate => candidate.kinds.includes(h.requesterKind))!;
+    const as: ApprovalRequester = { kind: 'MCP_ACCOUNT', ref: h.requesterRef, grantId: h.grantId!, clientId: h.clientId, displayName: h.clientName };
+    const opened = await openApprovalSession({ origin: 'https://flofi.test', scheme, handoffs: surface.handoffs }, as, h.handoffId);
+    const secret = decodeURIComponent(new URL(opened.approvalUrl).hash.slice(1)), wallets = [{ namespace: 'solana' as const, address: key.owner }];
+    await claimApproval(surface, secret, wallets, share, new Date());
+    await applyApproval(surface, secret, wallets, await pageWorkflow(), new Date());
+    return runOnPage();
+  };
+  return { chain, key, recipient, runtime, tool, state, native, requester, approvalId: requested.approvalId, events, deliver, ref, status, toReview, signOnPage, runOnPage };
 }
 
 describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native wallet signing from a conversation', () => {
@@ -145,11 +161,18 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native wallet signing from a c
       expect(await c.native.confirm({ handoffId: c.approvalId, sessionId: ready.id, confirmRef: reviewRef, requester: c.requester })).toEqual({ kind: 'WALLET', url: signUrl });
 
       const sent = await c.deliver(wallet.approve(signUrl));
-      expect(sent).toMatchObject({ kind: 'PAGE', page: 'RETURN', session: { state: 'SUBMITTED' } });
+      // Only the answer that made the broadcast may schedule the follow-up.
+      expect(sent).toMatchObject({ kind: 'PAGE', page: 'RETURN', session: { state: 'SUBMITTED' }, submitted: true });
       expect(c.chain.state.sent).toHaveLength(1);
       expect(c.events.map(e => e.event)).toEqual(['REVIEW_READY', 'SUBMITTED']);
       // A late or duplicate answer after the signature only learns it was sent, never "nothing changed".
-      expect(await c.deliver(wallet.approve(signUrl))).toMatchObject({ kind: 'PAGE', page: 'RETURN' });
+      const replay = await c.deliver(wallet.approve(signUrl));
+      expect(replay).toMatchObject({ kind: 'PAGE', page: 'RETURN' });
+      expect('submitted' in replay).toBe(false);
+      // A forged tag on the sent session learns only that it was sent, and never schedules anything either.
+      const forgedTag = await c.native.callback(c.approvalId, ready.id, 'A'.repeat(22), new URLSearchParams({ data: 'x' }));
+      expect(forgedTag).toMatchObject({ page: 'RETURN' });
+      expect('submitted' in forgedTag).toBe(false);
       // The bounded follow-up after the broadcast observes the run and tells the conversation its status changed (the receipt follows from there).
       expect(await c.native.follow(c.approvalId, ready.id, { attempts: 3, sleep: async () => undefined })).toBe('RECONCILED');
       expect(c.events.at(-1)).toMatchObject({ event: 'PROGRESS' });
@@ -284,29 +307,61 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: native wallet signing from a c
     } finally { await shared.runtime.close(); }
   });
 
-  it('a wallet request still out past the session\'s own validity never reads as "nothing was sent"; a late signature is sent once (independent review)', async () => {
+  it('a signature after its Review lapsed is refused before the flow: nothing sent, and the conversation is told so honestly (security review)', async () => {
     const clock = { offsetMs: -(15 * 60_000 - 80_000) }, c = await setup(clock);
     try {
       const wallet = deeplinkTestWallet('phantom', c.key);
-      // The session's validity ends about 80 s from now (the flow keeps the real clock).
+      // The session's validity ends about 80 s from now; its Review (the flow's clock) about 60 s from now.
       const started = await c.native.start({ handoffId: c.approvalId, requester: c.requester, wallet: 'phantom', returnTo: 'NONE', language: 'EN' });
       const ready = (await c.toReview(wallet, started)).session;
       clock.offsetMs = 0;
       const signing = await c.native.confirm({ handoffId: c.approvalId, sessionId: ready.id, confirmRef: await c.ref(), requester: c.requester }) as { kind: string; url: string };
       expect(signing.kind).toBe('WALLET');
       const reviewRef = c.events.find(e => e.event === 'REVIEW_READY')!.ref!;
-      // Past the session's validity, before its Review can no longer be broadcast: still waiting for the wallet, never "expired, nothing was sent".
+      // Past both: the same confirmation does not hand out the lapsed request again, nor does re-opening it.
       clock.offsetMs = Date.parse(started.expiresAt) - Date.now() + 5_000;
-      const seen = (await c.native.view(c.approvalId, c.requester))!.public;
-      expect(seen).toMatchObject({ state: 'AWAITING_SIGNATURE', outcome: null });
-      // Its Review lapsed: the same confirmation does not hand out the lapsed request again (it would be signed for nothing), nor does re-opening.
       await expect(c.native.confirm({ handoffId: c.approvalId, sessionId: ready.id, confirmRef: reviewRef, requester: c.requester })).rejects.toThrow('NATIVE_CONFIRMATION_LAPSED');
       expect(await c.native.reopen(c.approvalId, ready.id, c.requester)).toBeNull();
-      // Another session cannot start while that request is out.
-      await expect(c.native.start({ handoffId: c.approvalId, requester: c.requester, wallet: 'solflare', returnTo: 'NONE', language: 'EN' }))
-        .rejects.toThrow(/NATIVE_SIGNING_WALLET_REQUEST_OPEN|APPROVAL_EXPIRED/);
-      // The owner approves in the wallet now (the flow's Review is still valid on its own clock): FloFi broadcasts it once.
-      expect(await c.deliver(wallet.approve(signing.url))).toMatchObject({ page: 'RETURN', session: { state: 'SUBMITTED' } });
+      expect((await c.native.view(c.approvalId, c.requester))!.public).toMatchObject({ state: 'ENDED', outcome: { code: 'NATIVE_SESSION_EXPIRED', afterSignature: false } });
+      // The owner signs anyway: FloFi refuses it on its own clock, cancels the prepared request and sends nothing.
+      const late = await c.deliver(wallet.approve(signing.url));
+      expect(late).toMatchObject({ page: 'ENDED', code: 'NATIVE_REVIEW_LAPSED', session: { outcome: { afterSignature: false } } });
+      expect(await c.status(ready.review!.runId)).toMatchObject({ notSubmitted: true, attempt: { state: 'CANCELLED' } });
+      expect(c.chain.state.sent).toHaveLength(0);
+    } finally { await c.runtime.close(); }
+  });
+
+  it('the signing page sends between the native confirmation and the signature: the native signature is never broadcast (security review)', async () => {
+    const c = await setup();
+    try {
+      const wallet = deeplinkTestWallet('phantom', c.key);
+      const ready = (await c.toReview(wallet, await c.native.start({ handoffId: c.approvalId, requester: c.requester, wallet: 'phantom', returnTo: 'NONE', language: 'EN' }))).session;
+      const signing = await c.native.confirm({ handoffId: c.approvalId, sessionId: ready.id, confirmRef: await c.ref(), requester: c.requester }) as { url: string };
+      // The owner backs out of the wallet, resumes the applied approval on FloFi's page (a few blocks later) and sends it there.
+      (c.chain.state as { blockHeight: number; slot: number }).blockHeight += 5; (c.chain.state as { slot: number }).slot += 5;
+      await c.runOnPage();
+      expect(c.chain.state.sent).toHaveLength(1);
+      // Back in the wallet, they sign the native request: refused before any broadcast, its own prepared request cancelled.
+      const refused = await c.deliver(wallet.approve(signing.url));
+      expect(refused).toMatchObject({ page: 'ENDED', code: 'NATIVE_SIGNING_ALREADY_SENT', session: { outcome: { afterSignature: false } } });
+      expect(await c.status(ready.review!.runId)).toMatchObject({ attempt: { state: 'CANCELLED' } });
+      expect(c.chain.state.sent).toHaveLength(1);
+    } finally { await c.runtime.close(); }
+  });
+
+  it('a broadcast whose answer was lost is never "nothing sent", and the approval is never sent again (security review)', async () => {
+    const paused = { submit: false, lose: true }, c = await setup({ offsetMs: 0 }, paused);
+    try {
+      const wallet = deeplinkTestWallet('phantom', c.key);
+      const ready = (await c.toReview(wallet, await c.native.start({ handoffId: c.approvalId, requester: c.requester, wallet: 'phantom', returnTo: 'NONE', language: 'EN' }))).session;
+      const signing = await c.native.confirm({ handoffId: c.approvalId, sessionId: ready.id, confirmRef: await c.ref(), requester: c.requester }) as { url: string };
+      const lost = await c.deliver(wallet.approve(signing.url));
+      expect(lost).toMatchObject({ page: 'ENDED', session: { outcome: { afterSignature: true } } });
+      expect(c.chain.state.sent).toHaveLength(1);
+      paused.lose = false;
+      // A new session for the same approval proves the wallet, then is refused: its run may have been sent.
+      const again = await c.native.start({ handoffId: c.approvalId, requester: c.requester, wallet: 'phantom', returnTo: 'NONE', language: 'EN' });
+      expect(await c.toReview(wallet, again)).toMatchObject({ page: 'ENDED', code: 'NATIVE_SIGNING_ALREADY_SENT' });
       expect(c.chain.state.sent).toHaveLength(1);
     } finally { await c.runtime.close(); }
   });

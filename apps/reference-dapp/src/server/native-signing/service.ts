@@ -98,7 +98,9 @@ export type NativeDeps = {
   readonly now?: () => Date };
 /** What a wallet's return to FloFi produces: the next wallet request, or a short page (the signer's Review after the proof, or where to go next). */
 export type NativeOutcome = { readonly kind: 'WALLET'; readonly url: string }
-  | { readonly kind: 'PAGE'; readonly page: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 'ENDED'; readonly code: string | null; readonly session: NativeSession | null };
+  | { readonly kind: 'PAGE'; readonly page: 'METADATA' | 'REVIEW' | 'RETURN' | 'IGNORED' | 'ENDED'; readonly code: string | null; readonly session: NativeSession | null;
+    /** This very answer made the broadcast (the compare-and-swap winner): only then may a follow-up be scheduled. */
+    readonly submitted?: true };
 
 const fail = (code: string): never => { throw new Error(code); };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -114,13 +116,13 @@ type RunFacts = { readonly attempt?: { readonly state?: string; readonly signatu
 /** A run's wallet attempt proven never sent: cancelled before signing, or proven not executed. */
 const notSent = (run: RunFacts) => !run.attempt || run.attempt.state === 'CANCELLED' || run.verdict === 'NOT_EXECUTED' || run.notSubmitted === true;
 /**
- * Until when a session's wallet request can still be answered and broadcast: a request sent to the wallet stays open while its Review can still be
- * submitted (the flow refuses after the Review's validity; LAPSED_MS covers clock skew), even past the session's own validity — never "nothing was sent"
- * while a late signature could still go out.
+ * Until when a session's wallet request can still be answered and broadcast: a request sent to the wallet stays open while its Review is valid, even
+ * past the session's own validity (never "nothing was sent" while a signature could still go out). A signature arriving after that is refused here,
+ * on this clock, before the flow is asked (`answerOf`), so nothing past it is ever sent.
  */
 export function openUntil(s: Pick<NativeSession, 'state' | 'expiresAt' | 'review'>): number {
   const own = Date.parse(s.expiresAt);
-  return s.state === 'AWAITING_SIGNATURE' && s.review ? Math.max(own, Date.parse(s.review.expiresAt) + LAPSED_MS) : own;
+  return s.state === 'AWAITING_SIGNATURE' && s.review ? Math.max(own, Date.parse(s.review.expiresAt)) : own;
 }
 
 export function createNativeSigning(deps: NativeDeps) {
@@ -184,10 +186,11 @@ export function createNativeSigning(deps: NativeDeps) {
    * on FloFi's signing page (bound only while status is shared). Each must be cancelled before signing, proven never executed, or a prepared request
    * long past its Review (the flow can no longer broadcast it; it is then observed, which closes it as never sent). An incomplete read refuses.
    */
-  async function assertNothingSent(s: NativeSession, h: HandoffRecord, surface: ApprovalSurface) {
+  async function assertNothingSent(s: NativeSession, h: HandoffRecord, surface: ApprovalSurface, except: string | null = null) {
     const runs = await approvalRunIds(h, surface.runtime);
     if (!runs.complete) fail('CLOUD_RUNTIME_UNAVAILABLE');
     for (const runId of runs.runIds) {
+      if (runId === except) continue;
       const run = await flowCall<RunFacts>(s, 'status', [runId]), attempt = run.attempt;
       if (notSent(run)) continue;
       const prepared = attempt!.state === 'PREPARED' && !attempt!.signature;
@@ -366,6 +369,22 @@ export function createNativeSigning(deps: NativeDeps) {
       const submitting = stamp(s, { state: 'SUBMITTING', step: null, walletRequest: null });
       const at = await deps.store.write(version, submitting);
       const review = s.review ?? fail('NATIVE_REVIEW_MISSING');
+      // Before anything is broadcast: the Review is still valid on this clock (a late signature is refused here, whatever the flow's clock says), and
+      // no other run of the approval was sent or prepared since the confirmation (FloFi's signing page, by id and wallet proof). Otherwise this
+      // session's prepared request is cancelled and nothing is sent.
+      let refusal: string | null = now().getTime() >= Date.parse(review.expiresAt) ? 'NATIVE_REVIEW_LAPSED' : null;
+      if (!refusal) {
+        try {
+          const surface = await deps.surface(), h = await surface.handoffs.forRequester(s.handoffId, s.requester, now()) ?? fail('APPROVAL_NOT_FOUND');
+          await assertNothingSent(submitting, h, surface, review.runId);
+        } catch (error) { refusal = codeOf(error, 'CLOUD_RUNTIME_UNAVAILABLE'); }
+      }
+      if (refusal) {
+        const next = await ended(at, submitting, refusal, { afterSignature: false });
+        await deps.flow(s.flow, 'walletFailure', [review.runId, { stage: 'SIGN', code: `${NATIVE_FLOWS[s.flow].prefix}_WALLET_NOT_SUBMITTED`,
+          error: { code: refusal, message: 'FloFi did not send the signed transaction.' } }], { principal: s.owner!, betaIdentity: await beta(s) }).catch(() => undefined);
+        return { kind: 'PAGE', page: 'ENDED', code: refusal, session: next };
+      }
       const submitted = await deps.flow<RunFacts>(s.flow, 'submit', [review.runId, Buffer.from(bytes).toString('base64')], { principal: s.owner!, betaIdentity: await beta(s) })
         .catch(error => ({ ok: false as const, code: codeOf(error, 'NATIVE_SUBMISSION_UNKNOWN') }));
       const observe = async () => { await deps.flow(s.flow, 'observe', [review.runId], { principal: s.owner!, betaIdentity: await beta(s) }).catch(() => undefined); };
@@ -374,7 +393,8 @@ export function createNativeSigning(deps: NativeDeps) {
         // broadcast — paused execution, an unavailable runtime, a cancelled attempt — reads as never sent; anything else may have been sent).
         await observe();
         const facts = await deps.flow<RunFacts>(s.flow, 'status', [review.runId], { principal: s.owner!, betaIdentity: await beta(s) }).catch(() => null);
-        const proven = facts?.ok === true && notSent(facts.value);
+        // Positive proof only: this run was begun, so its attempt must be on record (cancelled, or proven not executed).
+        const proven = facts?.ok === true && !!facts.value.attempt && notSent(facts.value);
         return { kind: 'PAGE', page: 'ENDED', code: submitted.code, session: await ended(at, submitting, submitted.code,
           { afterSignature: !proven, attemptState: facts?.ok ? facts.value.attempt?.state ?? null : null }) };
       }
@@ -396,7 +416,7 @@ export function createNativeSigning(deps: NativeDeps) {
       // One observation now; the deployment's worker keeps observing until the run reconciles (as for every run).
       await observe();
       await deps.notify(done, 'SUBMITTED', null).catch(() => undefined);
-      return { kind: 'PAGE', page: 'RETURN', code: null, session: done };
+      return { kind: 'PAGE', page: 'RETURN', code: null, session: done, submitted: true };
   }
 
   return {
@@ -420,8 +440,8 @@ export function createNativeSigning(deps: NativeDeps) {
         if (kind === 'REPEATED') {
           // The same request again only while its Review can still be broadcast (a lapsed one would be signed for nothing).
           if (s.state === 'AWAITING_SIGNATURE' && s.walletRequest && s.review && now().getTime() < Date.parse(s.review.expiresAt)) return { kind: 'WALLET' as const, url: s.walletRequest };
-          return fail(s.state === 'PREPARING_SIGNATURE' ? 'NATIVE_CONFIRMATION_IN_PROGRESS' : s.state === 'AWAITING_SIGNATURE' && now().getTime() < openUntil(s)
-            ? 'NATIVE_CONFIRMATION_LAPSED' : 'NATIVE_CONFIRMATION_USED');
+          return fail(s.state === 'PREPARING_SIGNATURE' ? 'NATIVE_CONFIRMATION_IN_PROGRESS' : s.state === 'AWAITING_SIGNATURE' ? 'NATIVE_CONFIRMATION_LAPSED'
+            : 'NATIVE_CONFIRMATION_USED');
         }
         if (s.state !== 'REVIEW_READY' || !s.review) fail('NATIVE_REVIEW_NOT_READY');
         if (now().getTime() >= Date.parse(s.expiresAt)) { await ended(version, s, 'NATIVE_SESSION_EXPIRED'); fail('NATIVE_SESSION_EXPIRED'); }
