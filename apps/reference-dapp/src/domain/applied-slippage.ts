@@ -12,8 +12,14 @@ import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
  * network, token, recipient or routing on the card is never applied with it; it is validated by the step's own authoring rules (provider
  * limits) and by the editor (locks, revision), and it is one ordinary edit: the new revision retires earlier quotes, simulations and Reviews.
  * It never simulates, authorizes, signs or executes anything. Returns the refusal code otherwise (the caller words it).
+ *
+ * `exact` (security review): the edit is applied at once only when the resulting step equals the applied one apart from its slippage. The
+ * authoring input cannot express every valid step (a universal bridge with a provider list that is not a routing preset, a Router bridge whose
+ * stricter earlier editing bounds are kept on purpose), and rebuilding such a step from it would also change those: then the same edit is
+ * offered as a proposal instead, so the owner sees every change before applying it.
  */
-export function appliedSlippageCommand(state: EditorState, nodeId: string, slippage: string, context?: ReviewContext): { readonly command: Command } | { readonly code: string } {
+export function appliedSlippageCommand(state: EditorState, nodeId: string, slippage: string, context?: ReviewContext):
+  { readonly command: Command; readonly exact: boolean } | { readonly code: string } {
   const node = state.workflow.nodes.find(item => item.nodeId === nodeId);
   if (!node) return { code: 'NODE_NOT_FOUND' };
   const base = { nodeId, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
@@ -35,5 +41,12 @@ export function appliedSlippageCommand(state: EditorState, nodeId: string, slipp
     } else return { code: 'SLIPPAGE_NOT_APPLICABLE' };
   } catch (cause) { return { code: cause instanceof Error ? cause.message : 'INVALID_SLIPPAGE' }; }
   const preview = editorReducer(state, command, context);
-  return preview.error ? { code: preview.error } : { command };
+  if (preview.error) return { code: preview.error };
+  const after = preview.workflow.nodes.find(item => item.nodeId === nodeId);
+  return { command, exact: Boolean(after) && withoutSlippage(after!) === withoutSlippage(node) };
+}
+/** A step's canonical form without its slippage (its MAXIMUM_SLIPPAGE_BPS constraint and slippage fields). */
+function withoutSlippage(node: EditorState['workflow']['nodes'][number]): string {
+  return JSON.stringify({ ...node, userConstraints: node.userConstraints.filter(constraint => constraint.kind !== 'MAXIMUM_SLIPPAGE_BPS') },
+    (key, value: unknown) => /slippage/i.test(key) ? undefined : value);
 }

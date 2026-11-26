@@ -58,8 +58,8 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   'Sign-in is misconfigured on this deployment. Nothing was signed in.': 'O login está mal configurado nesta implantação. Nada foi conectado.',
   'The wallet provider sent an answer FloFi could not read. Nothing changed.': 'O provedor de carteiras enviou uma resposta que o FloFi não conseguiu ler. Nada mudou.',
   'Sign-in did not complete. Try again.': 'O login não foi concluído. Tente de novo.',
-  'Google sign-in does not work inside an app’s built-in browser, such as a wallet app’s browser. Open this page in Safari or Chrome to use Google, or choose email or your wallet here. Nothing changed.':
-    'O login com Google não funciona dentro do navegador interno de um app, como o navegador de um app de carteira. Abra esta página no Safari ou no Chrome para usar o Google, ou escolha e-mail ou sua carteira aqui. Nada mudou.',
+  'Google sign-in does not work inside an app’s built-in browser, such as a wallet app’s browser, or where this site cannot store data. Open this page in Safari or Chrome with site data allowed to use Google, or choose email or your wallet here. Nothing changed.':
+    'O login com Google não funciona dentro do navegador interno de um app, como o navegador de um app de carteira, nem onde este site não pode guardar dados. Abra esta página no Safari ou no Chrome com os dados do site permitidos para usar o Google, ou escolha e-mail ou sua carteira aqui. Nada mudou.',
   'Sign-in was interrupted. Choose your method again when it’s ready.':
     'O login foi interrompido. Escolha seu método de novo quando estiver pronto.',
   'FloFi was updated while you were signing in. Nothing was signed in. Sign in again.': 'A FloFi foi atualizada enquanto você entrava. Nenhum login foi feito. Entre de novo.', 'Sign in with Google, your email or a Web3 wallet.': 'Entre com o Google, seu e-mail ou uma carteira Web3.',

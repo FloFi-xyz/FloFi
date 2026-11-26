@@ -83,6 +83,8 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
     const result = appliedSlippageCommand(state, nodeId, slippage, context);
     if ('code' in result) return appliedSlippageMessage(result.code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS);
     // The form's own draft follows the applied value too (its later "Review swap change" never proposes the earlier limit).
+    // Only the slippage changes: applied at once. Otherwise (the step cannot be rebuilt exactly) the same edit is a proposal the owner reviews.
+    if (!result.exact) { propose(result.command); return null; }
     dismissProposal(); dispatch(result.command); set({ slippage }); setError('');
     return null;
   }

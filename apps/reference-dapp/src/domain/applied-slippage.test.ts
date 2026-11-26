@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
+import { createUniversalBridgeNode, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { appliedSlippageCommand } from './applied-slippage';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Command } from './commands';
@@ -26,6 +26,7 @@ const only = (state: EditorState) => state.workflow.nodes[0]!;
 const apply = (state: EditorState, slippage: string) => {
   const result = appliedSlippageCommand(state, only(state).nodeId, slippage, context);
   if ('code' in result) throw new Error(result.code);
+  expect(result.exact).toBe(true);
   return { command: result.command, next: editorReducer(state, result.command, context) };
 };
 
@@ -62,6 +63,17 @@ describe('PR #254 follow-up: an existing bridge or Jupiter swap applies its max 
         expect(result, `${only(state).actionType} ${refused}`).toHaveProperty('code');
       }
     }
+  });
+
+  it('security review: a step the settings cannot rebuild exactly is never changed silently; the same edit is offered for review instead', () => {
+    // A valid universal bridge whose provider list is not one of the card's routing presets (as an API or agent can author it).
+    const state = universal(), node = only(state), fields = universalBridgeDetails(node)!.fields;
+    const custom = createUniversalBridgeNode(node.nodeId, { ...fields, providers: ['across'], selection: 'BEST_MINIMUM_OUTPUT' });
+    const authored = { ...state, workflow: { ...state.workflow, nodes: [custom as typeof node] } };
+    const result = appliedSlippageCommand(authored, node.nodeId, '250', context);
+    if ('code' in result) throw new Error(result.code);
+    // Rebuilding it from the settings would change its routing too, so it is not applied at once (the forms propose it instead).
+    expect(result.exact).toBe(false);
   });
 
   it('refuses a step that has no such setting, and a step that is not in the workflow', () => {

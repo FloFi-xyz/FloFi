@@ -50,7 +50,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   PRIVY_RESPONSE_INVALID: 'The wallet provider sent an answer FloFi could not read. Nothing changed.',
   PRIVY_SIGN_IN_FAILED: 'Sign-in did not complete. Try again.',
   // PR #254 follow-up: Google refuses sign-in inside an app's built-in browser (a wallet app's browser, for example); retrying there cannot work.
-  PRIVY_OAUTH_EMBEDDED_BROWSER: 'Google sign-in does not work inside an app’s built-in browser, such as a wallet app’s browser. Open this page in Safari or Chrome to use Google, or choose email or your wallet here. Nothing changed.',
+  PRIVY_OAUTH_EMBEDDED_BROWSER: 'Google sign-in does not work inside an app’s built-in browser, such as a wallet app’s browser, or where this site cannot store data. Open this page in Safari or Chrome with site data allowed to use Google, or choose email or your wallet here. Nothing changed.',
   // Authentication UX & Login Regression Fix (P0): another sign-in was still open in this browser; it has been ended (nothing was signed in).
   PRIVY_SIGN_IN_INTERRUPTED: 'Sign-in was interrupted. Choose your method again when it’s ready.',
   SIGN_IN_PAGE_OUTDATED: 'FloFi was updated while you were signing in. Nothing was signed in. Sign in again.',
