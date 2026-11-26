@@ -108,7 +108,7 @@ export function simulationStatusPresentation(view: SimulationPresentation, inval
   if (view.message === 'Run a simulation to see the expected result.') return { label: 'No simulation yet', message: 'Run a simulation to see expected execution.', tone: 'neutral' };
   if (/expired/i.test(view.message)) return { label: 'Simulation expired', message: 'Simulate again to refresh the result before authorization.', tone: 'blocked' };
   if (/changed/i.test(view.message)) return { label: 'Review required again', message: view.message, tone: 'blocked' };
-  if (/balance.*low|Add funds for the network fee/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
+  if (/balance.*low|Add funds for the network fee|does not hold enough/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
   if (/Simulation is (?:currently unavailable|not available)/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
   if (/could not complete this simulation|rejected this transaction in simulation/i.test(view.message)) return { label: 'Simulation failed', message: view.message, tone: 'blocked' };
   if (/Connect the wallet that will sign/i.test(view.message)) return { label: 'Connect your wallet', message: view.message, tone: 'blocked' };
@@ -171,6 +171,8 @@ function koraMessage(error: string): string | null {
     return 'Paying the network fee in USDC or USDT is not available right now, so nothing was sent. Add SOL for the network fee, then simulate again.';
   return 'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.';
 }
+/** PR #254 follow-up: a liquidity step whose WETH (a token, not the network-fee ETH) exceeds what the wallet holds on that network. */
+export const LIQUIDITY_WETH_SHORTFALL_MESSAGE = 'Your wallet does not hold enough WETH on this step’s network for this liquidity deposit, so nothing was simulated or sent. WETH is wrapped ETH and FloFi does not wrap it for you: add WETH to this wallet on that network, or lower the WETH amount on the Canvas, then simulate again.';
 export const SINGLE_SWAP_NATIVE_FEE_MESSAGE = 'Add funds for the network fee, then simulate again. This swap pays its network fee in ETH on this network; paying it in USDC is not available for a single swap yet, so nothing was signed.';
 /**
  * BUILD-FLOFI-UNIFIED-WALLET-RESOLUTION-P0-001: a bridge's receiving wallet (`UNIVERSAL_DESTINATION_*`, and the client-only states FloFi refuses
@@ -236,6 +238,9 @@ export function simulationError(error: string, kind?: SimulationSource['kind']):
   // payment (Circle Paymaster) runs only inside multi-step workflow runs from an eligible smart account today, so it is not offered here: the
   // owner is told the real limitation instead of a bare "add funds".
   if (error === 'INSUFFICIENT_GAS_FUNDS') return SINGLE_SWAP_NATIVE_FEE_MESSAGE;
+  // PR #254 follow-up: a liquidity step short of WETH (wrapped ETH, a token) is not short of ETH for the network fee, which the rule below read
+  // into "WETH". FloFi never wraps ETH, swaps or bridges on the owner's behalf to cover it.
+  if (error === 'UNISWAP_INSUFFICIENT_WETH') return LIQUIDITY_WETH_SHORTFALL_MESSAGE;
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';

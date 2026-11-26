@@ -24,4 +24,8 @@ export const portugueseBuildEntry: Readonly<Record<string, string>> = {
   'Nothing executes without your review and authorization.': 'Nada é executado sem a sua revisão e autorização.',
   'You can start without connecting a wallet.': 'Você pode começar sem conectar uma carteira.',
   'Execution result': 'Resultado da execução', 'View in Dashboard': 'Ver no Painel',
+  // PR #254 follow-up: a suggestion's sentence is filled part by part in the same request field.
+  'Token suggestions': 'Sugestões de token', 'Network suggestions': 'Sugestões de rede',
+  'Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow. Type any token or network, or choose one of the suggestions shown under the field.':
+    'Preencha a parte selecionada. Pressione Enter ou Tab para a próxima parte, ou Shift+Tab para a anterior. Com todas as partes preenchidas, o Enter cria o fluxo. Digite qualquer token ou rede, ou escolha uma das sugestões mostradas abaixo do campo.',
 };

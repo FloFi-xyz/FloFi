@@ -228,6 +228,110 @@ test('the request field grows with its text, has no resize handle, scrolls insid
   networkGuard.assertClean();
 });
 
+/** The text currently selected in the request field (what typing replaces). */
+const selected = (page: Page) => request(page).evaluate(field => { const input = field as HTMLTextAreaElement; return input.value.slice(input.selectionStart, input.selectionEnd); });
+
+test('PR #254 follow-up: a template is filled part by part in the same field (Enter, Tab, Shift+Tab, a choice, a click), and never submits by itself', async ({ page, networkGuard }) => {
+  await open(page);
+  await entry(page).getByRole('button', { name: 'Swap tokens', exact: true }).click();
+  await expect.poll(() => selected(page)).toBe('[amount]');
+  // Typing replaces the part (a decimal amount); nothing advances per keystroke.
+  await page.keyboard.type('10.5');
+  await expect(request(page)).toHaveValue('Swap 10.5 [token] for [token] on [network]');
+  // Enter confirms the part and selects the next one still to fill; an incomplete template is never submitted.
+  await page.keyboard.press('Enter');
+  await expect.poll(() => selected(page)).toBe('[token]');
+  await expectChatSection(page);
+  await page.keyboard.type('USDC');
+  // Tab moves to the next part too; the choices are the existing supported tokens of the swap's networks (none for an amount).
+  await page.keyboard.press('Tab');
+  await expect.poll(() => selected(page)).toBe('[token]');
+  const choices = entry(page).getByRole('group', { name: 'Token suggestions', exact: true });
+  await expect(choices).toBeVisible();
+  await choices.getByRole('button', { name: 'ETH', exact: true }).click();
+  // A choice fills the part and moves on (the request keeps focus): the network is next, with its own choices (mainnets only).
+  await expect(request(page)).toHaveValue('Swap 10.5 USDC for ETH on [network]');
+  await expect(request(page)).toBeFocused();
+  await expect.poll(() => selected(page)).toBe('[network]');
+  const networks = entry(page).getByRole('group', { name: 'Network suggestions', exact: true });
+  const offered = await networks.getByRole('button').allTextContents();
+  expect(offered).toContain('Base'); expect(offered.filter(name => /Sepolia|Devnet|Testnet/i.test(name))).toEqual([]);
+  await networks.getByRole('button', { name: 'Base', exact: true }).click();
+  // The completed sentence is ready; filling the last part submitted nothing and authored nothing.
+  await expect(request(page)).toHaveValue('Swap 10.5 USDC for ETH on Base');
+  await expectChatSection(page);
+  // Shift+Tab revisits an earlier part (selected, so typing replaces it); ordinary editing keeps working.
+  await page.keyboard.press('Shift+Tab');
+  await expect.poll(() => selected(page)).toBe('ETH');
+  await page.keyboard.type('WETH');
+  await expect(request(page)).toHaveValue('Swap 10.5 USDC for WETH on Base');
+  // A click inside a part still to fill selects all of it (no manual selection or deletion).
+  await request(page).fill('Swap 2 [token] for USDC on Base, then wait');
+  const box = (await request(page).boundingBox())!;
+  const offset = await request(page).evaluate(field => {
+    // The horizontal position of the middle of "[token]", measured with the field's own font.
+    const input = field as HTMLTextAreaElement, style = getComputedStyle(input), canvas = document.createElement('canvas').getContext('2d')!;
+    canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return parseFloat(style.paddingLeft) + canvas.measureText('Swap 2 [to').width;
+  });
+  await page.mouse.click(box.x + offset, box.y + 22);
+  await expect.poll(() => selected(page)).toBe('[token]');
+  await page.keyboard.type('USDT');
+  // The person's own additions are kept.
+  await expect(request(page)).toHaveValue('Swap 2 USDT for USDC on Base, then wait');
+  // Free text written over a template (no part left) is submitted on Enter, exactly as typed, as before.
+  await entry(page).getByRole('button', { name: 'Swap tokens', exact: true }).click();
+  await request(page).fill('Swap 1 USDC to WETH on Base slippage 50 bps');
+  await request(page).press('Enter');
+  await expectEditorSection(page, 'Build');
+  await expect(chat(page)).toContainText('Swap added to your workflow: 1 USDC');
+  networkGuard.assertClean();
+});
+
+test('PR #254 follow-up: Portuguese templates fill part by part too', async ({ page, networkGuard }) => {
+  await chooseLanguage(page.context(), 'PT');
+  await open(page);
+  await entry(page).getByRole('button', { name: 'Trocar moedas', exact: true }).click();
+  await expect(request(page)).toHaveValue('Trocar [valor] [token] por [token] na [rede]');
+  await expect.poll(() => selected(page)).toBe('[valor]');
+  await page.keyboard.type('10'); await page.keyboard.press('Enter');
+  await page.keyboard.type('USDC'); await page.keyboard.press('Enter');
+  await entry(page).getByRole('group', { name: 'Sugestões de token', exact: true }).getByRole('button', { name: 'ETH', exact: true }).click();
+  await entry(page).getByRole('group', { name: 'Sugestões de rede', exact: true }).getByRole('button', { name: 'Base', exact: true }).click();
+  await expect(request(page)).toHaveValue('Trocar 10 USDC por ETH na Base');
+  await expectChatSection(page);
+  await chooseLanguage(page.context(), 'EN');
+  networkGuard.assertClean();
+});
+
+test('PR #254 follow-up: the Create workflow button is vertically centred in the request field and the editor link sits further below the chips', async ({ page, networkGuard }) => {
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const composer = page.locator('form[aria-busy]');
+    const centres = async () => {
+      const form = (await composer.boundingBox())!, button = (await create(page).boundingBox())!;
+      return { form: form.y + form.height / 2, button: button.y + button.height / 2, buttonBottom: button.y + button.height, formBottom: form.y + form.height };
+    };
+    for (const text of ['', 'Swap 1 USDC', 'Swap [amount] [token] for [token] on [network]', 'Swap 1 USDC to WETH on Base\nthen supply it to Aave\nand keep the rest']) {
+      await request(page).fill(text);
+      const at = await centres();
+      // Desktop: centred on the field's middle (within a pixel). Mobile keeps its own arrangement (the button on its own row, inside the field).
+      if (width === 1440) expect(Math.abs(at.button - at.form), JSON.stringify(text)).toBeLessThanOrEqual(1);
+      else expect(at.buttonBottom).toBeLessThanOrEqual(at.formBottom);
+    }
+    await request(page).fill('');
+    // The "Build it manually" line: at least 28px under the chips (it was 16px), same typography.
+    const chips = (await entry(page).getByRole('group', { name: 'Example requests', exact: true }).boundingBox())!;
+    const manual = page.locator('[data-build-entry] p').filter({ hasText: 'Prefer the editor?' });
+    const line = (await manual.boundingBox())!;
+    expect(line.y - (chips.y + chips.height)).toBeGreaterThanOrEqual(28);
+    expect(await manual.evaluate(node => getComputedStyle(node).fontSize)).toBe('14px');
+    await noOverflow(page);
+  }
+  networkGuard.assertClean();
+});
+
 test('every Build 0 control is reachable with the keyboard and shows its focus', async ({ page, networkGuard }) => {
   await open(page);
   await expect(entry(page)).toBeVisible();

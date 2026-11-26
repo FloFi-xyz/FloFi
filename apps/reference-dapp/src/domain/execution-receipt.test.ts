@@ -2,7 +2,7 @@
 /** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (workstream B): the execution receipt states only what the persisted record proves. */
 import { describe, expect, it } from 'vitest';
 import { runDetailFixture, detailHash } from '../test-utils/run-detail-fixture';
-import { projectExecutionReceipt, readableAmount, receiptDate } from './execution-receipt';
+import { projectExecutionReceipt, projectLiveExecutionResult, readableAmount, receiptDate } from './execution-receipt';
 import { portuguese } from '../i18n/pt';
 
 const receipt = (mode: Parameters<typeof runDetailFixture>[0]) => projectExecutionReceipt(runDetailFixture(mode).view);
@@ -137,5 +137,41 @@ describe('receipt formatting', () => {
     expect(tiny.text).toBe('0.000000000000000000000000001 ETH'); expect(tiny.text).not.toBe('0 ETH');
     expect(readableAmount('Not recorded in this history', 'PT').text).toBe('Not recorded in this history');
     expect(readableAmount('#4821', 'EN').text).toBe('#4821');
+  });
+});
+
+describe('execution UX regression fixes: the compact live result in the Execute panel', () => {
+  const live = (mode: Parameters<typeof runDetailFixture>[0]) => projectLiveExecutionResult(runDetailFixture(mode).view.progress!);
+  it('a reconciled swap: what was sent, the ACTUAL received amount (not the estimate), verified fees and the transaction to verify', () => {
+    const value = live('completed');
+    expect(value.values).toEqual([{ label: 'You sent', value: '100 USDC', observed: true }, { label: 'You received', value: '0.0243 WETH', observed: true }]);
+    expect(value.fees).toEqual([{ label: 'Network fee', value: '0.0003 ETH', observed: true }]);
+    expect(value.transaction).toEqual({ hash: detailHash, explorer: `https://sepolia.basescan.org/tx/${detailHash}`, network: 'Base Sepolia' });
+    expect(value.steps).toEqual([]);
+  });
+  it('before reconciliation: no received amount, no fee that was not verified, and never the saved receipt\'s "not recorded" wording', () => {
+    for (const mode of ['pending', 'bridge-pending'] as const) {
+      const value = live(mode);
+      expect(value.values.some(row => row.observed && /received|Delivered/i.test(row.label))).toBe(false);
+      expect(value.fees).toEqual([]);
+      expect(JSON.stringify(value)).not.toContain('Not recorded in this history');
+    }
+    expect(live('bridge-completed').values).toEqual([{ label: 'You sent', value: '5 USDC', observed: true }, { label: 'Delivered', value: '4.89 USDC', observed: true }]);
+  });
+  it('a delivery observed but not final keeps its interim label, never presented as the result', () => {
+    const progress = runDetailFixture('bridge-pending').view.progress!;
+    const step = progress.steps[0]!, op = step.operations.at(-1)!;
+    const withInterim = { ...progress, evidence: { ...progress.evidence!, operations: { ...progress.evidence!.operations,
+      [op.id]: { identifiers: [], comparisons: [], fees: [], ...progress.evidence!.operations[op.id], values: [...progress.evidence!.operations[op.id]?.values ?? [],
+        { label: 'Destination amount observed · awaiting reconciliation', value: '4.89 USDC' }] } } } };
+    expect(projectLiveExecutionResult(withInterim).values).toContainEqual({ label: 'Destination amount observed · awaiting reconciliation', value: '4.89 USDC', observed: true });
+  });
+  it('a step whose transaction is confirmed but whose record is not reconciled is never "Completed"', () => {
+    const progress = runDetailFixture('partial').view.progress!;
+    const unreconciled = { ...progress, stepEvidence: Object.fromEntries(progress.steps.map(step => [step.id, { reconciled: false }])) } as typeof progress;
+    expect(projectLiveExecutionResult(unreconciled).steps[0]).toMatchObject({ status: 'In progress', tone: 'progress' });
+  });
+  it('several steps: each step with its own status, amounts and transaction', () => {
+    expect(live('partial').steps.map(step => [step.number, step.action, step.status])).toEqual([[1, 'Supply', 'Completed'], [2, 'Borrow', 'Failed'], [3, 'Swap', 'Not run']]);
   });
 });

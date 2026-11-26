@@ -555,3 +555,25 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     expect(ready).not.toMatch(/data-network-pending|Network\?|calculated after the network|Choose the network in the chat/);
   });
 });
+
+describe('execution UX regression fixes: slippage presets apply at once', () => {
+  it('the action settings offer 1%, 2.5% and 5% presets with no "Manual" label and no separate Apply button; the default stays 1%', async () => {
+    const { LocaleProvider } = await import('../i18n/locale');
+    setWorkflow();
+    fixture.store.state = editorReducer(initialEditor(), { type: 'ADD_SWAP', source: 'CANVAS', baseRevision: 0, direction: 'USDC_TO_WETH', amount: '1', slippage: '100' }, fixture.store.context);
+    const node = fixture.store.state.workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input')!;
+    const render = (language: 'EN' | 'PT') => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language,
+      children: createElement(ActionSettingsContent, { selectedId: node.nodeId, select: vi.fn() }) }));
+    // (A static render runs no effect, so the field's draft and the pressed state are covered by the browser regression.)
+    const presets = (html: string) => [...html.matchAll(/<button type="button" aria-pressed="(?:true|false)">([^<]+)<\/button>/g)].map(match => match[1]);
+    const en = render('EN');
+    expect(presets(en)).toEqual(['1%', '2.5%', '5%']);
+    expect(en).not.toMatch(/Manual|Apply max price difference/);
+    expect(en).toContain('Applied limit: 1%. A fresh simulation and Review use it.');
+    const pt = render('PT');
+    expect(presets(pt)).toEqual(['1%', '2,5%', '5%']);
+    expect(pt).not.toMatch(/Manual|Aplicar a diferença máxima de preço/);
+    // Rendering applies nothing: the workflow changes only on a preset click or a committed valid value (browser regression).
+    expect(fixture.store.dispatch).not.toHaveBeenCalled();
+  });
+});

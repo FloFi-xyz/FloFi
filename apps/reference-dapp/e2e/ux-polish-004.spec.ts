@@ -600,10 +600,12 @@ test.describe('UX-03 direct access to the manual Editor', () => {
     const [question, accent] = await line.evaluate(element => [getComputedStyle(element).color, getComputedStyle(element.querySelector('a')!).color]);
     expect(question).not.toBe(accent);
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())).not.toBe('');
-    // Centred, small, right under the suggestions, with the page's hierarchy unchanged (one heading, one field, six buttons).
+    // Centred, small, under the suggestions, with the page's hierarchy unchanged (one heading, one field, six buttons).
+    // PR #254 follow-up (owner): the line sits 16px further from the chips than before (32px instead of 16px), never far from them.
     const chips = await box(entry(page).getByRole('group', { name: 'Exemplos de pedidos' })), lineBox = await box(line), linkBox = await box(link);
     expect(lineBox.y).toBeGreaterThan(chips.y + chips.height);
-    expect(lineBox.y - (chips.y + chips.height)).toBeLessThan(32);
+    expect(lineBox.y - (chips.y + chips.height)).toBeGreaterThanOrEqual(28);
+    expect(lineBox.y - (chips.y + chips.height)).toBeLessThanOrEqual(44);
     expect(Math.abs((lineBox.x + lineBox.width / 2) - (chips.x + chips.width / 2))).toBeLessThanOrEqual(2);
     expect(await line.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeLessThanOrEqual(14);
     await expect(entry(page).getByRole('button')).toHaveCount(6);

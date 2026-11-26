@@ -21,7 +21,7 @@ for (const width of widths) {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1, name: 'Tell FloFi: I want to swap, bridge, deposit, add liquidity or transfer.', exact: true })).toBeVisible();
     await expect(page.locator('.app-shell')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
     expect(await page.locator('main section[id]').evaluateAll(items => items.map(item => item.id))).toEqual(['top', 'dor', 'como-funciona', 'hoje', 'seguranca', 'perguntas', 'entrar']);
     await expect(page.locator('main')).not.toContainText(/devnet|testnet|sepolia|mock|sandbox|synthetic|simulated.only|test.funds/i);
     await expect(page.locator('a[href*="cluster=devnet"]')).toHaveCount(0);

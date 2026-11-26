@@ -25,7 +25,7 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (A3): the stage indicator now sits in the Editor header inside this workspace; its current "Execute" step is
   // navigation (aria-current), not an action. Every other control of the workspace is checked.
   await expect(execution.getByRole('navigation', { name: 'Editor steps', exact: true }).getByRole('button', { name: 'Execute', exact: true })).toHaveAttribute('aria-current', 'step');
-  await expect(execution.getByRole('button', { name: /^(Return to the Canvas|Execute|Execute swap|Authorize|Authorize workflow|Accept review)$/ })
+  await expect(execution.getByRole('button', { name: /^(Return to the Canvas|Execute|Execute swap|Authorize|Authorize workflow|Execute workflow|Accept review)$/ })
     .and(page.locator('button:not(.editor-stepper button)'))).toHaveCount(0);
   await assertNoFinancialCanvasAction(page);
   await expect(execution.getByRole('link', { name: /Download.*Evidence Bundle/ })).toHaveCount(0);

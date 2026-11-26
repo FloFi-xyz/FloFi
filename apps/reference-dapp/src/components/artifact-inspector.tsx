@@ -44,6 +44,7 @@ import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksConfiguration } from './stocks-settings';
 import { DEFAULT_SLIPPAGE, bpsToPercent, priceDifferenceLabel } from '../domain/slippage-policy';
 import { priceDifferenceBps, SlippageChoices } from './price-difference-input';
+import { settingsKeyOf } from '../domain/applied-slippage';
 import { plainFinding } from '../domain/editor-overview';
 import { withoutChainId } from '../domain/approved-ux';
 import { workflowPositionManagement } from '../domain/liquidity-positions';
@@ -64,20 +65,43 @@ function slippageMessage(cause: unknown) {
   return code === 'INVALID_SLIPPAGE' || !code ? 'Enter the max price difference as a percentage with up to two decimals (1 = 1%).' : 'This max price difference cannot be applied to this step.';
 }
 /**
- * BUILD-FIX-UX-001: the swap's maximum slippage, edited like any other parameter (Enter or Apply). It always shows the applied value.
+ * BUILD-FIX-UX-001: the swap's maximum slippage, edited like any other parameter. It always shows the applied value.
  * P0 approved UX (boards 04, 16): it is the card's "Max price difference", typed in percent; the command still carries exact basis points.
+ * Execution UX regression fixes: there is no separate Apply button. A preset (1%, 2,5%/2.5%, 5%, or Auto) is populated and applied in one click;
+ * a typed value is applied once committed (Enter, or leaving the field), when it is valid and differs from the applied limit. An invalid value
+ * is refused with its reason and never applied. Each applied change is one ordinary edit, so earlier simulations and Reviews are retired.
  */
-function SlippageField({ value, current, error, onChange, onSubmit, auto }: { value: string; current: number | null; error: string;
-  onChange(value: string): void; onSubmit(event: FormEvent<HTMLFormElement>): void; auto?: ReturnType<typeof useJupiterSlippageChoices> }) {
+function SlippageField({ value, current, error, onChange, onCommit, auto }: { value: string; current: number | null; error: string;
+  onChange(value: string): void; onCommit(value: string): void; auto?: ReturnType<typeof useJupiterSlippageChoices> }) {
   const { t: tr } = useLocale();
   const id = useId();
-  return <form onSubmit={onSubmit} className="inspector-form" aria-label={tr("Max price difference")}>
+  // The latest draft (a blur can follow a keystroke before the next render). Escape in the field discards it: the settings popover closes on
+  // Escape from a document capture listener that stops the event, so this window capture listener (which runs first) resets the draft before
+  // the field loses focus, and nothing typed is applied by closing.
+  const draft = useRef(value); draft.current = value;
+  const field = useRef<HTMLInputElement>(null), latest = useRef({ current, onChange }); latest.current = { current, onChange };
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.target !== field.current) return;
+      const applied = latest.current.current === null ? '' : bpsToPercent(String(latest.current.current));
+      draft.current = applied; latest.current.onChange(applied);
+    };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, []);
+  // Compared in exact basis points: "2,5" and "2.5" are the applied 2.5%, never a second edit.
+  const commit = (next: string) => { if (priceDifferenceBps(next) !== (current === null ? '' : String(current))) onCommit(next); };
+  const choose = (bps: string) => { const next = bpsToPercent(bps); draft.current = next; onChange(next); commit(next); };
+  // Focus leaving the whole form commits the typed draft (mouse, Tab past the presets, a closed popover); moving between the field and the
+  // presets does not (a preset applies its own value).
+  return <form onSubmit={event => { event.preventDefault(); commit(draft.current); }} className="inspector-form" aria-label={tr("Max price difference")}
+    onBlur={event => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) commit(draft.current); }}>
     <label htmlFor={`${id}-slippage`}>{tr("Max price difference (%)")}</label>
-    <input id={`${id}-slippage`} type="text" value={value} onChange={event => onChange(event.target.value)} inputMode="decimal" autoComplete="off" spellCheck={false} maxLength={6}
+    <input ref={field} id={`${id}-slippage`} type="text" value={value} onChange={event => onChange(event.target.value)} inputMode="decimal" autoComplete="off" spellCheck={false} maxLength={6}
       aria-invalid={Boolean(error) || undefined} aria-describedby={`${id}-slippage-note`}/>
-    <SlippageChoices {...auto} bps={priceDifferenceBps(value)} maximumBps={SWAP_SLIPPAGE_RANGE.maximum} onBpsChange={bps => onChange(bpsToPercent(bps))}/>
+    {/* The presets show the APPLIED limit as pressed (a typed draft is not applied until committed). */}
+    <SlippageChoices {...auto} bps={current === null ? priceDifferenceBps(value) : String(current)} maximumBps={SWAP_SLIPPAGE_RANGE.maximum} onBpsChange={choose}/>
     {auto?.autoError && <p className="muted" role="status">{tr(auto.autoError)}</p>}
-    <button type="submit" disabled={value === (current === null ? '' : bpsToPercent(String(current)))}>{tr("Apply max price difference")}</button>
     <p id={`${id}-slippage-note`} className={error ? 'form-error' : 'muted'} role={error ? 'alert' : undefined}>{error ? tr(error)
       : current === null ? tr('No max price difference is set for this step.') : tr('Applied limit: {0}. A fresh simulation and Review use it.', priceDifferenceLabel(current))}</p>
   </form>;
@@ -223,17 +247,16 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
    * BUILD-FIX-UX-001: a slippage edit is an ordinary parameter edit of the editable workflow: validated, then applied at once (no proposal).
    * The new revision retires every quote, simulation and Review; execution still needs fresh ones and the owner's wallet signature.
    */
-  function applySlippage(event: FormEvent<HTMLFormElement>, command: (bps: string) => Command) {
-    event.preventDefault();
+  function applySlippage(value: string, command: (bps: string) => Command) {
     try {
-      const bps = String(parseSwapSlippageEdit(priceDifferenceBps(slippage))), next = command(bps), preview = editorReducer(state, next, context);
+      const bps = String(parseSwapSlippageEdit(priceDifferenceBps(value))), next = command(bps), preview = editorReducer(state, next, context);
       if (preview.error) throw new Error(preview.error);
       dismissProposal(); dispatch(next); setSlippage(bpsToPercent(bps)); setSlippageError('');
     } catch (cause) { setSlippageError(slippageMessage(cause)); }
   }
-  function saveSlippage(event: FormEvent<HTMLFormElement>) {
-    if (!node || !swap) { event.preventDefault(); return; }
-    applySlippage(event, bps => ({ type: 'SET_SLIPPAGE', nodeId: node.nodeId, slippage: bps, source: 'CANVAS', baseRevision: state.workflow.revision }));
+  function saveSlippage(value: string) {
+    if (!node || !swap) return;
+    applySlippage(value, bps => ({ type: 'SET_SLIPPAGE', nodeId: node.nodeId, slippage: bps, source: 'CANVAS', baseRevision: state.workflow.revision }));
   }
   function saveBridge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!node || !bridge) return;
@@ -303,16 +326,17 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
       {lending&&<LendingNodeEditor key={`${node.nodeId}:${state.workflow.revision}`} nodeId={node.nodeId} {...(supply || node.actionType === 'borrow' ? { reviewFormId: supplyReviewFormId(node.nodeId) } : {})}/>}
       {!lending&&!lendingDraft&&node.actionType==='borrow'&&<BorrowAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
       {!lending && !lendingDraft && supply && <SupplyAuthoringForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
-      {solana && !cryptoSwap && <><p className="muted">{tr(solana.network)} {tr(solana.from)} → {tr(solana.to)}{tr(" via ")}{tr(solanaSwapLabels(solana.network).provider)}{tr(solanaSwapLabels(solana.network).testTokens ? ' · valueless test tokens' : '')}{tr(" · simulate for a live quote. Changes require review.")}</p><SolanaSwapForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
+      {solana && !cryptoSwap && <><p className="muted">{tr(solana.network)} {tr(solana.from)} → {tr(solana.to)}{tr(" via ")}{tr(solanaSwapLabels(solana.network).provider)}{tr(solanaSwapLabels(solana.network).testTokens ? ' · valueless test tokens' : '')}{tr(" · simulate for a live quote. Changes require review.")}</p><SolanaSwapForm key={settingsKeyOf(node)} nodeId={node.nodeId}/></>}
       {cryptoSwap && selection && <form className="inspector-form" aria-label={tr("Swap amount")} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(node.nodeId) ?? ''); }}>
         <label>{tr("Input amount (")}{tr(selection.from)})<TokenAmountInput value={amountInputs[node.nodeId] ?? cryptoSwap.amount} aria-invalid={Boolean(error) || undefined} onValueChange={value => { setError(''); editCanvasAmount(node.nodeId, value); }}/></label>
         {amountInputs[node.nodeId] !== undefined && <p className="muted">{tr("Press Enter to apply the amount.")}</p>}
       </form>}
       {cryptoSwap && selection && node.userConstraints.some(constraint => constraint.kind === 'MAXIMUM_SLIPPAGE_BPS') && <SlippageField auto={jupiterSlippage} value={slippage} current={Number(cryptoSwap.slippage)} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }}
-        onSubmit={event => applySlippage(event, bps => ({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, slippage: bps }, source: 'CANVAS', baseRevision: state.workflow.revision }))}/>}
+        onCommit={value => applySlippage(value, bps => ({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, slippage: bps }, source: 'CANVAS', baseRevision: state.workflow.revision }))}/>}
       {/* BUILD-FLOFI-UX-FIX-003: a bridge's settings are only what its card does not edit (recipient, routing, slippage), without protocol text. */}
-      {universalBridge && <UniversalBridgeForm options key={node!.nodeId + ':' + state.workflow.revision} nodeId={node!.nodeId}/>}
-      {routed && <RouterForm options key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/>}
+      {/* PR #254 follow-up: keyed by the step apart from its slippage, which these settings apply at once (`settingsKeyOf`). */}
+      {universalBridge && <UniversalBridgeForm options key={settingsKeyOf(node!)} nodeId={node!.nodeId}/>}
+      {routed && <RouterForm options key={settingsKeyOf(node)} nodeId={node.nodeId}/>}
       {uniPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(uniPosition.network)}{tr(" USDC / WETH via ")}{tr(uniPosition.provider)}{tr(" · fee 0.05% · test tokens · simulate against the live pool. Changes require review.")}</p><UniswapLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {managed && <p className="muted">{tr(liquidityPositionOperationPhrase(managed.protocol, managed.management.operation, managed.management.close))}{managed.management.partBps !== null ? ` · ${managed.management.partBps / 100}%` : ''}{' · '}{tr("Prepared from your position. Change it from the Dashboard or in chat; Simulate shows the exact Review.")}</p>}
       {orcaPosition && !managed && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(orcaPosition.network === 'Solana Devnet' ? " SOL / devUSDC via " : " SOL / USDC via ")}{tr(orcaPosition.provider)}{tr(orcaPosition.network === 'Solana Devnet' ? " · valueless test tokens · simulate against the live pool. Changes require review." : " · real funds · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
@@ -325,7 +349,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
         <TokenAmountInput id="sample-amount" value={node ? amountInputs[node.nodeId] ?? amount : amount} onValueChange={value => swap && node ? editCanvasAmount(node.nodeId, value) : setAmount(value)} inputMode={swap ? 'decimal' : 'numeric'} maxLength={swap ? 80 : 78} disabled={locked} aria-invalid={Boolean(error)}/>
         {node && canEditCanvasAmount(node, context, state.workflow) ? <p className="muted">{tr("Press Enter to apply the amount.")}</p>
           : <button type="submit" disabled={locked || (node ? amountInputs[node.nodeId] ?? amount : amount) === (swap ? swap.amount : node ? amountOf(node) : '')}>{tr(swap ? 'Review amount change' : 'Save parameter')}</button>}</form>}
-      {swap && !cryptoSwap && <SlippageField value={slippage} current={swap.slippage} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }} onSubmit={saveSlippage}/>}
+      {swap && !cryptoSwap && <SlippageField value={slippage} current={swap.slippage} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }} onCommit={saveSlippage}/>}
       {bridge && <form onSubmit={saveBridge} className="inspector-fields"><label>{tr("USDC amount")}<TokenAmountInput value={amountInputs[node.nodeId] ?? bridgeInput.amount} onValueChange={value => editCanvasAmount(node.nodeId, value)}/></label>
         <label>{tr("Maximum slippage (bps)")}<input type="text" inputMode="numeric" value={bridgeInput.slippageBps} onChange={event => setBridgeInput(current => ({ ...current, slippageBps: event.target.value }))}/></label><button type="submit">{tr("Review bridge change")}</button></form>}
       {liquidity && !cryptoSelections[node.nodeId] && <form id={poolReviewFormId(node.nodeId)} onSubmit={saveLiquidity} className="inspector-fields">{([

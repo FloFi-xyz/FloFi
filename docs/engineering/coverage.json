@@ -3648,6 +3648,7 @@
         "apps/reference-dapp/backend/main.ts",
         "apps/reference-dapp/backend/preview-migration.ts",
         "apps/reference-dapp/backend/preview.ts",
+        "apps/reference-dapp/backend/reconcile-pacing.ts",
         "apps/reference-dapp/backend/source-resolution.ts",
         "apps/reference-dapp/backend/workflow-run-worker.ts"
       ],
@@ -4161,6 +4162,7 @@
         "apps/reference-dapp/src/components/execute-workspace.tsx",
         "apps/reference-dapp/src/components/execution-concurrency-notes.tsx",
         "apps/reference-dapp/src/components/execution-evidence-details.tsx",
+        "apps/reference-dapp/src/components/execution-result-summary.tsx",
         "apps/reference-dapp/src/components/execution-identifier.tsx",
         "apps/reference-dapp/src/components/execution-panel.tsx",
         "apps/reference-dapp/src/components/execution-timeline.tsx",
@@ -4835,6 +4837,7 @@
       "sources": [
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
         "apps/reference-dapp/src/domain/build-entry.ts",
+        "apps/reference-dapp/src/domain/build-entry-fields.ts",
         "apps/reference-dapp/src/domain/approved-ux.ts",
         "apps/reference-dapp/src/domain/copilot-assist.ts",
         "apps/reference-dapp/src/domain/intelligence/concepts.ts",
@@ -5081,6 +5084,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/domain/applied-slippage.ts",
         "apps/reference-dapp/src/domain/catalog-swap-authoring.ts",
         "apps/reference-dapp/src/domain/jupiter-authoring.ts",
         "apps/reference-dapp/src/domain/public-testnet-swap.ts",

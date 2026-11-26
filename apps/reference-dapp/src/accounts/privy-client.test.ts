@@ -85,6 +85,17 @@ describe('Privy errors and wallets', () => {
     // Other "already" texts keep their own meaning.
     expect(privyErrorCode(new Error('User already has an embedded wallet'))).toBe('PRIVY_WALLET_LIMIT');
   });
+  it('PR #254 follow-up: names Google sign-in refused inside an app\'s built-in browser (the real SDK\'s own text), never the generic retry', () => {
+    // @privy-io/react-auth 3.51.0 `initLoginWithHeadlessOAuth`: a React Native WebView (a wallet app's browser), a Facebook/Instagram/Snapchat/LinkedIn
+    // browser, or no usable local storage. Retrying in place can never succeed, so the person is told to open a regular browser or use another method.
+    const text = 'It looks like you\'re using an in-app browser.  To log in, please try again using an external browser.';
+    expect(privyErrorCode(new Error(text), 'PRIVY_SIGN_IN_FAILED')).toBe('PRIVY_OAUTH_EMBEDDED_BROWSER');
+    expect(privyErrorCode(new Error(text), 'ACCOUNT_LINK_FAILED')).toBe('PRIVY_OAUTH_EMBEDDED_BROWSER');
+    // Every other outcome keeps its own code (a cancelled window, an open session, an unknown failure).
+    expect(privyErrorCode(new Error('User exited the modal before submitting'), 'PRIVY_SIGN_IN_FAILED')).toBe('PRIVY_USER_CANCELLED');
+    expect(privyErrorCode(new Error('User already authenticated'), 'PRIVY_SIGN_IN_FAILED')).toBe('PRIVY_SIGN_IN_INTERRUPTED');
+    expect(privyErrorCode(new Error('something odd'), 'PRIVY_SIGN_IN_FAILED')).toBe('PRIVY_SIGN_IN_FAILED');
+  });
   it('lists only Privy embedded wallets (not external wallets) with canonical EVM addresses', () => {
     const user = { linkedAccounts: [
       { type: 'wallet', walletClientType: 'privy', connectorType: 'embedded', chainType: 'ethereum', address: '0xABCDEF0123456789ABCDEF0123456789ABCDEF01', imported: false },

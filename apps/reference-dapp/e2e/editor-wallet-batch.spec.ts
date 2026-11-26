@@ -4,7 +4,7 @@
  * proven at the wallet boundary, not by a button label.
  *
  *   signed-in FloFi account → Swap 3 USDC → WETH, Supply the swap's WETH, Borrow 0.8 USDC on Base (chat) → Execute → "Review whole workflow"
- *   (the Editor footer's ONE action, board 06; `wallet_getCapabilities` only; nothing is sent) → "Authorize workflow" (the same footer action) → exactly one `wallet_sendCalls` with the prepared atomic batch
+ *   (the Editor footer's ONE action, board 06; `wallet_getCapabilities` only; nothing is sent) → "Execute workflow" (the same footer action) → exactly one `wallet_sendCalls` with the prepared atomic batch
  *   (chain 0x2105, the owner as `from`, `atomicRequired`, no capabilities, approve/swap/approve/supply/borrow) → the wallet double executes it on
  *   the MOCKED Base chain (one transaction from the owner's own account) → `wallet_getCallsStatus` → FloFi reconciles every step from the chain
  *   → reload: the run is recovered from FloFi, and the wallet is never asked to send again.
@@ -97,8 +97,8 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   expect(log.sent).toEqual([]);
 
   // Authorize: the sign-in proof, then exactly ONE wallet_sendCalls carrying the prepared atomic batch.
-  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
-  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(1);
+  await footerAction(page).getByRole('button', { name: 'Execute workflow', exact: true }).click();
   await expect(panel(page)).toContainText('Every step reconciled.', { timeout: 90_000 });
   expect(log.sent).toHaveLength(1);
   const batch = log.sent[0]!;
@@ -133,7 +133,7 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   await load.click();
   await expect(panel(page)).toHaveAttribute('data-run-state', 'COMPLETED', { timeout: 60_000 });
   await expect(panel(page)).toContainText('Every step reconciled.');
-  await expect(panel(page).getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
+  await expect(panel(page).getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
   // Settled: a finished run, once shown, has nothing left to do (no automatic recovery or status poll applies to a COMPLETED run). For 5 more
   // seconds the wallet must never be asked to send again (even a duplicate the wallet refuses is logged), and the chain still holds exactly
   // the one batch. (Reading back a batch the wallet holds after a reload is covered by the unit tests of the Editor's recovery.)

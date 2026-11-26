@@ -139,7 +139,7 @@ export const FINANCIAL_CANVAS_ACTIONS = ['approve', 'execute', 'continue'].map(k
  */
 export async function acceptProductReview(page: Page): Promise<void> {
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional change): in the public Editor a valid simulation offers "Continue to authorization" (Simulate →
-  // Execute), where the same Review is accepted with "Authorize workflow"; the /approve Canvas and the engineering workspace keep "Authorize in
+  // Execute), where the same Review is accepted with "Execute workflow"; the /approve Canvas and the engineering workspace keep "Authorize in
   // wallet" on the simulation. Either way it is the same `approve` lifecycle action, its gates and its first wallet request.
   const authorize = await openReview(page);
   await expect(authorize).toBeEnabled();
@@ -157,8 +157,8 @@ export async function acceptProductReview(page: Page): Promise<void> {
  * opens Execute. The Simulate footer then states the status only.
  */
 export const lifecycleAction = (page: Page) => page.locator('.canvas-primary-action, .simulation-panel-action');
-/** The Review acceptance: "Authorize workflow" where the Review covers the whole workflow (C1), "Authorize in wallet" otherwise. */
-export const AUTHORIZE_REVIEW = /^(Authorize in wallet|Authorize workflow)$/;
+/** The Review acceptance: "Execute workflow" where the Review covers the whole workflow (C1), "Authorize in wallet" otherwise. */
+export const AUTHORIZE_REVIEW = /^(Authorize in wallet|Execute workflow)$/;
 /** The simulation's own lifecycle action, by stage: Create/Simulate say "Simulate…"; Execute words the same action "Refresh review" (C2). */
 export const SIMULATE_AGAIN = /^(Simulate (workflow|again)|Refresh review)$/;
 const enabledReviewOperation = (page: Page) => page.locator('.simulation-panel-action button[data-lifecycle-action="review-operation"]:enabled');
@@ -211,8 +211,9 @@ export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
   const primary = page.locator('.canvas-primary-action, .simulation-panel-action');
   await expect(primary.first()).toBeAttached();
   await expect(primary.locator(FINANCIAL_CANVAS_ACTIONS)).toHaveCount(0);
-  // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the public Editor's Execute names the same Review acceptance "Authorize workflow" (C1); neither is enabled.
-  await expect(page.getByRole('button', { name: new RegExp(`^(${AUTHORIZE_IN_WALLET}|Authorize workflow)$`) }).and(page.locator(':enabled'))).toHaveCount(0);
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the public Editor's Execute names the same Review acceptance "Execute workflow" (C1; formerly "Authorize
+  // workflow", which must not come back either); none is enabled.
+  await expect(page.getByRole('button', { name: new RegExp(`^(${AUTHORIZE_IN_WALLET}|Authorize workflow|Execute workflow)$`) }).and(page.locator(':enabled'))).toHaveCount(0);
   await expect(page.locator('.execution-summary button.primary')).toHaveCount(0);
 }
 

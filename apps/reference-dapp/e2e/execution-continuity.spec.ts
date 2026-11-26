@@ -17,7 +17,7 @@ const summary = (page: Page) => page.locator('.execution-summary');
 const falseWalletChange = 'Wallet changed. Simulate and review this workflow again with the connected wallet.';
 const pointer = (page: Page) => page.evaluate(() => localStorage.getItem('gryloo:public-testnet-execution-id'));
 /** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request). */
-// BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1): "Authorize workflow" where the Review covers the whole workflow, "Authorize in wallet" during a run.
+// BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1): "Execute workflow" where the Review covers the whole workflow, "Authorize in wallet" during a run.
 const authorize = (page: Page) => page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_REVIEW });
 async function durable(id: string) {
   const url = process.env.FLOFI_E2E_DATABASE_URL!;
@@ -130,6 +130,10 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
   expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(2);
   // BUILD0-UX-001: no technical disclosure on Execute: the timeline keeps both transactions (copy and explorer), the Dashboard keeps the record.
   await expect(page.getByText('View technical details', { exact: true })).toHaveCount(0);
+  // Execution UX regression fixes (PR #254): a clean result is read in the compact result beside the Canvas; the Execution details below it are
+  // collapsed (where the Canvas shows the run) and both transactions are still there, one click away.
+  const details = page.locator('.execution-details-disclosure');
+  if (await details.count()) { await expect(details).not.toHaveAttribute('open', ''); await details.locator('summary').click(); await expect(details).toHaveAttribute('open', ''); }
   await expect(page.locator('.execution-plan').getByRole('button', { name: /Copy.*transaction/ })).toHaveCount(2);
   await expect(summary(page).getByRole('button', { name: 'View in Dashboard', exact: true })).toBeVisible();
   await reloadBuilder(page); await stage(page, 'Execute');
@@ -185,7 +189,7 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   await expect(next).toBeEnabled(); await next.click(); await owner.confirm();
   await expect(summary(page)).toContainText('Execution status unresolved');
   await synchronizeWallet(page);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Retry|Try again/ })).toHaveCount(0);
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Execute workflow|Retry|Try again/ })).toHaveCount(0);
   expect((await durable(id!)).attempts).toMatchObject([{ step: 'APPROVAL', state: 'CONFIRMED' }, { step: 'SWAP', state: 'UNKNOWN' }]);
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   // BUILD-SOLANA-MAINNET-001 (requirement E): even on a new visit (no tab session), an execution that still needs the owner is brought back to observe.
@@ -193,5 +197,5 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   await reloadBuilder(page); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Execution status unresolved');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Retry|Try again/ })).toHaveCount(0);
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Authorize workflow|Execute workflow|Retry|Try again/ })).toHaveCount(0);
 });

@@ -173,7 +173,7 @@ test('accepted settings update the card and existing warnings link to Selected A
   await expect(cards(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
   await expect(cards(page).locator('.composer-amount .composer-amount-token')).toHaveText('USDC');
   await inspector(page).getByLabel('Max price difference (%)').fill('2');
-  await inspector(page).getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  await inspector(page).getByLabel('Max price difference (%)').press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '3');
   await expect(inspector(page)).toContainText('Applied limit: 2%');
   await expect(cards(page)).not.toHaveAttribute('data-state', 'warning');

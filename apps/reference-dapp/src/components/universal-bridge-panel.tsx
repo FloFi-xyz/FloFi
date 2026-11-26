@@ -20,7 +20,8 @@ import { createUniversalBridgeFromInput, resolveUniversalAsset, universalAssetRe
   type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { TokenAmountInput } from './token-amount-input';
-import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { appliedSlippageCommand } from '../domain/applied-slippage';
 import { AssetSearch } from './asset-search';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
@@ -150,7 +151,7 @@ function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }
  */
 export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeId?: string; onDone?: () => void; options?: boolean }) {
   const { t: tr } = useLocale();
-  const { state, propose, amountInputs = {} } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, executedNodeIds = [], amountInputs = {} } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? universalBridgeDetails(node) : null;
   const [input, setInput] = useState<UniversalBridgeInput>(existing ? universalInputOf(existing)
     : { source: 'solana', destination: 'base', inputAsset: 'USDC', outputAsset: 'USDC', amount: '', recipient: '', slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' });
@@ -189,8 +190,11 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     || destinationResolution.kind === 'UNAVAILABLE') ? 'attention'
     : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? 'loading' : 'normal';
   const amount = options && nodeId ? amountInputs[nodeId] ?? input.amount : input.amount;
-  const autoSupported = input.routing === 'BEST' || input.routing === 'RELAY';
-  const autoKey = JSON.stringify([input.source, input.destination, input.inputAsset, input.outputAsset, amount, input.recipient, input.routing]);
+  // PR #254 follow-up (wallet-execution review): an existing bridge's Auto recommendation is for the APPLIED bridge it is applied to, never for
+  // an amount, recipient or routing drafted on the card but not applied yet.
+  const autoInput: UniversalBridgeInput = options && nodeId && existing ? universalInputOf(existing) : { ...input, amount };
+  const autoSupported = autoInput.routing === 'BEST' || autoInput.routing === 'RELAY';
+  const autoKey = JSON.stringify([autoInput.source, autoInput.destination, autoInput.inputAsset, autoInput.outputAsset, autoInput.amount, autoInput.recipient, autoInput.routing]);
   const currentAuto = autoSupported && auto?.key === autoKey ? auto : null;
   const autoBps = currentAuto && currentAuto.expiresAt > Date.now() ? currentAuto.bps : null;
   async function requestAuto() {
@@ -198,7 +202,7 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     setAuto(pending);
     let bps: number | null = null, expiresAt = 0;
     try {
-      const node = createUniversalBridgeFromInput('node-preview', { ...input, amount, slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE });
+      const node = createUniversalBridgeFromInput('node-preview', { ...autoInput, slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE });
       const request = bridgeEstimateRequest(node);
       if (request) {
         const result = await universalDiscover({ ...request, providers: ['relay'], recommendSlippage: true });
@@ -220,11 +224,30 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     }
     changeSlippage(slippage);
   }
+  /**
+   * PR #254 follow-up: an existing bridge's max price difference applies at once (a preset or Auto click, or a typed value on Enter or focus
+   * leaving it): one ordinary edit of the APPLIED bridge with only its slippage changed (`appliedSlippageCommand`; a draft amount, recipient or
+   * routing is never applied with it). Nothing is simulated, authorized or signed. Returns why a value cannot be applied.
+   */
+  function commitSlippage(slippage: string): string | null {
+    if (!nodeId) return null;
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: executedNodeIds.includes(nodeId) });
+    if ('code' in result) return appliedSlippageMessage(result.code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS);
+    // Only the slippage changes: applied at once. Otherwise (the bridge cannot be rebuilt exactly) the same edit is a proposal the owner reviews.
+    if (!result.exact) { propose(result.command); return null; }
+    dismissProposal(); dispatch(result.command); setAuto(null); setError('');
+    return null;
+  }
+  /** A delayed Auto click on a quote that expired since the previous render fetches a new recommendation instead of applying the old one. */
+  const autoStillValid = () => {
+    if (!currentAuto || currentAuto.expiresAt <= Date.now()) { void requestAuto(); return false; }
+    return true;
+  };
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
       // BUILD-FLOFI-UX-FIX-003: the compact options propose the amount the card shows (its draft, as the Router form does), never a hidden older one.
-      const proposed = { ...input, amount };
+      const proposed = { ...input, amount, ...options && existing ? { slippage: existing.slippage } : {} };
       createUniversalBridgeFromInput(nodeId ?? 'node-preview', proposed); setError('');
       propose(nodeId ? { type: 'SET_UNIVERSAL_BRIDGE', nodeId, input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision }
         : { type: 'ADD_UNIVERSAL_BRIDGE', input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision });
@@ -264,10 +287,13 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     {destinationRetry && <button type="button" className="composer-destination-choice composer-destination-connect" onClick={() => { retryAccountWallets(); destinationInput.current?.focus(); }}>{tr('Try again')}</button>}
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
-    <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
-      onBpsChange={changeSlippage}/></label>
-    <SlippageChoices bps={input.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onBpsChange={changeSlippage}
-      autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} onApplyAuto={applyAutoSlippage} autoPending={currentAuto?.pending ?? false}/>
+    {compact && existing ? <AppliedSlippageControls label={tr('Max price difference (%)')} inputLabel={tr('Universal bridge max price difference (%)')} maxLength={5}
+      bps={existing.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onCommit={commitSlippage}
+      autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} canApplyAuto={autoStillValid} autoPending={currentAuto?.pending ?? false}/> : <>
+      <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
+        onBpsChange={changeSlippage}/></label>
+      <SlippageChoices bps={input.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onBpsChange={changeSlippage}
+        autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} onApplyAuto={applyAutoSlippage} autoPending={currentAuto?.pending ?? false}/></>}
     {currentAuto && !currentAuto.pending && autoBps === null && <small role="status">{tr('Relay could not recommend a price difference for this bridge. Check the networks, assets and amount, or enter a value.')}</small>}
     {!compact && <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}

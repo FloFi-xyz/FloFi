@@ -2,9 +2,10 @@
 'use client';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { useLocale } from '../i18n/locale';
 import { BUILD_ENTRY_SUGGESTIONS, buildEntryOutcome, firstPlaceholder, type BuildEntryOutcome, type BuildEntrySnapshot, type BuildEntrySuggestion } from '../domain/build-entry';
+import { adjacentField, fieldAt, fieldSuggestions, fillField, nextPlaceholder, sessionOf, templateFields, type TemplateField, type TemplateSession } from '../domain/build-entry-fields';
 import type { FlofiConversation } from '../state/flofi-conversation';
 import styles from './build-entry.module.css';
 
@@ -52,6 +53,17 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   const [refused, setRefused] = useState<Extract<BuildEntryOutcome, { kind: 'REFUSED' }> | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const busy = Boolean(attempt && !attempt.settled) || conversation.busy;
+  /**
+   * PR #254 follow-up: the template a suggestion filled (its parts are filled in order inside this same text) and the caret (which part is being
+   * filled). The caret is kept when focus leaves the request, so the choices under it never disappear between a press and its click (which
+   * would move the chips below and lose the click) and can be reached with Tab after Create workflow. Free text has no session: only
+   * [placeholders] still in it are parts.
+   */
+  const [session, setSession] = useState<TemplateSession | null>(null);
+  const [caret, setCaret] = useState<number | null>(null);
+  const parts = useMemo(() => templateFields(draft, session), [draft, session]);
+  const activePart = caret === null ? null : fieldAt(parts, caret);
+  const partChoices = session && activePart ? fieldSuggestions(session, parts, activePart) : [];
   const snapshot = (): BuildEntrySnapshot => ({ workflowId: workflow.workflowId, revision: workflow.revision, proposal, messages: conversation.messages.length,
     question: conversation.question, automation: conversation.automation });
 
@@ -76,14 +88,14 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   // The request stays editable after a refusal: focus returns to it once the field is enabled again.
   useEffect(() => { if (refused) field.current?.focus(); }, [refused]);
   // A draft set from outside the field (a suggestion, a cleared request, the one kept from another section) and a new width refit it.
-  useEffect(() => { fitHeight(field.current); }, [draft]);
+  useEffect(() => { fitHeight(field.current); if (!draft) setSession(null); }, [draft]);
   /** The bracketed part a suggestion selects, applied in the commit that writes its template (see `suggest`). */
   const selectAfterFill = useRef<{ readonly text: string; readonly start: number; readonly end: number } | null>(null);
   useLayoutEffect(() => {
     const pending = selectAfterFill.current, element = field.current;
     if (!pending || !element) return;
     selectAfterFill.current = null;
-    if (element.value === pending.text) element.setSelectionRange(pending.start, pending.end);
+    if (element.value === pending.text) { element.setSelectionRange(pending.start, pending.end); setCaret(pending.start); }
   }, [draft]);
   useEffect(() => {
     const view = globalThis.window, element = field.current;
@@ -99,8 +111,47 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   }, []);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); void submit(); }
+  /** Selects a part (its placeholder, or the value already chosen for it) so typing replaces it; the caret follows. */
+  function selectPart(element: HTMLTextAreaElement, part: TemplateField) { element.setSelectionRange(part.start, part.end); setCaret(part.start); }
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); }
+    if (event.nativeEvent.isComposing) return;
+    // Read from the field itself (this render's state can be a keystroke behind).
+    const element = event.currentTarget, current = templateFields(element.value, session);
+    // PR #254 follow-up: Tab and Shift+Tab move between the parts (a filled part can be revisited); past the last or first part they leave the
+    // request as usual.
+    if (event.key === 'Tab' && current.length) {
+      const target = adjacentField(current, event.shiftKey ? element.selectionStart : element.selectionEnd, event.shiftKey ? -1 : 1);
+      if (target) { event.preventDefault(); selectPart(element, target); }
+      return;
+    }
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    // Enter never submits an incomplete template: it confirms the part being filled and moves to the next one still to fill. Once no part is left
+    // to fill, Enter creates the workflow as before (filling the last part never submits by itself).
+    const next = nextPlaceholder(current, element.selectionEnd);
+    if (next) { selectPart(element, next); return; }
+    void submit();
+  }
+  /** A tap or click inside a part still to fill selects all of it, so it is replaced without selecting or deleting by hand (keyboard, mouse, touch). */
+  function onSelect(event: SyntheticEvent<HTMLTextAreaElement>) {
+    const element = event.currentTarget, { selectionStart: start, selectionEnd: end } = element;
+    setCaret(start);
+    if (start !== end) return;
+    const inside = templateFields(element.value, session).find(part => part.placeholder && start > part.start && start < part.end);
+    if (inside) element.setSelectionRange(inside.start, inside.end);
+  }
+  /** A contextual choice fills the part being filled and moves on to the next part still to fill (it never submits). */
+  function choose(value: string) {
+    const element = field.current;
+    if (!element || !activePart) return;
+    const current = templateFields(element.value, session), part = current[activePart.index];
+    if (!part) return;
+    const filled = fillField(element.value, part, value), next = nextPlaceholder(templateFields(filled.text, session), filled.end);
+    const selection = next ? { start: next.start, end: next.end } : { start: filled.end, end: filled.end };
+    element.focus(); setRefused(null);
+    if (filled.text === element.value) { element.setSelectionRange(selection.start, selection.end); setCaret(selection.start); return; }
+    selectAfterFill.current = { text: filled.text, ...selection };
+    setDraft(filled.text);
   }
   // P0 approved UX (board 03): a chip fills an editable sentence template and focuses it, with its first bracketed part selected so typing
   // replaces it. It never submits: the person completes the sentence and chooses Create workflow.
@@ -110,11 +161,12 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   function suggest(item: BuildEntrySuggestion) {
     const text = item.template[language === 'PT' ? 'PT' : 'EN'], range = firstPlaceholder(text), element = field.current;
     selectAfterFill.current = range ? { text, ...range } : null;
+    setSession(sessionOf(item.id, language === 'PT' ? 'PT' : 'EN'));
     setDraft(text); setRefused(null);
     if (!element) return;
     element.focus();
     // The same template again writes nothing new (no commit follows): select it now.
-    if (range && element.value === text) { selectAfterFill.current = null; element.setSelectionRange(range.start, range.end); }
+    if (range && element.value === text) { selectAfterFill.current = null; element.setSelectionRange(range.start, range.end); setCaret(range.start); }
   }
   const refusal = refused?.message ? refused.language ? refused.message : tr(refused.message) : null;
   /** UX-03: opens the Editor and moves focus to its workspace (this entry, and the focused link, leave the page). */
@@ -137,12 +189,21 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
         <textarea ref={field} id="build-entry-request" value={draft} rows={2} maxLength={1024} disabled={busy}
           placeholder={tr('e.g. swap 10 USDC for ETH on Base')}
           aria-describedby={refusal || refused ? 'build-entry-error' : 'build-entry-hint'}
-          onChange={event => { fitHeight(event.target); setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}/>
+          onChange={event => { fitHeight(event.target); setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}
+          onSelect={onSelect}/>
         <button className={styles.create} type="submit" disabled={!draft.trim() || busy || !interactive}>
           {tr(busy ? 'Preparing…' : actions > 0 ? 'Add to workflow' : 'Create workflow')}
         </button>
       </form>
-      <p id="build-entry-hint" className="sr-only">{tr('Press Enter to create the workflow, or Shift+Enter for a new line.')}</p>
+      {/* PR #254 follow-up: choices for the part being filled (existing supported networks and tokens of the template's action). A choice fills the
+          part and moves to the next one; it never submits. Pressing it keeps the request focused (mouse and touch). */}
+      {partChoices.length > 0 && activePart && <div id="build-entry-part-choices" className={styles.partChoices} role="group"
+        aria-label={tr(activePart.kind === 'network' ? 'Network suggestions' : 'Token suggestions')}>
+        {partChoices.map(option => <button key={option} type="button" disabled={busy} onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()}
+          onClick={() => choose(option)}>{option}</button>)}
+      </div>}
+      <p id="build-entry-hint" className="sr-only">{parts.length ? tr('Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow. Type any token or network, or choose one of the suggestions shown under the field.')
+        : tr('Press Enter to create the workflow, or Shift+Enter for a new line.')}</p>
       {busy && <p className={styles.status} role="status">{tr('Understanding your request and preparing the workflow…')}</p>}
       {refused && <div id="build-entry-error" className={styles.error} role="alert">
         <p>{refusal ?? tr('FloFi could not build this strategy yet. Try describing it differently or start manually.')}</p>

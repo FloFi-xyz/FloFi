@@ -20,7 +20,8 @@
 /* The example reads as a hint, never as typed text: the muted token. */
 .composer textarea::placeholder{color:var(--muted);opacity:1}
 .composer textarea:disabled{opacity:.7}
-.create{align-self:flex-end;flex:none;display:flex;align-items:center;justify-content:center;min-width:150px;min-height:52px;border:0;border-radius:14px;padding:0 24px;background:var(--primary);color:var(--on-accent,#fff);
+/* PR #254 follow-up: vertically centred in the request field at every height (empty, one line, a template, several lines). */
+.create{align-self:center;flex:none;display:flex;align-items:center;justify-content:center;min-width:150px;min-height:52px;border:0;border-radius:14px;padding:0 24px;background:var(--primary);color:var(--on-accent,#fff);
   font-size:16px;font-weight:600;cursor:pointer;transition:background .2s ease}
 .create:not(:disabled):hover{background:color-mix(in srgb,var(--primary) 86%,#000)}
 /* Disabled reads as disabled (board 16 §3): neutral fill, muted text, not-allowed cursor — never a dim blue that looks active. */
@@ -41,8 +42,15 @@
 .suggestions button:not(:disabled):hover{border-color:var(--accent);background:var(--surface-raised)}
 .suggestions button:disabled{opacity:.6;cursor:not-allowed}
 .chipIcon{width:18px;height:18px;flex:none;color:var(--accent)}
+/* PR #254 follow-up: choices for the template part being filled, under the request field; the same neutral chip style, smaller. */
+.partChoices{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;max-width:920px;margin:-8px 0 0}
+.partChoices button{min-height:36px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);font-size:14px;font-weight:500;cursor:pointer}
+.partChoices button:not(:disabled):hover{border-color:var(--accent);background:var(--surface-raised)}
+.partChoices button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.partChoices button:disabled{opacity:.6;cursor:not-allowed}
 /* BUILD UX POLISH 004 (UX-03): one small centred line under the suggestions — the question neutral, only the action in the FloFi accent. */
-.manual{margin:-6px 0 0;color:var(--muted);font-size:14px;line-height:1.5}
+/* PR #254 follow-up: 16px further from the suggestion chips (was 16px below them, now 32px). */
+.manual{margin:10px 0 0;color:var(--muted);font-size:14px;line-height:1.5}
 .manual a{border-radius:4px;color:var(--accent);font-weight:600;text-decoration:none;text-underline-offset:3px;cursor:pointer}
 .manual a:hover{text-decoration:underline}
 .manual a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;text-decoration:underline}
@@ -62,6 +70,7 @@
 @media(max-width:590px){
   .title{font-size:36px}
   .suggestions{gap:8px}.suggestions button{min-height:44px;padding:0 12px;font-size:13px;gap:8px}.chipIcon{width:16px;height:16px}
+  .partChoices button{min-height:44px}
 }
 @media(prefers-reduced-motion:reduce){
   .mascotLight,.mascotDark{animation:none}

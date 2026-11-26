@@ -24,7 +24,8 @@ import { OBSERVATION_DELAYS_MS } from '../domain/observation-schedule';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({
-  workflow: null as unknown, service: null as unknown, provider: null as unknown, restore: vi.fn(),
+  workflow: null as unknown, canonical: null as unknown, service: null as unknown, provider: null as unknown, restore: vi.fn(),
+  simulated: [] as SemanticWorkflow[],
   // Stable, as the real store's callbacks are (useCallback with no dependencies).
   track: (read: Promise<unknown>) => read,
   refreshes: 0, failures: [] as string[],
@@ -37,7 +38,9 @@ vi.mock('../domain/observation-schedule', async original => {
   return { ...real, observeUntilSettled: <T,>(observe: () => Promise<T>, settled: (value: T) => boolean, options: { readonly active?: () => boolean } = {}) =>
     real.observeUntilSettled(observe, settled, { ...options, sleep: async ms => { f.sleeps.push(ms); await new Promise(resolve => setTimeout(resolve, 0)); } }) };
 });
-vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, restoreLiquidityCanvas: f.restore, trackCanvasRestoration: f.track }) }));
+// The store runs the RUNTIME workflow (a sequence's current step, else the canonical workflow): `f.canonical` stands for a whole multi-step Canvas.
+vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.canonical ?? f.workflow }, runtimeWorkflow: f.workflow, restoreLiquidityCanvas: f.restore,
+  trackCanvasRestoration: f.track }) }));
 vi.mock('./build009-wallet-store', () => ({
   useBuild009Wallet: () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34', session: async () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34' }),
     connect: async () => null, switchTo: async () => undefined }),
@@ -49,7 +52,7 @@ vi.mock('../app/uniswap-liquidity-action', () => {
   return {
     uniswapLiquidityMode: async () => 'harness', uniswapLiquidityInfo: async () => ({ ok: true, value: { executionEnabled: true } }),
     catalogLiquidityMode: async () => 'off', catalogLiquidityInfo: async () => ({ ok: false, code: 'OFF' }), uniswapLiquidityPrice: async () => ({ ok: false, code: 'UNUSED' }),
-    uniswapLiquiditySimulate: (workflow: SemanticWorkflow, owner: string) => wrap(() => svc().simulate(workflow, owner)),
+    uniswapLiquiditySimulate: (workflow: SemanticWorkflow, owner: string) => { f.simulated.push(workflow); return wrap(() => svc().simulate(workflow, owner)); },
     uniswapLiquidityRefresh: (id: string) => { f.refreshes++; return wrap(() => svc().refresh(id)); },
     uniswapLiquidityReview: (id: string, commitment: string, workflow: SemanticWorkflow) => wrap(() => svc().review(id, commitment, workflow)),
     uniswapLiquidityInvalidate: (id: string) => wrap(() => svc().invalidate(id)),
@@ -94,7 +97,7 @@ async function settle() { for (let i = 0; i < 20; i++) { await new Promise(resol
 async function act(action: () => Promise<void>) { const done = action(); await settle(); await done; await settle(); }
 
 beforeEach(async () => {
-  host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0;
+  host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0; f.canonical = null; f.simulated = [];
   f.observes = 0; f.pendingObservations = 0; f.sleeps = [];
   chain = createUniswapLiquidityChain();
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unilp-store-'));
@@ -127,6 +130,24 @@ async function approveUsdc() {
   expect(sent).toHaveLength(1);
   return store.record!;
 }
+
+describe('PR #254 follow-up: a pool step of a step-by-step sequence is simulated alone (production Swap → Bridge → Pool)', () => {
+  it('simulates the runtime step, never the whole multi-step Canvas, and its Review stays current while the Canvas is unchanged', async () => {
+    // The Canvas holds a Router bridge before the pool; the sequence's current step (the runtime workflow) is the pool alone.
+    const bridge = editorReducer(initialEditor(), { type: 'ADD_ROUTER_BRIDGE', source: 'CANVAS', baseRevision: 0,
+      input: { source: 'Base', destination: 'Arbitrum', token: 'USDC', amount: '1', recipient: '', slippage: '100', routing: 'AUTO' } }, createBaseSepoliaReviewContext());
+    const step = f.workflow as SemanticWorkflow;
+    f.canonical = { ...step, nodes: [...bridge.workflow.nodes, ...step.nodes] };
+    read(); await settle();
+    await act(() => store.simulate());
+    expect(f.simulated).toEqual([step]);
+    expect(store.error).toBeNull();
+    expect(store.record?.workflow).toEqual(step);
+    expect(store.retired).toBe(false);
+    // The whole Canvas, as this store used to send it, is refused by the server for the Router bridge it carries (production: ROUTER_ISOLATED_ONLY).
+    await expect((f.service as UniswapLiquidityService).simulate(f.canonical as SemanticWorkflow, UNI_OWNER)).rejects.toThrow('ROUTER_ISOLATED_ONLY');
+  });
+});
 
 describe('EXEC-01: the store continues the same run after its Review expired between two wallet requests', () => {
   it('refuses before preparing, refreshes the run in place, says why, and continues only after a new authorization', async () => {

@@ -604,6 +604,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const estimate = quote.status === 'ready' ? quote.estimate : null;
   // P0 workflow execution: an expired quote stays on the card, marked as expired, until its fresh answer replaces it (never a silent '—').
   const expiredEstimate = quote.status === 'expired' && (!card.inspection || quoteFrozen) ? quote.estimate : null;
+  // Execution UX regression fixes: once the step is reconciled, the amount its record observed replaces the estimate from before execution.
+  // Only for the card's own output token (a recorded unit of another asset never replaces it); "Delivered" for a delivery to the reviewed recipient.
+  const reconciled = card.execution?.visual === 'done' ? card.execution.received ?? null : null;
+  const receivedFor = (token: string | null | undefined) => reconciled && (!reconciled.unit || reconciled.unit.toLowerCase() === token?.toLowerCase()) ? reconciled : null;
   const usdState ={ status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const amountAssets = card.inspection || quoteFrozen ? [] : card.amountAssets ?? [];
@@ -666,6 +670,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const amountParts = card.summary.amount.match(/^(\d+(?:\.\d+)?) (\S+)$/);
   const pair = card.summary.detail ?? card.summary.bridgePair;
   const [pairSource, pairDestination] = pair?.split(' → ') ?? [];
+  const received = receivedFor(pairDestination);
   const onInvert = bridgeCard ? card.onInvertBridge : (card.summary.action === 'Swap' || stocksCard) ? card.actionSelection?.onInvert : undefined;
   function invertPair() {
     setAmountError(null);
@@ -753,10 +758,13 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         </ValuePair> : <div className={pairDestination ? 'composer-value-pair' : undefined}>
           {amountParts ? <ValueBox readOnly source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
-          {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly round token={pairDestination} network={destinationNetwork}
-            {...estimate ?? expiredEstimate ? { amount: (estimate ?? expiredEstimate)!.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : expiredEstimate ? 'Quote expired: updating' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
+          {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span>{received ? <ValueBox readOnly round token={pairDestination} network={destinationNetwork}
+            amount={received.amount} hint={received.label} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
+            : <ValueBox readOnly round token={pairDestination} network={destinationNetwork}
+            {...estimate ?? expiredEstimate ? { amount: (estimate ?? expiredEstimate)!.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : expiredEstimate ? 'Quote expired: updating' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>}</>}
         </div>}
-        {pairDestination && expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr(quoteFrozen ? 'Estimate from before execution' : 'Quote expired: updating')}</span>}
+        {pairDestination && received && <span className="composer-quote-note composer-received-note" role="status" data-received="true">{tr(received.label)}</span>}
+        {pairDestination && expiredEstimate && !received && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr(quoteFrozen ? 'Estimate from before execution' : 'Quote expired: updating')}</span>}
         {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate plan shows the same shared live quote as Build, or why there is none. */}
         {/* BUILD-FLOFI-UX-FIX-003: only a quote that could not be produced is explained, in plain words; provider names, quality labels and "calculating"
             text stay off the card (the destination box shows the estimate or a quiet placeholder). Fees, the chosen route and risks are shown at Review. */}
@@ -777,11 +785,11 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {...stocksCard ? (card.stocks?.side === 'source' && stockEquity ? { equity: stockEquity } : {}) : { picker: picker('source') }}
           hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState, language)}/>
-        <ValueBox round caption={networkPending ? 'You receive' : 'You receive, approximately'} {...networkPending ? { placeholder: 'calculated after the network' } : {}}
-          amount={networkPending ? undefined : estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={!networkPending && quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
+        <ValueBox round caption={networkPending ? 'You receive' : received ? received.label : 'You receive, approximately'} {...networkPending ? { placeholder: 'calculated after the network' } : {}}
+          amount={networkPending ? undefined : received?.amount ?? estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={!networkPending && !received && quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
           {...stocksCard ? (card.stocks?.side === 'destination' && stockEquity ? { equity: stockEquity } : {}) : { picker: picker('destination') }}
-          hint="Estimated output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
-          usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState, language)}/>
+          hint={received ? received.label : 'Estimated output; simulate before review'} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+          {...received ? {} : { usd: usdLine(destinationNetwork, estimate?.usd?.output, usdState, language) }}/>
         </ValuePair>
         {networkPending && <span className="composer-quote-note composer-network-pending-note" role="status"><span className="composer-network-pending-dot" aria-hidden="true"/>{tr('Choose the network in the chat')}</span>}
         {/* BUILD-FLOFI-UX-FIX-003: the card says only what the owner must act on — mismatched networks, or why no estimate could be produced — in plain
@@ -791,7 +799,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {card.networkSelection?.valid === false ? tr('Choose matching networks') : tr(buildEstimateFailureMessage(quote.status === 'unavailable' ? quote.code ?? 'ESTIMATE_UNAVAILABLE' : 'ESTIMATE_UNAVAILABLE'))}
           {card.networkSelection?.valid !== false && quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
         {card.networkSelection?.valid !== false && estimate?.bridge?.execution === 'QUOTE_ONLY' && <span className="composer-quote-note" role="status">{tr('Estimate only: FloFi cannot execute this route yet.')}</span>}
-        {expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr(quoteFrozen ? 'Estimate from before execution' : 'Quote expired: updating')}</span>}
+        {received ? <span className="composer-quote-note composer-received-note" role="status" data-received="true">{tr(received.label)}</span>
+          : expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr(quoteFrozen ? 'Estimate from before execution' : 'Quote expired: updating')}</span>}
         {!amountParts && card.networkSelection?.valid !== false && quote.status !== 'unavailable' && card.summary.amount && <span className="composer-quote-note">{tr(card.summary.amount)}</span>}
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>

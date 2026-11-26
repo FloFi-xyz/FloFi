@@ -201,7 +201,7 @@ export const portugueseLocaleContract: Readonly<Record<string, string>> = {
   'You declined the signature request. No transaction was sent.': 'Você recusou o pedido de assinatura. Nenhuma transação foi enviada.',
   'Your wallet does not have enough USDC for this repayment.': 'Sua carteira não tem USDC suficiente para este pagamento.',
   'Choose two different tokens and enter a valid amount to check Auto slippage.': 'Escolha dois tokens diferentes e informe um valor válido para consultar a tolerância automática.',
-  'Jupiter did not provide a usable slippage recommendation. Set a Manual limit or try again.': 'A Jupiter não retornou uma tolerância válida. Defina um limite manual ou tente de novo.',
+  'Jupiter did not provide a usable slippage recommendation. Choose a preset or enter a limit, or try again.': 'A Jupiter não retornou uma tolerância válida. Escolha uma opção ou informe um limite, ou tente de novo.',
   'Your wallet holds a wrapped SOL account. Unwrap it in your wallet before swapping SOL.': 'Sua carteira tem uma conta de SOL encapsulado. Desencapsule-a na carteira antes de trocar SOL.',
   'Your wallet holds a wrapped SOL account. Unwrap it in your wallet first.': 'Sua carteira tem uma conta de SOL encapsulado. Desencapsule-a na carteira primeiro.',
   'Your wallet needs more Base Sepolia ETH for gas.': 'Sua carteira precisa de mais ETH da Base Sepolia para o gás.',

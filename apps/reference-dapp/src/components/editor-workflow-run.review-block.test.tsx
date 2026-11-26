@@ -26,8 +26,8 @@ import type { Language } from '../i18n/locale';
 import { swapBridgeReview } from '../domain/review-block-test-harness';
 
 const state = (patch: Partial<EditorWorkflowRunState>): EditorWorkflowRunState => ({ available: true, phase: 'reviewed', review: swapBridgeReview(), error: null, run: null,
-  updated: [], started: false, grouped: true, unrecorded: false, visible: true, earlier: false, stepByStep: false, unloaded: false, canReview: true, following: false,
-  followEarlier: vi.fn(), hide: vi.fn(), resume: vi.fn(), startReview: vi.fn(), authorize: vi.fn(), confirmUpdate: vi.fn(), authorizeDue: vi.fn(), checkWallet: vi.fn(),
+  updated: [], started: false, grouped: true, unrecorded: false, visible: true, stepByStep: false, unloaded: false, canReview: true,
+  resume: vi.fn(), startReview: vi.fn(), authorize: vi.fn(), confirmUpdate: vi.fn(), authorizeDue: vi.fn(), checkWallet: vi.fn(),
   end: vi.fn(), dismiss: vi.fn(), ...patch });
 const render = (s: EditorWorkflowRunState, language: Language = 'EN', actionsOutside = true) =>
   renderToStaticMarkup(<LocaleProvider initialLanguage={language}><EditorWorkflowRunPanel state={s} actionsOutside={actionsOutside}/></LocaleProvider>);
@@ -90,7 +90,7 @@ describe('board 06: the Review before authorization', () => {
     // under Technical details only.
     const visibleButtons = visible(html).match(/<button[^>]*>/g) ?? [];
     for (const button of visibleButtons) expect(button, button).toMatch(/aria-expanded="false"/);
-    expect(visible(html)).not.toMatch(/Authorize|Review again|Refresh review/);
+    expect(visible(html)).not.toMatch(/Authorize|Execute workflow|Review again|Refresh review/);
     expect(html.match(/class="quiet review-block-again"/g)).toHaveLength(1);
     expect(html).toContain('<button type="button" class="quiet review-block-again">Review again</button>');
     // Expired: the footer offers "Refresh review" (BUILD-FLOFI-UX-EDITOR-FINOPS-001, C2), so the block has no second one.
@@ -98,9 +98,13 @@ describe('board 06: the Review before authorization', () => {
     // A refusal asks for a fresh quote: the quiet control sits beside the amber line.
     expect(visible(render(state({ error: 'SWAP_MINIMUM_NOT_MET' })))).toMatch(/class="review-block-alert" role="alert">[^<]*<button type="button" class="quiet review-block-again">Review again<\/button><\/p>/);
     // The engineering workspace (no footer) keeps the panel's own buttons.
-    expect(render(state({}), 'EN', false)).toContain('>Authorize workflow</button>');
+    expect(render(state({}), 'EN', false)).toContain('>Execute workflow</button>');
     const s = state({});
-    expect(primary(s)).toBe('<button type="button" class="primary editor-run-authorize">Authorize workflow</button>');
+    // Execution UX regression fixes: the final CTA reads "Execute workflow" / "Executar fluxo" (never "Authorize workflow" / "Autorizar fluxo");
+    // the click is the same one wallet authorization of the reviewed workflow (`state.authorize`), with no extra confirmation step.
+    expect(primary(s)).toBe('<button type="button" class="primary editor-run-authorize">Execute workflow</button>');
+    expect(primary(s, 'PT')).toBe('<button type="button" class="primary editor-run-authorize">Executar fluxo</button>');
+    expect(primary(s) + primary(s, 'PT')).not.toMatch(/Authorize workflow|Autorizar fluxo/);
     expect(primary(state({ phase: 'authorizing' }))).toContain('disabled="" aria-busy="true">Preparing your wallet request…</button>');
     expect(primary(state({ review: null, phase: 'idle' }))).toBe('<button type="button" class="primary">Review whole workflow</button>');
     expect(primary(state({ review: null, phase: 'reviewing' }))).toContain('disabled="" aria-busy="true">Reviewing the whole workflow…</button>');

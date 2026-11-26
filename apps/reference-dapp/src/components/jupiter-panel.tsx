@@ -11,7 +11,8 @@ import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
 import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
 import { DEFAULT_SLIPPAGE, slippageRangeMessage } from '../domain/slippage-policy';
-import { PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
+import { appliedSlippageCommand } from '../domain/applied-slippage';
 
 export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: string) {
   const key = input?.network === 'Solana' ? JSON.stringify([scope, input.from, input.to, input.amount]) : null;
@@ -41,7 +42,7 @@ export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: 
     const hash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
     const bps = result?.format === 'flofi.jupiter-rtse.v1' && result.workflowHash === hash && expires > Date.now() &&
       Number.isSafeInteger(result.slippageBps) && result.slippageBps >= 1 && result.slippageBps <= 300 ? result.slippageBps : null;
-    setStatus({ key, pending: false, bps, expires, error: bps === null ? 'Jupiter did not provide a usable slippage recommendation. Set a Manual limit or try again.' : null });
+    setStatus({ key, pending: false, bps, expires, error: bps === null ? 'Jupiter did not provide a usable slippage recommendation. Choose a preset or enter a limit, or try again.' : null });
   }
   return { autoBps: visible?.bps ?? null, autoPending: Boolean(visible?.pending), ...(key ? { onRequestAuto: () => void suggest() } : {}),
     autoError: visible?.error ?? null };
@@ -49,7 +50,7 @@ export function useJupiterSlippageChoices(input: SolanaSwapInput | null, scope: 
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
-  const { state, propose, dispatch } = useWorkflow();
+  const { state, propose, dispatch, dismissProposal, context, executedNodeIds = [] } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId);
   const existing = node ? solanaSwapDetails(node) : null;
   const devnet = (existing?.network ?? initialNetwork) === 'Solana Devnet';
@@ -58,12 +59,15 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
   const [error, setError] = useState('');
   const set = (patch: Partial<SolanaSwapInput>) => setInput(value => ({ ...value, ...patch }));
   const tokens = solanaTokensFor(input.network), label = devnet ? 'Solana Devnet' : 'Solana';
-  const { autoError, ...auto } = useJupiterSlippageChoices(input, `${nodeId ?? 'new'}:${state.workflow.revision}`);
+  // An existing swap's Auto recommendation is for the APPLIED swap it is applied to (never an unapplied draft of its tokens or amount).
+  const { autoError, ...auto } = useJupiterSlippageChoices(nodeId && existing ? existing : input, `${nodeId ?? 'new'}:${state.workflow.revision}`);
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      createSolanaSwapNode(nodeId ?? 'node-preview', input); setError('');
-      const command = nodeId ? { type: 'SET_SOLANA_SWAP' as const, nodeId, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
+      // An existing swap's max price difference is applied on its own (`commitSlippage`): this edit carries the APPLIED limit, never an older draft.
+      const edited = nodeId && existing ? { ...input, slippage: existing.slippage } : input;
+      createSolanaSwapNode(nodeId ?? 'node-preview', edited); setError('');
+      const command = nodeId ? { type: 'SET_SOLANA_SWAP' as const, nodeId, input: edited, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
         : { type: 'ADD_SOLANA_SWAP' as const, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
       if (direct) dispatch(command); else propose(command); onDone?.();
     } catch (cause) {
@@ -71,12 +75,28 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
       setError(slippageRangeMessage(code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS) ?? code);
     }
   }
+  /**
+   * PR #254 follow-up: an existing Jupiter swap's max price difference applies at once (a preset or Auto click, or a typed value on Enter or focus
+   * leaving it), like the swap card's: one ordinary edit of the APPLIED swap with only its slippage changed (`appliedSlippageCommand`; a draft
+   * token or amount is never applied with it). Nothing is simulated, authorized or signed.
+   */
+  function commitSlippage(slippage: string): string | null {
+    if (!nodeId) return null;
+    const result = appliedSlippageCommand(state, nodeId, slippage, context, { executed: executedNodeIds.includes(nodeId) });
+    if ('code' in result) return appliedSlippageMessage(result.code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS);
+    // Only the slippage changes: applied at once. Otherwise (the step cannot be rebuilt exactly) the same edit is a proposal the owner reviews.
+    if (!result.exact) { propose(result.command); return null; }
+    dismissProposal(); dispatch(result.command); setError('');
+    return null;
+  }
   return <form className="inspector-fields" aria-label={tr(nodeId ? `Edit ${label} swap` : `Create ${label} swap`)} onSubmit={submit}>
     <label>{tr(label)}{tr(" from token")}<select aria-label={tr("From token")} value={input.from} onChange={e => set({ from: e.target.value as SolanaSwapSymbol })}>{tokens.map(t => <option key={t} value={t}>{tr(solanaTokenLabel(input.network, t))}</option>)}</select></label>
     <label>{tr(label)}{tr(" to token")}<select aria-label={tr("To token")} value={input.to} onChange={e => set({ to: e.target.value as SolanaSwapSymbol })}>{tokens.map(t => <option key={t} value={t}>{tr(solanaTokenLabel(input.network, t))}</option>)}</select></label>
     <label>{tr(label)}{tr(" amount")}<input aria-label={tr("Amount")} inputMode="decimal" autoComplete="off" maxLength={40} value={input.amount} onChange={e => set({ amount: e.target.value })}/></label>
-    <label>{tr('Max price difference (%)')}<PriceDifferenceInput bps={input.slippage} maxLength={6} onBpsChange={slippage => set({ slippage })}/></label>
-    <SlippageChoices {...auto} bps={input.slippage} maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onBpsChange={slippage => set({ slippage })}/>
+    {nodeId && existing ? <AppliedSlippageControls {...auto} label={tr('Max price difference (%)')} maxLength={6} bps={existing.slippage}
+      maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onCommit={commitSlippage}/> : <>
+      <label>{tr('Max price difference (%)')}<PriceDifferenceInput bps={input.slippage} maxLength={6} onBpsChange={slippage => set({ slippage })}/></label>
+      <SlippageChoices {...auto} bps={input.slippage} maximumBps={DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS} onBpsChange={slippage => set({ slippage })}/></>}
     {autoError && <p className="muted" role="status">{tr(autoError)}</p>}
     {devnet && <p className="muted">{tr("Devnet test tokens have no value.")}</p>}
     {error && <p role="alert">{tr(error)}</p>}

@@ -19,7 +19,7 @@ const ICON: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>>
   Repay: 'repay', Withdraw: 'withdraw', Stocks: 'stocks',
 };
 
-function Amount({ row }: { row: ReceiptValue }) {
+export function Amount({ row }: { row: ReceiptValue }) {
   const { t } = useLocale();
   // The amount the owner configured stays exactly as set; recorded amounts read at six significant digits with the exact value one tap away.
   if (row.label === 'Configured amount') return <span className="execution-receipt-amount">{t(row.value)}</span>;
@@ -27,7 +27,7 @@ function Amount({ row }: { row: ReceiptValue }) {
   return <TokenAmountText className="execution-receipt-amount" value={row.value}/>;
 }
 
-function TransactionLink({ link }: { link: ReceiptLink }) {
+export function TransactionLink({ link }: { link: ReceiptLink }) {
   const { t } = useLocale();
   if (!link.explorer) return null;
   return <a className="execution-receipt-link" href={link.explorer} target="_blank" rel="noopener noreferrer">{t('View transaction')}

@@ -141,6 +141,11 @@ export function createLoginChannel() {
 }
 
 const PRIVY_CODES: readonly [RegExp, string][] = [
+  // PR #254 follow-up (Google sign-in reports): @privy-io/react-auth 3.51.0 refuses to START Google OAuth inside an app's embedded browser (a React
+  // Native WebView such as a wallet app's browser, or the Facebook/Instagram/Snapchat/LinkedIn browsers) and where this site cannot use local
+  // storage: "It looks like you're using an in-app browser.  To log in, please try again using an external browser." It reached the person as
+  // the generic "Sign-in did not complete. Try again.", and every retry failed the same way. It now says what to do instead (nothing is bypassed).
+  [/in-app browser|external browser/i, 'PRIVY_OAUTH_EMBEDDED_BROWSER'],
   // Authentication UX & Login Regression Fix (P0): Privy's real SDK refuses a login while a session is already open ("Attempted to log in, but
   // user is already logged in", "User already authenticated") and an OAuth completion it no longer tracks ("no OAuth flow is in progress").
   // These used to reach the person as the generic "Sign-in did not complete"; the sign-in page now ends that session and says so.

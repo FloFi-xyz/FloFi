@@ -125,16 +125,38 @@ export const SEQUENCE_RUNTIMES: readonly string[] = Object.freeze(['public', 'ro
  */
 export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'transfer', 'supply']);
 /**
+ * Whether an execution already made on this Editor's own paths holds the whole-workflow path back (`useEditorWorkflowRun` stays off): the shown
+ * execution (`current`: a run of this workflow, or a run of another one still in flight), a start recorded for this workflow (`recorded`), ANY
+ * run the runtime holds that is not final yet (`unfinished`, a detached run after "Create new workflow" included: its own flow refuses a second
+ * request while it may still land, ATTEMPT_ALREADY_ACTIVE), or a step-by-step sequence that already began. A sequence also keeps any run its
+ * runtime holds (`started`), as before (its steps run there one by one).
+ *
+ * Execution UX regression fixes (multiple wallet prompts for simple cards): a single card is NOT held back by a FINISHED run of another workflow
+ * that its runtime still holds (`started` alone). Before, any earlier per-card execution in the tab sent every later simple card to its own flow
+ * (approval, then a second Review and Authorize, then the swap: two or more prompts) instead of ONE wallet confirmation. Nothing that may still
+ * execute is ever bypassed.
+ *
+ * PR #254 follow-up: `unfinished` is `unfinishedRunHolds` (domain/execution-result.ts). An UNRELATED workflow's run (detached) that is not final
+ * holds a single card back only while it has an owner-wallet request in flight (a genuine nonce, balance or open-prompt conflict); a bridge of it
+ * whose deposit is confirmed and whose delivery FloFi only observes and reconciles no longer forces the card into its multi-prompt flow. The
+ * detached run keeps reconciling on its own and is never resent; its own flow's ATTEMPT_ALREADY_ACTIVE guard is unchanged.
+ */
+export function localExecutionHolds(input: { readonly current: boolean; readonly started: boolean; readonly unfinished: boolean; readonly recorded: boolean;
+  readonly sequence: { readonly cursor: number; readonly completed: readonly unknown[] } | null }): boolean {
+  return input.current || input.recorded || input.unfinished || Boolean(input.sequence) && input.started
+    || Boolean(input.sequence && (input.sequence.cursor > 0 || input.sequence.completed.length > 0));
+}
+/**
  * Whether a single card that took the whole-workflow path goes back to its own flow: never once its run started (a started run always stays); when
  * its Review is not one grouped interaction or refuses the batch (its own flow re-checks, simulates and reviews it and shows its own errors); and
  * when the Review could not answer at all (rate limited, an RPC or server failure: final workflow review), since its own flow was always available.
  */
 export function singleCardFallsBack(run: { readonly started: boolean; readonly review: { readonly mode: string; readonly refusal: unknown } | null;
-  readonly stepByStep: boolean; readonly error: string | null; readonly following: boolean }): boolean {
+  readonly stepByStep: boolean; readonly error: string | null }): boolean {
   if (run.started) return false;
   // No connected wallet is not a Review that could not answer: the existing connect reason stays where it is (never a silent flip back and forth).
   return run.review ? run.review.mode === 'STEP_BY_STEP' || run.review.refusal !== null
-    : run.stepByStep || run.error !== null && run.error !== 'EVM_WALLET_REQUIRED' && !run.following;
+    : run.stepByStep || run.error !== null && run.error !== 'EVM_WALLET_REQUIRED';
 }
 /** Runtimes whose reconciled record proves the delivered amount a funded later step spends (`deliveredByRecord`). */
 export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply', 'workflow-run']);

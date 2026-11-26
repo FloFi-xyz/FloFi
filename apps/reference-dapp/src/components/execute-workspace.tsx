@@ -21,6 +21,7 @@ import { refreshableRun } from '../domain/canvas-lifecycle';
 
 import { STEPS_COMPLETED, type WorkflowProgressView } from '../domain/workflow-progress';
 import { SequenceContinuationPanel, WorkflowProgressList, type SequenceContinuation } from './workflow-progress-panel';
+import { ExecutionResultSummary } from './execution-result-summary';
 
 export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   workflowName: string; backToBuild(): void; backToSimulate(): void; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
@@ -73,7 +74,7 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    */
   canvasExecution?: CanvasExecution | null;
   /**
-   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1/C2): the Editor footer hosts the ONE lifecycle action (Authorize workflow, Refresh review, or the existing
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1/C2): the Editor footer hosts the ONE lifecycle action (Execute workflow, Refresh review, or the existing
    * execution action) while Execute shows the Canvas, so the Canvas frame carries none (`executeActionPlacement` decides; same handlers).
    */
   actionInFooter?: boolean;
@@ -113,13 +114,14 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   // (exact id and revision). Execute keeps the Canvas for a live run only when that execution includes this very run; otherwise the timeline stays.
   const canvasRun = props.canvasExecution?.started ? props.canvasExecution : null;
   const canvasLive = live && live.runKey && canvasRun?.runKeys.includes(live.runKey) ? canvasRun : null;
-  // Execution details: closed while the run progresses (the Canvas shows it), open once a result or something that needs attention exists; the
-  // owner's own choice is kept for this run.
+  // Execution details: closed while the run progresses (the Canvas shows it) and once it has a clean result (execution UX regression fixes: the
+  // compact result is in the status panel beside the Canvas, so nobody has to scroll below it); open when something needs attention. The owner's
+  // own choice is kept for this run.
   const [detailsChoice, setDetailsChoice] = useState<{ readonly key: string; readonly open: boolean } | null>(null);
   // The owner's open/closed choice belongs to one run: a later step of a step-by-step workflow (a new run) starts from the default again, so its
   // result or failure is never hidden behind a choice made for an earlier step.
   const detailsKey = canvasLive && live?.runKey ? live.runKey : '';
-  const detailsOpen = detailsChoice?.key === detailsKey ? detailsChoice.open : Boolean(result) || Boolean(live && ['attention', 'uncertain'].includes(live.state));
+  const detailsOpen = detailsChoice?.key === detailsKey ? detailsChoice.open : Boolean(live && ['attention', 'uncertain'].includes(live.state));
   const progress = props.workflowProgress ?? null, continuation = !live && props.continuation ? props.continuation : null;
   // N is the WHOLE workflow's number of steps (a sequence step's own run has one); without a workflow view the run's own count stays.
   const reviewBlock = Boolean(props.reviewBlock && !live && !continuation);
@@ -185,6 +187,8 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
           {providers.length > 0 && <div><dt>{tr("Providers")}</dt><dd>{tr(providers.join(' · '))}</dd></div>}
           {!live && !grouped && !continuation && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
         </dl>
+        {/* Execution UX regression fixes: the same compact result beside the Canvas in this summary (its known costs are listed above). */}
+        {live && <ExecutionResultSummary live={live} fees={false}/>}
         {live?.active && <section className="execute-next" aria-label={tr("Current step")}><h3>{tr(result ? 'Needs attention' : 'Current step')}</h3><p>{tr(live.active.number)}. {tr(live.active.action)}</p><p>{tr([live.active.provider, live.active.network].filter(Boolean).join(' · '))}</p><p>{tr(live.active.label)}</p></section>}
         {progressList}
         {!grouped && notices}
@@ -220,6 +224,8 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
     {live && <p className="execution-status-progress">{progress ? tr(STEPS_COMPLETED, progress.completed, progress.total)
       : result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
       : tr('{0} of {1} steps confirmed', live.completed, live.steps.length)}</p>}
+    {/* Execution UX regression fixes: sent, received (the reconciled amount once observed), verified fees and the transaction link, in the panel. */}
+    {live && <ExecutionResultSummary live={live}/>}
     {continuation && progress && <p className="execution-status-progress">{tr(STEPS_COMPLETED, progress.completed, progress.total)}</p>}
     {progressList}
     {!grouped && notices}

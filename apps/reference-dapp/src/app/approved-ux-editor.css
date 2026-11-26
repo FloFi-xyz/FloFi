@@ -6,6 +6,9 @@
 /* ── Two regions: the Canvas on the darkest surface with the dot grid; the chat on the panel surface. ─────────────────────────────── */
 .build-workspace .build-grid>.canvas{border-color:var(--line);background:var(--app-bg)}
 .build-workspace .build-flow-surface{background:var(--app-bg)}
+/* Execution UX regression fixes: Simulate, Review and Execute keep the Create Canvas surface (the same colour under the same dot grid,
+   CANVAS_BACKGROUND), never the generic flat gradient of .flow-surface. Cards, layout and the read-only behaviour are unchanged. */
+.simulation-workflow-canvas .simulate-flow-surface{background:var(--app-bg)}
 .build-workspace .build-grid>.copilot{border-color:var(--line);background:var(--surface)}
 @media(min-width:1200px){.main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-panel-width:380px}}
 

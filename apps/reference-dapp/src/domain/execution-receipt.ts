@@ -11,6 +11,7 @@ import type { DashboardRunView, DashboardStatus } from '../lib/dashboard/types';
 import type { ExecutionLifecycle, LifecycleOperation, LifecycleStep } from './execution-lifecycle';
 import type { EvidenceValue } from './execution-evidence';
 import { shellChainLabel } from './product-shell';
+import { stepReconciled } from './workflow-progress';
 
 export type ReceiptTone = 'success' | 'attention' | 'progress' | 'failed' | 'neutral';
 /** A row of the receipt. `observed`: the record observed this value (an execution effect), as opposed to the configured plan. */
@@ -124,19 +125,27 @@ function stepValues(step: LifecycleStep, observed: readonly Observed[], status: 
 /** A send authored to the connected owner's own wallet is recorded symbolically; the receipt names the wallet that executed it. */
 const ownRecipient = (recipient: string | null, wallet: string | null) => recipient === 'CONNECTED_OWNER' ? wallet : recipient;
 
-export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceipt {
-  const progress: ExecutionLifecycle | null = view.progress;
-  const steps = progress?.steps ?? [];
-  const evidence = progress?.evidence;
-  const observed = (step: LifecycleStep): Observed[] => step.operations.flatMap(op => (evidence?.operations[op.id]?.values ?? []).map(value => ({ ...value, operation: op.id })));
-  const single = steps.length === 1 && !progress?.planUnavailable ? steps[0]! : null;
+/** A lifecycle's observed values for one step, each with the operation that recorded it. */
+const observedOf = (evidence: ExecutionLifecycle['evidence'], step: LifecycleStep): Observed[] =>
+  step.operations.flatMap(op => (evidence?.operations[op.id]?.values ?? []).map(value => ({ ...value, operation: op.id })));
+/** Known network costs as recorded per network, plus a fee the swap itself paid (0x), listed with the fees and never added to them. */
+function feesOf(evidence: ExecutionLifecycle['evidence'], steps: readonly LifecycleStep[]): ReceiptValue[] {
   const fees: ReceiptValue[] = (evidence?.knownCosts ?? []).map(cost => {
     const network = cost.label.replace(/^Known network cost · /, '');
     return (evidence?.knownCosts.length ?? 0) > 1 ? { label: 'Network fee · {0}', args: [networkName(network)], value: cost.value, observed: true }
       : { label: 'Network fee', value: cost.value, observed: true };
   });
-  // A fee the swap itself paid (0x) is a cost the record observed, in the swap's token: listed with the fees, never added to them.
-  for (const step of steps) for (const value of observed(step)) if (FEE_LABELS.has(value.label)) fees.push({ label: value.label, value: value.value, observed: true });
+  for (const step of steps) for (const value of observedOf(evidence, step)) if (FEE_LABELS.has(value.label)) fees.push({ label: value.label, value: value.value, observed: true });
+  return fees;
+}
+
+export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceipt {
+  const progress: ExecutionLifecycle | null = view.progress;
+  const steps = progress?.steps ?? [];
+  const evidence = progress?.evidence;
+  const observed = (step: LifecycleStep): Observed[] => observedOf(evidence, step);
+  const single = steps.length === 1 && !progress?.planUnavailable ? steps[0]! : null;
+  const fees = feesOf(evidence, steps);
   const networks = [...new Set(steps.map(step => networkName(step.network)).filter(Boolean))];
   const protocols = [...new Set(steps.map(step => step.provider).filter((provider): provider is string => Boolean(provider)))];
   const status = view.status;
@@ -160,6 +169,38 @@ export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceip
     provenance: progress?.local ? 'Local execution · no public-chain transactions'
       : PROVENANCE[view.run.provenance] ?? null,
     submitted: steps.some(step => step.operations.some(op => op.hash)) || Boolean(view.run.attempts?.some(attempt => attempt.transactionHash)),
+  };
+}
+
+/**
+ * Execution UX regression fixes: the compact result the Editor's Execute panel shows beside the Canvas for the run on screen, by the receipt's own
+ * rules — what was sent (observed, else the configured amount labelled as such); what was received only as the record observed it, so once the run
+ * is reconciled its actual amount replaces the pre-execution estimate; verified network fees only; the transaction to verify; each step's status.
+ * A delivery observed but not yet final keeps its own interim label (never the result). Presentation only: every value is the live record's own.
+ */
+export type LiveExecutionResult = { readonly values: readonly ReceiptValue[]; readonly fees: readonly ReceiptValue[]; readonly transaction: ReceiptLink | null;
+  readonly steps: readonly ReceiptStep[] };
+const INTERIM_DELIVERY = 'Destination amount observed · awaiting reconciliation';
+export function projectLiveExecutionResult(live: ExecutionLifecycle): LiveExecutionResult {
+  const evidence = live.evidence;
+  const values = (step: LifecycleStep): ReceiptValue[] => {
+    const observed = observedOf(evidence, step);
+    // 'In progress': a live view never says "Not recorded in this history" (that wording is the saved receipt's).
+    const rows = stepValues(step, observed, 'In progress');
+    const interim = observed.find(value => value.label === INTERIM_DELIVERY);
+    if (interim && !rows.some(row => row.observed && /received|Delivered/i.test(row.label))) rows.push({ label: INTERIM_DELIVERY, value: interim.value, observed: true });
+    return rows;
+  };
+  const single = live.steps.length === 1 && !live.planUnavailable ? live.steps[0]! : null;
+  return {
+    values: single ? values(single) : [], fees: feesOf(evidence, live.steps), transaction: single ? link(mainOperation(single.operations)) : null,
+    // A step whose transactions are confirmed is "Completed" only once its record is reconciled (the Canvas's own rule, `stepReconciled`).
+    steps: single ? [] : live.steps.map(step => {
+      const tone = stepTone(step);
+      return { number: step.number, action: step.action, network: networkName(step.network), provider: step.provider,
+        ...tone.status === 'Completed' && !stepReconciled(live, step.id) ? { status: 'In progress', tone: 'progress' as const } : tone,
+        values: values(step), transaction: link(mainOperation(step.operations)), recipient: null };
+    }),
   };
 }
 

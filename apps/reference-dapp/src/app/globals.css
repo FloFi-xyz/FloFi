@@ -397,6 +397,8 @@
 .action-settings-popover .inspector-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end}
 .action-settings-popover .inspector-fields>strong,.action-settings-popover .inspector-fields>p,.action-settings-popover .inspector-fields>small{grid-column:1/-1}
 .action-settings-popover .inspector-fields label{width:100%}.action-settings-popover input,.action-settings-popover select{width:100%;min-width:0;max-width:100%}
+/* PR #254 follow-up: the applied max price difference controls keep the form's own layout (their label, presets and notes stay grid items). */
+.applied-slippage{display:contents}.action-settings-popover .inspector-fields>.applied-slippage>p{grid-column:1/-1}
 .action-settings-popover p{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .action-settings-popover select{min-height:40px;border:1px solid var(--line);border-radius:6px;padding:0 10px;background:var(--paper);color:var(--ink);font:inherit}
 .build-flow-surface .canvas-primary-action{right:12px;bottom:24px}
@@ -1793,9 +1795,6 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .automation-history h3{font-size:14px;margin:16px 0 6px}
 .automation-archived summary{cursor:pointer;color:var(--muted);font-size:13px;margin:14px 0}
 /* P0 workflow execution: a whole-workflow run this browser started in an earlier visit, offered after a reload (same band as the automation inbox). */
-.editor-run-earlier-notice{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--accent-line);background:var(--blue-soft);color:var(--ink);font-size:13px}
-.editor-run-earlier{display:grid;gap:8px;margin:0 0 12px}
-.editor-run-earlier p{margin:0}
 .editor-run-recipient{overflow-wrap:anywhere}
 .automation-inbox{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--soft);font-size:13px}
 .automation-inbox .workspace-action{display:inline-flex;align-items:center;min-height:30px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-weight:500}

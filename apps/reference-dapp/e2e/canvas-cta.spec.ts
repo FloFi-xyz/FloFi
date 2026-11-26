@@ -102,8 +102,8 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   // C1: the Review is authorized only from Execute, through the one guarded footer action (closed here: nothing is authorized).
   await reviewOperation.click();
   await expectEditorSection(page, 'Execute');
-  await expect(primary.getByRole('button', { name: 'Authorize workflow', exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
+  await expect(primary.getByRole('button', { name: 'Execute workflow', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(1);
   await openEditorSection(page, 'Build');
   // Create never hosts an authorization: its one action opens the Review in Execute.
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Review operation', exact: true })).toBeEnabled();

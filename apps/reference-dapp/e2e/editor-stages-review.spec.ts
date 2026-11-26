@@ -4,7 +4,7 @@
  *
  *   Create (stage indicator in the Editor header, Execute closed until a simulation exists, no authorization copy) → "Simulate workflow" runs the
  *   read-only whole-workflow Review IN Simulate, whose panel states the result with no authorization copy and no Authorize control → the footer's
- *   "Continue to authorization" (UX-05) opens Execute → the valid Review (C1: "Check your operation", "Authorize workflow" in the footer, once) → its validity passes
+ *   "Continue to authorization" (UX-05) opens Execute → the valid Review (C1: "Check your operation", "Execute workflow" in the footer, once) → its validity passes
  *   (client clock only) → C2: "Your review expired", the fee and permission marked as needing a refreshed Review, no Authorize, "Refresh review"
  *   as the one action, the Assistant's local note → "Refresh review" prepares a fresh Review in place → Authorize is offered again.
  *
@@ -36,11 +36,11 @@ const BASE = '0x2105', BASE_HARNESS = 'http://127.0.0.1:8562', CHAIN_HARNESS = '
 const PT = process.env.FLOFI_UX_EVIDENCE_LANG === 'PT';
 const EVIDENCE = process.env.FLOFI_UX_EVIDENCE_DIR ?? null;
 /** The few visible words this proof reads, in the interface language it runs in. */
-const W = PT ? { simulate: 'Simular fluxo', review: 'Continuar para autorização', authorizing: 'Confira sua operação', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
+const W = PT ? { simulate: 'Simular fluxo', review: 'Continuar para autorização', authorizing: 'Confira sua operação', authorize: 'Executar fluxo', validFor: /Revisão válida por \d+:\d\d/,
   expired: 'Sua revisão expirou', refreshFee: 'Precisa ser atualizada', refreshPermission: 'Depende da revisão atualizada', reviewExpired: 'Revisão expirada',
   refresh: 'Atualizar revisão', executeClosed: /Simule o fluxo primeiro/, simulateClosed: /Adicione uma ação ao seu fluxo primeiro/, operate: 'Operar', areas: 'Áreas do produto',
   assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar\s*3 USDC → (≈ )?[\d.,]+ WETH/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
-  : { simulate: 'Simulate workflow', review: 'Continue to authorization', authorizing: 'Check your operation', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
+  : { simulate: 'Simulate workflow', review: 'Continue to authorization', authorizing: 'Check your operation', authorize: 'Execute workflow', validFor: /Review valid for \d+:\d\d/,
   expired: 'Your review expired', refreshFee: 'Needs to be refreshed', refreshPermission: 'Depends on the updated review', reviewExpired: 'Review expired',
   refresh: 'Refresh review', executeClosed: /Simulate the workflow first/, simulateClosed: /Add an action to your workflow first/, operate: 'Operate', areas: 'Product areas',
   assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap\s*3 USDC → (≈ )?[\d.,]+ WETH/, card: ['Swap', 'Supply', 'Borrow'] };

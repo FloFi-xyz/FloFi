@@ -83,7 +83,6 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Review again': 'Revisar novamente',
   'Preparing your wallet request…': 'Preparando o pedido para a sua carteira…',
   'Authorize workflow · 1 wallet confirmation': 'Autorizar fluxo · 1 confirmação na carteira',
-  'Authorize workflow': 'Autorizar fluxo',
   'Confirm the updated minimums': 'Confirmar os mínimos atualizados',
   'Authorize steps {0}–{1} now': 'Autorizar as etapas {0}–{1} agora',
   'Quote expired: updating': 'Cotação expirada: atualizando',
@@ -159,10 +158,6 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
     'Antes disso, sua carteira pode pedir para mudar para {0} se estiver em outra rede e, uma vez por sessão, para assinar a mensagem de entrada da FloFi (nenhuma transação).',
   'The wallet request itself does not expire on chain: confirm it promptly, or reject it and review again. Each swap\'s minimum is fixed when FloFi prepares the request.':
     'O pedido à carteira não expira sozinho na rede: confirme-o logo, ou recuse-o e revise de novo. O mínimo de cada swap é fixado quando a FloFi prepara o pedido.',
-  'A workflow you authorized earlier in this browser has not been closed. Its progress, and any batch your wallet already has, are read from FloFi and your wallet.':
-    'Um fluxo que você autorizou antes neste navegador não foi fechado. O andamento dele, e qualquer lote que sua carteira já tenha, são lidos da FloFi e da sua carteira.',
-  'A workflow you authorized earlier in this browser has not been closed.': 'Um fluxo que você autorizou antes neste navegador não foi fechado.',
-  'Show its progress': 'Mostrar o andamento',
   'FloFi could not complete this request ({0}). What your wallet already has stands: FloFi keeps following it and never sends it again.':
     'A FloFi não conseguiu concluir este pedido ({0}). O que sua carteira já tem continua valendo: a FloFi continua acompanhando e nunca o envia de novo.',
   '1 on-chain transaction': '1 transação on-chain', '1 signature': '1 assinatura',
@@ -177,8 +172,6 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Forgetting removes this workflow only from this browser: the run, and anything your wallet already sent, stay. Check your wallet\'s activity first.':
     'Esquecer remove este fluxo apenas deste navegador: a execução, e o que sua carteira já enviou, continuam. Verifique antes a atividade da sua carteira.',
   'Forget this workflow in this browser': 'Esquecer este fluxo neste navegador',
-  'Hide this workflow': 'Ocultar este fluxo',
-  'This is a workflow you authorized earlier, not the one on the Canvas.': 'Este é um fluxo que você autorizou antes, não o que está no Canvas.',
   'Your wallet was asked to send this batch, but its answer never arrived, so FloFi cannot tell whether it was sent. Check your wallet\'s activity. FloFi will not ask your wallet for it again; the workflow can be ended once the prepared request expires.':
     'Sua carteira foi solicitada a enviar este lote, mas a resposta nunca chegou, então a FloFi não consegue saber se ele foi enviado. Verifique a atividade da sua carteira. A FloFi não vai pedir esse lote de novo à sua carteira; o fluxo pode ser encerrado quando o pedido preparado expirar.',
   'Load workflow progress': 'Carregar o andamento do fluxo',

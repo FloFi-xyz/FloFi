@@ -56,8 +56,8 @@ test('semantic revision change retires the reviewed installation', async ({ page
   await openEditorSection(page, 'Build');
   await page.locator('.flow-card').nth(1).click();
   await page.locator('.inspector').getByLabel('Max price difference (%)', { exact: true }).fill('0.5');
-  // BUILD-FIX-UX-001: a slippage edit applies directly — still a new semantic revision that retires the finite authority.
-  await page.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  // BUILD-FIX-UX-001: a slippage edit applies directly (committed with Enter) — still a new semantic revision that retires the finite authority.
+  await page.locator('.inspector').getByLabel('Max price difference (%)', { exact: true }).press('Enter');
   await openEditorSection(page, 'Execute');
   const retired = page.getByRole('region', { name: 'Finite Mode B authority' });
   await expect(retired).toContainText('Semantic revision changed');

@@ -165,4 +165,33 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 universal router on durable cloud state
     const attempts = await t.db.query(`SELECT step, state, reconciled FROM execution_attempts WHERE run_id = $1 ORDER BY attempt_id`, [id]);
     expect(attempts.rows).toEqual([{ step: 'APPROVAL', state: 'CONFIRMED', reconciled: true }, { step: 'DEPOSIT', state: 'CONFIRMED', reconciled: true }]);
   });
+
+  it('a delivery awaiting finality is observed again at the settlement cadence (not the long backoff) and reconciles with no owner action', async () => {
+    const c = chains(), owner = c.wallet.publicKey, w = workflow('solana', 'base', '0x3333333333333333333333333333333333333333');
+    // Its own tenant: the MOCKED fill hash is deterministic per chain instance, and a delivery already claimed by another run is (rightly) divergent.
+    const api = await deployment(c, owner, { tenantId: 'tenant-b' });
+    const run = ok<UniversalRecord>(await api.call('simulate', w, owner)), id = run.id;
+    ok(await api.call('review', id, run.review.commitment, w));
+    const begun = ok<{ unsignedTransaction: string }>(await api.call('begin', id, owner, w));
+    const submitted = ok<UniversalRecord>(await api.call('submit', id, c.wallet.sign(begun.unsignedTransaction)));
+    c.solana.land(submitted.attempts.at(-1)!.transactionHash!);
+    const worker = await deployment(c, owner, { tenantId: 'tenant-b', evidenceDir: api.evidenceDir });
+    fill(c, await drain(c, worker, id, 'IN_FLIGHT'));
+    // The run has already been observed many times (a long bridge, a slow source): the generic backoff would now wait ten minutes.
+    await t.db.query(`UPDATE work_items SET deliveries = 12 WHERE run_id = $1 AND kind = 'reconcile' AND state = 'READY'`, [id]);
+    await due(worker.db); await worker.worker.drainOnce();
+    const observed = ok<UniversalRecord>(await worker.call('status', id));
+    expect(observed).toMatchObject({ phase: 'DESTINATION_OBSERVED', verdict: 'PENDING', error: 'UNIVERSAL_AWAITING_FINALITY', destination: { final: false },
+      observation: { outcome: 'DESTINATION_OBSERVED', reason: 'UNIVERSAL_AWAITING_FINALITY' } });
+    const next = (await t.db.query(`SELECT extract(epoch FROM available_at - now())::float AS delay_s, last_error FROM work_items
+      WHERE run_id = $1 AND kind = 'reconcile' AND state = 'READY'`, [id])).rows[0] as { delay_s: number; last_error: string };
+    expect(next.last_error).toBe('UNIVERSAL_AWAITING_FINALITY');
+    expect(next.delay_s).toBeGreaterThan(5);
+    expect(next.delay_s).toBeLessThanOrEqual(18);                  // 15 s ±20 %, never the 480–720 s backoff of a twelfth delivery
+    // The destination block becomes safe: the very next observation reconciles; no status request, wallet or signature is involved.
+    c.mine();
+    await due(worker.db); await worker.worker.drainOnce();
+    expect(ok<UniversalRecord>(await worker.call('status', id))).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', destination: { final: true } });
+    expect(worker.methods.filter(m => SEND.includes(m))).toEqual([]);
+  });
 });

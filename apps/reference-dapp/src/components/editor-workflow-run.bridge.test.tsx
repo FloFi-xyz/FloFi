@@ -48,8 +48,8 @@ const review = (patch: Partial<EditorExecutionReview> = {}): EditorExecutionRevi
     expected: usdc(BASE, '4966223', '4.966223 USDC'), minimum: usdc(BASE, '4966223', '4.966223 USDC'), recipient: null, destination: 'Base' }],
   counts: { walletPrompts: 1, atLeast: false, signatures: 1, transactions: 1, batchedCalls: 4, networkSwitches: 0, oneTimeSetup: [] }, ...patch });
 const state = (patch: Partial<EditorWorkflowRunState>): EditorWorkflowRunState => ({ available: true, phase: 'running', review: null, error: null, run: null, updated: [],
-  started: true, grouped: true, unrecorded: false, visible: true, earlier: false, stepByStep: false, unloaded: false, canReview: false, following: false,
-  followEarlier: vi.fn(), hide: vi.fn(), resume: vi.fn(), startReview: vi.fn(), authorize: vi.fn(), confirmUpdate: vi.fn(), authorizeDue: vi.fn(), checkWallet: vi.fn(),
+  started: true, grouped: true, unrecorded: false, visible: true, stepByStep: false, unloaded: false, canReview: false,
+  resume: vi.fn(), startReview: vi.fn(), authorize: vi.fn(), confirmUpdate: vi.fn(), authorizeDue: vi.fn(), checkWallet: vi.fn(),
   end: vi.fn(), dismiss: vi.fn(), ...patch });
 const render = (s: EditorWorkflowRunState, language: Language = 'EN') =>
   renderToStaticMarkup(<LocaleProvider initialLanguage={language}><EditorWorkflowRunPanel state={s}/></LocaleProvider>);

@@ -21,7 +21,7 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   sequenceNote?: string | null;
   onExecute?: () => void; workflowName?: string;
   /**
-   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, C1/C2): the Editor's Execute stage words the same actions as "Authorize workflow" (a Review to accept)
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, C1/C2): the Editor's Execute stage words the same actions as "Execute workflow" (a Review to accept)
    * and "Refresh review" (an expired or invalidated one). Wording only: the projected action, its gates, `disabled` and its handler are unchanged.
    */
   labelFor?: ((action: CanvasAction) => string) | undefined;

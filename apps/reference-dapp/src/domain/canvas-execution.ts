@@ -28,7 +28,15 @@ export const CANVAS_EXECUTION_VISUALS = ['waiting', 'active', 'wallet', 'authori
 export type CanvasExecutionVisual = (typeof CANVAS_EXECUTION_VISUALS)[number];
 /** The visual state of one connection (a workflow dependency or resource edge). */
 export type CanvasEdgeVisual = 'waiting' | 'active' | 'done' | 'attention' | 'failed';
-export type CanvasNodeExecution = { readonly visual: CanvasExecutionVisual; readonly phase: ExecutionPhase | null; readonly text: PhaseText };
+export type CanvasNodeExecution = { readonly visual: CanvasExecutionVisual; readonly phase: ExecutionPhase | null; readonly text: PhaseText;
+  /**
+   * Execution UX regression fixes: what the reconciled record observed this step deliver, so the card shows the actual result instead of the
+   * estimate from before execution. Only ever set on a reconciled ('done') step; absent otherwise. `amount` is a plain decimal; `unit` the
+   * recorded token symbol (null when the record proves the asset itself, e.g. a whole-workflow run's delivery keyed by its address); `label`
+   * "Delivered" for a delivery to the reviewed recipient (a bridge's destination, a non-owner recipient), as on the receipt.
+   */
+  readonly received?: CanvasReceived };
+export type CanvasReceived = { readonly amount: string; readonly unit: string | null; readonly label: 'You received' | 'Delivered' };
 export type CanvasExecution = {
   /** Which record colors the Canvas (`lifecycle:<runKey>`, `sequence:<workflowId>`, `run:<workflowRunId>`): a new record never inherits another's colors. */
   readonly key: string;
@@ -77,7 +85,19 @@ export function lifecycleNodeExecution(live: ExecutionLifecycle, step: Lifecycle
   // A request being prepared or handed over right now (after the owner's click) is active, not merely "prepared".
   if (phase === 'PREPARED' && step.operations.some(op => op.state === 'preparing' || op.state === 'submitting'))
     return { visual: 'active', phase, text: text(step.operations.some(op => op.state === 'submitting') ? 'Submitting' : 'Preparing request') };
-  return { visual: visualOfPhase(phase), phase, text: words };
+  const visual = visualOfPhase(phase), received = visual === 'done' ? reconciledReceived(live, step) : null;
+  return { visual, phase, text: words, ...received ? { received } : {} };
+}
+/**
+ * The "Actual received" a step's reconciled evidence recorded ("0.648117 USDC" → 0.648117, USDC); null when the record observed none. A bridge's
+ * destination delivery goes to the reviewed recipient, not necessarily the owner: "Delivered" (`execution-receipt.ts`).
+ */
+function reconciledReceived(live: ExecutionLifecycle, step: LifecycleStep): CanvasReceived | null {
+  for (const op of [...step.operations].reverse()) for (const value of live.evidence?.operations[op.id]?.values ?? []) {
+    const match = value.label === 'Actual received' ? /^(\d+(?:\.\d+)?) (\S+)$/.exec(value.value) : null;
+    if (match) return { amount: match[1]!, unit: match[2]!, label: op.id === 'destination' ? 'Delivered' : 'You received' };
+  }
+  return null;
 }
 
 const ids = (workflow: CanvasWorkflow) => new Set(workflow.nodes.map(node => node.nodeId));
