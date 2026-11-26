@@ -190,8 +190,11 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     || destinationResolution.kind === 'UNAVAILABLE') ? 'attention'
     : !input.recipient && cross && destinationResolution.kind === 'LOADING' ? 'loading' : 'normal';
   const amount = options && nodeId ? amountInputs[nodeId] ?? input.amount : input.amount;
-  const autoSupported = input.routing === 'BEST' || input.routing === 'RELAY';
-  const autoKey = JSON.stringify([input.source, input.destination, input.inputAsset, input.outputAsset, amount, input.recipient, input.routing]);
+  // PR #254 follow-up (wallet-execution review): an existing bridge's Auto recommendation is for the APPLIED bridge it is applied to, never for
+  // an amount, recipient or routing drafted on the card but not applied yet.
+  const autoInput: UniversalBridgeInput = options && nodeId && existing ? universalInputOf(existing) : { ...input, amount };
+  const autoSupported = autoInput.routing === 'BEST' || autoInput.routing === 'RELAY';
+  const autoKey = JSON.stringify([autoInput.source, autoInput.destination, autoInput.inputAsset, autoInput.outputAsset, autoInput.amount, autoInput.recipient, autoInput.routing]);
   const currentAuto = autoSupported && auto?.key === autoKey ? auto : null;
   const autoBps = currentAuto && currentAuto.expiresAt > Date.now() ? currentAuto.bps : null;
   async function requestAuto() {
@@ -199,7 +202,7 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     setAuto(pending);
     let bps: number | null = null, expiresAt = 0;
     try {
-      const node = createUniversalBridgeFromInput('node-preview', { ...input, amount, slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE });
+      const node = createUniversalBridgeFromInput('node-preview', { ...autoInput, slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE });
       const request = bridgeEstimateRequest(node);
       if (request) {
         const result = await universalDiscover({ ...request, providers: ['relay'], recommendSlippage: true });
@@ -230,7 +233,8 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     if (!nodeId) return null;
     const result = appliedSlippageCommand(state, nodeId, slippage, context);
     if ('code' in result) return appliedSlippageMessage(result.code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS);
-    dismissProposal(); dispatch(result.command); setAuto(null); setError('');
+    // The form's own draft follows the applied value too (its later "Review bridge change" never proposes the earlier limit).
+    dismissProposal(); dispatch(result.command); setInput(value => ({ ...value, slippage })); setAuto(null); setError('');
     return null;
   }
   /** A delayed Auto click on a quote that expired since the previous render fetches a new recommendation instead of applying the old one. */

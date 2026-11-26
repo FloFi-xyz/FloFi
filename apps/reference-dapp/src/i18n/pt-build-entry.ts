@@ -26,6 +26,6 @@ export const portugueseBuildEntry: Readonly<Record<string, string>> = {
   'Execution result': 'Resultado da execução', 'View in Dashboard': 'Ver no Painel',
   // PR #254 follow-up: a suggestion's sentence is filled part by part in the same request field.
   'Token suggestions': 'Sugestões de token', 'Network suggestions': 'Sugestões de rede',
-  'Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow.':
-    'Preencha a parte selecionada. Pressione Enter ou Tab para a próxima parte, ou Shift+Tab para a anterior. Com todas as partes preenchidas, o Enter cria o fluxo.',
+  'Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow. Suggestions for a token or network part follow the Create workflow button.':
+    'Preencha a parte selecionada. Pressione Enter ou Tab para a próxima parte, ou Shift+Tab para a anterior. Com todas as partes preenchidas, o Enter cria o fluxo. As sugestões para uma parte de token ou de rede vêm depois do botão Criar fluxo.',
 };

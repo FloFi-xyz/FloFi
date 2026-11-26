@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
+import { useEffect, useId, useRef, useState, type InputHTMLAttributes } from 'react';
 import { ELEVATED_SLIPPAGE_WARNING_BPS } from '@defi-workflow-engine/workflow-contracts';
 import { bpsToPercent, percentToBps, priceDifferenceLabel, slippageRangeMessage } from '../domain/slippage-policy';
 import { useLocale } from '../i18n/locale';
@@ -77,18 +77,20 @@ export function AppliedSlippageControls({ bps, maximumBps, onCommit, label, inpu
   const [text, setText] = useState(() => bpsToPercent(bps));
   const [error, setError] = useState<string | null>(null);
   // The latest draft (a blur can follow a keystroke before the next render) and the applied limit it is compared with.
-  const draft = useRef(text), applied = useRef(bps), field = useRef<HTMLInputElement>(null);
+  const draft = useRef(text), applied = useRef(bps), field = useRef<HTMLInputElement>(null), errorId = useId();
   draft.current = text;
   useEffect(() => { if (bps !== applied.current) { applied.current = bps; draft.current = bpsToPercent(bps); setText(draft.current); setError(null); } }, [bps]);
   // Escape in the field discards the draft. The settings popover closes on Escape from a document capture listener that stops the event, so this
   // window capture listener (which runs first) resets the draft before the field loses focus: closing never applies what was typed.
   useEffect(() => {
+    const view = globalThis.window;
+    if (!view) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.target !== field.current) return;
       draft.current = bpsToPercent(applied.current); setText(draft.current); setError(null);
     };
-    window.addEventListener('keydown', escape, true);
-    return () => window.removeEventListener('keydown', escape, true);
+    view.addEventListener('keydown', escape, true);
+    return () => view.removeEventListener('keydown', escape, true);
   }, []);
   // Compared in exact basis points: "2,5" and "2.5" are the applied 2.5%, never a second edit.
   const commit = (next: string) => {
@@ -97,13 +99,16 @@ export function AppliedSlippageControls({ bps, maximumBps, onCommit, label, inpu
     setError(onCommit(nextBps));
   };
   const choose = (value: string) => { draft.current = bpsToPercent(value); setText(draft.current); commit(draft.current); };
-  return <div className="applied-slippage" onBlur={event => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) commit(draft.current); }}>
+  // A press on a preset never takes focus (Safari and Firefox do not focus a clicked button, so the field's blur would otherwise apply the typed
+  // draft first and make two edits): the preset applies only its own value.
+  return <div className="applied-slippage" onMouseDown={event => { if (event.target instanceof Element && event.target.closest('button')) event.preventDefault(); }}
+    onBlur={event => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) commit(draft.current); }}>
     <label>{label}<input ref={field} {...inputLabel ? { 'aria-label': inputLabel } : {}} type="text" inputMode="decimal" autoComplete="off" spellCheck={false}
-      maxLength={maxLength} value={text} aria-invalid={Boolean(error) || undefined}
-      onChange={event => { setError(null); setText(event.target.value); }}
+      maxLength={maxLength} value={text} aria-invalid={Boolean(error) || undefined} {...error ? { 'aria-describedby': errorId } : {}}
+      onChange={event => { setError(null); draft.current = event.target.value; setText(event.target.value); }}
       onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(draft.current); } }}/></label>
     <SlippageChoices bps={bps} maximumBps={maximumBps} onBpsChange={choose} autoBps={autoBps ?? null}
       {...onRequestAuto ? { onRequestAuto } : {}} {...canApplyAuto ? { onApplyAuto: (value: string) => { if (canApplyAuto()) choose(value); } } : {}} autoPending={autoPending ?? false}/>
-    {error && <p className="form-error" role="alert">{t(error)}</p>}
+    {error && <p id={errorId} className="form-error" role="alert">{t(error)}</p>}
   </div>;
 }

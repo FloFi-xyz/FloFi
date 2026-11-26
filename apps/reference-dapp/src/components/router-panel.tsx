@@ -109,7 +109,8 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
     if (!nodeId) return null;
     const result = appliedSlippageCommand(state, nodeId, slippage, context);
     if ('code' in result) return appliedSlippageMessage(result.code, maximumSlippageBps);
-    dismissProposal(); dispatch(result.command); setError('');
+    // The form's own draft follows the applied value too (its later "Review bridge change" never proposes the earlier limit).
+    dismissProposal(); dispatch(result.command); setInput(value => ({ ...value, slippage })); setError('');
     return null;
   }
   const compact = options && Boolean(nodeId);

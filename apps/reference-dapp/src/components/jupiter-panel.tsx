@@ -59,7 +59,8 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
   const [error, setError] = useState('');
   const set = (patch: Partial<SolanaSwapInput>) => setInput(value => ({ ...value, ...patch }));
   const tokens = solanaTokensFor(input.network), label = devnet ? 'Solana Devnet' : 'Solana';
-  const { autoError, ...auto } = useJupiterSlippageChoices(input, `${nodeId ?? 'new'}:${state.workflow.revision}`);
+  // An existing swap's Auto recommendation is for the APPLIED swap it is applied to (never an unapplied draft of its tokens or amount).
+  const { autoError, ...auto } = useJupiterSlippageChoices(nodeId && existing ? existing : input, `${nodeId ?? 'new'}:${state.workflow.revision}`);
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -81,7 +82,8 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
     if (!nodeId) return null;
     const result = appliedSlippageCommand(state, nodeId, slippage, context);
     if ('code' in result) return appliedSlippageMessage(result.code, DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS);
-    dismissProposal(); dispatch(result.command); setError('');
+    // The form's own draft follows the applied value too (its later "Review swap change" never proposes the earlier limit).
+    dismissProposal(); dispatch(result.command); set({ slippage }); setError('');
     return null;
   }
   return <form className="inspector-fields" aria-label={tr(nodeId ? `Edit ${label} swap` : `Create ${label} swap`)} onSubmit={submit}>

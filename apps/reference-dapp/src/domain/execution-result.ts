@@ -76,15 +76,18 @@ export function isFinalExecutionResult(progress: ExecutionLifecycle | null | und
  * delivery FloFi only observes on the destination (`wallet: false`) has none: its settlement needs no signature and keeps reconciling on its own.
  */
 export function ownerRequestInFlight(progress: ExecutionLifecycle | null | undefined): boolean {
-  return Boolean(progress?.started && progress.steps.some(step => step.operations.some(operation => (operation.wallet || operation.intent) && IN_FLIGHT.includes(operation.state))));
+  // An operation not explicitly marked as FloFi's own observation (`wallet: false`) counts as the owner's request (fail closed).
+  return Boolean(progress?.started && progress.steps.some(step => step.operations.some(operation => (operation.wallet !== false || operation.intent) && IN_FLIGHT.includes(operation.state))));
 }
 /**
  * Whether a run the per-card runtime holds still holds a single card back from its one-confirmation path (`localExecutionHolds` `unfinished`):
- * any run of this Canvas that is not final, and a run of an unrelated workflow (detached after "Create new workflow") only while it has an
- * owner-wallet request in flight. A final run never does (execution UX regression fixes).
+ * any run of this Canvas that is not final, and a run of an unrelated workflow (detached after "Create new workflow") while it has an owner-wallet
+ * request in flight or its outcome is uncertain (e.g. its source transaction was reorganised: the nonce may be free again or the transaction may
+ * land again). A final run never does (execution UX regression fixes).
  */
 export function unfinishedRunHolds(progress: ExecutionLifecycle | null | undefined): boolean {
-  return Boolean(progress?.started) && !isFinalExecutionResult(progress) && (!progress!.detached || ownerRequestInFlight(progress));
+  return Boolean(progress?.started) && !isFinalExecutionResult(progress)
+    && (!progress!.detached || progress!.state === 'uncertain' || ownerRequestInFlight(progress));
 }
 
 /**

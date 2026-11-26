@@ -47,7 +47,8 @@ export function templateFields(text: string, session: TemplateSession | null): r
         fields.push({ index, kind: kinds[index]!, start: at, end: next, value, placeholder: isPlaceholder(value) });
         at = next + (index + 1 < kinds.length ? literals[index + 1]!.length : 0);
       }
-      if (ok && at === limit) return fields;
+      // A part whose value still carries a placeholder ("10 [token]" typed into [amount]) makes the structure ambiguous: the placeholders alone count.
+      if (ok && at === limit && !fields.some(field => !field.placeholder && new RegExp(PLACEHOLDER.source).test(field.value))) return fields;
     }
   }
   return [...text.matchAll(PLACEHOLDER)].map((match, index) => ({ index, kind: KINDS[match[1]!]!, start: match.index!, end: match.index! + match[0].length,

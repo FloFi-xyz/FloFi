@@ -61,6 +61,11 @@ describe('PR #254 follow-up: a suggestion\'s template is filled part by part ins
     // The sentence's own words changed: free text; only the [placeholders] still in it are parts (Enter still refuses to submit them).
     const rewritten = templateFields('Please swap 10 [token] to ETH on [network]', session);
     expect(rewritten.map(part => [part.kind, part.placeholder])).toEqual([['token', true], ['network', true]]);
+    // A part typed so that a placeholder ends up inside another part's value ("10 USDC" typed into [amount]: the single space between the parts
+    // matches inside it) is ambiguous: the placeholders alone count, so the visible [token] is still a part to fill and Enter never submits it.
+    const ambiguous = templateFields('Swap 10 USDC [token] for [token] on Base', session);
+    expect(ambiguous.map(part => [part.value, part.placeholder])).toEqual([['[token]', true], ['[token]', true]]);
+    expect(nextPlaceholder(ambiguous, 0)).toMatchObject({ start: 'Swap 10 USDC '.length });
     // Free text with no template part has no parts at all (Enter submits it as before), and brackets of the person's own are not parts.
     expect(templateFields('swap 10 USDC to ETH on Base', null)).toEqual([]);
     expect(templateFields('note [this] and [that]', null)).toEqual([]);

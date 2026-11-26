@@ -214,6 +214,10 @@ describe('execution UX regression fixes: one wallet confirmation for a simple ca
       expect(holds(run([{ state, hash: state === 'wallet' || state === 'preparing' ? null : `0x${'b'.repeat(64)}` }])), state).toBe(true);
     }
     expect(holds(run([{ state: 'posted', intent: true }]))).toBe(true);
+    // An uncertain outcome holds too (wallet-execution review: a source reorganisation leaves the deposit read as confirmed while the run is
+    // uncertain), and an operation not explicitly marked as FloFi's own observation counts as the owner's request.
+    expect(holds(run([{ id: 'deposit', state: 'confirmed' }, { id: 'destination', state: 'uncertain', wallet: false }], { state: 'uncertain' }))).toBe(true);
+    expect(holds(run([{ state: 'pending', wallet: undefined as unknown as boolean }]))).toBe(true);
     expect(holds(run([{ state: 'settling', intent: true }]))).toBe(true);
     // The same workflow's own unfinished run always holds (same-workflow execution protection), detached or not.
     const own = run([{ id: 'deposit', state: 'confirmed' }, { id: 'destination', state: 'pending', wallet: false }], { matchesWorkflow: true });

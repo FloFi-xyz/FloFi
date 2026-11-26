@@ -51,11 +51,13 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   const { t: tr, language } = useLocale();
   const [attempt, setAttempt] = useState<{ before: BuildEntrySnapshot; request: string; settled: boolean } | null>(null);
   const [refused, setRefused] = useState<Extract<BuildEntryOutcome, { kind: 'REFUSED' }> | null>(null);
-  const field = useRef<HTMLTextAreaElement>(null), choices = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
   const busy = Boolean(attempt && !attempt.settled) || conversation.busy;
   /**
    * PR #254 follow-up: the template a suggestion filled (its parts are filled in order inside this same text) and the caret (which part is being
-   * filled; null once focus leaves the request and its choices). Free text has no session: only [placeholders] still in it are parts.
+   * filled). The caret is kept when focus leaves the request, so the choices under it never disappear between a press and its click (which
+   * would move the chips below and lose the click) and can be reached with Tab after Create workflow. Free text has no session: only
+   * [placeholders] still in it are parts.
    */
   const [session, setSession] = useState<TemplateSession | null>(null);
   const [caret, setCaret] = useState<number | null>(null);
@@ -146,7 +148,7 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
     if (!part) return;
     const filled = fillField(element.value, part, value), next = nextPlaceholder(templateFields(filled.text, session), filled.end);
     const selection = next ? { start: next.start, end: next.end } : { start: filled.end, end: filled.end };
-    element.focus();
+    element.focus(); setRefused(null);
     if (filled.text === element.value) { element.setSelectionRange(selection.start, selection.end); setCaret(selection.start); return; }
     selectAfterFill.current = { text: filled.text, ...selection };
     setDraft(filled.text);
@@ -188,19 +190,19 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
           placeholder={tr('e.g. swap 10 USDC for ETH on Base')}
           aria-describedby={refusal || refused ? 'build-entry-error' : 'build-entry-hint'}
           onChange={event => { fitHeight(event.target); setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}
-          onSelect={onSelect} onBlur={event => { if (!(event.relatedTarget instanceof Node && choices.current?.contains(event.relatedTarget))) setCaret(null); }}/>
+          onSelect={onSelect}/>
         <button className={styles.create} type="submit" disabled={!draft.trim() || busy || !interactive}>
           {tr(busy ? 'Preparing…' : actions > 0 ? 'Add to workflow' : 'Create workflow')}
         </button>
       </form>
       {/* PR #254 follow-up: choices for the part being filled (existing supported networks and tokens of the template's action). A choice fills the
           part and moves to the next one; it never submits. Pressing it keeps the request focused (mouse and touch). */}
-      {partChoices.length > 0 && activePart && <div ref={choices} className={styles.partChoices} role="group" aria-label={tr(activePart.kind === 'network' ? 'Network suggestions' : 'Token suggestions')}
-        onBlur={event => { if (!(event.relatedTarget instanceof Node && (choices.current?.contains(event.relatedTarget) || event.relatedTarget === field.current))) setCaret(null); }}>
+      {partChoices.length > 0 && activePart && <div id="build-entry-part-choices" className={styles.partChoices} role="group"
+        aria-label={tr(activePart.kind === 'network' ? 'Network suggestions' : 'Token suggestions')}>
         {partChoices.map(option => <button key={option} type="button" disabled={busy} onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()}
           onClick={() => choose(option)}>{option}</button>)}
       </div>}
-      <p id="build-entry-hint" className="sr-only">{parts.length ? tr('Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow.')
+      <p id="build-entry-hint" className="sr-only">{parts.length ? tr('Fill the selected part. Press Enter or Tab for the next part, or Shift+Tab for the previous one. Once every part is filled, Enter creates the workflow. Suggestions for a token or network part follow the Create workflow button.')
         : tr('Press Enter to create the workflow, or Shift+Enter for a new line.')}</p>
       {busy && <p className={styles.status} role="status">{tr('Understanding your request and preparing the workflow…')}</p>}
       {refused && <div id="build-entry-error" className={styles.error} role="alert">
