@@ -23,9 +23,9 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     const fallback = String(result.structuredContent!.approvalUrl);
     expect(fallback).toMatch(/\/approve#apr_[a-z2-7]{26}$/);
     const host = await context.newPage();
-    const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result, { hostName });
-    await expect(panel.getByRole('button', { name: 'Open in MetaMask' })).toBeVisible();
-    await expect(panel.getByRole('button', { name: 'Open Phantom browser' })).toHaveCount(0);
+    const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), {}, result, { hostName });
+    await expect(panel.getByRole('button', { name: 'Open FloFi in MetaMask' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Open FloFi in Phantom' })).toHaveCount(0);
     const elsewhere = await guardedContext(browser), stranger = await elsewhere.context.newPage();
     await stranger.goto(fallback);
     await expect(stranger.locator('.approval-page [role=alert]')).toContainText('APPROVAL_ACCOUNT_REQUIRED');
@@ -41,7 +41,7 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     await expect(region).toContainText('Nothing is authorized yet.');
     await expect(signingSurface(page).getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
     await region.getByText('Open with a mobile wallet', { exact: true }).click();
-    const metaMask = new URL((await region.getByRole('link', { name: 'Open in MetaMask', exact: true }).getAttribute('href'))!);
+    const metaMask = new URL((await region.getByRole('link', { name: 'Open FloFi in MetaMask', exact: true }).getAttribute('href'))!);
     expect(metaMask.hash).toMatch(/^#flofi_hs_/);
     expect(metaMask.pathname + metaMask.search).not.toContain('flofi_hs_');
     await page.setViewportSize({ width: 390, height: 844 });
@@ -138,7 +138,7 @@ test('host link refusal leaves a usable private fallback and concurrent clicks m
   const composed = await client.tool('compose_strategy', { strategy });
   const result = await client.toolResult('request_user_approval', { strategy, workflowHash: composed.workflowHash });
   const host = await context.newPage();
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result, { openLinkRefused: true });
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), {}, result, { openLinkRefused: true });
   await panel.getByRole('button', { name: 'Open FloFi', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect(panel.getByText('OPEN_LINK_REFUSED', { exact: true })).toBeVisible();
   const log = await hostLog(host);
@@ -192,7 +192,7 @@ test('progress reporting projects public facts even when a host returns unexpect
     flow: 'crosschain-router-testnet', status: 'RECONCILED', reconciled: true, terminal: true, evidenceEnvironment: 'MOCKED',
     evidenceBundleHash: '0x' + 'a'.repeat(64), approvalUrl: 'flofi_hs_' + 'x'.repeat(43), signature: 'hidden', transaction: 'hidden' }] } }) };
   const host = await context.newPage();
-  const panel = await openHost(host, fake, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result);
+  const panel = await openHost(host, fake, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), {}, result);
   await panel.getByRole('button', { name: 'Refresh status' }).click();
   await expect.poll(async () => (await hostLog(host)).modelContext.length).toBe(1);
   expect(JSON.stringify((await hostLog(host)).modelContext)).not.toMatch(/flofi_hs_|hidden|approvalUrl|signature|transaction/);

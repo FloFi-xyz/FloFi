@@ -47,7 +47,7 @@ import { networkIdentity } from '../domain/network-registry';
 import { canonicalNetworkFields } from './network-aliases.ts';
 import type { CopilotLiquidityAction } from '../domain/copilot-intent';
 import { simulateWorkflowPreview } from '../platform/preview.ts';
-import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, panelHtml, panelResourceMeta } from './app/panel.ts';
+import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, PREVIOUS_PANEL_URI, panelHtml, panelResourceMeta } from './app/panel.ts';
 import { MCP_HANDOFF_RULES, mcpApprovalLinkScheme } from './approval-profile.ts';
 import { readHandoffPolicy, workflowPlan, type HandoffPolicy } from './execution.ts';
 import type { McpScope, OAuthConfig } from './oauth/config.ts';
@@ -244,7 +244,7 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** BUILD-MCP-002: the MCP handoff policy (default: test funds only, every mainnet off). */
   readonly policy?: HandoffPolicy;
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
-  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[] } | null;
+  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[]; readonly frameAncestors?: readonly string[] } | null;
   /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (default: this server's, `server/network-scope.ts`). */
   readonly scope?: NetworkScope;
   /** The request's deadline (`deadline.ts`): a tool stops waiting at its tool deadline and answers with a classified timeout. */
@@ -730,10 +730,11 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   if (ctx.principal.kind === 'mcp-oauth' && ctx.state && ctx.oauth) {
     registerApprovalTools(ctx, register);
     if (ctx.ui) {
-      const meta = panelResourceMeta(ctx.oauth.origin), html = panelHtml({ origin: ctx.oauth.origin, inFrameProbeHosts: ctx.ui.inFrameProbeHosts });
+      const meta = panelResourceMeta(ctx.oauth.origin), html = panelHtml({ origin: ctx.oauth.origin, inFrameProbeHosts: ctx.ui.inFrameProbeHosts, frameAncestors: ctx.ui.frameAncestors ?? [] });
       // New tool results use a versioned resource so host HTML caches cannot retain the external-only adapter.
       // Keep the old resource readable for existing conversations; no approval or financial API changes.
-      for (const uri of [PANEL_URI, LEGACY_PANEL_URI]) server.registerResource(uri === PANEL_URI ? 'flofi-approval-panel' : 'flofi-approval-panel-legacy', uri,
+      for (const uri of [PANEL_URI, PREVIOUS_PANEL_URI, LEGACY_PANEL_URI]) server.registerResource(uri === PANEL_URI ? 'flofi-approval-panel'
+        : uri === PREVIOUS_PANEL_URI ? 'flofi-approval-panel-v1' : 'flofi-approval-panel-legacy', uri,
         { title: 'FloFi approval', description: 'The in-chat FloFi approval panel.', mimeType: PANEL_MIME, _meta: meta },
         async () => ({ contents: [{ uri, mimeType: PANEL_MIME, text: html, _meta: meta }] }));
     }
@@ -762,7 +763,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
   const requester: ApprovalRequester = { kind: 'MCP_ACCOUNT', ref: principal.accountId, grantId: principal.id, clientId: principal.clientId, displayName: principal.clientName };
   const deps = (): ApprovalDeps => ({ origin: oauth.origin, scheme: mcpApprovalLinkScheme(oauth), handoffs: state.handoffs,
     allow: (bucket, limit, windowSeconds, now) => state.oauth.allow(bucket, limit, windowSeconds, now), runtime: ctx.runtime, policy: ctx.policy ?? DEFAULT_POLICY,
-    rules: MCP_HANDOFF_RULES, now: new Date() });
+    rules: MCP_HANDOFF_RULES, now: new Date(), singleStepRuns: () => state.workflowRuns.singleStepRuns() });
   const owned = (approvalId: string) => approvalForRequester(state.handoffs, requester, approvalId, new Date());
   /**
    * One of this requester's approvals with its runs (only when the owner shares them). A Pix approval lists its durably bound Pix runs
@@ -792,7 +793,9 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'the owner\'s own wallet pays every fee and FloFi never does; each step or group runs only after the previous one reconciled. ' +
     'The same approvalUrl reopens the next step for the owner.', SCHEMAS[ctx.scope ?? networkScope()].request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
-    const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
+    // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: one eligible EVM step may be handed off as a run of that step (one wallet batch where the
+    // owner's wallet supports it); the server decides, and anything else keeps the one-step SINGLE_FLOW plan.
+    const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash, { externalOneStep: true });
     if (!result.ok) return failWith(result.code, result.extra ?? {});
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
     const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()));
@@ -802,7 +805,8 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'openai/toolInvocation/invoked': 'Approval ready' } : {});
 
   register('get_approval_status', 'Approval status', 'The status of an approval request this account created: PENDING, CLAIMED, APPLIED, EXPIRED, SUPERSEDED, ' +
-    'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A multi-step approval also returns ' +
+    'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A run approval (several steps, or one ' +
+    'step FloFi runs as one wallet batch: executionPlan SEQUENTIAL; its receipt is in workflowRun.steps[].outcome) also returns ' +
     '`workflowRun`: every step\'s state, the next action (OWNER_SIGNS_STEP or OWNER_SIGNS_GROUP: share the approvalUrl again; OWNER_CONFIRMS_BATCH: the owner ' +
     'reopens FloFi so their wallet reports its batch), and — when the owner shares status — each step\'s ' +
     'transaction hashes, explorer links, reconciled amounts and evidence. HALTED means stopped and the owner decides in FloFi: `workflowRun.halted` says whether ' +
@@ -832,7 +836,8 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
 
   register('cancel_approval', 'Cancel an approval request', 'Withdraw one of this account\'s approval requests before its proposal is in the owner\'s signing flow ' +
     '(PENDING or CLAIMED): its link stops working and nothing can be authorized from it. An APPLIED request is no longer cancellable here — the owner rejects the ' +
-    'wallet prompt or stops it in the FloFi signing page; a confirmed transaction can never be undone. An already ended request is reported as it is. Cancelling ' +
+    'wallet prompt or stops it in the FloFi signing page; a confirmed transaction can never be undone. A run approval (executionPlan SEQUENTIAL, one step or several) ' +
+    'whose run has started once claimed is refused with WORKFLOW_RUN_STARTED: the owner ends it in FloFi. An already ended request is reported as it is. Cancelling ' +
     'signs, sends and refunds nothing. Only call it when the person asks to cancel.', ApprovalSchemas.byId,
   { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }, async args => {
     const h = await owned(args.approvalId);

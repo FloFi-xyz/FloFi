@@ -72,6 +72,7 @@ import { portugueseUxGuidelines } from './pt-ux-guidelines';
 import { portugueseUxRefinement, portugueseUxRefinementParameterized } from './pt-ux-refinement';
 import { portugueseEditorFidelity } from './pt-editor-fidelity';
 import { portugueseGlobalPrecision } from './pt-global-precision';
+import { portugueseChannelExecutionParity } from './pt-channel-execution-parity';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
@@ -370,6 +371,8 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseGlobalPrecision,
   ...portugueseUxRefinement,
   ...portugueseUxRefinementParameterized,
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the state-aware proposal notice and the mobile wallet handoff (new keys).
+  ...portugueseChannelExecutionParity,
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: position Review row values; last, so their templates never shadow another message.
   ...portugueseLiquidityPositionValues,
 };

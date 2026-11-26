@@ -171,6 +171,9 @@ export async function claimApproval(surface: ApprovalSurface, secret: unknown, w
   const wallet = wallets.find(w => w.namespace === namespace) ?? refuse(namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
   // BUILD-CHAT-E2E-001: a sequence needs this deployment's workflow runs and a proven wallet of EVERY namespace it uses, before it is claimed.
   if (sequence && !surface.workflowRuns) refuse('WORKFLOW_RUNS_NOT_ENABLED');
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (flofi-workflow review): a run of ONE step needs the certified one-step schema; ask BEFORE the
+  // claim commits, so a reversed 0032 or a failed read refuses with nothing claimed (never a CLAIMED handoff whose run can never be created).
+  if (sequence && current.plan.steps.length === 1 && !await surface.workflowRuns!.store.singleStepRuns().catch(() => false)) refuse('WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED');
   if (sequence) for (const ns of planNamespaces(current.plan)) if (!wallets.some(w => w.namespace === ns)) refuse(ns === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
   const verified = await verifyHandoff(current, surface.runtime, profile.policy);
   // The requester's own rule reads only the handoff's immutable requester data, so deciding it before the row lock is exact.

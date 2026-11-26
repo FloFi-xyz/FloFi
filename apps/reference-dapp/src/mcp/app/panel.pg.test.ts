@@ -10,7 +10,7 @@ import { session } from '../gateway.test-harness.ts';
 import { oauthClient, oauthEnv, ORIGIN, signIn } from '../oauth/oauth-test-harness.ts';
 import { createPgOAuthStore } from '../oauth/pg-store.ts';
 import { stateOf } from '../oauth/state.ts';
-import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, panelHtml } from './panel.ts';
+import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, PREVIOUS_PANEL_URI, panelHtml } from './panel.ts';
 
 let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); });
@@ -39,7 +39,9 @@ describe('BUILD-MCP-002 MCP App panel resource', () => {
   it('is listed and readable with the MCP Apps MIME type and only the trusted signing frame origin; request_user_approval points to it', async () => {
     const c = await client();
     const listed = ((await c.request('resources/list')).result as { resources: { uri: string; mimeType: string }[] }).resources;
-    expect(listed).toEqual([expect.objectContaining({ uri: PANEL_URI, mimeType: PANEL_MIME }), expect.objectContaining({ uri: LEGACY_PANEL_URI, mimeType: PANEL_MIME })]);
+    expect(listed).toEqual([expect.objectContaining({ uri: PANEL_URI, mimeType: PANEL_MIME }), expect.objectContaining({ uri: PREVIOUS_PANEL_URI, mimeType: PANEL_MIME }),
+      expect.objectContaining({ uri: LEGACY_PANEL_URI, mimeType: PANEL_MIME })]);
+    expect(PANEL_URI).not.toBe(PREVIOUS_PANEL_URI);
     const legacy = ((await c.request('resources/read', { uri: LEGACY_PANEL_URI })).result as { contents: { uri: string; text: string }[] }).contents[0]!;
     expect(legacy.uri).toBe(LEGACY_PANEL_URI); expect(legacy.text).toContain('Authorize in chat');
     const read = ((await c.request('resources/read', { uri: PANEL_URI })).result as { contents: { uri: string; mimeType: string; text: string; _meta: Record<string, unknown> }[] }).contents[0]!;

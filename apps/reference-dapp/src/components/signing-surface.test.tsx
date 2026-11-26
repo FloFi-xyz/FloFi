@@ -24,6 +24,19 @@ describe('shared chat-first signing surface', () => {
     expect(html).toContain('0.025 WETH'); expect(html).toContain('Minimum received'); expect(html).toContain('0.024875 WETH');
     expect(render({ ...reviewFixture(), execution: { ready: false, started: false, start: null, prompt: null, expiresAt: null } }, 'PT')).toContain('Mínimo recebido');
   });
+  it('BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the incident amounts read at six significant digits (minimum down, fee ceiling up), EN and PT', () => {
+    const data: ExecutionControlsState = { ...reviewFixture(), execution: { ready: true, started: false, start: vi.fn(), prompt: null, expiresAt: null } };
+    data.authorization = { ...data.authorization, limits: [...data.authorization.limits.filter(line => line.label !== 'Minimum received'),
+      { label: 'Minimum received', value: '0.000589872367683721 WETH' }, { label: 'Max network cost', value: '0.0000089732844 ETH' }] };
+    const html = render(data);
+    expect(html).toContain('>0.000589872 WETH</button>');
+    expect(html).toContain('>0.00000897329 ETH</button>');
+    // The exact recorded value stays available (the disclosure's title), never replaced.
+    expect(html).toContain('title="0.000589872367683721 WETH"');
+    const pt = render(data, 'PT');
+    expect(pt).toContain('>0,000589872 WETH</button>');
+    expect(pt).toContain('>0,00000897329 ETH</button>');
+  });
   it('keeps Mainnet real-funds disclosure when a Solana wallet is on Devnet', async () => {
     const data = await solanaTransferReviewFixture();
     data.wallet = { ...data.wallet, chain: SOLANA_DEVNET_TRANSFER.chain, environment: 'testnet' };

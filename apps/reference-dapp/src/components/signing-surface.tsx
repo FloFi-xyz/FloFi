@@ -20,6 +20,21 @@ import { ReviewTokenPermissions } from './review-workspace';
 import { SimulationOutcome } from './simulation-summary';
 import { networkIdentity } from '../domain/network-registry';
 import { realFundsTemplate } from '../domain/network-scope';
+import { TokenAmountText } from './token-amount-text';
+import { ExecutionResultSummary } from './execution-result-summary';
+import type { SimulationLine } from '../domain/simulation-presentation';
+
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (WS09): this surface is what ChatGPT, Claude and Telegram open, so its amounts follow the
+ * global six-significant-digit rule exactly as the Canvas does (`simulation-summary.tsx`): a minimum rounds down, a maximum or fee ceiling up, an
+ * estimate to the nearest with "≈"; the exact recorded value stays one tap away. Anything that is not an amount stays exactly as written.
+ */
+const limitRounding = (label: string) => /^Minimum\b/.test(label) ? 'down' as const : /^Max\b/.test(label) ? 'up' as const : 'nearest' as const;
+function LineValue({ line, rounding }: { line: SimulationLine; rounding: 'down' | 'up' | 'nearest' }) {
+  const { t: tr } = useLocale();
+  return <>{line.amount || line.treatment || rounding !== 'nearest' ? <TokenAmountText value={line.value} rounding={line.amount ?? (line.treatment === 'CEILING' ? 'up' : rounding)}/>
+    : <TokenAmountText value={line.value}/>}{line.note && <small>{tr(line.note)}</small>}</>;
+}
 
 const short = (value: string) => value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 const SIGNING_LIMITS = ['Max spend', 'Max per action', 'Max total spend', 'Max slippage', 'Minimum received', 'Max network cost', 'Max provider fees', 'Price range', 'Minimum health factor', 'Max loan-to-value'];
@@ -114,8 +129,8 @@ export function SigningSurface(props: SigningSurfaceProps) {
           {Array.from(new Set((authorization.policy as { allowlists?: { recipients?: { address: string }[] } } | null)?.allowlists?.recipients?.map(recipient => recipient.address) ?? []))
             .map(address => <div key={address}><dt>{tr('Recipient')}</dt><dd>{address}</dd></div>)}
           {authorization.tokens.map(token => <div key={`${token.chain}:${token.address}`}><dt>{tr(token.chain.startsWith('solana:') ? 'Token mint' : 'Token contract')}</dt><dd>{token.symbol} · {token.address}</dd></div>)}
-          {simulation.fees.map((line, index) => <div key={`fee-${index}`}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd></div>)}
-          {limits.map((line, index) => <div key={`limit-${index}`}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd></div>)}
+          {simulation.fees.map((line, index) => <div key={`fee-${index}`}><dt>{tr(line.label)}</dt><dd><LineValue line={line} rounding="nearest"/></dd></div>)}
+          {limits.map((line, index) => <div key={`limit-${index}`}><dt>{tr(line.label)}</dt><dd><LineValue line={line} rounding={limitRounding(line.label)}/></dd></div>)}
           {!live && seconds !== null && authorization.key && <div><dt>{tr('Valid for')}</dt><dd>{seconds > 0 ? tr('{0}s', String(seconds)) : tr('Expired')}</dd></div>}
         </dl>
         {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
@@ -124,12 +139,17 @@ export function SigningSurface(props: SigningSurfaceProps) {
         {destinationShown && props.destinationActions && <DestinationActions actions={props.destinationActions}
           focusStatus={() => requestAnimationFrame(() => statusRef.current?.focus())}/>}
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
+        {/* Incident 8: a token permission and the swap it enables are two transactions of ONE financial step: the approval is named as such
+            ("Approve USDC"), never as a second identical "Swap · Confirmed". */}
         {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
-          {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
+          {operations.map(({ step, operation }) => <li key={operation.id} data-operation-kind={operation.approval ? 'approval' : 'action'}>
+            <span>{tr(operation.approval ? operation.title : step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
             {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}
             {operation.providerExplorer && <a href={operation.providerExplorer} target="_blank" rel="noreferrer">{tr('View provider-reported transaction')}</a>}</li>)}
         </ul>}
-        {live?.evidence?.knownCosts.length ? <dl className="simulation-summary-values">{live.evidence.knownCosts.map(cost => <div key={cost.label}><dt>{tr(cost.label)}</dt><dd>{tr(cost.value)}</dd></div>)}</dl> : null}
+        {/* Incident 10: the reconciled result (amount sent and received, recorded network cost, the transaction), the same compact receipt the
+            Canvas shows (PR #254), at six significant digits; never the pre-execution estimate once the record observed the real amount. */}
+        {live && <ExecutionResultSummary live={live}/>}
         {live && <details><summary>{tr('Transaction and reconciliation evidence')}</summary><ExecutionEvidenceDetails progress={live}/>
           {live.runKey && <a href={`/app/dashboard/runs/${encodeURIComponent(live.runKey)}`}>{tr('View receipt and evidence')}</a>}
         </details>}

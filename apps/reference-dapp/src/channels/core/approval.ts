@@ -28,7 +28,7 @@ export const channelApprovalScheme = (keys: ChannelKeys): ApprovalLinkScheme => 
 export type ChannelPlatform = { readonly origin: string; readonly scheme: ApprovalLinkScheme; readonly handoffs: HandoffStore; readonly allow: WindowLimit;
   readonly runtime: EngineRuntime; readonly policy: Extract<HandoffPolicy, { ok: true }>;
   /** BUILD-CHAT-E2E-001: the runs of multi-step approvals (status and notifications), where the deployment runs workflows. */
-  readonly workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps' | 'groups'> | null };
+  readonly workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps' | 'groups'> & Partial<Pick<WorkflowRunStore, 'singleStepRuns'>> | null };
 /** The requester of one conversation: its id isolates its handoffs; the intended wallet is immutable, non-secret claim context. */
 export function channelRequester(source: { readonly clientId: string; readonly displayName: string }, conversationId: string, intendedWallet: WalletRef | null): ApprovalRequester {
   return { kind: 'CHANNEL_CONVERSATION', ref: conversationId, clientId: source.clientId, displayName: source.displayName, context: intendedWallet ? { intendedWallet } : {} };
@@ -56,7 +56,9 @@ export type ChannelApproval = { readonly ok: true; readonly approvalId: string; 
 export async function createChannelApproval(platform: ChannelPlatform, requester: ApprovalRequester, strategy: Pick<ChannelStrategy, 'workflowHash'> & { readonly spec: StrategyInput },
   now: Date): Promise<ChannelApproval> {
   const result = await requestApproval({ origin: platform.origin, scheme: platform.scheme, handoffs: platform.handoffs, allow: platform.allow, runtime: platform.runtime,
-    policy: platform.policy, rules: CHANNEL_HANDOFF_RULES, now }, requester, strategy.spec, strategy.workflowHash);
+    policy: platform.policy, rules: CHANNEL_HANDOFF_RULES, now, ...platform.workflowRuns?.singleStepRuns ? { singleStepRuns: platform.workflowRuns.singleStepRuns } : {} },
+    // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: as on MCP, one eligible EVM step may become a run of that step (the server decides).
+    requester, strategy.spec, strategy.workflowHash, { externalOneStep: true });
   if (!result.ok) {
     const blockers = ((result.extra?.blockers ?? []) as { message?: unknown }[]).map(b => String(b.message ?? '')).filter(Boolean).slice(0, 3);
     return { ok: false, code: result.code, blockers };

@@ -46,7 +46,7 @@ async function proposal(browser: Browser, request: APIRequestContext, presentati
   // Nothing is authorized by the chat.
   expect(result.structuredContent).toMatchObject({ ok: true, status: 'PENDING', authority: 'NONE' });
   const host = await context.newPage();
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), args, result);
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), args, result);
   await expect(panel.getByText('Nothing is authorized yet.', { exact: false })).toBeVisible();
   await panel.getByRole('button', { name: 'Open FloFi', exact: true }).click();
   await expect.poll(async () => (await hostLog(host)).openLinks.length).toBe(1);
@@ -152,6 +152,9 @@ test('external fallback: Open FloFi → minimal signing surface → one Authoriz
   await authorizeAndComplete(journey, surface);
   await expect(surface.locator('.signing-status')).toContainText('Execution completed', { timeout: 45_000 });
   await expect(surface.getByRole('list', { name: 'Transactions' }).getByRole('listitem')).toHaveCount(2);
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (incident 8): the token approval and the swap are never two identical rows.
+  const rows = await surface.getByRole('list', { name: 'Transactions' }).getByRole('listitem').allTextContents();
+  expect(new Set(rows).size).toBe(rows.length);
   await expect(surface).toContainText('You can return to your conversation.');
   await surface.getByText('Transaction and reconciliation evidence', { exact: true }).click();
   const link = await surface.getByRole('link', { name: 'View receipt and evidence', exact: true }).getAttribute('href');
@@ -198,7 +201,7 @@ test('embedded chat: existing execution runtime completes after wallet confirmat
   const args = { strategy: composed.strategy, workflowHash: composed.workflowHash };
   await client.tool('review_strategy', args);
   const result = await client.toolResult('request_user_approval', args);
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), args, result, { embedded: true });
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v2.html'), args, result, { embedded: true });
   await consent.close();
   await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
   const signing = panel.frameLocator('iframe.signing-frame');

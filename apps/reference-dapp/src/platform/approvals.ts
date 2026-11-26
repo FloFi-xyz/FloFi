@@ -20,7 +20,8 @@ import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
 import { strategyTestNetworks } from './strategy.ts';
 import { composeWorkflow, composeWorkflowBound, semanticWorkflowHash, type Composition, type WorkflowComposition } from '../engine/strategy-engine';
-import { ENGINE_VERSION, evaluateWorkflowGates, handoffFindings, type ExecutionPlan, type Gates, type HandoffPolicy, type PlanStep } from '../mcp/execution.ts';
+import { ENGINE_VERSION, evaluateWorkflowGates, handoffFindings, workflowPlan, type ExecutionPlan, type Gates, type HandoffPolicy, type PlanStep } from '../mcp/execution.ts';
+import { compositionChain, externalOneStepPlan, oneStepFactsAllow, ONE_STEP_RUN_REQUESTERS } from './external-single-step.ts';
 import { assertSafeOutput } from '../mcp/simulation.ts';
 import { newId } from '../mcp/oauth/crypto.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
@@ -73,7 +74,9 @@ export type HandoffRules = { readonly handoffSeconds: number; readonly maxPendin
  * surface's handoff policy and rules, and the clock.
  */
 export type ApprovalDeps = { readonly origin: string; readonly scheme: ApprovalLinkScheme; readonly handoffs: HandoffStore; readonly allow: WindowLimit;
-  readonly runtime: EngineRuntime; readonly policy: HandoffPolicy; readonly rules: HandoffRules; readonly now: Date };
+  readonly runtime: EngineRuntime; readonly policy: HandoffPolicy; readonly rules: HandoffRules; readonly now: Date;
+  /** BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: whether this database accepts a run of one step (absent: no; `singleStepRunsSupported`). */
+  readonly singleStepRuns?: () => Promise<boolean> };
 export type Failure = { readonly ok: false; readonly code: string; readonly extra?: Readonly<Record<string, unknown>> };
 export function approvalUrl(origin: string, secret: string): string {
   const url = trustedFlofiUrl(`${origin}/approve#${secret}`, origin);
@@ -116,9 +119,14 @@ function requesterValid(requester: ApprovalRequester): boolean {
  * own requester may ask for it (`EDITOR_SESSION`, on a deployment whose database accepts one-step runs); any other requester is refused, so every
  * external surface keeps its one-step SINGLE_FLOW contract. The stored strategy and hash are the step's own either way (a one-step workflow
  * composes to the same strategy and hash as its step).
+ *
+ * BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: `externalOneStep` lets an MCP account or a channel conversation have its ONE eligible step
+ * handed off as such a run, where the server decides it can be (`external-single-step.ts`: grouped EVM flow, user-funded groups on that chain, the
+ * certified one-step schema, every run gate). It is a request, never a requirement: whenever any condition fails the proposal keeps its
+ * SINGLE_FLOW plan exactly as before, and no caller can force a run with it.
  */
 export async function prepareApprovalRequest(deps: ApprovalDeps, requester: ApprovalRequester, strategy: unknown, workflowHash: string,
-  options: { readonly singleStepRun?: boolean; readonly ownerStepsOnly?: boolean } = {}) {
+  options: { readonly singleStepRun?: boolean; readonly ownerStepsOnly?: boolean; readonly externalOneStep?: boolean } = {}) {
   // A surface may only mint links for the requester kinds its scheme serves, for a requester the store can persist.
   if (!deps.scheme.kinds.includes(requester.kind) || !requesterValid(requester)) return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
   const externalLive = requester.kind === 'DEVELOPER_PROJECT' && requester.ref.endsWith('.production') && options.ownerStepsOnly;
@@ -128,13 +136,15 @@ export async function prepareApprovalRequest(deps: ApprovalDeps, requester: Appr
   // A one-step run is only ever a run of exactly one step (a longer workflow is a sequence anyway).
   if (options.singleStepRun && workflow.steps.length !== 1) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' } satisfies Failure;
   if (externalLive && workflow.fundsClass !== 'REAL_FUNDS') return { ok: false, code: 'TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY' } satisfies Failure;
-  const sequence = workflow.steps.length > 1 || options.singleStepRun === true;
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product hands off mainnet workflows only; a test network is never mapped to its mainnet.
   const test = networkScope() === 'ENGINEERING' ? [] : strategyTestNetworks(workflow);
   if (test.length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE, extra: { issues: test.map(t => ({ path: t.path, rule: 'mainnetOnly' })),
     networks: [...new Set(test.map(t => t.network))], mainnets: [...new Set(test.map(t => t.mainnet).filter((m): m is string => m !== null))] } } satisfies Failure;
+  // After the cheap refusals (flofi-security review): only a proposal that can be handed off pays for the one-step reads.
+  const oneStepRun = !options.singleStepRun && options.externalOneStep === true ? await externalOneStepRun(deps, requester, workflow) : null;
+  const sequence = workflow.steps.length > 1 || options.singleStepRun === true || oneStepRun !== null;
   // A sequence is handed off only when it is SEQUENTIAL and every step's facts allow it (BUILD-CHAT-E2E-001); every step's facts are reported.
-  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy, { run: sequence });
+  const gates = oneStepRun ?? await evaluateWorkflowGates(workflow, deps.runtime, deps.policy, { run: sequence });
   if (options.ownerStepsOnly && (gates.enabledByDeployment.mockedHarness || gates.supportedByCode.modes?.confirmEachStep))
     return { ok: false, code: gates.supportedByCode.modes?.confirmEachStep ?? 'MAINNET_RUNTIME_REQUIRED' } satisfies Failure;
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason!, extra: { gates: gateView(gates), executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView) } } satisfies Failure;
@@ -169,6 +179,21 @@ export async function prepareApprovalRequest(deps: ApprovalDeps, requester: Appr
     ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, delegation, undefined, userFundedFacts ? { facts: userFundedFacts } : undefined) } : {},
     // What FloFi's flow still requires of the owner before anything can be signed (cleared by the fresh simulation and Review).
     preExecution } };
+}
+
+/**
+ * BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: the run gates of an external one-step proposal the server can hand off as a run of that
+ * step, or null (it then keeps SINGLE_FLOW). Every condition of `external-single-step.ts` is required; any failure to read one is a no.
+ */
+async function externalOneStepRun(deps: ApprovalDeps, requester: ApprovalRequester, workflow: WorkflowComposition): Promise<(Gates & { readonly plan: ExecutionPlan }) | null> {
+  if (!ONE_STEP_RUN_REQUESTERS.includes(requester.kind) || workflow.steps.length !== 1 || !deps.singleStepRuns) return null;
+  const plan = workflowPlan(workflow, { run: true });
+  if (!externalOneStepPlan(requester.kind, plan)) return null;
+  const facts = await (deps.runtime.sequences?.() ?? Promise.resolve(null)).catch(() => null);
+  if (!oneStepFactsAllow(facts, plan.steps[0]!.flow!, compositionChain(workflow.steps[0]!.workflow))) return null;
+  if (!await deps.singleStepRuns().catch(() => false)) return null;
+  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy, { run: true }).catch(() => null);
+  return gates?.handoff.allowed && gates.plan.kind === 'SEQUENTIAL' ? gates : null;
 }
 
 export async function requestApproval(...args: Parameters<typeof prepareApprovalRequest>) {
@@ -361,9 +386,15 @@ export type ApprovalProgress = ReturnType<typeof approvalStatus> & { readonly ru
   /** BUILD-FLOFI-E2E-RELIABILITY-001: present (false) only when a run read failed: the listed runs are then not all of them. */
   readonly runsComplete?: false; readonly runsReadError?: string;
   /** Present (true) only when no run of this approval was found but older runs of the wallet were not examined: never read as "no run". */
-  readonly runsTruncated?: true };
+  readonly runsTruncated?: true;
+  /** BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001: present (true) when a one-step run's state is withheld because the owner did not share it. */
+  readonly statusHidden?: true };
 export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string,
   workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps' | 'groups'> | null): Promise<ApprovalProgress> {
+  // BUILD-FLOFI-UNIVERSAL-CHANNEL-EXECUTION-PARITY-001 (flofi-workflow/security reviews): an MCP or channel proposal of ONE step keeps its one-step
+  // consent contract when FloFi runs it as a run: without the owner's status sharing the requester learns nothing of what ran (as for SINGLE_FLOW).
+  if (externalOneStepPlan(h.requesterKind, h.plan) && !h.shareStatus && h.status !== 'PENDING') return { ...approvalStatus(h), runs: [], runsVisible: false,
+    workflowRun: null, statusHidden: true as const, note: 'The owner has not shared the status of runs started from this proposal.' };
   const run = h.plan.kind === 'SEQUENTIAL' && workflowRuns ? await workflowRuns.byHandoff(h.handoffId) : null;
   const workflowRun = run && workflowRuns ? await runView({ store: workflowRuns }, run, { outcomes: h.shareStatus, origin: origin ?? null }) : null;
   if (h.plan.kind === 'SEQUENTIAL') return { ...approvalStatus(h), runs: [], runsVisible: h.shareStatus, workflowRun,
