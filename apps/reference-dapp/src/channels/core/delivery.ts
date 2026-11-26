@@ -99,7 +99,7 @@ export const MAX_SEALED_BODY_BYTES = 12_288;
 export function sealReply(ctx: Pick<DeliveryContext, 'tenantId' | 'keys'>, outboxId: string, reply: ChannelReply, origin: string | null = null): Buffer {
   const keep = reply.link !== null && (pageLink(reply.link.url) || (origin !== null && (workspaceLink(reply.link.url, origin) || nativeConfirmLink(reply.link.url, origin))));
   // Native start buttons carry a token and are never stored (they are attached again at send time).
-  const { visual, walletLinks: _walletLinks, ...rest } = reply, body = { ...rest, link: keep ? reply.link : null };
+  const { visual, ...rest } = reply, body = { ...rest, link: keep ? reply.link : null, walletLinks: undefined };
   const withVisual = visual ? JSON.stringify({ ...body, visual }) : null;
   const json = withVisual && Buffer.byteLength(withVisual) <= MAX_SEALED_BODY_BYTES ? withVisual : JSON.stringify(body);
   return seal(ctx.keys.seal, json, bodyContext(ctx, outboxId));

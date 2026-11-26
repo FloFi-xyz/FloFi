@@ -104,7 +104,7 @@ export function openAnswer(input: { readonly wallet: DeeplinkWallet; readonly me
     const message = params.get('errorMessage');
     return { kind: 'REFUSED', code: numeric !== null ? REFUSALS[String(numeric)] ?? 'WALLET_REQUEST_FAILED' : 'WALLET_REQUEST_FAILED', walletCode: numeric,
       // A wallet's own words, bounded and as plain text; shown to nobody but kept for the owner's diagnostics.
-      message: message ? message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, MAX_ERROR_MESSAGE) : null };
+      message: message ? [...message].map(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? ' ' : c).join('').slice(0, MAX_ERROR_MESSAGE) : null };
   }
   const answeredKey = params.get(keyParam);
   let walletPublicKey: Uint8Array;

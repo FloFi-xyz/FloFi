@@ -2045,6 +2045,38 @@
     "app.mcp.oauth.linked-wallet.pg": {
       "path": "apps/reference-dapp/src/mcp/oauth/linked-wallet.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.wallet.deeplink.nacl-box": {
+      "path": "apps/reference-dapp/src/wallet/deeplink/nacl-box.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.deeplink.protocol": {
+      "path": "apps/reference-dapp/src/wallet/deeplink/protocol.test.ts",
+      "stage": "unit"
+    },
+    "app.server.native-signing.review": {
+      "path": "apps/reference-dapp/src/server/native-signing/review.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.core.native-start": {
+      "path": "apps/reference-dapp/src/channels/core/native-start.test.ts",
+      "stage": "unit"
+    },
+    "app.server.native-signing.pg": {
+      "path": "apps/reference-dapp/src/server/native-signing/native-signing.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.mcp.native-signing.pg": {
+      "path": "apps/reference-dapp/src/mcp/native-signing.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.channels.telegram.native-signing.pg": {
+      "path": "apps/reference-dapp/src/channels/telegram/native-signing.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.server.native-signing.pages": {
+      "path": "apps/reference-dapp/src/server/native-signing/pages.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2104,6 +2136,7 @@
     "app.server.flight-access",
     "app.server.journey-telemetry",
     "app.server.lending-composition-service",
+    "app.server.native-signing.pages",
     "app.server.universal-router.fee-obligation",
     "app.state.flofi-conversation",
     "app.state.review-authorization",
@@ -2247,7 +2280,11 @@
     "app.platform.external-single-step",
     "app.mcp.app.panel",
     "app.domain.approval-notice",
-    "app.domain.run-outcome-amounts"
+    "app.domain.run-outcome-amounts",
+    "app.wallet.deeplink.nacl-box",
+    "app.wallet.deeplink.protocol",
+    "app.server.native-signing.review",
+    "app.channels.core.native-start"
   ],
   "modules": [
     {
@@ -3727,6 +3764,7 @@
         "apps/reference-dapp/src/channels/core/learning-copy.ts",
         "apps/reference-dapp/src/channels/core/learning.ts",
         "apps/reference-dapp/src/channels/core/log.ts",
+        "apps/reference-dapp/src/channels/core/native-start.ts",
         "apps/reference-dapp/src/channels/core/notify.ts",
         "apps/reference-dapp/src/channels/core/pg-store.ts",
         "apps/reference-dapp/src/channels/core/provider-http.ts",
@@ -3741,6 +3779,7 @@
         "apps/reference-dapp/src/channels/flight-gate.ts",
         "apps/reference-dapp/src/channels/http.ts",
         "apps/reference-dapp/src/channels/learning-runtime.ts",
+        "apps/reference-dapp/src/channels/native-signing.ts",
         "apps/reference-dapp/src/channels/providers.ts",
         "apps/reference-dapp/src/channels/registry.ts",
         "apps/reference-dapp/src/channels/route-discovery.ts",
@@ -3779,7 +3818,9 @@
         "app.platform.intelligence-parity",
         "app.channels.telegram.universal-actions",
         "app.channels.telegram.universal-actions.pg",
-        "app.platform.external-single-step"
+        "app.platform.external-single-step",
+        "app.channels.core.native-start",
+        "app.channels.telegram.native-signing.pg"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -5818,7 +5859,8 @@
         "app.mcp.account-tools",
         "app.mcp.app.panel",
         "app.platform.external-single-step",
-        "app.server.embedded-approval"
+        "app.server.embedded-approval",
+        "app.mcp.native-signing.pg"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -5970,7 +6012,8 @@
         "apps/reference-dapp/src/platform/workflow-run-approvals.ts",
         "apps/reference-dapp/src/platform/workflow-visual-layout.ts",
         "apps/reference-dapp/src/platform/workflow-visual.ts",
-        "apps/reference-dapp/src/platform/external-single-step.ts"
+        "apps/reference-dapp/src/platform/external-single-step.ts",
+        "apps/reference-dapp/src/platform/native-signing.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5987,7 +6030,8 @@
         "app.platform.conversation-state",
         "app.platform.external-single-step",
         "app.editor.single-card-run.pg",
-        "app.editor.single-card-strategy"
+        "app.editor.single-card-strategy",
+        "app.server.native-signing.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -9308,6 +9352,43 @@
         "Plain ERC-4626 vaults have no atomic minimum-shares deposit: execution needs a vault with the bounded deposit(uint256,address,uint256) or a separately reviewed router.",
         "No engine flow, surface, wallet handoff or Studio financial capability dispatches this adapter yet; Studio certification covers read metadata only (0036 allows network.read and vault.read)."
       ]
+    },
+    {
+      "id": "native-signing--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-channels",
+        "flofi-data-privacy",
+        "flofi-mcp",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/app/api/native-signing/[...path]/route.ts",
+        "apps/reference-dapp/src/server/native-signing/messages.ts",
+        "apps/reference-dapp/src/server/native-signing/pages.ts",
+        "apps/reference-dapp/src/server/native-signing/review.ts",
+        "apps/reference-dapp/src/server/native-signing/runtime.ts",
+        "apps/reference-dapp/src/server/native-signing/service.ts",
+        "apps/reference-dapp/src/server/native-signing/session-store.ts",
+        "apps/reference-dapp/src/wallet/deeplink/base58.ts",
+        "apps/reference-dapp/src/wallet/deeplink/nacl-box.ts",
+        "apps/reference-dapp/src/wallet/deeplink/protocol.ts"
+      ],
+      "suites": [
+        "app.channels.telegram.native-signing.pg",
+        "app.mcp.native-signing.pg",
+        "app.server.native-signing.pages",
+        "app.server.native-signing.pg",
+        "app.server.native-signing.review",
+        "app.wallet.deeplink.nacl-box",
+        "app.wallet.deeplink.protocol"
+      ],
+      "gaps": [
+        "The Phantom/Solflare deeplink tests use a test wallet that speaks the documented protocol with real NaCl encryption on a MOCKED Solana flow; they do not certify the wallet apps, universal-link handling on iOS/Android, in-app browsers or a real signature on mainnet.",
+        "Return to ChatGPT, Claude or Telegram after the wallet is a link on a FloFi transit page; whether each host app reopens the conversation needs live acceptance."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -9388,6 +9469,9 @@
     "app.studio.certification-store.pg",
     "cloud-runtime.security-0016-runtime-privileges.pg",
     "app.backend.database-privileges.pg",
-    "app.channels.telegram.universal-actions.pg"
+    "app.channels.telegram.universal-actions.pg",
+    "app.server.native-signing.pg",
+    "app.mcp.native-signing.pg",
+    "app.channels.telegram.native-signing.pg"
   ]
 }
