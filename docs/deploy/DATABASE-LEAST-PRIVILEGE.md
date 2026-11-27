@@ -1,7 +1,8 @@
 # BUILD-FLOFI-DATABASE-LEAST-PRIVILEGE-001
 
-This procedure applies to the certified FloFi schema through 0036 on PostgreSQL
-18. It changes access control and row policies in the target database. All 36
+This procedure applies to the certified FloFi schema through 0037 on PostgreSQL
+18 (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 added 0037; apply the policy only
+after 0037). It changes access control and row policies in the target database. All 37
 migration files, checksums and ledger rows are preserved. The owner activates
 the database policy separately from reviewing and merging the application PR.
 
@@ -25,8 +26,8 @@ logins do not establish row isolation between unrelated tenants by themselves.
 
 ## Privilege matrix and audit
 
-[The policy matrix](database-privileges/policy.sql) enumerates all 115 public
-tables on version 36 and the necessary privileges for each login. Blank cells
+[The policy matrix](database-privileges/policy.sql) enumerates all 118 public
+tables on version 37 and the necessary privileges for each login. Blank cells
 mean no table-level access. The column rows specify narrower INSERT and UPDATE
 permissions, including columns needed for authorized row locks and upserts.
 Table INSERT into a generated identity column's table uses the identity without
@@ -154,6 +155,6 @@ psql -X -v ON_ERROR_STOP=1 --single-transaction \
 - A future migration remains an operator one-shot using the direct owner
   connection. Review its ACL changes with the migration and add explicit
   grants for any new object before the feature needs it. The stage/enforce
-  application is pinned to the version 36 ledger and rejects inventory drift.
+  application is pinned to the version 37 ledger and rejects inventory drift.
   Compatibility of app rollout and migration ordering remains governed by
   [Schema compatibility](SCHEMA-COMPATIBILITY.md).
