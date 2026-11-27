@@ -233,7 +233,26 @@ Left open, with reasons:
 
 ## 8. Test results
 
-Pending at this commit: the full gate results are recorded here before delivery.
+All runs are local, in this build's container: Node 24.21.0, pnpm 11.22.0, the verified headless shell 1243, and digest-verified Anvil 1.8.3. Every financial path ran on loopback doubles or a closed replay. CircleCI remains the certification authority.
+
+| Gate | Result |
+|---|---|
+| `pnpm check` (typecheck, lint, build, schema drift, unit tests) | **Pass.** 829 files and 10,588 tests passed. 2 files are skipped (live or fork suites that need external services, the same as the baseline) |
+| `pnpm test:postgres` (local PostgreSQL 16.15) | 154 of 156 files and 1,061 of 1,067 tests passed. **6 failures need PostgreSQL ≥ 17/18:** `backend/database-privileges.pg.test.ts` (5: `unrecognized privilege type "MAINTAIN"`) and `packages/cloud-runtime/test/forward-compatibility.pg.test.ts` (1: the NOT NULL constraint catalog). CI uses `postgres:18.6`. This build changes neither those files nor any migration. **Not run here on PostgreSQL 18; left to CI** |
+| Batch Payment PostgreSQL suite (`workflow-runs/batch-payment-run.pg.test.ts`) | Pass: one atomic batch reconciled with exact amounts; confirm mode and non-atomic wallets refused; refusal never continued and closed as not sent; halted batch not resumable; split wallet execution UNMATCHED; re-prepare needs a chain proof; unprovable re-prepare is OWNER_DECIDES; report bound per group |
+| Browser `canvas-workflow-ux` (with `batch-payment-card.spec.ts`) | Pass, 13/13 (4 Batch Payment card tests) |
+| Browser `workflow-ux-authoring`, `copilot`, `mcp-in-chat`, `channel-approve`, `editor-single-card`, `approve-workflow-run` | Pass: 14/14, 13/13, 26/26, 3/3, 5/5, 2/2 |
+| Visual baselines `visual-shell` `build.png`, `swap-authoring` `chat-committed.png` | **Expected to change** (the new rail entry). Renders from this container differ from the committed baselines in font rasterization everywhere, including unchanged pages, so they were not committed. **The CI candidate renders are needed** (§4) |
+| `python3 scripts/governance_lite.py` and its unittest suite | Pass |
+| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | Pass (336) |
+| `python3 scripts/agent_guard.py check` | Pass |
+| `python3 scripts/agent_evolution.py --base origin/main` | Advisory only. No signal for this change's areas beyond the standing `PENDING_VERIFICATION` reference pins |
+
+Visual evidence of the Batch Payment card (EN and PT, draft and applied), rendered locally:
+
+- Draft: [EN](BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001/card-draft-en.png), [PT](BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001/card-draft-pt.png)
+- Applied: [EN](BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001/card-applied-en.png), [PT](BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001/card-applied-pt.png)
+- Editor: [EN](BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001/editor-draft-en.png), [PT](BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001/editor-draft-pt.png)
 
 ## 9. Production configuration (CTO approval required)
 
@@ -278,4 +297,10 @@ LIVE VERIFIED is claimed only after step 4 is performed and reconciled on mainne
 
 ## Final status
 
-Pending at this commit.
+| Status | Applies? | Basis |
+|---|---|---|
+| ENGINEERING COMPLETE | **Yes**, for WS01 and WS02 as scoped | All findings are fixed or documented (§2, §6, §11). Local gates are listed in §8 |
+| CI CERTIFIED | **No, not yet** | CircleCI has not certified this revision. Two visual baselines must come from the CI candidate renders, and the PostgreSQL 18-only suites must pass there |
+| READY FOR OWNER ACCEPTANCE | **After CI certification** | The procedure is in §10. The P0 fix in production also needs the §9 configuration change, which needs CTO approval |
+| LIVE VERIFIED | **No** | No owner-signed mainnet Batch Payment and no production P0 check have been performed; this build performs none |
+| BLOCKED / PARTIAL | **Partial on evidence** | Mainnet execution evidence is MOCKED only. Solana is not exposed. Developer API production keys cannot hand off a batch (owner decision) |
