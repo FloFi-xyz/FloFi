@@ -1,0 +1,49 @@
+# Incidente de acesso à FloFi no Brasil
+
+**P0 em aberto.** Em 23/11/2026, por volta das 18h14 UTC, um visitante no Brasil relatou `ERR_CONNECTION_RESET` em Chrome e Dia ao abrir `flofi.xyz`. Safari abriu a página no mesmo relato. A investigação reproduziu falhas TCP e TLS em duas redes brasileiras. A origem do reset do visitante e a diferença entre os navegadores permanecem sem confirmação.
+
+## Evidências de transporte
+
+| Origem | Resultado | Medições |
+| --- | --- | --- |
+| São Paulo, Starlink AS14593 | Entre 18h33m16s e 18h33m25s UTC, três tentativas para `216.198.79.1:443` expiraram em 15 s ao abrir TCP. Duas fixaram o IP e a terceira resolveu o domínio pelo DNS normal. A mesma sonda recebeu HTTP 200 de `flofi.xyz` via `64.29.17.1`, `64.29.17.65` e `216.198.79.65`, além de concluir os controles em `vercel.com` e `www.google.com`. | [HTTPS com IP fixo](https://api.globalping.io/v1/measurements/2d4MqFDtGsUqUa7ky00021YgD), [h2 com IP fixo](https://api.globalping.io/v1/measurements/29iakfkAet0iGrzvi00021YgD), [h2 com DNS normal](https://api.globalping.io/v1/measurements/2dWj96kfBPZc0HJYH00021YgD) |
+| Curitiba, Telefônica Brasil AS18881 | Às 18h32m01s UTC, `64.29.17.65:443` aceitou TCP em 773 ms, mas o TLS expirou sem resposta HTTP. Em outra tentativa, TLS para `216.198.79.65` demorou 10,9 s antes de `www` devolver 308. A repetição com `64.29.17.65` devolveu 200 e o mesmo ASN em outras cidades também alcançou o site. | [Timeout TLS](https://api.globalping.io/v1/measurements/2yWpRHqCPOpwvpg9b00021YgC), [TLS de 10,9 s](https://api.globalping.io/v1/measurements/23ErorcJweJTR09eK00021YgB), [Repetição](https://api.globalping.io/v1/measurements/2hHImnA2wiVpOm56v00021YgD) |
+| São Paulo e outras origens brasileiras | Na primeira matriz IPv4, foram 41 respostas esperadas em 42 sondagens. As respostas brasileiras passaram pelo edge `gru1`, incluindo o acesso à landing e a `/login`. | [Landing h2](https://api.globalping.io/v1/measurements/274kdrHsQeyk2xiil00021YgB), [Landing HTTPS](https://api.globalping.io/v1/measurements/2k8SMwRw8pFuvLM7300021YgB) |
+| Lisboa e Porto | As 12 sondagens IPv4 da primeira matriz devolveram as respostas esperadas. | [Landing h2](https://api.globalping.io/v1/measurements/274kdrHsQeyk2xiil00021YgB), [Entrada h2](https://api.globalping.io/v1/measurements/2yWpRHqCPOpwvpg9b00021YgC) |
+
+O timeout da Starlink ocorreu antes de SNI, TLS, HTTP ou código da aplicação. Essa evidência localiza a falha observada na abertura de TCP entre aquela sonda e aquele destino. O resultado comporta perda na ida ou na volta, filtragem ou problema no edge. Em Curitiba, o timeout ocorreu em outra etapa e passou nas repetições. O IP de saída, a rede do evento e a captura do reset original não estão disponíveis para correlação.
+
+Às 18h41 UTC, a Starlink repetiu o timeout TCP para `216.198.79.1`. O traceroute TCP para esse IP ficou sem respostas a partir do terceiro salto. O controle para `216.198.79.65` chegou ao destino e recebeu HTTP 200 em 341 ms. A supressão de respostas intermediárias impede atribuir a perda a um salto específico. [Quarto timeout](https://api.globalping.io/v1/measurements/2LN4KmqDPbiEjOapT00021YgL) · [Rota afetada](https://api.globalping.io/v1/measurements/2aLT3fKutUg2awhiR00021YgL) · [Rota de controle](https://api.globalping.io/v1/measurements/2XDZZpjRVz7bjam5s00021YgL) · [HTTP do controle](https://api.globalping.io/v1/measurements/29xuiZLwn85UcBnyS00021YgL)
+
+## Produção e firewall
+
+- A Vercel confirmou `flofi.xyz` e `www.flofi.xyz` no projeto `flofi`. `www` redireciona para o apex com 308. A proteção SSO de deployments exclui domínios personalizados. O DNS autoritativo usa `ns1.vercel-dns.com` e `ns2.vercel-dns.com`. Sondas no Brasil e em Portugal retornaram combinações dos endereços IPv4 da Vercel, sem AAAA ou HTTPS. Testes IPv6 estritos terminaram na resolução por falta de AAAA. [Configuração de domínios](https://vercel.com/alrimarleskovars-projects/flofi/settings/domains) · [DNS da Vercel](https://vercel.com/docs/domains/working-with-dns)
+- Em Aveiro, os quatro IPv4 observados aceitaram HTTP/1.1 e HTTP/2 com o nome de cada host, com 200 no apex e 308 em `www`. TLS 1.2 e 1.3 foram verificados. O certificado apresentado, emitido por Let's Encrypt, cobre `flofi.xyz` e `*.flofi.xyz` e vence em 07/02/2027. Os hosts não anunciaram HTTP/3 por `Alt-Svc` ou DNS HTTPS. QUIC forçado em Aveiro expirou para os dois hosts e negociou com Google e Cloudflare nos controles. As navegações bem-sucedidas da FloFi negociaram h2 quando o navegador reportou o protocolo. [Protocolos da rede Vercel](https://vercel.com/docs/edge-network#supported-protocols)
+- A consulta de firewall pelo conector retornou 404 `Seawall Config not found` com erro de autorização. O CLI autenticado conseguiu ler as regras e agregar o tráfego. Na auditoria, WAF e regras de sistema estavam ativos, Attack Challenge Mode e Bot Protection estavam desligados, e não havia bloqueios IP/CIDR. A única regra personalizada ativa negava quatro caminhos de sondagem. Ela não tinha condições de país, ASN, User-Agent ou fingerprint TLS e não correspondia a `/` ou `/login`. [Firewall do projeto](https://vercel.com/alrimarleskovars-projects/flofi/firewall)
+- Entre 18h14 e 18h20 UTC, o firewall retornou 57 registros `allow` do Brasil para o apex, 38 da Telefônica Brasil e 19 da Cloudflare. Para `/`, houve um `allow` às 18h16 de um User-Agent Chrome em Android na Telefônica. A consulta de alertas ficou vazia e a consulta de runtime não retornou linhas para a janela. Uma falha anterior ao HTTP pode ficar fora desses registros. A página de status da Vercel não registrava incidente na data da consulta. [Tráfego do firewall](https://vercel.com/alrimarleskovars-projects/flofi/firewall/traffic) · [Status público da Vercel](https://vercel.statuspage.io/)
+- O deploy ativo na janela era `dpl_2mBmuj49fhZRuS6a5SuWUoTWexgC` (`972c1644`). A publicação regular de `601b293d` começou depois da janela e já servia o domínio nos testes. O diff entre os dois commits não alterou `vercel.json`, Next.js config, proxy, CSP, landing ou tela de entrada. Nessas superfícies, o código inspecionado atua após o estabelecimento de HTTP. [Deploy anterior](https://vercel.com/alrimarleskovars-projects/flofi/2mBmuj49fhZRuS6a5SuWUoTWexgC) · [Deploy ativo durante os testes](https://vercel.com/alrimarleskovars-projects/flofi/3uiFffjdK4vgSmgFKXQqcFWkwAnt)
+
+## Navegação pública
+
+| Origem real | Navegadores | Resultado |
+| --- | --- | --- |
+| Aveiro, Portugal, MEO AS3243, 18h33 UTC | Chromium 153.0.8010.12 e WebKit 26.6 | Landing e `/login` em 200. `www` em 308. Google ficou acionável e o formulário de e-mail abriu. |
+| São Paulo, Brasil, sandbox Vercel `gru1`, egress AWS AS16509, 18h35–18h36 UTC | Chromium 153.0.8010.12 e WebKit 26.6 | Mesmo resultado nos dois hosts. O Chromium registrou `gru1::iad1::m8d4r-1795458959412-9d220533355b` para a landing. Uma execução WebKit registrou um erro de página com referência parcial a Privy, sem impedir o acesso aos controles. |
+
+Cada origem usou contextos novos, sem wallet ou sessão. Os testes chegaram ao formulário de e-mail e à disponibilidade do botão Google, sem enviar e-mail ou iniciar OAuth. WebKit foi executado em Linux. Falta testar o Safari nativo e repetir os dois navegadores na rota afetada. A origem AWS em São Paulo valida a execução regional dos motores, enquanto as sondas de operadora medem a conectividade em redes distintas. O sandbox foi encerrado após o teste.
+
+`node scripts/check-public-entry.mjs` repete o percurso em Chromium e WebKit instalados pelo Playwright do workspace. Valida os status dos documentos, o redirecionamento de `www`, a landing renderizada e os controles iniciais de entrada. O comando retorna 1 se uma navegação ou um controle falhar. O resultado vale para a rede que executa o comando.
+
+## Detecção e mitigação
+
+`python3 scripts/check_public_connectivity.py` faz GETs públicos para a landing, a entrada e o redirecionamento em sondas do Brasil e de Portugal. A verificação registra origem, ASN, IP resolvido, etapa alcançada, tempo e ID do edge. Se uma sonda falhar, repete a medição com as origens anteriores.
+
+| Código de saída | Resultado para o agendador |
+| --- | --- |
+| 0 | Sem falha recorrente nas origens requeridas nessa amostra. Falhas isoladas ficam no JSON. |
+| 1 | Uma origem voltou a falhar. O JSON conserva a etapa e o endereço de cada tentativa. |
+| 2 | Resultado inconclusivo por ausência de cobertura, repetição incompleta ou falha da API de sondas. |
+
+O modo de operação previsto é um agendador de disponibilidade independente do CircleCI, com alerta de recorrência para a equipe de infraestrutura e alerta separado de perda de cobertura. Agendamento e notificações externas ficam pendentes. A primeira execução do comando completo recebeu 429 após as campanhas de diagnóstico consumirem a cota anônima. O tratamento dessa condição foi verificado e as medições ao vivo usadas na análise são as registradas acima. [Globalping API](https://github.com/jsdelivr/globalping/blob/master/public/v1/spec.yaml)
+
+O escalonamento para o time de Edge Network da Vercel deve usar os horários e IDs das sondas para distinguir ausência de SYN no edge, perda no retorno e decisão de filtragem. Se a Vercel confirmar um destino defeituoso, a mitigação preferencial é corrigir ou retirar esse destino da rotação gerenciada, com validação prévia das rotas de Starlink e Telefônica, comparação com Portugal e verificação dos dois navegadores após a intervenção. Os endereços `216.198.79.1` e `216.198.79.65` pertencem ao mesmo bloco da Vercel. Fixar manualmente um endereço alteraria a seleção de destinos e deixaria pendente o timeout TLS observado em Curitiba. [Rede da Vercel](https://vercel.com/docs/regions) · [Registro da faixa na ARIN](https://whois.arin.net/rest/net/NET-216-198-79-0-1.html)
