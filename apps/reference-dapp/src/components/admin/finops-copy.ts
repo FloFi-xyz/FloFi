@@ -97,8 +97,42 @@ const portuguese: Readonly<Record<string, string>> = {
   "Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; simulations, quotes, approval requests, retries and individual steps are never counted.":
     "Cada contagem é uma execução única de fluxo concluída e conciliada. Um Pagamento em lote conta uma vez, qualquer que seja o número de destinatários; simulações, cotações, pedidos de aprovação, novas tentativas e etapas individuais nunca são contados.",
   "An execution belongs to the period it started in.": "Cada execução pertence ao período em que foi iniciada.",
-  "FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor: no record says which of the two started a run.":
-    "FloFi Web conta as execuções de fluxos iniciadas no Editor e reúne o Chat na web e o Editor: nenhum registro indica qual dos dois iniciou a execução.",
+  "FloFi Web combines Web Chat and the Editor: they are the same app page and no server-side record says which of the two started a run.":
+    "FloFi Web reúne o Chat na web e o Editor: são a mesma página do app e nenhum registro no servidor indica qual dos dois iniciou a execução.",
+  "FloFi Web in total: {0} ({1} recorded when they started, {2} recovered from history).":
+    "FloFi Web no total: {0} ({1} registradas ao iniciar, {2} recuperadas do histórico).",
+  "Every execution records the channel it started from when it is created. Legacy Web is earlier web history recovered only where the approval records prove no approval page created it; anything else without evidence stays Unknown origin.":
+    "Cada execução registra o canal de origem quando é criada. Web (histórico) é o histórico anterior da web recuperado somente quando os registros de aprovação provam que nenhuma página de aprovação a criou; o que não tiver evidência continua como Origem desconhecida.",
+  "Platform fee": "Taxa da plataforma",
+  "{0} per completed workflow, on its independently introduced principal": "{0} por fluxo concluído, sobre o principal introduzido de forma independente",
+  "Completed workflows (this range)": "Fluxos concluídos (neste intervalo)",
+  "Fee accounting": "Contabilização da taxa",
+  "Active for executions created from {0} UTC": "Ativa para execuções criadas a partir de {0} UTC",
+  "Not activated": "Não ativada",
+  "Fee collection": "Cobrança da taxa",
+  "Not active": "Inativa",
+  "Collection is switched off.": "A cobrança está desligada.",
+  "No treasury is configured.": "Nenhuma tesouraria está configurada.",
+  "The configured treasury is invalid.": "A tesouraria configurada é inválida.",
+  "The financial accounting policy is not approved.": "A política de contabilização financeira não está aprovada.",
+  "No collection mechanism is implemented yet.": "Ainda não há mecanismo de cobrança implementado.",
+  "Fee ledger": "Livro de taxas",
+  "Not installed (migration 0037)": "Não instalado (migração 0037)",
+  "Owed, not collected": "Devida, não cobrada",
+  "Collection pending": "Cobrança pendente",
+  "Collected": "Cobrada",
+  "Collection failed": "Falha na cobrança",
+  "No feeable principal": "Sem principal tarifável",
+  "Waived (not completed)": "Dispensada (não concluída)",
+  "Not accountable (never charged)": "Não contabilizável (nunca cobrada)",
+  "Fees owed and not collected, per asset": "Taxas devidas e não cobradas, por ativo",
+  "Asset": "Ativo",
+  "Accounted executions by origin:": "Execuções contabilizadas por origem:",
+  "Automation": "Automação",
+  "Collected revenue is reported only from ledger rows that carry their collection transactions; until collection is active it is zero. Amounts stay in each token’s own units and are never added across tokens or converted to money here.":
+    "A receita cobrada é informada somente a partir de linhas do livro que trazem as transações de cobrança; enquanto a cobrança não estiver ativa, ela é zero. Os valores ficam na unidade de cada token e nunca são somados entre tokens nem convertidos em dinheiro aqui.",
+  "FloFi Web (Chat or Editor)": "FloFi Web (Chat ou Editor)",
+  "Legacy Web (recovered history)": "Web (histórico recuperado)",
   "One-step runs started directly in the app have no origin record and are shown as Unknown origin.":
     "Execuções de uma etapa iniciadas diretamente no app não têm registro de origem e aparecem como Origem desconhecida.",
   "A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.":

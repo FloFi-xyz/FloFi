@@ -24,24 +24,27 @@
  * UNKNOWN too (never counted twice). FloFi Web is therefore counted only from positive records: workflow runs whose handoff is an
  * EDITOR_SESSION. A single flow an EDITOR_SESSION handoff names would be FloFi Web too, but no current code records one: Editor handoffs are
  * SEQUENTIAL (`editor/approval.ts`), and both `run_ids` writers bind runs only to a single-flow plan.
- * Known limits: a single flow started directly in the app has no origin record (UNKNOWN). A single flow started from an approval keeps the
- * approval's channel only while that approval's binding of the run exists: an approval records a run only when one of those two writers bound
- * it, holds at most 16 runs (`bindRuns` leaves a full list unchanged), and may be removed by retention (`HandoffStore.purge`). Otherwise, and
- * for earlier history without records, the execution is UNKNOWN.
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: with migration 0037 a durable origin is written when an execution is created
+ * (`workflow-runs/execution-origins.ts`): /app server actions record FloFi Web from the proxy's authoritative path, an approval's binding records its
+ * requester, and the audited backfill records Legacy Web only where the approval history proves no approval page could have created the run.
+ * A recorded origin (or its latest approved correction) wins over a binding; an execution with neither stays UNKNOWN. Without 0037 the rule
+ * above applies unchanged. Chat and the Editor stay one row: no server-side record separates them.
  */
 import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import type { AdminHost } from '../host.ts';
 import { cimdClientId } from '../../mcp/oauth/cimd.ts';
+import { effectiveOrigins, revenueOriginsActive, type ExecutionOrigin } from '../../workflow-runs/execution-origins.ts';
 import { COMPOSITION_FLOWS } from './classify.ts';
 import { ENVIRONMENTS, type AnalyticsEnvironment } from './networks.ts';
 import { executionsOf, loadRuns, type Coverage, type Execution, type LoadedRun } from './workflows.ts';
 
 /** The table's rows, in their fixed order. Web Chat and the Editor are one row: no record says which of the two started a run. */
-export const CHANNELS = ['FLOFI_WEB', 'CHATGPT_MCP', 'CLAUDE_MCP', 'TELEGRAM', 'DEVELOPER_API', 'MCP_UNIDENTIFIED', 'UNKNOWN'] as const;
+export const CHANNELS = ['FLOFI_WEB', 'LEGACY_WEB', 'CHATGPT_MCP', 'CLAUDE_MCP', 'TELEGRAM', 'DEVELOPER_API', 'MCP_UNIDENTIFIED', 'UNKNOWN'] as const;
 export type Channel = (typeof CHANNELS)[number];
 /** An origin: a channel, or an automation rule (reported in its own note, never in the table or its total). */
 export type Origin = Channel | 'AUTOMATION';
-export const CHANNEL_LABELS: Readonly<Record<Channel, string>> = { FLOFI_WEB: 'FloFi Web', CHATGPT_MCP: 'ChatGPT MCP', CLAUDE_MCP: 'Claude MCP',
+export const CHANNEL_LABELS: Readonly<Record<Channel, string>> = { FLOFI_WEB: 'FloFi Web (Chat or Editor)', LEGACY_WEB: 'Legacy Web (recovered history)',
+  CHATGPT_MCP: 'ChatGPT MCP', CLAUDE_MCP: 'Claude MCP',
   TELEGRAM: 'Telegram', DEVELOPER_API: 'Developer API', MCP_UNIDENTIFIED: 'Unidentified MCP client', UNKNOWN: 'Unknown origin' };
 
 /**
@@ -67,6 +70,21 @@ export function channelOf(requesterKind: string, clientId: string): Origin {
       const check = cimdClientId(clientId, Object.keys(CIMD_CHANNELS));
       return check.ok ? CIMD_CHANNELS[check.url.hostname] ?? 'MCP_UNIDENTIFIED' : 'MCP_UNIDENTIFIED';
     }
+    default: return 'UNKNOWN';
+  }
+}
+
+/** A recorded execution origin (0037) as a reported channel. Chat and the Editor are FloFi Web; recovered history is Legacy Web. */
+export function channelOfOrigin(origin: ExecutionOrigin): Origin {
+  switch (origin) {
+    case 'web': case 'web_chat': case 'web_editor': return 'FLOFI_WEB';
+    case 'legacy_web': return 'LEGACY_WEB';
+    case 'mcp_chatgpt': return 'CHATGPT_MCP';
+    case 'mcp_claude': return 'CLAUDE_MCP';
+    case 'mcp_other': return 'MCP_UNIDENTIFIED';
+    case 'telegram': return 'TELEGRAM';
+    case 'developer_api': return 'DEVELOPER_API';
+    case 'automation': return 'AUTOMATION';
     default: return 'UNKNOWN';
   }
 }
@@ -118,7 +136,9 @@ export function completedExecutions(executions: readonly Execution[], runs: read
 
 /** The tally (pure). `steps`: run ids a workflow run's OWNER_RUN step names. An execution no binding names is UNKNOWN, whenever it ran. */
 export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRunGroup[]; readonly executions: readonly CompletedExecution[];
-  readonly steps: ReadonlySet<string>; readonly bindings: readonly RunBinding[] }):
+  readonly steps: ReadonlySet<string>; readonly bindings: readonly RunBinding[];
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: recorded origins of single-flow runs (0037), by run id; they win over bindings. */
+  readonly recorded?: ReadonlyMap<string, ExecutionOrigin> }):
   { readonly byEnvironment: Readonly<Record<AnalyticsEnvironment, ChannelTally>>; readonly unrecognizedEnvironment: number } {
   const tallies = Object.fromEntries(ENVIRONMENTS.map(env => [env, { counts: Object.fromEntries(CHANNELS.map(c => [c, 0])) as Record<Channel, number>, automation: 0 }]));
   let unrecognizedEnvironment = 0;
@@ -138,7 +158,8 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
   }
   for (const e of input.executions) {
     if (e.runIds.some(id => input.steps.has(id)) || e.workflowIds.some(isWorkflowRunStepWorkflow)) continue;
-    const origins = new Set(e.runIds.flatMap(id => [...bound.get(id) ?? []]));
+    const recorded = new Set(e.runIds.flatMap(id => { const o = input.recorded?.get(id); return o ? [channelOfOrigin(o)] : []; }));
+    const origins = recorded.size ? recorded : new Set(e.runIds.flatMap(id => [...bound.get(id) ?? []]));
     const origin: Origin = origins.size === 1 ? [...origins][0]! : 'UNKNOWN';
     add(e.environment, origin, 1);
   }
@@ -158,6 +179,8 @@ export type ChannelCounts = {
   readonly workflowRunsTruncated: boolean;
   /** Composition executions whose record is not indexed yet: their step runs cannot be recognized and may be counted on their own. */
   readonly compositionsWithoutRecord: Readonly<Record<AnalyticsEnvironment, number>>;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: whether this database records origins at creation (migration 0037 active). */
+  readonly originsRecorded: boolean;
 };
 export type ChannelCountsResult = { readonly ok: true; readonly value: ChannelCounts } | { readonly ok: false; readonly code: 'ADMIN_CHANNEL_COUNTS_UNAVAILABLE' };
 
@@ -213,10 +236,13 @@ export async function loadChannelCounts(host: AdminHost, options: { readonly per
     const [read, workflowRuns] = await Promise.all([bounded(host, tx => loadRuns(tx, host.tenantId, period)), completedWorkflowRuns(host, period)]);
     const all = executionsOf(read.runs), executions = completedExecutions(all, read.runs);
     const ids = [...new Set(executions.flatMap(e => e.runIds))];
-    const { steps, bindings } = ids.length ? await bounded(host, async tx => ({ steps: await workflowRunSteps(tx, host.tenantId, ids),
-      bindings: await runBindings(tx, host.tenantId, ids, period.to) })) : { steps: new Set<string>(), bindings: [] };
+    const { steps, bindings, recorded } = ids.length ? await bounded(host, async tx => ({ steps: await workflowRunSteps(tx, host.tenantId, ids),
+      bindings: await runBindings(tx, host.tenantId, ids, period.to),
+      recorded: new Map([...(await effectiveOrigins(tx, host.tenantId, { runIds: ids, workflowRunIds: [] })).runs].map(([id, o]) => [id, o.origin] as const)) }))
+      : { steps: new Set<string>(), bindings: [], recorded: new Map<string, ExecutionOrigin>() };
     const compositionsWithoutRecord = Object.fromEntries(ENVIRONMENTS.map(env => [env, all.filter(e => e.environment === env && COMPOSITION_FLOWS.has(e.flow) && !e.actions).length]));
-    return { ok: true, value: { period, ...foldChannels({ workflowRuns: workflowRuns.groups, executions, steps, bindings }), coverage: read.coverage,
+    const originsRecorded = await bounded(host, tx => revenueOriginsActive(tx));
+    return { ok: true, value: { period, originsRecorded, ...foldChannels({ workflowRuns: workflowRuns.groups, executions, steps, bindings, recorded }), coverage: read.coverage,
       workflowRunsTruncated: workflowRuns.truncated, compositionsWithoutRecord: compositionsWithoutRecord as Record<AnalyticsEnvironment, number> } };
   } catch { return { ok: false, code: 'ADMIN_CHANNEL_COUNTS_UNAVAILABLE' }; }
 }

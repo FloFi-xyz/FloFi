@@ -11,6 +11,7 @@ import { isFlightRecoveryMethod, requireFlightMethodAccess, requireFlightProduct
 import { guardFlowExecution } from '../server/execution-guard';
 import { readDeveloperConfig } from '../developer/config';
 import { issuesWalletRequest } from '../workflow-runs/external-step';
+import { surfaceOfPath, type ExecutionSurface } from '../workflow-runs/execution-origins';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
 // The record (with the account and request code it needs) loads on the first successful hosted simulation, never when an action module
@@ -54,5 +55,11 @@ export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
   const identity = !proven && !isFlightRecoveryMethod(method) && durableRuntime(env)
     ? await requireFlightProductAccess(env)
     : await requireFlightMethodAccess(method, proven ?? undefined, env);
-  return runtimeFlow<T>(flow, method, values, { ...options, principal, betaIdentity: identity, developerLive });
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: where this server action was posted from, by the proxy's authoritative path (never a client field):
+  // a run the /app page creates records FloFi Web as its origin. Outside a request (tools, tests) there is no surface.
+  const surface = options?.surface !== undefined ? options.surface : await requestSurface();
+  return runtimeFlow<T>(flow, method, values, { ...options, principal, betaIdentity: identity, developerLive, surface });
+}
+async function requestSurface(): Promise<ExecutionSurface | null> {
+  try { const { headers } = await import('next/headers'); return surfaceOfPath((await headers()).get('x-flofi-pathname')); } catch { return null; }
 }

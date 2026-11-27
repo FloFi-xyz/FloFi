@@ -19,11 +19,18 @@ function channelNotes(data: Counts, environment: AnalyticsEnvironment, language:
     copy('Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; ' +
       'simulations, quotes, approval requests, retries and individual steps are never counted.'),
     copy('An execution belongs to the period it started in.'),
-    copy('FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor: no record says which of the two started a run.'),
-    copy('One-step runs started directly in the app have no origin record and are shown as Unknown origin.'),
-    copy("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at " +
-      'most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.'),
-    copy('Executions without a recorded origin, including earlier history, are shown as Unknown origin.'),
+    copy('FloFi Web combines Web Chat and the Editor: they are the same app page and no server-side record says which of the two started a run.'),
+    ...tally.counts.FLOFI_WEB || tally.counts.LEGACY_WEB ? [copy('FloFi Web in total: {0} ({1} recorded when they started, {2} recovered from history).',
+      count(tally.counts.FLOFI_WEB + tally.counts.LEGACY_WEB), count(tally.counts.FLOFI_WEB), count(tally.counts.LEGACY_WEB))] : [],
+    ...data.originsRecorded ? [
+      copy('Every execution records the channel it started from when it is created. Legacy Web is earlier web history recovered only where the ' +
+        'approval records prove no approval page created it; anything else without evidence stays Unknown origin.'),
+    ] : [
+      copy('One-step runs started directly in the app have no origin record and are shown as Unknown origin.'),
+      copy("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at " +
+        'most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.'),
+      copy('Executions without a recorded origin, including earlier history, are shown as Unknown origin.'),
+    ],
     copy('Executions from other channels, such as WhatsApp, are shown as Unknown origin.'),
     ...tally.automation ? [copy('{0} completed executions requested by automation rules are not attributed to a channel.', count(tally.automation))] : [],
     ...data.unrecognizedEnvironment ? [copy('{0} completed executions have no recognized environment and are not counted.', count(data.unrecognizedEnvironment))] : [],

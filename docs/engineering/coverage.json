@@ -2233,6 +2233,18 @@
     "app.channels.core.batch-payment-status-solana": {
       "path": "apps/reference-dapp/src/channels/core/batch-payment-status-solana.test.ts",
       "stage": "unit"
+    },
+    "app.platform-fee.principal": {
+      "path": "apps/reference-dapp/src/platform-fee/principal.test.ts",
+      "stage": "unit"
+    },
+    "app.platform-fee.revenue-origins.pg": {
+      "path": "apps/reference-dapp/src/platform-fee/revenue-origins.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.certificate-0037.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0037.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -2449,7 +2461,8 @@
     "app.user-funded.groups-solana-batch",
     "app.editor.workflow-execution-solana-batch",
     "app.components.editor-workflow-run-solana-batch",
-    "app.platform.native-signing"
+    "app.platform.native-signing",
+    "app.platform-fee.principal"
   ],
   "modules": [
     {
@@ -2958,7 +2971,8 @@
         "apps/reference-dapp/src/admin/finops/sync-providers.ts",
         "apps/reference-dapp/src/admin/finops/sync-store.ts",
         "apps/reference-dapp/src/admin/finops/sync-transport.ts",
-        "apps/reference-dapp/backend/finops-worker.ts"
+        "apps/reference-dapp/backend/finops-worker.ts",
+        "apps/reference-dapp/src/admin/analytics/origin-backfill.ts"
       ],
       "suites": [
         "app.admin.analytics.workflows",
@@ -2981,7 +2995,8 @@
         "app.backend.single-step-runs-migrate.pg",
         "app.backend.workflow-run-purge-migrate.pg",
         "app.admin.analytics.channels",
-        "app.admin.analytics.channels.pg"
+        "app.admin.analytics.channels.pg",
+        "app.platform-fee.revenue-origins.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
@@ -4195,7 +4210,8 @@
         "apps/reference-dapp/src/components/admin/finops-controls.tsx",
         "apps/reference-dapp/src/components/admin/finops-views.tsx",
         "apps/reference-dapp/src/components/admin/finops-copy.ts",
-        "apps/reference-dapp/src/components/admin/channel-counts.tsx"
+        "apps/reference-dapp/src/components/admin/channel-counts.tsx",
+        "apps/reference-dapp/src/components/admin/platform-fees.tsx"
       ],
       "suites": [
         "app.admin.analytics.workflows",
@@ -4205,7 +4221,8 @@
         "app.e2e.admin-login-layout",
         "app.e2e.admin-console",
         "app.components.admin.finops-views",
-        "app.admin.analytics.channels"
+        "app.admin.analytics.channels",
+        "app.platform-fee.revenue-origins.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -9312,7 +9329,8 @@
         "apps/reference-dapp/src/workflow-runs/run-step-phase.ts",
         "apps/reference-dapp/src/workflow-runs/user-funded-pass.ts",
         "apps/reference-dapp/src/workflow-runs/worker.ts",
-        "apps/reference-dapp/src/workflow-runs/testdata/evm-batch-plans.fed320e.json"
+        "apps/reference-dapp/src/workflow-runs/testdata/evm-batch-plans.fed320e.json",
+        "apps/reference-dapp/src/workflow-runs/execution-origins.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -9335,7 +9353,8 @@
         "app.editor.single-card-strategy",
         "app.engine.batch-payment",
         "app.workflow-runs.batch-payment-run.pg",
-        "app.workflow-runs.solana-batch-payment-run.pg"
+        "app.workflow-runs.solana-batch-payment-run.pg",
+        "app.platform-fee.revenue-origins.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -9631,6 +9650,37 @@
         "The Phantom/Solflare deeplink tests use a test wallet that speaks the documented protocol with real NaCl encryption on a MOCKED Solana flow; they do not certify the wallet apps, universal-link handling on iOS/Android, in-app browsers or a real signature on mainnet.",
         "Return to ChatGPT, Claude or Telegram after the wallet is a link on a FloFi transit page; whether each host app reopens the conversation needs live acceptance."
       ]
+    },
+    {
+      "id": "app--platform-fee",
+      "primary": "flofi-payments-billing",
+      "dependencies": [
+        "flofi-admin-analytics",
+        "flofi-bridge",
+        "flofi-data-privacy",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-transfer-payments",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/platform-fee/activation.ts",
+        "apps/reference-dapp/src/platform-fee/ledger.ts",
+        "apps/reference-dapp/src/platform-fee/policy.ts",
+        "apps/reference-dapp/src/platform-fee/principal.ts",
+        "packages/cloud-runtime/optional-migrations/0037_execution_origins_platform_fees.sql"
+      ],
+      "suites": [
+        "app.platform-fee.principal",
+        "app.platform-fee.revenue-origins.pg",
+        "cloud-runtime.certificate-0037.pg",
+        "app.server.universal-router.fee-obligation"
+      ],
+      "gaps": [
+        "Fee collection is not implemented: no treasury, approved accounting policy or collection rail exists (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001); the ledger records what completed workflow runs owe and collection stays fail-closed.",
+        "Single-flow executions without a workflow run are not accounted in the ledger; the universal bridge keeps its own per-run obligation record."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -9717,6 +9767,8 @@
     "app.channels.telegram.native-signing.pg",
     "app.admin.analytics.channels.pg",
     "app.workflow-runs.solana-batch-payment-run.pg",
-    "app.editor.editor-solana-batch-run.pg"
+    "app.editor.editor-solana-batch-run.pg",
+    "app.platform-fee.revenue-origins.pg",
+    "cloud-runtime.certificate-0037.pg"
   ]
 }

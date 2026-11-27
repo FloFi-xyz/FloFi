@@ -19,6 +19,7 @@ import { WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_REQUEST_REJECTED, WORKFLOW_RUN_ADV
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
 import { plannedGroupCode } from './owner-step-circle.ts';
 import type { TokenFeePaid } from '../user-funded/gas-payer.ts';
+import { revenueOriginsActive, type ExecutionOrigin } from './execution-origins.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
 /** How a bound step's amount was resolved (native units of `asset`). */
@@ -63,7 +64,9 @@ export type RunStepRecord = {
   readonly code: string | null; readonly version: number; readonly updatedAt: Date };
 export type RunEvent = { readonly stepIndex: number | null; readonly kind: string; readonly code: string | null; readonly detail: Readonly<Record<string, unknown>> | null; readonly at: Date };
 export type NewRun = { readonly runId: string; readonly handoffId: string; readonly requester: RequesterScope; readonly owner: WalletRef; readonly wallets: WalletSet;
-  readonly strategy: StrategyInput; readonly workflowHash: string; readonly engineVersion: string; readonly stepCount: number; readonly expiresAt: Date };
+  readonly strategy: StrategyInput; readonly workflowHash: string; readonly engineVersion: string; readonly stepCount: number; readonly expiresAt: Date;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the channel the run started from (its handoff's requester), recorded once with the run (0037). */
+  readonly origin?: ExecutionOrigin };
 export type RunPatch = { readonly currentStep?: number; readonly mode?: RunMode; readonly authorizationId?: string; readonly code?: string | null; readonly completedAt?: Date };
 export type StepPatch = { readonly flow?: string; readonly strategy?: StrategySpec; readonly workflowHash?: string; readonly bound?: BoundResolution;
   readonly claimedAt?: Date; readonly outcome?: StepOutcome; readonly code?: string | null };
@@ -151,6 +154,16 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         for (let i = 0; i < input.stepCount; i++) await tx.query(`INSERT INTO workflow_run_steps (tenant_id, run_id, step_index, state, created_at, updated_at)
           VALUES ($1, $2, $3, 'PENDING', $4, $4)`, [tenantId, input.runId, i, now]);
         await event(tx, input.runId, null, 'RUN_CREATED', null, { stepCount: input.stepCount, workflowHash: input.workflowHash });
+        // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the run's origin, in the creating transaction (0037 only). Its own savepoint: an origin that
+        // cannot be written never rolls the run back (attribution is analytics, never a precondition of an execution).
+        if (input.origin && await revenueOriginsActive(tx)) {
+          await tx.query('SAVEPOINT execution_origin');
+          try {
+            await tx.query(`INSERT INTO execution_origins (tenant_id, workflow_run_id, origin, basis, evidence) VALUES ($1, $2, $3, 'CREATION', 'APPROVAL_REQUESTER')
+              ON CONFLICT DO NOTHING`, [tenantId, input.runId, input.origin]);
+            await tx.query('RELEASE SAVEPOINT execution_origin');
+          } catch { await tx.query('ROLLBACK TO SAVEPOINT execution_origin'); }
+        }
       }
       return runOf((await tx.query('SELECT * FROM workflow_runs WHERE tenant_id = $1 AND handoff_id = $2', [tenantId, input.handoffId])).rows[0]!);
     }),

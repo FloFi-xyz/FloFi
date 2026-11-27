@@ -3,7 +3,7 @@
  * BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 (P0): the runtime-role privilege remediation of 0016_owner_history_purge
  * (`docs/deploy/SECURITY-0016-RUNTIME-PRIVILEGES.sql`) and its read-only verification (`.verify.sql`), each run here as its exact file, on
  * disposable loopback PostgreSQL that reproduces FloFi production's privilege model: a non-superuser MIGRATION role owns every object (it is the
- * database owner and applies the shipped migrations and the certified 0029–0036 itself), and a separate RUNTIME role receives table rights only
+ * database owner and applies the shipped migrations and the certified 0029–0037 itself), and a separate RUNTIME role receives table rights only
  * through that owner's `ALTER DEFAULT PRIVILEGES ... GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES` (sequences: USAGE, SELECT, UPDATE), the
  * explicit EXECUTE on `purge_unstarted_execution` and the 0033 runtime-role provisioning file; the owner also administers the runtime role, as
  * Neon's CREATEROLE grant does in production (read from production's catalog, read-only, on 2026-11-23).
@@ -61,7 +61,7 @@ afterEach(async () => {
   try { for (const role of extraRoles.splice(0)) await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined); } finally { await admin.close(); }
 });
 
-/** The certified chain FloFi production runs (shipped 0001–0028, then 0029–0036 from their SHA-256-pinned files), or the first `upTo` of it. */
+/** The certified chain FloFi production runs (shipped 0001–0028, then 0029–0037 from their SHA-256-pinned files), or the first `upTo` of it. */
 async function chain(upTo?: number): Promise<Migration[]> {
   const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
   const ahead = await Promise.all(certificate.migrations.map(async identity => {
@@ -230,7 +230,7 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
 
     // Before: production's privileges, as read from its catalog.
     const before = await verification(m);
-    expect(before.identity).toEqual([expect.objectContaining({ version: 16, name: 'owner_history_purge', sha256: SHA_0016, certified: true, ledger_head: 36 })]);
+    expect(before.identity).toEqual([expect.objectContaining({ version: 16, name: 'owner_history_purge', sha256: SHA_0016, certified: true, ledger_head: 37 })]);
     expect(before.role).toEqual([expect.objectContaining({ rolname: m.runtime, rolsuper: false, member_of: '' })]);
     expect(before.summary).toEqual({ runtime_reads_tombstones: true, runtime_writes_tombstones: true, runtime_touches_permits: true, runtime_column_writes: true,
       runtime_member_writes: false, runtime_creates_in_public: false, runtime_execute: true, public_execute: false, public_touches_tables: false });
