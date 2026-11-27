@@ -34,8 +34,11 @@
  */
 import { erc4337, eip5792, decompileMessageV0, decodeTokenAccount, fromBase64, isSolanaNativeFeeShortfall, koraCreatedAccounts, parseMessageV0, parseTransaction, readSolanaAccounts,
   simulateJupiterSwap, simulateKoraJupiterSwap, simulateKoraSolanaTransfer, simulateSolanaTransfer, verifySignedJupiterTransaction, verifySignedSolanaTransfer, KORA_MECHANISM,
-  KORA_TOKEN_PROGRAM, type JupiterHttp, type JupiterReview, type KoraGasTerms, type LookupTables, type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
-import { koraLamportRefund, recoverKoraTransaction } from '@defi-workflow-engine/reference-reconciler';
+  KORA_TOKEN_PROGRAM, type JupiterHttp, type JupiterReview, type KoraGasTerms, type LookupTables, type SolanaRpc, type SolanaTransferReview,
+  decodeSolanaBatchPaymentMessage, serializeTransaction, sha256Hex, simulateSolanaBatchPayment, solanaBatchPaymentManifestHash, solanaTransferProfile, toBase64,
+  verifySignedSolanaBatchPayment, SOLANA_BATCH_PAYMENT, type SolanaBatchPaymentReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { findLandedSolanaBatchPreparation, koraLamportRefund, reconcileSolanaBatchTransaction, recoverKoraTransaction } from '@defi-workflow-engine/reference-reconciler';
+import { isSolanaBatchPaymentNode, isSolanaTransferNode, readSolanaBatchPaymentNode, readSolanaTransferNode, type SolanaBatchPaymentFields } from '@defi-workflow-engine/workflow-contracts';
 import type { KoraGas } from '../gas-abstraction/kora/runtime.ts';
 import { createHash } from 'node:crypto';
 import type { BetaPrincipal } from '../flight/beta-access.ts';
@@ -107,10 +110,17 @@ export type Prepared = Readonly<Record<string, unknown>> & { readonly kind: Grou
  * (no new chain read): the owner's native balance, the fee ceiling and any native value the group sends, in wei. A read-only projection for the
  * blocker screen and the assistant's explanation; it authorizes nothing and is never an input to a later preparation.
  */
-export type NativeFeeShortfall = { readonly kind: 'NATIVE_FEE_SHORTFALL'; readonly chainId: string; readonly owner: string; readonly unit: 'wei';
+export type NativeFeeShortfall = { readonly kind: 'NATIVE_FEE_SHORTFALL'; readonly chainId: string; readonly owner: string;
+  /** EVM: wei. KAN-20, a Solana Batch Payment: lamports (`chainId` Solana mainnet). */
+  readonly unit: 'wei' | 'lamports';
   readonly balance: string; readonly maxFee: string; readonly nativeSpend: string; readonly required: string; readonly shortfall: string;
   /** ADR-0010: the token-paid alternative that was considered for this group and why it could not be used (closed codes); absent: none considered. */
-  readonly unavailable?: readonly MechanismUnavailable[] };
+  readonly unavailable?: readonly MechanismUnavailable[];
+  /**
+   * KAN-20 (Solana only): the worst-case token-account deposits included in `maxFee` (fee + deposits), and the owner's own rent-exempt reserve
+   * included in `required` (SOL sent + maxFee + reserve). Absent on EVM.
+   */
+  readonly deposits?: string; readonly reserve?: string };
 export type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly stepIndex?: number | null; readonly evidence?: NativeFeeShortfall };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const no = (code: string, stepIndex: number | null = null): Result<never> => ({ ok: false, code, stepIndex });
@@ -349,7 +359,7 @@ function preparedOperation(prepared: Prepared, signature = '0x'): { readonly op:
 }
 
 /** One reviewed Solana transaction of a group (what the owner signs and what FloFi verifies; never the whole Review artifact chain). */
-export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITER' | 'TRANSFER'; readonly owner: string; readonly message: string; readonly messageHash: string;
+export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITER' | 'TRANSFER' | 'BATCH_PAYMENT'; readonly owner: string; readonly message: string; readonly messageHash: string;
   readonly unsignedTransaction: string; readonly lookupTables: LookupTables; readonly lastValidBlockHeight: number; readonly estimatedFeeLamports: string;
   readonly spend: AssetAmountFact; readonly minimumOut: AssetAmountFact | null;
   /** The network fee plus the (refundable) account-creation deposits this transaction may charge the owner, in lamports. */
@@ -358,14 +368,132 @@ export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITE
   readonly gas?: KoraGasTerms;
   /** Kora transactions: the owner token account the step itself spends from (its fee account may be the same one). */
   readonly spendAccount?: string;
-  /** Kora transactions: the slot the Review read the chain at (a lost answer is searched for in the owner's history from there). */
-  readonly sinceSlot?: number };
+  /**
+   * Kora transactions: the slot the Review read the chain at (a lost answer is searched for in the owner's history from there). KAN-20, a Batch
+   * Payment transaction: the same slot, from which an earlier preparation's landing is searched for before the group is prepared again (C.4 H3).
+   */
+  readonly sinceSlot?: number;
+  /** KAN-20: a Batch Payment transaction's legs (one per payment, in manifest order; each its own run step). */
+  readonly legs?: readonly SolanaBatchLeg[];
+  /** KAN-20: a Batch Payment transaction's reviewed facts (the manifest hash binds chain, owner, asset and every payment in order). */
+  readonly batch?: SolanaBatchFacts };
+/**
+ * KAN-20: one payment of an atomic Solana Batch Payment transaction. `spend` is what its run step spends (the payment itself; a created token account's
+ * deposit is SOL the owner pays besides it, reconciled from the chain). `createDestination`: the recipient's token account is missing now and its
+ * `CreateIdempotent` creates it (`accountCreationLamports`); `maximumAccountCreationLamports` is the deposit if it must be created when it runs.
+ */
+export type SolanaBatchLeg = { readonly stepIndex: number; readonly recipient: string; readonly amount: string; readonly spend: AssetAmountFact;
+  readonly destinationAccount: string | null; readonly createDestination: boolean; readonly accountCreationLamports: string; readonly maximumAccountCreationLamports: string };
+export type SolanaBatchFacts = { readonly format: 'flofi.solana-batch-group.v1'; readonly chain: string; readonly batchStep: number; readonly batchWorkflowHash: string;
+  readonly manifestHash: string; readonly reviewCommitment: string; readonly asset: SolanaBatchPaymentReview['asset'];
+  /** The token the legs move (program, mint, decimals) and the ONE owner account that pays the whole total; null for SOL. */
+  readonly token: { readonly programId: string; readonly mint: string; readonly decimals: number; readonly sourceAccount: string } | null;
+  readonly total: string; readonly computeUnitLimit: number; readonly computeUnitPrice: string; readonly estimatedFeeLamports: string;
+  readonly accountCreationLamports: string; readonly maximumAccountCreationLamports: string; readonly maximumNetworkCostLamports: string; readonly requiredLamports: string;
+  readonly transactionBytes: number; readonly accountCount: number; readonly atomic: true };
+/**
+ * KAN-20 (surfaces read it): what the owner reads about a prepared Solana Batch Payment group — one atomic transaction, its asset and total, the
+ * network fee, the token-account deposits it charges now and at most, what the owner's SOL must cover, and its size. The Review's own shape.
+ */
+export type SolanaBatchGroupView = { readonly atomic: true; readonly asset: { readonly symbol: string; readonly decimals: number }; readonly total: string;
+  readonly estimatedFeeLamports: string; readonly accountCreationLamports: string; readonly maximumAccountCreationLamports: string; readonly maximumNetworkCostLamports: string;
+  readonly requiredLamports: string; readonly transactionBytes: number };
+const SOLANA_BATCH_GROUP_FORMAT = 'flofi.solana-batch-group.v1';
+/** KAN-20: whether a prepared group is a Solana Batch Payment: a sign-all group of exactly ONE transaction of kind BATCH_PAYMENT. */
+export const isSolanaBatchPrepared = (prepared: Readonly<Record<string, unknown>> | null | undefined): boolean => prepared?.kind === 'SOLANA_SIGN_ALL'
+  && Array.isArray(prepared.transactions) && prepared.transactions.length === 1 && (prepared.transactions[0] as Partial<SolanaGroupTx> | null)?.kind === 'BATCH_PAYMENT';
+/** KAN-20: the owner's view of a prepared Solana Batch Payment group, or null (any other group, or a malformed artifact). */
+export function solanaBatchView(prepared: Readonly<Record<string, unknown>> | null | undefined): SolanaBatchGroupView | null {
+  if (!isSolanaBatchPrepared(prepared)) return null;
+  const tx = (prepared!.transactions as readonly SolanaGroupTx[])[0]!, b = tx.batch;
+  if (!b || b.format !== SOLANA_BATCH_GROUP_FORMAT || b.atomic !== true) return null;
+  return { atomic: true, asset: { symbol: b.asset.symbol, decimals: b.asset.decimals }, total: b.total, estimatedFeeLamports: b.estimatedFeeLamports,
+    accountCreationLamports: b.accountCreationLamports, maximumAccountCreationLamports: b.maximumAccountCreationLamports, maximumNetworkCostLamports: b.maximumNetworkCostLamports,
+    requiredLamports: b.requiredLamports, transactionBytes: b.transactionBytes };
+}
+/**
+ * KAN-20: the composition's Solana Batch Payment this group is, exactly (its legs are the group), null when the group holds no batch leg, or INVALID
+ * when a batch overlaps the group without being exactly it (a batch is never prepared as separate transfers, nor merged with another step).
+ */
+function solanaBatchOf(composition: WorkflowComposition, g: Pick<GroupInput, 'stepFrom' | 'stepTo'>): NonNullable<WorkflowComposition['batches']>[number] | null | 'INVALID' {
+  const overlapping = (composition.batches ?? []).filter(b => b.from <= g.stepTo && g.stepFrom <= b.to);
+  if (!overlapping.length) return null;
+  const b = overlapping[0]!;
+  return overlapping.length === 1 && b.network === 'solana' && b.from === g.stepFrom && b.to === g.stepTo ? b : 'INVALID';
+}
+const BATCH_CHANGED = 'SOLANA_BATCH_PAYMENT_TRANSACTION_CHANGED';
+/**
+ * KAN-20: a stored Batch Payment transaction is exactly what was reviewed — the manifest re-derived from the STORED message with the closed decoder
+ * (`decodeSolanaBatchPaymentMessage`) equals its legs (recipient, amount, token account, order), its asset and owner, its compute budget, and its
+ * manifest hash; the message hash and unsigned bytes match. Throws SOLANA_BATCH_PAYMENT_TRANSACTION_CHANGED: a tampered artifact is never authorized.
+ */
+export function assertSolanaBatchArtifact(tx: SolanaGroupTx, owner: string): void {
+  const b = tx.batch, legs = tx.legs, profile = b ? solanaTransferProfile(b.chain) : null;
+  if (tx.kind !== 'BATCH_PAYMENT' || !b || b.format !== SOLANA_BATCH_GROUP_FORMAT || b.atomic !== true || !profile || !profile.realFunds || b.chain !== SOLANA_BATCH_PAYMENT.chain
+    || !Array.isArray(legs) || legs.length < SOLANA_BATCH_PAYMENT.minimumRecipients || legs.length > SOLANA_BATCH_PAYMENT.maximumRecipients
+    || tx.owner !== owner || b.computeUnitPrice !== profile.computeUnitPriceMicroLamports) throw new Error(BATCH_CHANGED);
+  const native = b.asset.mint === null;
+  if (native ? b.token !== null || b.asset.program !== 'native' || b.asset.decimals !== 9
+    : !b.token || b.token.mint !== b.asset.mint || b.token.decimals !== b.asset.decimals || b.token.programId !== (b.asset.program === 'token-2022' ? profile.programs.token2022 : profile.programs.token))
+    throw new Error(BATCH_CHANGED);
+  let message: Uint8Array;
+  try { message = fromBase64(tx.message); } catch { throw new Error(BATCH_CHANGED); }
+  if (sha256Hex(message) !== tx.messageHash || toBase64(serializeTransaction(null, message)) !== tx.unsignedTransaction) throw new Error(BATCH_CHANGED);
+  let decoded: ReturnType<typeof decodeSolanaBatchPaymentMessage>;
+  try { decoded = decodeSolanaBatchPaymentMessage(message, { owner, profile, token: b.token, computeUnitPrice: b.computeUnitPrice }); } catch { throw new Error(BATCH_CHANGED); }
+  const spendAsset = assetKey({ chain: b.chain, address: b.asset.mint ?? WSOL });
+  if (decoded.computeUnitLimit !== b.computeUnitLimit || decoded.payments.length !== legs.length || legs.some((leg, i) => leg.stepIndex !== tx.stepIndex + i
+    || leg.recipient !== decoded.payments[i]!.recipient || leg.amount !== decoded.payments[i]!.amount || leg.destinationAccount !== decoded.payments[i]!.destinationAccount
+    || leg.spend.asset !== spendAsset || leg.spend.amount !== leg.amount)) throw new Error(BATCH_CHANGED);
+  const total = legs.reduce((sum, leg) => sum + BigInt(leg.amount), 0n);
+  if (total.toString() !== b.total || tx.spend.asset !== spendAsset || tx.spend.amount !== b.total) throw new Error(BATCH_CHANGED);
+  const manifest = solanaBatchPaymentManifestHash({ chain: b.chain, owner, asset: { kind: native ? 'NATIVE' : 'SPL_TOKEN', mint: b.asset.mint, decimals: b.asset.decimals,
+    program: b.asset.program }, payments: legs.map(leg => ({ recipient: leg.recipient, amount: leg.amount })) });
+  if (manifest !== b.manifestHash) throw new Error(BATCH_CHANGED);
+}
+/** KAN-20: the signed bytes the owner's wallet returned for a Batch Payment transaction (exact, or with verified Lighthouse assertions only). */
+function verifiedBatchSignature(tx: SolanaGroupTx, owner: string, signed: unknown): { signature: string; transaction: string; walletGuard?: SolanaWalletGuard } {
+  assertSolanaBatchArtifact(tx, owner);
+  const verified = verifySignedSolanaBatchPayment({ message: tx.message, owner }, signed);
+  return { signature: verified.signature, transaction: verified.transaction, ...verified.walletGuard ? { walletGuard: verified.walletGuard } : {} };
+}
+/**
+ * KAN-20 (C.4, pure): before an AUTHORIZED Batch Payment group is submitted, the stored artifact is re-derived from its message and the recorded signed
+ * bytes are re-verified against it (owner signature, exact bytes or verified Lighthouse assertions, at most 1,232 bytes, the recorded signature).
+ * Null when it holds, else SOLANA_BATCH_PAYMENT_TRANSACTION_CHANGED: nothing is ever sent for an artifact that no longer matches what was reviewed.
+ */
+export function solanaBatchAuthorizationRefusal(prepared: Readonly<Record<string, unknown>>, authorization: Readonly<Record<string, unknown>>): string | null {
+  if (!isSolanaBatchPrepared(prepared)) return null;
+  const tx = (prepared.transactions as readonly SolanaGroupTx[])[0]!, signed = authorization.transactions as readonly { signature?: unknown; transaction?: unknown }[] | undefined;
+  if (!Array.isArray(signed) || signed.length !== 1 || typeof prepared.owner !== 'string') return BATCH_CHANGED;
+  try {
+    const again = verifiedBatchSignature(tx, prepared.owner, signed[0]!.transaction);
+    return again.signature === signed[0]!.signature && again.transaction === signed[0]!.transaction ? null : BATCH_CHANGED;
+  } catch { return BATCH_CHANGED; }
+}
+/**
+ * KAN-20 (core 4.4): whether a second answer for an already answered Batch Payment group signs the SAME message as the recorded one. Phantom's
+ * Lighthouse assertions differ per prompt, so a second prompt yields different valid bytes; only the first answer is ever recorded or sent.
+ */
+export function sameSolanaBatchAnswer(prepared: Prepared, authorization: Readonly<Record<string, unknown>>, answer: OwnerAnswer, owner: string): Result<boolean> {
+  if (answer.kind !== 'SOLANA_SIGN_ALL' || !isSolanaBatchPrepared(prepared)) return no('USER_FUNDED_AUTHORIZATION_KIND_MISMATCH');
+  if (!Array.isArray(answer.transactions) || answer.transactions.length !== 1) return no('SOLANA_SIGNED_COUNT_MISMATCH');
+  const tx = (prepared.transactions as readonly SolanaGroupTx[])[0]!;
+  const recorded = (authorization.transactions as readonly { transaction?: unknown }[] | undefined)?.[0]?.transaction;
+  let next: { transaction: string };
+  try { next = verifiedBatchSignature(tx, owner, answer.transactions[0]); } catch (cause) { return no(codeOf(cause, 'SOLANA_SIGNATURE_INVALID'), tx.stepIndex); }
+  const messageHash = (wire: unknown) => { try { return sha256Hex(parseTransaction(fromBase64(wire, 2048)).message); } catch { return null; } };
+  const before = messageHash(recorded);
+  return ok(before !== null && before === messageHash(next.transaction));
+}
 /**
  * ADR-0010 §2 per execution group: the native group exactly as before; only when a member failed for lack of SOL (and Kora is configured), every
  * member with the Kora fee payer — then only if the group's native worst case provably exceeds the owner's SOL, all members repay in ONE fee
  * token, and the owner's fee account covers every quoted fee plus the group's own spends from that account.
  */
 async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput): Promise<Result<Prepared>> {
+  // KAN-20: a Solana Batch Payment is native SOL only (its fee and every deposit in the owner's SOL): Pimlico's Kora is never tried for it.
+  if (solanaBatchOf(composition, g) !== null) return buildSolanaGroup(deps, composition, requirement, g, null);
   const native = await buildSolanaGroup(deps, composition, requirement, g, null);
   if (native.ok || !deps.kora || !deps.solana || !isSolanaNativeFeeShortfall(new Error(native.code))) return native;
   const kora = await buildSolanaGroup(deps, composition, requirement, g, deps.kora);
@@ -400,6 +528,9 @@ export async function koraGroupNativeCovers(deps: Pick<UserFundedDeps, 'solana'>
 }
 async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput, kora: KoraGas | null): Promise<Result<Prepared>> {
   if (!deps.solana) return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
+  const batch = solanaBatchOf(composition, g);
+  if (batch === 'INVALID') return no('SOLANA_BATCH_PAYMENT_GROUP_INVALID', g.stepFrom);
+  if (batch) return buildSolanaBatchGroup(deps, composition, g, batch, kora, deps.solana);
   const txs: SolanaGroupTx[] = [];
   for (let index = g.stepFrom; index <= g.stepTo; index++) {
     const step = requirement.steps[index]!;
@@ -442,6 +573,74 @@ async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowCompo
   const fee = txs.reduce((sum, x) => sum + BigInt(x.maximumNetworkCostLamports ?? x.estimatedFeeLamports), 0n);
   return ok({ kind: 'SOLANA_SIGN_ALL', owner: g.feePayer, transactions: txs, fee: { payer: g.feePayer, unit: 'lamports', maxCost: fee.toString(), estimated: true },
     lastValidBlockHeight: Math.min(...txs.map(x => x.lastValidBlockHeight)) });
+}
+
+/** A shortfall the batch compiler reported (`SolanaBatchPaymentShortfall`), as the shared native-fee evidence in lamports; null when malformed. */
+function solanaBatchShortfall(owner: string, cause: unknown): NativeFeeShortfall | null {
+  const c = cause && typeof cause === 'object' ? cause as Record<string, unknown> : null, units = /^(0|[1-9][0-9]{0,30})$/;
+  const keys = ['balance', 'maxFee', 'nativeSpend', 'required', 'shortfall', 'deposits', 'reserve'] as const;
+  if (!c || c.unit !== 'lamports' || keys.some(k => typeof c[k] !== 'string' || !units.test(c[k] as string))) return null;
+  return { kind: 'NATIVE_FEE_SHORTFALL', chainId: SOLANA_BATCH_PAYMENT.chain, owner, unit: 'lamports', balance: c.balance as string, maxFee: c.maxFee as string,
+    nativeSpend: c.nativeSpend as string, required: c.required as string, shortfall: c.shortfall as string, deposits: c.deposits as string, reserve: c.reserve as string };
+}
+/**
+ * KAN-20 (core 4.2): a Solana Batch Payment group is ONE atomic v0 transaction of every leg, simulated and reviewed by the batch compiler from the
+ * batch's own semantic workflow (its manifest). Every leg FloFi composed for the run (bound legs re-composed with their reconciled share) must be
+ * exactly that manifest's line — same recipient, amount and asset, in order — and a bound leg must spend exactly its amount from a producer before
+ * the group; anything else is refused before anything is simulated or handed to the wallet. Never Kora, never split, never re-amounted.
+ */
+async function buildSolanaBatchGroup(deps: UserFundedDeps, composition: WorkflowComposition, g: GroupInput, batch: NonNullable<WorkflowComposition['batches']>[number],
+  kora: KoraGas | null, rpc: SolanaRpc): Promise<Result<Prepared>> {
+  if (kora !== null) return no('SOLANA_BATCH_PAYMENT_KORA_UNSUPPORTED', g.stepFrom);
+  const node = batch.composition.workflow.nodes.find(n => isSolanaBatchPaymentNode(n));
+  if (!node || batch.composition.workflow.nodes.length !== 1) return no('SOLANA_BATCH_PAYMENT_GROUP_INVALID', g.stepFrom);
+  let fields: SolanaBatchPaymentFields;
+  try { fields = readSolanaBatchPaymentNode(node as Parameters<typeof readSolanaBatchPaymentNode>[0]); } catch { return no('SOLANA_BATCH_PAYMENT_GROUP_INVALID', g.stepFrom); }
+  if (fields.chain !== g.chain || fields.payments.length !== g.stepTo - g.stepFrom + 1) return no('SOLANA_BATCH_PAYMENT_LEG_MISMATCH', g.stepFrom);
+  for (const [i, line] of fields.payments.entries()) {
+    const index = g.stepFrom + i, nodes = composition.steps[index]?.workflow.nodes ?? [];
+    const leg = nodes.length === 1 && isSolanaTransferNode(nodes[0]!) ? (() => { try { return readSolanaTransferNode(nodes[0] as Parameters<typeof readSolanaTransferNode>[0]); } catch { return null; } })() : null;
+    const token = fields.asset.kind === 'SPL_TOKEN' ? fields.asset : null;
+    if (!leg || leg.chain !== fields.chain || leg.recipient !== line.recipient || leg.amount !== line.amount || (leg.token === null) !== (token === null)
+      || token && (leg.token!.mint !== token.mint || leg.token!.decimals !== token.decimals || leg.token!.program !== token.program)) return no('SOLANA_BATCH_PAYMENT_LEG_MISMATCH', index);
+  }
+  // A bound leg spends exactly its own amount (never less) from what a step BEFORE the batch delivered; FloFi resolved it from reconciled facts.
+  const unexact = composition.bindings.find(b => b.step >= g.stepFrom && b.step <= g.stepTo && (b.exact !== true || b.amountFrom >= g.stepFrom));
+  if (unexact) return no('SOLANA_BATCH_PAYMENT_BINDING_NOT_EXACT', unexact.step);
+  let review: SolanaBatchPaymentReview;
+  try {
+    review = await simulateSolanaBatchPayment(batch.composition.workflow as unknown as Parameters<typeof simulateSolanaBatchPayment>[0], g.feePayer, rpc, deps.now().getTime());
+  } catch (cause) {
+    const code = codeOf(cause, 'SIMULATION_FAILED'), detail = cause instanceof Error ? cause.cause as { recipient?: unknown } | undefined : undefined;
+    const stepIndex = Number.isSafeInteger(detail?.recipient) && (detail!.recipient as number) >= 0 && (detail!.recipient as number) < fields.payments.length
+      ? g.stepFrom + (detail!.recipient as number) : g.stepFrom;
+    const evidence = code === 'SOLANA_BATCH_PAYMENT_INSUFFICIENT_SOL' ? solanaBatchShortfall(g.feePayer, detail) : null;
+    return evidence ? { ok: false, code, stepIndex, evidence } : no(code, stepIndex);
+  }
+  // The reviewed manifest is the batch's, line for line (the simulation read it from the batch's own workflow).
+  if (review.payments.length !== fields.payments.length || review.payments.some((p, i) => p.recipient !== fields.payments[i]!.recipient || p.amount !== fields.payments[i]!.amount))
+    return no('SOLANA_BATCH_PAYMENT_LEG_MISMATCH', g.stepFrom);
+  const spendAsset = assetKey({ chain: g.chain, address: review.asset.mint ?? WSOL });
+  const legs: SolanaBatchLeg[] = review.payments.map((p, i) => ({ stepIndex: g.stepFrom + i, recipient: p.recipient, amount: p.amount, spend: { asset: spendAsset, amount: p.amount },
+    destinationAccount: p.destinationAccount, createDestination: p.createDestination, accountCreationLamports: p.accountCreationLamports,
+    maximumAccountCreationLamports: p.maximumAccountCreationLamports }));
+  const tx: SolanaGroupTx = { stepIndex: g.stepFrom, kind: 'BATCH_PAYMENT', owner: review.owner, message: review.message, messageHash: review.messageHash,
+    unsignedTransaction: review.unsignedTransaction, lookupTables: {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
+    spend: { asset: spendAsset, amount: review.total }, minimumOut: null, maximumNetworkCostLamports: review.maximumNetworkCostLamports,
+    // C.4 (H3): the slot the Review read the chain at; an earlier copy of this message cannot have landed before it.
+    sinceSlot: review.state.slot, legs,
+    batch: { format: SOLANA_BATCH_GROUP_FORMAT, chain: review.chain, batchStep: batch.step, batchWorkflowHash: batch.composition.workflowHash, manifestHash: review.manifestHash,
+      reviewCommitment: review.commitment, asset: review.asset, token: review.token ? { programId: review.token.programId, mint: review.token.mint, decimals: review.token.decimals,
+        sourceAccount: review.token.sourceAccount } : null, total: review.total, computeUnitLimit: review.computeUnitLimit, computeUnitPrice: review.computeUnitPrice,
+      estimatedFeeLamports: review.estimatedFeeLamports, accountCreationLamports: review.accountCreationLamports, maximumAccountCreationLamports: review.maximumAccountCreationLamports,
+      maximumNetworkCostLamports: review.maximumNetworkCostLamports, requiredLamports: review.requiredLamports, transactionBytes: review.transactionBytes,
+      accountCount: review.accountCount, atomic: true } };
+  // The artifact FloFi stores is checked exactly as it will be at authorization (a mismatch here is FloFi's own defect: refused, never stored).
+  try { assertSolanaBatchArtifact(tx, g.feePayer); } catch (cause) { return no(codeOf(cause, BATCH_CHANGED), g.stepFrom); }
+  // S1: the fee payer of the transaction (static key 0 of its message) is the owner, the only signer.
+  assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: parseMessageV0(fromBase64(tx.message)).staticKeys[0] ?? '', ownerWallet: g.feePayer });
+  return ok({ kind: 'SOLANA_SIGN_ALL', owner: g.feePayer, transactions: [tx], atomic: true,
+    fee: { payer: g.feePayer, unit: 'lamports', maxCost: review.maximumNetworkCostLamports, estimated: true }, lastValidBlockHeight: review.lastValidBlockHeight });
 }
 
 /** Builds what the owner signs for one group, from fresh chain facts. `guaranteed`: outputs fixed before this group (a bridge's signed minimum). */
@@ -497,9 +696,12 @@ export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: s
   }
   const txs = prepared.transactions as readonly SolanaGroupTx[];
   if (!Array.isArray(answer.transactions) || answer.transactions.length !== txs.length) return no('SOLANA_SIGNED_COUNT_MISMATCH');
-  const signed: { signature: string; transaction: string; kora?: true }[] = [];
+  const signed: { signature: string; transaction: string; kora?: true; walletGuard?: SolanaWalletGuard }[] = [];
   for (const [i, tx] of txs.entries()) {
     try {
+      // KAN-20: a Batch Payment transaction is authorized only while its stored artifact still decodes to exactly its reviewed manifest, and only with
+      // the owner's signature of exactly that message (or it plus verified Lighthouse assertions; the guard is kept as evidence).
+      if (tx.kind === 'BATCH_PAYMENT') { signed.push(verifiedBatchSignature(tx, owner, answer.transactions[i])); continue; }
       // ADR-0010: a Kora transaction needs Kora's empty slot 0, the owner's signature in slot 1 and the reviewed payment (K1 on the exact bytes).
       const review = { message: tx.message, owner, lookupTables: tx.lookupTables, ...tx.gas ? { gas: tx.gas } : {} };
       const verified = tx.kind === 'TRANSFER' ? verifySignedSolanaTransfer(review, answer.transactions[i]) : verifySignedJupiterTransaction(review as unknown as JupiterReview, answer.transactions[i]);
@@ -680,6 +882,46 @@ export async function solanaSendBudget(deps: UserFundedDeps, prepared: Prepared)
   if (!Number.isSafeInteger(height) || (height as number) < 0) return 'UNAVAILABLE';
   return Math.min(...last as number[]) - (height as number) < solanaSendBudgetBlocks(last.length) ? 'SHORT' : 'OK';
 }
+/**
+ * KAN-20 (C.4, H1 + H3): an UNSIGNED Batch Payment preparation past its validity may still land: FloFi never held its signed bytes, yet the owner's
+ * wallet may have signed it and broadcast it out of band. It is settled (prepared again, or the run stops) only once the chain decides:
+ *   LIVE        the finalized height has not passed its last valid block height: it can still land, nothing is decided
+ *   UNKNOWN     no RPC, an unreadable height or history: nothing is decided now
+ *   ABSENT      provably expired and no owner-signed copy landed in its window (a copy that landed and failed paid no recipient)
+ *   LANDED      an owner-signed copy landed and succeeded: preparing again would pay every recipient twice. Its `signature` (the public transaction
+ *               signature the owner's wallet sent) is returned so the blocked group keeps it as evidence; it is never logged
+ *   UNPROVABLE  it can never be decided (no Review slot recorded, more owner history in its window than a scan reads): fail closed
+ */
+export type SolanaBatchSettlement = { readonly outcome: 'LIVE' | 'UNKNOWN' | 'ABSENT' } | SolanaBatchEarlierRequestStop;
+/** The settlements that stop the group for good (it is never prepared again). */
+export type SolanaBatchEarlierRequestStop = { readonly outcome: 'UNPROVABLE' } | { readonly outcome: 'LANDED'; readonly signature: string };
+export async function settleExpiredSolanaBatch(deps: Pick<UserFundedDeps, 'solana'>, prepared: Readonly<Record<string, unknown>>): Promise<SolanaBatchSettlement> {
+  const rpc = deps.solana;
+  if (!rpc) return { outcome: 'UNKNOWN' };
+  const tx = isSolanaBatchPrepared(prepared) ? (prepared.transactions as readonly Partial<SolanaGroupTx>[])[0]! : null;
+  // FloFi's own frozen artifact without a provable window: never decided as absent.
+  if (!tx || !Number.isSafeInteger(tx.lastValidBlockHeight) || (tx.lastValidBlockHeight as number) < 0 || typeof tx.owner !== 'string' || typeof tx.message !== 'string')
+    return { outcome: 'UNPROVABLE' };
+  let finalized: unknown;
+  try { finalized = await rpc('getBlockHeight', [{ commitment: 'finalized' }]); } catch { return { outcome: 'UNKNOWN' }; }
+  if (!Number.isSafeInteger(finalized) || (finalized as number) < 0) return { outcome: 'UNKNOWN' };
+  if ((finalized as number) <= tx.lastValidBlockHeight!) return { outcome: 'LIVE' };
+  if (!Number.isSafeInteger(tx.sinceSlot) || (tx.sinceSlot as number) < 0) return { outcome: 'UNPROVABLE' };
+  const found = await findLandedSolanaBatchPreparation(rpc, { owner: tx.owner, message: tx.message, sinceSlot: tx.sinceSlot!, lastValidBlockHeight: tx.lastValidBlockHeight! });
+  if (found.state === 'FOUND') return found.failed ? { outcome: 'ABSENT' } : { outcome: 'LANDED', signature: found.signature };
+  return found.state === 'ABSENT' ? { outcome: 'ABSENT' } : found.state === 'UNKNOWN' ? { outcome: 'UNKNOWN' } : { outcome: 'UNPROVABLE' };
+}
+/**
+ * KAN-20 (C.4): what a Solana Batch Payment group blocked by an earlier request keeps in its outcome (never a reconciliation: no leg, no fee): the
+ * settlement and, for LANDED, the signature of the copy the owner's wallet sent. Survives End (cancellation rewrites the group's code, never its outcome).
+ */
+export const earlierSolanaBatchRequestOutcome = (settled: SolanaBatchEarlierRequestStop) =>
+  ({ earlierRequest: settled.outcome === 'LANDED' ? { settlement: 'LANDED', signature: settled.signature } : { settlement: 'UNPROVABLE' } }) as const;
+/** Whether a group's outcome records an earlier Solana Batch Payment request that landed, or can never be proven not to have (see above). */
+export const hasEarlierSolanaBatchRequest = (outcome: Readonly<Record<string, unknown>> | null): boolean => {
+  const settlement = (outcome?.earlierRequest as { settlement?: unknown } | undefined)?.settlement;
+  return settlement === 'LANDED' || settlement === 'UNPROVABLE';
+};
 async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<readonly SignatureStatus[]> {
   const r = await rpc('getSignatureStatuses', [signatures, { searchTransactionHistory: true }]) as { value?: readonly SignatureStatus[] };
   return r?.value ?? signatures.map(() => null);
@@ -914,6 +1156,8 @@ export async function reconcileSolanaGroup(deps: UserFundedDeps, prepared: Prepa
   const rpc = deps.solana;
   if (!rpc) return { status: 'PENDING' };
   const txs = prepared.transactions as readonly SolanaGroupTx[], signatures = submission.hashes as readonly (string | null)[];
+  // KAN-20: a Batch Payment's one transaction is reconciled as a whole (every leg exactly, or none).
+  if (txs.length === 1 && txs[0]!.kind === 'BATCH_PAYMENT' && signatures.length > 0) return reconcileSolanaBatchGroup(rpc, txs[0]!, signatures[0] ?? null, chain, owner);
   const steps: StepFacts[] = [];
   let fee = 0n, tokenFee = 0n;
   // ADR-0010: a Kora group's fee was fronted by the pinned Kora signer and repaid by the owner in one token (proven per transaction below).
@@ -945,6 +1189,32 @@ export async function reconcileSolanaGroup(deps: UserFundedDeps, prepared: Prepa
     steps.push({ stepIndex: expected.stepIndex, spent: deltas.spent, received: deltas.received });
   }
   return { status: 'RECONCILED', steps, gasPaid: paid(), transactions: sent(signatures.length) };
+}
+/**
+ * KAN-20 (core 4.2.7): the finalized Batch Payment transaction, read from the chain and reconciled by the pure batch reconciler. Not finalized yet:
+ * PENDING. Failed on chain: FAILED (the whole batch reverted; the owner paid the fee only, no leg settled). Landed but not exactly the reviewed batch,
+ * or its balances moved otherwise: UNMATCHED (funds may have moved; never FAILED, never resent). Matched: one fact per leg — the payment, and the
+ * deposit of a token account this transaction created (SOL) — whose sum is the owner's whole delta besides the fee.
+ */
+async function reconcileSolanaBatchGroup(rpc: SolanaRpc, tx: SolanaGroupTx, signature: string | null, chain: string, owner: string): Promise<Reconciled> {
+  if (!signature) return { status: 'PENDING' };
+  const b = tx.batch, legs = tx.legs ?? [];
+  if (!b) throw new Error('SOLANA_GROUP_SUBMISSION_INVALID');
+  const landed = await rpc('getTransaction', [signature, { encoding: 'base64', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]);
+  if (landed === null || landed === undefined) return { status: 'PENDING' };
+  // Malformed RPC data throws SOLANA_RPC_INVALID: an RPC problem, never a chain fact (the pass observes the group again).
+  const observed = reconcileSolanaBatchTransaction({ chain: b.chain, owner, reviewedMessage: tx.message, estimatedFeeLamports: tx.estimatedFeeLamports,
+    asset: { mint: b.asset.mint, decimals: b.asset.decimals, programId: b.token?.programId ?? null }, sourceAccount: b.token?.sourceAccount ?? null,
+    payments: legs.map(leg => ({ stepIndex: leg.stepIndex, recipient: leg.recipient, amount: leg.amount, destinationAccount: leg.destinationAccount,
+      maximumAccountCreationLamports: leg.maximumAccountCreationLamports })) }, signature, landed);
+  const gasPaid: GasPaidFact = { payer: owner, amount: observed.fee.toString(), unit: 'lamports', source: 'SOLANA_META' };
+  if (observed.verdict === 'FAILED') return { status: 'FAILED', code: 'SOLANA_TRANSACTION_FAILED', gasPaid, transactions: [signature], steps: [] };
+  if (observed.verdict === 'DIVERGENT' || observed.legs.length !== legs.length || observed.legs.some((l, i) => l.stepIndex !== legs[i]!.stepIndex || l.amount !== legs[i]!.amount))
+    return { status: 'UNMATCHED', code: observed.code ?? 'SOLANA_BATCH_PAYMENT_TRANSACTION_MISMATCH', gasPaid: null, transactions: [signature] };
+  const wsol = assetKey({ chain, address: WSOL });
+  const steps: StepFacts[] = observed.legs.map((l, i) => ({ stepIndex: l.stepIndex, received: [], spent: [{ asset: legs[i]!.spend.asset, amount: l.received },
+    ...BigInt(l.accountCreationLamports) > 0n ? [{ asset: wsol, amount: l.accountCreationLamports }] : []] }));
+  return { status: 'RECONCILED', steps, gasPaid, transactions: [signature] };
 }
 /** The mismatches that mean "these transactions are not THIS preparation's calls" (they may be an earlier preparation's, under the same id). */
 const SUPERSEDED_MISMATCH: ReadonlySet<string> = new Set(['RECONCILIATION_CALLS_MISMATCH', 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION']);

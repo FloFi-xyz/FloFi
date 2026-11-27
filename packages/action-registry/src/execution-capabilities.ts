@@ -48,7 +48,7 @@ const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
   'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'orca.whirlpools-mainnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
   'flofi.router': '1.0.0', 'flofi.router.universal': '1.0.0', 'evm.token-transfer': '1.0.0', 'solana.system-transfer': '1.0.0', 'solana.spl-transfer': '1.0.0',
-  'evm.batch-payment': '1.0.0',
+  'evm.batch-payment': '1.0.0', 'solana.batch-payment': '1.0.0',
 });
 const rows: ExecutionCapabilityProfile[] = [];
 function add(actionType: string, adapterId: string, chainId: string, environment: ExecutionEnvironment,
@@ -148,9 +148,13 @@ for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['ass
 // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: Batch Payment (one source wallet, one asset, several recipients) on the four EVM mainnets with a
 // transfer profile that pays explicit recipients. Executed only as ONE atomic owner-wallet authorization of its transfer legs (EIP-5792 atomic batch
 // or the owner's own smart-account operation), on deployments that enable user-funded execution for the chain; none is demonstrated on mainnet, so no
-// evidence ceiling is claimed. Solana has no atomic multi-recipient path in this build and no row.
+// evidence ceiling is claimed. Solana has its own atomic adapter below.
 for (const chain of ['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1'] as const)
   add('asset.transfer.batch', 'evm.batch-payment', chain, 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// KAN-20 (BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 WS02): Batch Payment on Solana mainnet-beta (SOL, USDC, USDT), executed as ONE atomic
+// owner-signed v0 transaction of System / SPL transfer legs (solana-batch-payment.ts). Mainnet only: no Devnet row. Owner execution is implemented;
+// none is demonstrated, so no evidence ceiling is claimed.
+add('asset.transfer.batch', 'solana.batch-payment', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH ⇄ WETH9 conversions (deposit / withdraw on each network's verified WETH9, exactly 1:1) on the
 // four catalog mainnets, in the same owner-wallet swap runtime; native-ETH pool swaps stay `uniswap.v3`. None is demonstrated on mainnet.
 for (const chain of ['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1'] as const)

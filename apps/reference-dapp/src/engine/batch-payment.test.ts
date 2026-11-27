@@ -14,7 +14,7 @@ import { authorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { exactBoundAmount } from './workflow-bindings';
 import { composeWorkflow, workflowSequenceHash, type WorkflowComposition } from './strategy-engine';
-import { isStrategyInput } from './strategy-spec';
+import { isStrategyInput, strategyInputIssues, strategyRequiredFields, strategySpecIssues } from './strategy-spec';
 import { toChecksumAddress } from '@defi-workflow-engine/action-registry';
 import { checkBatchPaymentDraft } from '../domain/batch-payment-authoring';
 
@@ -108,6 +108,90 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment composit
     const over = composeWorkflow({ version: 2, steps: [SWAP, { ...BATCH, recipients: eight }] });
     expect(over.ok ? 'OK' : over.code).toBe('BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET');
     expect(compose({ version: 2, steps: [SWAP, { ...BATCH, recipients: eight.slice(0, 7) }] }).steps).toHaveLength(8);
+  });
+});
+
+/**
+ * KAN-20 (WS02 surfaces 9.1): a Solana mainnet Batch Payment through the same engine. Recipients are base58 wallet keys kept VERBATIM (letter case is
+ * part of the key: never lower-cased), each leg is exactly the verified single Solana transfer of that recipient and amount, and the batch node's
+ * MAXIMUM_INPUT is the exact integer total. A, B and C are seed-derived keys on the Ed25519 curve; A_CASE is another on-curve spelling of A.
+ */
+describe('KAN-20 Solana Batch Payment composition', () => {
+  const SA = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', SB = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty', SC = '8WcnkMD1aZFGDppfnerV37Fob9W1ij3yHkCL3LWgVKiG';
+  const A_CASE = '2CErLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', A_OFF = '2cERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb';
+  const SOL_BATCH = { action: 'batch_payment', network: 'solana', asset: 'SOL',
+    recipients: [{ recipient: SA, amount: '0.01' }, { recipient: SB, amount: '0.02' }, { recipient: SC, amount: '0.03' }] };
+  const refusal = (input: unknown) => { const w = composeWorkflow(input); return w.ok ? 'OK' : w.code; };
+  const constraintAmount = (node: { readonly userConstraints: readonly unknown[] }) => (node.userConstraints[0] as { quantity: { amount: string } }).quantity.amount;
+  it('"Send 0.01 SOL to A, 0.02 SOL to B and 0.03 SOL to C" is ONE operation: three verbatim legs, exact lamports, the batch total 60000000', () => {
+    const w = compose(SOL_BATCH);
+    expect(w.strategy).toEqual({ version: 2, steps: [{ version: 1, action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: SOL_BATCH.recipients }] });
+    expect(w.steps.map(c => [c.strategy.action, 'network' in c.strategy ? c.strategy.network : null, 'recipient' in c.strategy ? c.strategy.recipient : null]))
+      .toEqual([['transfer', 'solana', SA], ['transfer', 'solana', SB], ['transfer', 'solana', SC]]);
+    expect(w.steps.map(c => constraintAmount(c.workflow.nodes.find(n => n.actionType === 'asset.transfer')!))).toEqual(['10000000', '20000000', '30000000']);
+    const [batch] = w.batches!;
+    expect(batch).toMatchObject({ step: 0, from: 0, to: 2, network: 'solana', asset: 'SOL', recipients: 3 });
+    const node = batch!.composition.workflow.nodes.find(n => n.actionType === 'asset.transfer.batch')!;
+    expect(node.adapterConstraints.adapters.map(a => a.id)).toEqual(['solana.batch-payment']);
+    expect(node.userConstraints[0]).toMatchObject({ kind: 'MAXIMUM_INPUT', quantity: { amount: '60000000' } });
+    expect(w.workflowHash).toBe(workflowSequenceHash(w.steps.map(c => c.workflowHash), [], [{ step: 0, from: 0, to: 2, workflowHash: batch!.composition.workflowHash }]));
+    expect(compose(w.strategy).workflowHash).toBe(w.workflowHash);
+    // Each leg is exactly the single Solana transfer of that payment (the reviewed transfer declaration, recipient verbatim).
+    const single = compose({ action: 'transfer', network: 'solana', asset: 'SOL', amount: '0.01', recipient: SA });
+    expect(w.steps[0]!.workflowHash).toBe(single.workflowHash);
+    expect(w.notes.join(' ')).toMatch(/runs only as ONE Solana transaction signed by your own wallet \(every payment settles, or none does\)/);
+  });
+  it('keeps letter case: A and a case variant of A are two recipients, an exact repeat is refused, an off-curve spelling is never corrected', () => {
+    const w = compose({ ...SOL_BATCH, recipients: [{ recipient: SA, amount: '1' }, { recipient: A_CASE, amount: '2' }] });
+    expect(w.steps.map(c => 'recipient' in c.strategy ? c.strategy.recipient : null)).toEqual([SA, A_CASE]);
+    expect(refusal({ ...SOL_BATCH, recipients: [{ recipient: SA, amount: '1' }, { recipient: SA, amount: '2' }] })).toBe('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
+    expect(refusal({ ...SOL_BATCH, recipients: [{ recipient: A_OFF, amount: '1' }, { recipient: SB, amount: '2' }] })).toBe('BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID');
+    // A program or the asset's own mint is never a payee (both ARE curve points).
+    expect(refusal({ ...SOL_BATCH, recipients: [{ recipient: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', amount: '1' }, { recipient: SB, amount: '2' }] }))
+      .toBe('BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED');
+    expect(refusal({ ...SOL_BATCH, asset: 'USDC', recipients: [{ recipient: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', amount: '1' }, { recipient: SB, amount: '2' }] }))
+      .toBe('BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED');
+    expect(refusal({ ...SOL_BATCH, asset: 'USDC', recipients: [{ recipient: SA, amount: '1.0000001' }, { recipient: SB, amount: '2' }] })).toBe('BATCH_PAYMENT_AMOUNT_TOO_PRECISE');
+    // Every recipient, amount or order change is a new workflow hash.
+    const base = compose(SOL_BATCH).workflowHash, r = SOL_BATCH.recipients;
+    for (const changed of [{ ...SOL_BATCH, recipients: [r[1], r[0], r[2]] }, { ...SOL_BATCH, recipients: [r[0], r[1], { ...r[2]!, amount: '0.030000001' }] },
+      { ...SOL_BATCH, recipients: [{ ...r[0]!, recipient: A_CASE }, r[1], r[2]] }, { ...SOL_BATCH, asset: 'USDC' }])
+      expect(compose(changed).workflowHash).not.toBe(base);
+  });
+  it('the schema refuses Devnet, any asset other than SOL, USDC and USDT, a mint, and base58 recipients on an EVM network (the EVM branch is unchanged)', () => {
+    expect(refusal({ ...SOL_BATCH, network: 'solana-devnet' })).toBe('STRATEGY_SCHEMA_INVALID');
+    for (const asset of ['BONK', 'devUSDC', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'usdc', 'ETH'])
+      expect(refusal({ ...SOL_BATCH, asset }), asset).toBe('STRATEGY_SCHEMA_INVALID');
+    expect(refusal({ ...SOL_BATCH, network: 'base', asset: 'USDC' })).toBe('STRATEGY_SCHEMA_INVALID');
+    expect(isStrategyInput({ ...SOL_BATCH, recipients: [SOL_BATCH.recipients[0]] })).toBe(false);
+  });
+  // An invalid batch is reported against the one member its network names: an EVM batch with exactly its fed320e issues (never the Solana member's network
+  // const, base58 pattern or the union's anyOf), a Solana batch with only the Solana member's own.
+  it('schema issues: an EVM batch keeps exactly its own (pre-KAN-20) issues; a Solana batch reports only the Solana member\'s', () => {
+    const evm = { action: 'batch_payment', network: 'base', asset: 'USDC', recipients: [{ recipient: A, amount: '1' }, { recipient: B, amount: '2' }] };
+    const nine = Array.from({ length: 9 }, (_, i) => ({ recipient: '0x' + (i + 1).toString(16).padStart(2, '0').repeat(20), amount: '1' }));
+    for (const [input, issues] of [
+      [{ ...evm, recipients: [evm.recipients[0]] }, [{ path: '/recipients', rule: 'minItems' }]],
+      [{ ...evm, recipients: [{ recipient: 'nope', amount: '1' }, evm.recipients[1]] }, [{ path: '/recipients/0/recipient', rule: 'minLength' }, { path: '/recipients/0/recipient', rule: 'pattern' }]],
+      [{ ...evm, network: 'ethereum', asset: 'ETH', memo: 'x' }, [{ path: '/memo', rule: 'additionalProperties' }]],
+      [{ ...evm, network: 'polygon' }, [{ path: '/network', rule: 'const' }, { path: '/network', rule: 'anyOf' }]],
+      [{ action: 'batch_payment', asset: 'USDC', recipients: evm.recipients }, [{ path: '/network', rule: 'required' }]],
+      [{ ...evm, recipients: nine }, [{ path: '/recipients', rule: 'maxItems' }]],
+      [{ version: 2, steps: [{ ...evm, recipients: [evm.recipients[0]] }] }, [{ path: '/steps/0/recipients', rule: 'minItems' }]],
+      // A Solana batch: only the Solana member (never the EVM network enum or the 0x recipient length and pattern).
+      [{ ...SOL_BATCH, asset: 'BONK' }, [{ path: '/asset', rule: 'const' }, { path: '/asset', rule: 'anyOf' }]],
+      [{ ...SOL_BATCH, recipients: [SOL_BATCH.recipients[0]] }, [{ path: '/recipients', rule: 'minItems' }]],
+    ] as const) {
+      expect(strategyInputIssues(input), JSON.stringify(input)).toEqual(issues);
+      if (!('steps' in input)) expect(strategySpecIssues(input), JSON.stringify(input)).toEqual(issues);
+    }
+    expect(strategyInputIssues(SOL_BATCH)).toEqual([]);
+    expect(strategyInputIssues(evm)).toEqual([]);
+  });
+  it('the Capability API\'s required parameters of a Batch Payment are what both of its schema branches require (unchanged)', () => {
+    expect(strategyRequiredFields('batch_payment')).toEqual(['network', 'asset', 'recipients']);
+    // A one-object branch is read as before.
+    expect(strategyRequiredFields('transfer')).toEqual(['network', 'asset', 'amount']);
   });
 });
 

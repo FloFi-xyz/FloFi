@@ -76,6 +76,47 @@ const portuguese: Readonly<Record<string, string>> = {
   "Completed & reconciled": "Concluídos e conciliados",
   "Failed (confirmed)": "Falhas confirmadas",
   "{0} distinct workflows": "{0} fluxos distintos",
+  // BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): completed executions by channel.
+  "Completed executions by channel": "Execuções concluídas por canal",
+  "Today": "Hoje",
+  "All time": "Todo o período",
+  "Mainnet": "Mainnet",
+  "Channel": "Canal",
+  "Completed executions": "Execuções concluídas",
+  "Total": "Total",
+  "FloFi Web": "FloFi Web",
+  "ChatGPT MCP": "ChatGPT MCP",
+  "Claude MCP": "Claude MCP",
+  "Telegram": "Telegram",
+  "Developer API": "API para desenvolvedores",
+  "Unidentified MCP client": "Cliente MCP não identificado",
+  "Unknown origin": "Origem desconhecida",
+  "No completed executions in this period.": "Nenhuma execução concluída neste período.",
+  "Completed execution counts are unavailable.": "As contagens de execuções concluídas estão indisponíveis.",
+  "The requested period was not recognized, so the last 30 days are shown.": "O período solicitado não foi reconhecido; são exibidos os últimos 30 dias.",
+  "Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; simulations, quotes, approval requests, retries and individual steps are never counted.":
+    "Cada contagem é uma execução única de fluxo concluída e conciliada. Um Pagamento em lote conta uma vez, qualquer que seja o número de destinatários; simulações, cotações, pedidos de aprovação, novas tentativas e etapas individuais nunca são contados.",
+  "An execution belongs to the period it started in.": "Cada execução pertence ao período em que foi iniciada.",
+  "FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor: no record says which of the two started a run.":
+    "FloFi Web conta as execuções de fluxos iniciadas no Editor e reúne o Chat na web e o Editor: nenhum registro indica qual dos dois iniciou a execução.",
+  "One-step runs started directly in the app have no origin record and are shown as Unknown origin.":
+    "Execuções de uma etapa iniciadas diretamente no app não têm registro de origem e aparecem como Origem desconhecida.",
+  "A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.":
+    "Uma execução de uma etapa iniciada a partir de uma aprovação mantém seu canal somente enquanto existir o registro dessa execução na aprovação: uma aprovação registra no máximo 16 execuções, e aprovações podem ser removidas pela retenção. Caso contrário, ela aparece como Origem desconhecida.",
+  "Executions without a recorded origin, including earlier history, are shown as Unknown origin.":
+    "Execuções sem origem registrada, inclusive o histórico anterior, aparecem como Origem desconhecida.",
+  "Executions from other channels, such as WhatsApp, are shown as Unknown origin.":
+    "Execuções de outros canais, como o WhatsApp, aparecem como Origem desconhecida.",
+  "{0} completed executions requested by automation rules are not attributed to a channel.":
+    "{0} execuções concluídas solicitadas por regras de automação não são atribuídas a um canal.",
+  "{0} completed executions have no recognized environment and are not counted.":
+    "{0} execuções concluídas não têm ambiente reconhecido e não são contadas.",
+  "This period holds more runs than one view reads: single-flow executions are counted only from {0} on, so every figure is a lower bound.":
+    "Este período tem mais execuções do que uma consulta lê: execuções de fluxo único são contadas somente a partir de {0}, portanto cada número é um limite inferior.",
+  "Not every group of completed workflow runs could be read at once, so every figure is a lower bound.":
+    "Nem todos os grupos de execuções de fluxos concluídas puderam ser lidos de uma vez, portanto cada número é um limite inferior.",
+  "{0} composition executions are not indexed yet: until they are, their step runs may be counted as separate executions.":
+    "{0} execuções de composição ainda não foram indexadas: até lá, suas etapas podem ser contadas como execuções separadas.",
   "Execution metrics and trends": "Métricas e tendências de execução",
   "Expenses & invoices": "Despesas e faturas",
   "Invoice and CSV import": "Registro de faturas e importação CSV",

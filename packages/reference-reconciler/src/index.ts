@@ -24,6 +24,8 @@ export * from './supply.js';
 export * from './jupiter.js';
 export * from './kora.js';
 export * from './solana-transfer.js';
+// KAN-20: pure reconciliation of one atomic Solana Batch Payment transaction.
+export * from './solana-batch-payment.js';
 export * from './borrow.js';
 
 export * from './repay.js';

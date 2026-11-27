@@ -59,7 +59,8 @@ describe('the Batch Payment `pay` grammar', () => {
   });
   it('chat review C3: a pay list on a network Batch Payment does not pay is its own closed refusal, never the generic help', () => {
     const SOL_A = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', SOL_B = 'DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy';
-    for (const text of [`batch pay 1 SOL to ${SOL_A} and 2 SOL to ${SOL_B} on Solana`, `pay 1 SOL to ${SOL_A}, 2 SOL to ${SOL_B} on Solana Devnet`,
+    // KAN-20: Solana mainnet is a Batch Payment network now ("… on Solana" is a positive case below); Solana Devnet is still refused.
+    for (const text of [`pay 1 SOL to ${SOL_A}, 2 SOL to ${SOL_B} on Solana Devnet`,
       `pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Base Sepolia`, `batch pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on ethereum sepolia`,
       `pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Arbitrum Sepolia`, `pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Robinhood Chain Testnet`,
       `pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on Optimism`]) expect(refusal(text), text).toBe('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
@@ -79,5 +80,64 @@ describe('the Batch Payment `pay` grammar', () => {
     expect(pay('pay 0.5 SOL to 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU on Solana')).toMatchObject({ type: 'ADD_RH_TRANSFER', input: { network: 'Solana', asset: 'SOL' } });
     // A valid pay list on a Batch Payment network is still ONE Batch Payment.
     expect(pay(`pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on Arbitrum One`)).toMatchObject({ type: 'ADD_BATCH_PAYMENT', input: { network: 'Arbitrum One', asset: 'USDC' } });
+  });
+});
+
+/**
+ * BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-20, WS02 surfaces 4.1): the exact Solana pay list. Every recipient reaches the authoring exactly as
+ * typed (base58 is case-sensitive: never lower-cased, never corrected), one asset (SOL, USDC or USDT), 2..8 payments, mainnet only. A, B and C are
+ * seed-derived wallet keys on the Ed25519 curve; A_CASE is a different, also on-curve spelling of A; A_OFF is another spelling that is off the curve.
+ */
+describe('KAN-20: the Solana Batch Payment pay list', () => {
+  const OWNER = '0x1111111111111111111111111111111111111111';
+  const A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', B = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty', C = '8WcnkMD1aZFGDppfnerV37Fob9W1ij3yHkCL3LWgVKiG';
+  const A_CASE = '2CErLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', A_OFF = '2cERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb';
+  const pay = (text: string) => parseLocalCommand(text, initialEditor().workflow, BASE_CONTEXT, OWNER);
+  const refusal = (text: string) => { try { pay(text); return 'PARSED'; } catch (cause) { return (cause as Error).message; } };
+  const batch = (asset: string, payments: readonly (readonly [string, string])[]) => ({ type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0,
+    input: { network: 'Solana', asset, payments: payments.map(([recipient, amount]) => ({ recipient, amount })) } });
+  it('the owner\'s acceptance example is ONE Batch Payment: three recipients verbatim, in order, total 0.06 SOL', () => {
+    const command = pay(`Send 0.01 SOL to ${A}, 0.02 SOL to ${B} and 0.03 SOL to ${C}`);
+    expect(command).toEqual(batch('SOL', [[A, '0.01'], [B, '0.02'], [C, '0.03']]));
+    expect(commandIsValid(command)).toBe(true);
+    const node = editorReducer(initialEditor(), command, BASE_CONTEXT).workflow.nodes.at(-1)!;
+    const details = batchPaymentDetails(node as Parameters<typeof batchPaymentDetails>[0])!;
+    expect(details).toMatchObject({ network: 'Solana', asset: 'SOL', total: '0.06', payments: [{ recipient: A, amount: '0.01' }, { recipient: B, amount: '0.02' }, { recipient: C, amount: '0.03' }] });
+    expect(details.fields.payments.map(p => p.amount)).toEqual(['10000000', '20000000', '30000000']);
+    expect(node.adapterConstraints.adapters.map(a => a.id)).toEqual(['solana.batch-payment']);
+  });
+  it('accepts the Solana sentences of the surfaces spec (USDC, Portuguese, "on Solana", case variants as two keys)', () => {
+    expect(pay(`pay 1 USDC to ${A} and 2 USDC to ${B} on Solana`)).toEqual(batch('USDC', [[A, '1'], [B, '2']]));
+    expect(pay(`envie 0.5 SOL para ${A} e 0.25 SOL para ${B} na Solana`)).toEqual(batch('SOL', [[A, '0.5'], [B, '0.25']]));
+    expect(pay(`batch pay 1 SOL to ${A} and 2 SOL to ${B} on Solana`)).toEqual(batch('SOL', [[A, '1'], [B, '2']]));
+    // Two spellings that differ only in letter case are two different wallets (both on the curve): never merged.
+    expect(pay(`pay 1 SOL to ${A} and 2 SOL to ${A_CASE}`)).toEqual(batch('SOL', [[A, '1'], [A_CASE, '2']]));
+    // A single Solana send keeps its own grammar.
+    expect(pay(`send 0.5 SOL to ${A}`)).toMatchObject({ type: 'ADD_RH_TRANSFER', input: { network: 'Solana', asset: 'SOL', amount: '0.5', recipient: A } });
+  });
+  it('refuses every other Solana pay list with its own closed code, never rounding, correcting or resolving anything', () => {
+    for (const [text, code] of [
+      [`pay 1 SOL to ${A} and 2 USDC to ${B}`, 'BATCH_PAYMENT_ASSET_MIXED'],
+      [`pay 1 SOL to ${A} and 2 SOL to ${A}`, 'BATCH_PAYMENT_DUPLICATE_RECIPIENT'],
+      [`pay 1 SOL to ${A_OFF} and 2 SOL to ${B}`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID'],
+      [`pay 1 SOL to TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA and 2 SOL to ${B}`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED'],
+      [`pay 1 USDC to EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v and 2 USDC to ${B}`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED'],
+      [`pay 1.0000001 USDC to ${A} and 2 USDC to ${B} on Solana`, 'BATCH_PAYMENT_AMOUNT_TOO_PRECISE'],
+      [`pay 1 SOL to ${A}, 2 SOL to ${B} on Solana Devnet`, 'BATCH_PAYMENT_NETWORK_UNSUPPORTED'],
+      [`pay 1 SOL to my wallet and 2 SOL to ${B} on Solana`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID'],
+      // A mistyped letter that is not base58 (`l`) is refused, never corrected to a nearby key.
+      [`pay 1 SOL to ${A.slice(0, -1)}l and 2 SOL to ${B}`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID'],
+      // 0x addresses are not Solana addresses.
+      [`pay 1 USDC to 0x${'a1'.repeat(20)} and 2 USDC to 0x${'b2'.repeat(20)} on Solana`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID'],
+      // Only SOL, USDC and USDT of the verified registry: never another token, never a mint.
+      [`pay 1 BONK to ${A} and 2 BONK to ${B} on Solana`, 'BATCH_PAYMENT_ASSET_UNSUPPORTED'],
+      [`pay ${Array.from({ length: 9 }, (_, i) => `${i + 1} SOL to ${[A, B, C, A_CASE][i % 4]}`).join(', ')}`, 'BATCH_PAYMENT_TOO_MANY_RECIPIENTS'],
+    ] as const) expect(refusal(text), text).toBe(code);
+  });
+  it('placeholders are never an address: "wallet A" is not this grammar (the Copilot asks for each address), and EVM pay lists are unchanged', () => {
+    expect(refusal('Send 0.01 SOL to wallet A, 0.02 SOL to wallet B and 0.03 SOL to wallet C')).toMatch(/^Try /);
+    const LOWER = '0x3333333333333333333333333333333333333333', OTHER = '0x4444444444444444444444444444444444444444';
+    expect(pay(`pay 1 USDC to ${LOWER} and 2 USDC to ${OTHER} on Base`)).toEqual({ type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0,
+      input: { network: 'Base', asset: 'USDC', payments: [{ recipient: LOWER, amount: '1' }, { recipient: OTHER, amount: '2' }] } });
   });
 });

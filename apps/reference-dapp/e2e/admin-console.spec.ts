@@ -112,6 +112,13 @@ test('admin console: refusal until granted, overview with network distribution, 
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Executed workflows' }).locator('strong')).toHaveText('3');
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Completed & reconciled' }).locator('strong')).toHaveText('1');
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Failed (confirmed)' }).locator('strong')).toHaveText('1');
+    // BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): the one completed execution, by channel. No record names its origin, so it is
+    // Unknown origin, never guessed (never FloFi Web by time or by the absence of a record).
+    const channels = page.getByRole('region', { name: 'Completed executions by channel' });
+    await expect(channels.getByRole('navigation', { name: 'Period' }).getByRole('link', { name: 'Last 30 days' })).toHaveAttribute('aria-current', 'true');
+    await expect(channels.getByRole('row', { name: /^Unknown origin/ }).getByRole('cell')).toHaveText('1');
+    await expect(channels.getByRole('row', { name: /^Total/ }).getByRole('cell')).toHaveText('1');
+    await expect(channels.getByRole('row', { name: /^FloFi Web/ }).getByRole('cell')).toHaveText('0');
     await page.screenshot({ path: test.info().outputPath('admin-overview-desktop.png') });
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileMenu = page.locator('.admin-nav-mobile summary');

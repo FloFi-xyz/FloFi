@@ -20,6 +20,8 @@
 import { TokenAmountText } from './token-amount-text';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
+import { SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
+import { BATCH_PAYMENT_ACTION } from '@defi-workflow-engine/workflow-contracts';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, reportUserFundedRefusal,
   reportUserFundedRejection, resumeWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
@@ -30,7 +32,7 @@ import { circleFactsOf } from '../user-funded/circle-facts';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
-import { circleSignatureView, walletRequestView } from '../domain/approved-ux';
+import { circleSignatureView, SOLANA_BATCH_FALLBACK, SOLANA_BATCH_REFUSAL, walletRequestView } from '../domain/approved-ux';
 import { reviewBlockView, reviewStepItems, type ReviewBlockText, type ReviewStepItem } from '../domain/review-block';
 import { BlockerPanel, ExpiredReviewAlert, MaximumFeeRow, RefreshBadge } from './review-summary-panel';
 import { StepSummaryCard } from './operation-summary';
@@ -99,7 +101,10 @@ const handedOver = (approvalId: string, group: number) => storedRun(approvalId)?
 const FORGOTTEN = /_NOT_FOUND$/;
 /** A Review that failed for a moment (rate limit, RPC): reviewing again is the way forward, not the step-by-step path. */
 const TRANSIENT_REVIEW_FAILURE: ReadonlySet<string> = new Set(['EDITOR_REVIEW_RATE_LIMITED', 'USER_FUNDED_RPC_UNAVAILABLE', 'HANDOFF_RATE_LIMITED',
-  'EVM_WALLET_REQUIRED', 'EDITOR_EXECUTION_FAILED']);
+  'EVM_WALLET_REQUIRED', 'EDITOR_EXECUTION_FAILED',
+  // KAN-20: a Solana Batch Payment without a connected Solana mainnet wallet keeps its action open (connecting one is the way forward), and an
+  // earlier request that can still land for a short time is waited out (trying again in a minute is the way forward): never a Review refusal.
+  'SOLANA_WALLET_REQUIRED', 'SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE']);
 /**
  * Review refusals no retry changes that each step's own owner-signed flow handles itself (it re-checks, simulates and reviews its step): the
  * workflow is offered step by step instead of a batch that can never be prepared (the same codes a due group resumes step by step for).
@@ -205,6 +210,25 @@ const OPEN_RUN = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'];
 /** A USDC amount (6 decimals) as the owner reads it, rounded up (a cap is never understated). */
 const usdcText = (units: bigint | string) => feeAmountText(String(units), 'token', { symbol: 'USDC', decimals: 6 });
 const EVM_MAINNETS: readonly string[] = ['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:4663'];
+/** KAN-20: Solana mainnet-beta, the one cluster a Solana Batch Payment runs on. */
+const SOLANA_MAINNET = SOLANA_MAINNET_TRANSFER.chain;
+/**
+ * KAN-20: whether a Canvas workflow runs here with the owner's SOLANA wallet: every financial node is a Batch Payment on Solana mainnet (the lone
+ * Batch Payment card). A client hint only: the server re-validates it from the canonical composition (EDITOR_WORKFLOW_SOLANA_BATCH_ONLY). Any other
+ * Solana workflow keeps its per-step path, and a workflow mixing EVM and Solana steps is not run in place, exactly as before.
+ */
+export function solanaBatchWorkflow(workflow: unknown): boolean {
+  const nodes = (workflow as { nodes?: readonly { readonly actionType?: unknown; readonly chainId?: unknown }[] } | null)?.nodes ?? [];
+  const financial = nodes.filter(n => typeof n?.actionType === 'string' && !n.actionType.startsWith('mock-'));
+  return financial.length > 0 && financial.every(n => n.actionType === BATCH_PAYMENT_ACTION && n.chainId === SOLANA_MAINNET);
+}
+/**
+ * KAN-20 (design 2.4): the wallet that executed a lone card's workflow run, as the Editor's executed record keeps it: the run's own fee payer, an EVM
+ * address lower-cased and a Solana (base58) address exactly as it is (letter case matters: lower-casing would name another wallet).
+ */
+export const executedRunOwner = (feePayer: string | null | undefined): string | null => feePayer ? feePayer.startsWith('0x') ? feePayer.toLowerCase() : feePayer : null;
+/** A recipient is the reviewed owner's own wallet: an EVM address compared case-insensitively, a Solana (base58) address exactly. */
+const ownWallet = (recipient: string, owner: string) => /^0x/i.test(owner) ? recipient.toLowerCase() === owner.toLowerCase() : recipient === owner;
 
 export type EditorRunPhase = 'idle' | 'reviewing' | 'reviewed' | 'authorizing' | 'proving' | 'confirm-update' | 'wallet' | 'confirming' | 'running' | 'done';
 export type EditorWorkflowRunState = {
@@ -259,6 +283,8 @@ export type EditorWorkflowRunState = {
    * once FloFi's permit step answered with the operation to sign. Null otherwise (absent: a state without it).
    */
   readonly signing?: { readonly stage: 1 | 2; readonly cap: string } | null;
+  /** KAN-20: whose wallet this path reviews and authorizes with: 'solana' for a Solana Batch Payment workflow, else 'eip155'. Absent: EVM. */
+  readonly namespace?: 'eip155' | 'solana';
   /**
    * Review UX1: the run prepared its first group with another fee mechanism than the Review (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED): this run is
    * ended (nothing of it was signed) and the workflow reviewed again, in one action. Absent: a state without it.
@@ -277,8 +303,13 @@ export type EditorWorkflowRunState = {
  * (the availability's `singleStep`); otherwise the card keeps its own flow, exactly as before.
  */
 export function useEditorWorkflowRun(input: { readonly workflow: { readonly workflowId: string; readonly revision: number }; readonly evmAccount: string | null;
+  /** KAN-20: the connected Solana wallet on Solana mainnet (Phantom or Solflare), exactly as the wallet reports it; null or absent: none. */
+  readonly solanaAccount?: string | null;
   readonly enabled: boolean; readonly single?: boolean }): EditorWorkflowRunState {
   const { workflow, evmAccount } = input;
+  // KAN-20: a Solana Batch Payment workflow is reviewed and authorized with the owner's Solana wallet; every other workflow exactly as before.
+  const namespace: 'eip155' | 'solana' = solanaBatchWorkflow(workflow) ? 'solana' : 'eip155';
+  const owner = namespace === 'solana' ? input.solanaAccount ?? null : evmAccount;
   const [availability, setAvailability] = useState<{ readonly enabled: boolean; readonly singleStep: boolean; readonly known?: boolean; readonly code?: string | null }>({ enabled: false, singleStep: false });
   const available = availability.enabled;
   // A single card is reviewed and authorized here only where one-step runs exist. A run of this workflow already stored in this browser is
@@ -322,7 +353,10 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const acting = useRef(false);
   /** Mirrors `acting` as state so a workflow switch deferred during an action is applied once the action ends. */
   const [actingNow, setActingNow] = useState(false);
-  const proof = useWalletProof('eip155');
+  const proof = useWalletProof(namespace, namespace === 'solana' ? 'solana:mainnet' : undefined);
+  /** KAN-20: the wallet sign-in this path asks for (once per session; it authorizes no transaction), and the refusal that asks for it. */
+  const proveOwner = () => namespace === 'solana' ? proof.proveSolana() : proof.proveEvm();
+  const PROOF_REQUIRED = namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED';
   const workflowSnapshot = useRef<unknown>(workflow);
   workflowSnapshot.current = workflow;
   // The EVM chains this workflow uses: the only ones the wallet is asked about. A workflow without any EVM step (Solana only) is not reviewed
@@ -330,11 +364,12 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const chains = (workflow as { nodes?: readonly { chainId?: string }[] }).nodes?.map(n => n.chainId ?? '') ?? [];
   const evmChains = [...new Set(chains.filter(c => c.startsWith('eip155:')))];
   const evmWorkflow = evmChains.length > 0 && !chains.some(c => c.startsWith('solana:'));
+  const runnable = evmWorkflow || namespace === 'solana';
   // Re-read when the wallet changes (a FloFi sign-in usually comes with it): without an account session the step-by-step path stays primary.
   useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailability({ enabled: r.enabled, singleStep: r.enabled && r.singleStep === true, known: true, code: r.code ?? null }))
-    .catch(() => setAvailability({ enabled: false, singleStep: false, known: true, code: 'EDITOR_EXECUTION_FAILED' })); }, [evmAccount]);
+    .catch(() => setAvailability({ enabled: false, singleStep: false, known: true, code: 'EDITOR_EXECUTION_FAILED' })); }, [owner]);
   // A Review describes one workflow revision and one wallet: any edit or wallet change makes it stale (nothing was started).
-  const reviewKey = `${workflow.workflowId}:${workflow.revision}:${evmAccount ?? ''}`;
+  const reviewKey = `${workflow.workflowId}:${workflow.revision}:${owner ?? ''}`;
   const reviewedFor = useRef<string | null>(null);
   const currentKey = useRef(reviewKey);
   currentKey.current = reviewKey;
@@ -393,7 +428,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     void workflowRunStatusHandoff(mine.approvalId).then(result => {
       if (!current) return;
       if (result.ok) adopt(result.value);
-      else setError(FORGOTTEN.test(result.code) || result.code === 'EVM_WALLET_PROOF_REQUIRED' ? 'EDITOR_RUN_SIGN_IN_REQUIRED' : result.code);
+      else setError(FORGOTTEN.test(result.code) || result.code === PROOF_REQUIRED ? 'EDITOR_RUN_SIGN_IN_REQUIRED' : result.code);
     }).catch(() => undefined);
     return () => { current = false; };
   }, [followable, workflow.workflowId, approvalId, adopt, actingNow]);
@@ -412,7 +447,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     try { await work(); } catch (cause) { setError(codeOf(cause)); setPhase(p => p === 'wallet' || p === 'confirming' ? 'running' : p === 'reviewing' ? 'idle' : p === 'authorizing' || p === 'proving' ? runRef.current ? 'running' : 'reviewed' : p); }
     finally { acting.current = false; setActingNow(false); }
   }
-  const profileFor = async (chains: readonly string[]) => walletProfile(evmAccount, chains, false);
+  // KAN-20: a Solana Batch Payment reports only the chosen Solana wallet (Phantom or Solflare signs its ONE transaction; FloFi Wallet is refused).
+  const profileFor = async (chains: readonly string[]) => namespace === 'solana' ? walletProfile(null, [SOLANA_MAINNET], true) : walletProfile(evmAccount, chains, false);
 
   const runReview = () => guard(async () => {
     // Never while a run is shown: the Review would be read against another run's facts.
@@ -421,12 +457,12 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   });
   /** The whole-workflow Review of the Canvas workflow (never while a run is shown: `runReview`, and `endAndReview` once its run was closed). */
   async function reviewNow() {
-    if (!evmAccount) { failedFor.current = currentKey.current; throw new Error('EVM_WALLET_REQUIRED'); }
+    if (!owner) { failedFor.current = currentKey.current; throw new Error(namespace === 'solana' ? 'SOLANA_WALLET_REQUIRED' : 'EVM_WALLET_REQUIRED'); }
     setPhase('reviewing'); setUpdated([]);
     // The wallet is asked what it can do on FloFi's EVM mainnets (`wallet_getCapabilities` shows no prompt); the server keeps only this workflow's.
     const key = currentKey.current, reviewing = workflowSnapshot.current;
     failedFor.current = null;
-    const result = await reviewEditorWorkflow(reviewing, evmAccount, await profileFor(evmChains.length ? evmChains : EVM_MAINNETS));
+    const result = await reviewEditorWorkflow(reviewing, owner, await profileFor(namespace === 'solana' ? [SOLANA_MAINNET] : evmChains.length ? evmChains : EVM_MAINNETS));
     // A Review of a revision (or wallet) that changed while it was made describes nothing current: it is dropped, never authorized.
     if (currentKey.current !== key) { setPhase('idle'); return; }
     if (!result.ok) { failedFor.current = key; throw new Error(result.code); }
@@ -591,6 +627,10 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
       prepared = r.value;
     }
     const kind = (prepared.prepared as { kind?: string } | null)?.kind;
+    // KAN-20: a Solana sign-all group is handed to the wallet only as a Solana Batch Payment's ONE transaction whose legs are exactly what the owner
+    // accepted (anything else of this kind never was, and still is not: fails closed).
+    if (kind === 'SOLANA_SIGN_ALL') { await continueSolanaBatch(id, index, prepared); return; }
+    if (namespace === 'solana') throw new Error('EDITOR_EXECUTION_PLAN_UNVERIFIED');
     // Only a wallet batch has planned values to compare with what the owner accepted; any other kind is never handed to the wallet from here —
     // except ADR-0010's Circle-paid operation, which carries the same batch's planned calls (compared below exactly as a batch's).
     const circle = circleFactsOf(prepared.prepared as Readonly<Record<string, unknown>> | null);
@@ -642,9 +682,50 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     await sendPrepared(id, index, prepared.prepared as Record<string, unknown>, prepared.feePayer);
   }
+  /**
+   * KAN-20: a Solana Batch Payment group is handed to the owner's Solana wallet only as ONE transaction whose legs (one per payment, in order) are
+   * exactly the run's steps of this group, each paying exactly the recipient the owner accepted (base58, compared exactly: a case variant is another
+   * wallet) and, with this tab's Review of this run, exactly the reviewed amount. A recipient this tab never showed (a reload) is shown and
+   * confirmed first. The server verified the stored message against these legs with its closed decoder and verifies the signed bytes again.
+   * Anything else is never handed to the wallet (fails closed).
+   */
+  async function continueSolanaBatch(id: string, index: number, prepared: { readonly prepared: unknown; readonly feePayer: string }) {
+    const p = prepared.prepared as { kind?: unknown; transactions?: unknown } | null;
+    const txs = p?.kind === 'SOLANA_SIGN_ALL' && Array.isArray(p.transactions) ? p.transactions as readonly { kind?: unknown; unsignedTransaction?: unknown;
+      legs?: readonly { stepIndex?: unknown; recipient?: unknown; amount?: unknown }[] }[] : [];
+    const tx = txs.length === 1 && txs[0]?.kind === 'BATCH_PAYMENT' && typeof txs[0].unsignedTransaction === 'string' && Array.isArray(txs[0].legs) ? txs[0] : null;
+    const fresh = await workflowRunStatusHandoff(id);
+    if (!fresh.ok) throw new Error(fresh.code);
+    adopt(fresh.value);
+    const group = fresh.value.view.workflowRun?.run.groups[index];
+    // The group's fee payer is the run's own Solana wallet, which must be the one connected now (exactly): another wallet signs nothing of it.
+    const signer = input.solanaAccount ?? null;
+    if (!signer || prepared.feePayer !== signer) throw new Error('SOLANA_WALLET_SESSION_REQUIRED');
+    if (!tx || !group || group.strategy !== 'SOLANA_SIGN_ALL') throw new Error('EDITOR_EXECUTION_PLAN_UNVERIFIED');
+    const legs = tx.legs!, expected = group.steps[1] - group.steps[0] + 1;
+    if (legs.length !== expected || legs.some((leg, at) => leg.stepIndex !== group.steps[0] + at || typeof leg.recipient !== 'string' || typeof leg.amount !== 'string'))
+      throw new Error('EDITOR_EXECUTION_PLAN_UNVERIFIED');
+    const reviewed = reviewRef.current && reviewRef.current.workflowHash === runRef.current?.workflowHash ? reviewRef.current : null;
+    const changes: { index: number; recipient: string }[] = [];
+    for (const leg of legs as readonly { stepIndex: number; recipient: string; amount: string }[]) {
+      const known = acceptedRecipients.current.get(leg.stepIndex) ?? null;
+      if (known !== null && known !== leg.recipient) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
+      const spend = reviewed?.steps.find(step => step.index === leg.stepIndex)?.spend ?? null;
+      if (reviewed && (!spend || spend.units !== leg.amount)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
+      if (known === null) changes.push({ index: leg.stepIndex, recipient: leg.recipient });
+    }
+    if (changes.length) {
+      pendingSend.current = { approvalId: id, index };
+      offered.current = new Map(); offeredCaps.current = new Map();
+      offeredRecipients.current = new Map(changes.map(c => [c.index, c.recipient] as const));
+      setUpdated(changes.map(c => ({ index: c.index, kind: 'recipient' as const, reviewed: null, now: c.recipient }))); setPhase('confirm-update');
+      return;
+    }
+    await sendPrepared(id, index, prepared.prepared as Record<string, unknown>, prepared.feePayer);
+  }
 
   const authorize = () => guard(async () => {
-    if (!review || !evmAccount) throw new Error('REVIEW_REQUIRED');
+    if (!review || !owner) throw new Error('REVIEW_REQUIRED');
     if (review.validUntil && Date.parse(review.validUntil) <= Date.now()) throw new Error('REVIEW_EXPIRED');
     setPhase('authorizing');
     const profile = await profileFor([...new Set(review.groups.map(g => g.chain))]);
@@ -653,11 +734,14 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     const binding = { owner: review.owner, workflowHash: review.workflowHash, groups: review.groups.map(g => ({ strategy: g.strategy, steps: g.steps })),
       firstGroupGas: review.groups[0]?.gasPayment ? 'CIRCLE_USDC_PAYMASTER' : 'NATIVE_WALLET_GAS' };
     let result = await authorizeEditorWorkflow(reviewedWorkflow.current, profile, binding);
-    if (!result.ok && result.code === 'EVM_WALLET_PROOF_REQUIRED') {
-      // One-time sign-in of this wallet in this browser (EIP-4361 message; it authorizes no transaction), then the same Authorize continues.
+    if (!result.ok && result.code === PROOF_REQUIRED) {
+      // One-time sign-in of this wallet in this browser (EIP-4361 message, or KAN-20 Sign-In With Solana; it authorizes no transaction), then the
+      // same Authorize continues.
       setPhase('proving');
-      const proven = await proof.proveEvm();
+      const proven = await proveOwner();
       if (!proven.account) throw new Error(proven.error ?? 'WALLET_REQUEST_REJECTED');
+      // KAN-20: the Solana wallet that signed in must be exactly the reviewed one (base58 is compared exactly); another one runs nothing.
+      if (namespace === 'solana' && proven.account !== review.owner) throw new Error('SOLANA_WALLET_SESSION_REQUIRED');
       setPhase('authorizing');
       result = await authorizeEditorWorkflow(reviewedWorkflow.current, profile, binding);
     }
@@ -665,7 +749,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     const { approvalId: id, proposal, prepared } = result.value;
     keepBatchHandout(id, 0, (prepared as { handout?: string | null } | null)?.handout);
     setApprovalId(id); authorizedRevision.current = workflow.revision;
-    record.current = { workflowId: workflow.workflowId, approvalId: id, workflowHash: review.workflowHash, owner: evmAccount.toLowerCase(), revision: workflow.revision,
+    record.current = { workflowId: workflow.workflowId, approvalId: id, workflowHash: review.workflowHash, owner: namespace === 'solana' ? owner : owner.toLowerCase(), revision: workflow.revision,
       at: new Date().toISOString() };
     putStored(record.current);
     adopt(proposal);
@@ -677,7 +761,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   });
   const confirmUpdate = () => guard(async () => {
     const pending = pendingSend.current;
-    if (!pending || !evmAccount) throw new Error('REVIEW_REQUIRED');
+    if (!pending || !owner) throw new Error('REVIEW_REQUIRED');
     // The owner accepted exactly the minimums shown; anything lower after a new quote is shown again before the wallet is asked.
     for (const [index, amount] of offered.current) accepted.current.set(index, amount);
     for (const [index, recipient] of offeredRecipients.current) acceptedRecipients.current.set(index, recipient);
@@ -697,12 +781,12 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   async function loadStatus(id: string, interactive = true) {
     let r = await workflowRunStatusHandoff(id);
     // Automatic reads never open a wallet prompt: the owner signs in from the panel ("Load workflow progress").
-    if (!interactive && !r.ok && (FORGOTTEN.test(r.code) || r.code === 'EVM_WALLET_PROOF_REQUIRED')) throw new Error('EDITOR_RUN_SIGN_IN_REQUIRED');
+    if (!interactive && !r.ok && (FORGOTTEN.test(r.code) || r.code === PROOF_REQUIRED)) throw new Error('EDITOR_RUN_SIGN_IN_REQUIRED');
     // "Not found" is also the answer when this browser's wallet sign-in expired: the connected wallet signs FloFi's sign-in message once (no
     // transaction) and the status is read again. Still not found: another wallet started it (the run is kept; the owner may forget it here).
-    if (!r.ok && (FORGOTTEN.test(r.code) || r.code === 'EVM_WALLET_PROOF_REQUIRED')) {
+    if (!r.ok && (FORGOTTEN.test(r.code) || r.code === PROOF_REQUIRED)) {
       setPhase('proving');
-      const proven = await proof.proveEvm();
+      const proven = await proveOwner();
       // A declined (or busy) sign-in says nothing about what the wallet sent: never the "nothing was sent" of a declined wallet request.
       if (!proven.account) throw new Error('EDITOR_RUN_SIGN_IN_REQUIRED');
       r = await workflowRunStatusHandoff(id);
@@ -777,9 +861,10 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const authorizedFor = ownRun && run && authorizedRevision.current !== null ? { workflowId: shownWorkflow.current, revision: authorizedRevision.current } : null;
   return { available: Boolean(approvalId) || available && enabled, phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, resume, signing, endAndReview,
     availability: { known: availability.known === true, code: availability.enabled ? null : availability.code ?? null }, held: !followable,
-    canReview: available && enabled && evmWorkflow && !approvalId,
+    canReview: available && enabled && runnable && !approvalId,
     visible: Boolean(approvalId) || available && enabled,
-    stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)
+    ...namespace === 'solana' ? { namespace } : {},
+    stepByStep: !ownRun && (!runnable || (review ? reviewOffersStepByStep(review)
       : error !== null && !TRANSIENT_REVIEW_FAILURE.has(error))),
     unloaded: Boolean(approvalId && !run),
     startReview: runReview, authorize, confirmUpdate, authorizeDue, checkWallet, end, dismiss };
@@ -794,7 +879,9 @@ const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Not signed yet
   RECONCILED: 'Reconciled', FAILED: 'Failed', UNCERTAIN: 'Outcome pending', BLOCKED: 'Stopped before submission', SKIPPED: 'Not run', EXPIRED: 'Expired' };
 const HOW: Readonly<Record<string, string>> = { EVM_WALLET_BATCH: 'One wallet confirmation: one atomic transaction', EVM_USER_OPERATION: 'One signature now; FloFi relays it when due',
   EVM_OWNER_STEP: 'Each step confirmed in your wallet', SOLANA_SIGN_ALL: 'One Solana signing request for every transaction', SOLANA_OWNER_STEP: 'One Solana prompt per step',
-  SOLANA_DURABLE_NONCE: 'One Solana signing request now' };
+  SOLANA_DURABLE_NONCE: 'One Solana signing request now',
+  // KAN-20: a Solana Batch Payment group (`solanaBatch`): every payment in ONE transaction, signed once.
+  SOLANA_BATCH: 'One Solana signing request for one atomic transaction' };
 /** ADR-0010 review UX7: how a group whose fee is paid from the owner's USDC through Circle is authorized (never "one wallet confirmation"). */
 const CIRCLE_HOW = 'Two signatures: a USDC permit for the fee, then the operation';
 /**
@@ -815,6 +902,8 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
   USER_OPERATION_AAVE_SIGNED_WHEN_DUE: 'An Aave step after a bridge is authorized when the bridge delivery lands, after FloFi simulates it on that state (health factor and supply cap).',
   USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE: 'A swap after a bridge whose output a later step spends is authorized when the bridge delivery lands, after FloFi simulates the whole batch and proves you receive that output.',
   SOLANA_MULTI_SIGN_UNSUPPORTED: 'Your Solana wallet confirms each transaction separately.',
+  // KAN-20: the planner's downgrade for FloFi Wallet on a Solana Batch Payment group (its one transaction is signed by Phantom or Solflare only).
+  FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED: 'FloFi Wallet cannot sign a Solana Batch Payment yet; Phantom or Solflare signs it as one transaction.',
   SOLANA_DURABLE_NONCE_NOT_OFFERED: 'A Solana step after a bridge is signed when the delivery lands (a recent blockhash expires within about a minute).',
   USER_FUNDED_NATIVE_SWAP_UNSUPPORTED: 'A swap of native ETH runs through its own review and wallet confirmation.',
   USER_FUNDED_ACTION_NOT_BUILDABLE: 'This step (for example a bridge or a liquidity position) runs through its own review and wallet confirmation.',
@@ -864,6 +953,18 @@ const PREPARED_STILL_VALID_LAST = 'FloFi did not ask your wallet this time: the 
 const RUN_WINDOW_CLOSED = 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.';
 const PREPARED_EXPIRED_AT = 'The request FloFi prepared expired at {0}; you can ask for a fresh one now.';
 const PREPARED_EXPIRED_CHECK_WALLET = 'The request FloFi prepared expired at {0}. FloFi will not ask your wallet for a fresh one: check your wallet\'s activity (it may have executed before it expired), then end the workflow.';
+/**
+ * KAN-20: a Solana Batch Payment run in place, in plain words: its Solana wallet (connected on mainnet, signed in, the one that started it), FloFi
+ * Wallet's own wording, and the scope of this path. The core's refusal families and C.4's earlier request are shared with /approve
+ * (`SOLANA_BATCH_REFUSAL`, domain/approved-ux.ts).
+ */
+const SOLANA_BATCH_RUN_REFUSAL: Readonly<Record<string, string>> = {
+  SOLANA_WALLET_REQUIRED: 'Connect your Solana wallet (Phantom or Solflare) on Solana mainnet to review this workflow.',
+  SOLANA_WALLET_PROOF_REQUIRED: 'Sign in with your Solana wallet to follow this workflow. The sign-in authorizes no transaction.',
+  SOLANA_WALLET_SESSION_REQUIRED: 'Connect the Solana wallet that started this workflow, then try again. Nothing was signed.',
+  USER_FUNDED_WALLET_CHANGED: 'Your Solana wallet changed before it signed. Nothing was signed or sent. Connect the wallet of this workflow and try again.',
+  EDITOR_WORKFLOW_SOLANA_BATCH_ONLY: 'Only a Solana workflow with a Batch Payment runs here with your Solana wallet. Nothing was signed or sent.',
+};
 /**
  * Refusals in plain words, keyed by the bare code the server answers with: never a placeholder, because a refusal of a preparation, an
  * authorization or a Review that failed as a whole names no step (a step number would be invented, or the code shown in its place). A
@@ -945,9 +1046,12 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   GAS_MECHANISM_CHANGED_REVIEW_REQUIRED: EDITOR_MECHANISM_CHANGED,
   // Final review (P3): found at Authorize, before the first group was stored: the run was ended at once (nothing to end); review again.
   EDITOR_MECHANISM_CHANGED_NOT_STARTED,
+  ...SOLANA_BATCH_REFUSAL,
+  ...SOLANA_BATCH_RUN_REFUSAL,
 };
 /** The words the Review panel uses for a refusal or an action's error (BUILD-FLOFI-UX-EDITOR-FINOPS-001: also said by the Simulate panel). */
-export const workflowRunErrorText = (error: string) => EXECUTION_REFUSAL[error] ?? 'FloFi could not complete this request ({0}). Nothing was sent.';
+export const workflowRunErrorText = (error: string) => EXECUTION_REFUSAL[error]
+  ?? (error.startsWith('SOLANA_BATCH_PAYMENT_') ? SOLANA_BATCH_FALLBACK : 'FloFi could not complete this request ({0}). Nothing was sent.');
 /** A Review refusal that names the step it is about (`refusal.step`, shown as {0}): only then is a step number written. */
 export const STEP_REFUSAL: Readonly<Record<string, string>> = {
   SIMULATION_REVERTED: 'FloFi simulated the whole batch and step {0} would fail on chain now. Check its amount, balance and allowance; nothing was sent.',
@@ -1020,7 +1124,7 @@ function ReviewStepsCard({ review, variant }: { review: EditorExecutionReview; v
   const items = reviewStepItems(review).map(step => ({ key: String(step.index), action: step.action, title: STEP_TITLE[step.action] ?? step.action,
     amount: step.spend || step.receive ? <StepAmounts step={step}/> : null,
     network: step.destination ? `${step.network} → ${step.destination}` : step.network,
-    recipient: step.recipient ? { address: step.recipient, own: step.recipient.toLowerCase() === review.owner.toLowerCase() } : null }));
+    recipient: step.recipient ? { address: step.recipient, own: ownWallet(step.recipient, review.owner) } : null }));
   return <StepSummaryCard items={items} variant={variant}/>;
 }
 
@@ -1102,7 +1206,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
   // A step number only when the Review names the step (never step 1 by default); otherwise the code's own placeholder-free words.
   const stepRefusal = review?.refusal && review.refusal.step !== null ? STEP_REFUSAL[review.refusal.code] : undefined;
   const refusal = !review?.refusal ? null : stepRefusal ? tr(stepRefusal, String(review.refusal.step! + 1))
-    : tr(EXECUTION_REFUSAL[review.refusal.code] ?? 'FloFi cannot prepare this workflow now ({0}). Nothing was sent.', review.refusal.code);
+    : tr(EXECUTION_REFUSAL[review.refusal.code] ?? (review.refusal.code.startsWith('SOLANA_BATCH_PAYMENT_') ? SOLANA_BATCH_FALLBACK
+      : 'FloFi cannot prepare this workflow now ({0}). Nothing was sent.'), review.refusal.code);
   const runStep = (index: number) => run?.steps.find(s => s.index === index) ?? null;
   const plannedOf = (index: number) => run?.groups.flatMap(g => g.planned?.steps ?? []).find(s => s.index === index) ?? null;
   const currentGroup = run?.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
@@ -1158,7 +1263,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     : error === 'WALLET_REQUEST_REJECTED' && windowClosed ? tr(EXECUTION_REFUSAL.WALLET_REQUEST_REJECTED_WINDOW_CLOSED!)
     : tr(EXECUTION_REFUSAL[error] ?? (mayHold
       ? 'FloFi could not complete this request ({0}). What your wallet already has stands: FloFi keeps following it and never sends it again.'
-      : 'FloFi could not complete this request ({0}). Nothing was sent.'), error);
+      : error.startsWith('SOLANA_BATCH_PAYMENT_') ? SOLANA_BATCH_FALLBACK : 'FloFi could not complete this request ({0}). Nothing was sent.'), error);
   // "End workflow" follows the server's own rule (`canEndWorkflow`, the one /approve and the store's cancellation use): e.g. a group whose batch
   // the wallet reported not sent is BLOCKED but keeps its authorization, and its HALTED run can (only) be ended. One stricter case: a signed user
   // operation FloFi has not relayed stays valid on chain until the owner cancels it, which only /approve offers, so it is not ended from here.
@@ -1201,10 +1306,18 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
   // for), each value said once and in its own row; a recipient is shown in full with a copy control. Nothing is omitted,
   // changed or added, and the material rows (steps, amounts, minimum, fee, permission, wallet requests, validity) stay visible above it.
   const stepLabel = (index: number, label: string) => `${tr('Step {0}', String(index + 1))} · ${label}`;
+  const sol = (lamports: string) => feeAmountText(lamports, 'lamports');
   const feeWords = (g: EditorExecutionReview['groups'][number]): string | null => g.gasPayment ? tr('Network fee, at most {0} — paid from your USDC through Circle', usdcFee(g.gasPayment.maxFee.amount))
+    // KAN-20: a Solana Batch Payment's network fee and, only when a recipient needs a token account, the deposits at most (both in SOL).
+    : g.solanaBatch ? /^[1-9][0-9]*$/.test(g.solanaBatch.maximumAccountCreationLamports)
+      ? tr('about {0} in network fees, plus up to {1} in deposits for recipients who need a token account; your wallet pays both in SOL', sol(g.solanaBatch.estimatedFeeLamports),
+        sol(g.solanaBatch.maximumAccountCreationLamports))
+      : tr('about {0} in network fees; your wallet pays it in SOL', sol(g.solanaBatch.estimatedFeeLamports))
     : g.fee?.sponsorship === 'REQUIRED' ? tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')
     : g.fee ? tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))
     : run?.groups[g.index]?.maxFee?.unit === 'wei' ? tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))
+    : run?.groups[g.index]?.maxFee?.unit === 'lamports' && !run.groups[g.index]!.maxFee!.token
+      ? tr('up to {0} in network fees and account deposits; your wallet pays it in SOL', feeAmountText(run.groups[g.index]!.maxFee!.amount, 'lamports'))
     : run?.groups[g.index]?.maxFee?.token ? tr(tokenFeeKey(run.groups[g.index]!.chain), groupFee(run.groups[g.index]!.maxFee!), run.groups[g.index]!.maxFee!.token!.symbol) : null;
   const circleWords = (g: EditorExecutionReview['groups'][number]) => circleDetails(g.gasPayment ?? run?.groups[g.index]?.gasPayment ?? null).replace(/^ · /, '');
   const expiredQuote = (g: EditorExecutionReview['groups'][number]) => run?.groups[g.index]?.state === 'PREPARED' && run.groups[g.index]!.validUntil && Date.parse(run.groups[g.index]!.validUntil!) <= now
@@ -1267,7 +1380,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
             <span className="muted"> · {tr(step.network)}{step.provider ? ` · ${step.provider}` : ''}</span>
             {recipient && <span className="technical-recipient">{tr('To')}{' '}
               {/* The recipient in full (a shortened address invites look-alike mistakes; review-block.ts), with its copy control. */}
-              <CopyValue value={recipient} shown={`${recipient}${recipient.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}`} label="Recipient" step={step.index + 1}/></span>}
+              <CopyValue value={recipient} shown={`${recipient}${ownWallet(recipient, review.owner) ? ` ${tr('(your wallet)')}` : ''}`} label="Recipient" step={step.index + 1}/></span>}
             {live && run && <span className="workflow-run-state">{stepWords(run, live)}</span>}
             {live?.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer" title={tx.hash}><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash} title={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
@@ -1281,7 +1394,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       {review.groups.map(g => {
         const fee = feeWords(g), circle = circleWords(g), quote = expiredQuote(g), live = run?.groups[g.index];
         return <dl key={g.index} className="technical-rows editor-run-facts">
-          <div><dt>{review.groups.length > 1 ? tr('Group {0} · {1}', String(g.index + 1), g.network) : g.network}</dt><dd>{tr(g.gasPayment ? CIRCLE_HOW : HOW[g.strategy] ?? g.strategy)}</dd></div>
+          <div><dt>{review.groups.length > 1 ? tr('Group {0} · {1}', String(g.index + 1), g.network) : g.network}</dt><dd>{tr(g.gasPayment ? CIRCLE_HOW : g.solanaBatch || live?.solanaBatch ? HOW.SOLANA_BATCH! : HOW[g.strategy] ?? g.strategy)}</dd></div>
           {g.calls && <div><dt>{tr('Calls')}</dt><dd>{tr(g.gasPayment ? '{0} calls in the operation ({1} token approvals)' : '{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}</dd></div>}
           {fee && <div><dt>{tr('Network fee')}</dt><dd>{fee}</dd></div>}
           {g.fee?.sponsorship === 'OFFERED' && <div><dt>{tr('Sponsorship')}</dt><dd>{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</dd></div>}
@@ -1314,6 +1427,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     </TechnicalGroup>}
   </>;
   const block = review ? reviewBlockView(review) : null;
+  // KAN-20: a Solana Batch Payment's fee ceiling says, beside it, the token-account deposits it includes at most (absent for every other Review).
+  const feeValue = (view: NonNullable<typeof block>) => view.feeNote
+    ? <>{rich(tr, view.fee!)} <small className="review-block-qualifier" data-fee-note="">{rich(tr, view.feeNote)}</small></> : rich(tr, view.fee!);
   // Review B1/LQ1: a later step on a network that needs its native coin for its fee after an earlier token-paid one there — said visibly before
   // the first signature (the Review, or a run nothing of which was signed or reconciled yet), never as a refusal: the design stays as it is.
   const beforeFirstSignature = !run || !run.groups.some(g => g.signed || ANSWERED_STATES.includes(g.state)) && !run.steps.some(s => s.state === 'RECONCILED');
@@ -1379,7 +1495,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       <ReviewStepsCard review={review} variant="icons"/>
       <dl className="review-panel-rows review-block-rows review-decision-rows">
         {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
-        {block.fee && <MaximumFeeRow value={rich(tr, block.fee)} walletPays={walletPays} priced={priced} valueTitle={block.fee.full ?? undefined}/>}
+        {block.fee && <MaximumFeeRow value={feeValue(block)} walletPays={walletPays} priced={priced} valueTitle={block.fee.full ?? undefined}/>}
       </dl>
       {nativeLater}
       {/* UX-05: the ONE next action of a valid result, in the panel where the owner reads it (navigation to Execute; nothing is signed here). */}
@@ -1406,7 +1522,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         <ReviewStepsCard review={review!} variant="numbered"/>
         <dl className="review-panel-rows review-block-rows review-decision-rows">
           {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
-          {block.fee && <MaximumFeeRow value={rich(tr, block.fee)} walletPays={walletPays} priced={priced} valueTitle={block.fee.full ?? undefined}/>}
+          {block.fee && <MaximumFeeRow value={feeValue(block)} walletPays={walletPays} priced={priced} valueTitle={block.fee.full ?? undefined}/>}
           {/* UX-03: each token approval as "Access to <token>": its limit and who may spend it, before anything is signed (same approvals as before). */}
           {(block.access ?? []).map(line => <div key={`${line.step}:${line.symbol}`} className="review-access-row" data-review-access={line.symbol}><dt>{tr('Access to {0}', line.symbol)}</dt>
             <dd><span className="numeric" title={line.full ?? undefined}>{tr('Up to {0}', line.limit)}</span><small className="review-block-qualifier">{tr('{0} can use it', line.spender)}</small></dd></div>)}
@@ -1468,7 +1584,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       </ol>
       <dl className="editor-run-facts">{run.groups.map(g => <div key={g.index}><dt>{run.groups.length > 1 ? tr('Group {0}', String(g.index + 1)) : tr('Wallet request')}</dt>
         {/* Review round 2: a reconciled sponsored batch says FloFi paid its gas (as with a Review in this tab), never that the wallet did. */}
-        <dd>{tr(g.gasPayment ? CIRCLE_HOW : HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}
+        <dd>{tr(g.gasPayment ? CIRCLE_HOW : g.solanaBatch ? HOW.SOLANA_BATCH! : HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}
           {!g.gasPaid && g.maxFee?.token ? ` · ${tr(tokenFeeKey(g.chain), groupFee(g.maxFee), g.maxFee.token.symbol)}` : ''}
           {g.gasPaid ? ` · ${paidWords(g.gasPaid, g.chain)}` : ''}</dd></div>)}</dl>
     </>}

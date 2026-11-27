@@ -46,7 +46,8 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 review MCP-3: reported
     ['user-funded groups on another chain only', OTHER_CHAIN]] as const) {
     it(`${name}: capabilityFacts and request_user_approval agree for every batch row`, async () => {
       const rows = await capabilityFacts(runtime(facts), policy, { action: 'batch_payment' }, 'PUBLIC_MAINNET');
-      expect(rows.length).toBe(4);
+      // Base, Arbitrum One, Ethereum, Robinhood Chain and (KAN-20) Solana Mainnet.
+      expect(rows.length).toBe(5);
       for (const fact of rows) {
         const workflow = composeWorkflow(fact.row.example);
         if (!workflow.ok) throw new Error(workflow.code);

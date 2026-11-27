@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ACTION_KINDS, ACTION_LABELS } from '../../admin/analytics/actions';
+import { channelPeriod, loadChannelCounts } from '../../admin/analytics/channels';
 import { ENVIRONMENT_LABELS, type NetworkInfo } from '../../admin/analytics/networks';
 import { param, withParams, workflowView, type AnalyticsParams } from '../../admin/analytics/view';
 import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/workflows';
@@ -12,6 +13,7 @@ import { healthReport } from '../../admin/health';
 import { loadExecutionAttention } from '../../admin/support/lifecycle';
 import { AnalyticsFilters } from '../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../components/admin/admin-shell';
+import { ChannelCounts } from '../../components/admin/channel-counts';
 import { DataNotes } from '../../components/admin/data-notes';
 import { AttentionList, Kpi, Section, StatusTile, TechnicalDetails } from '../../components/admin/admin-ui';
 import { Amount } from '../../components/admin/finops-views';
@@ -81,14 +83,17 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
   const page = await adminPage();
   if (!page.ok) return <AdminUnavailable code={page.code}/>;
   const search = await searchParams;
-  const params: AnalyticsParams = Object.fromEntries((['range', 'from', 'to', 'env', 'action', 'outcome'] as const).flatMap(key => {
+  const params: AnalyticsParams = Object.fromEntries((['range', 'from', 'to', 'env', 'action', 'outcome', 'channels'] as const).flatMap(key => {
     const value = param(search[key]); return value ? [[key, value]] : []; }));
   // BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): the same probes System Health and AI Settings show, summarized first ("is everything normal?").
   // One read of the shared execution-attention model feeds both the glance (all time) and the range figures, so they cannot disagree.
   const shared = loadExecutionAttention(page.host.db, page.host.tenantId, page.now).catch(() => null);
-  const [{ language }, view, health, copilot, finance] = await Promise.all([requestLanguage(), workflowView(page.host, params, page.now, shared),
+  // BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): completed executions by channel, every environment at once (the page's own is shown).
+  const channelsPeriod = channelPeriod(params.channels, page.now);
+  const [{ language }, view, health, copilot, finance, channels] = await Promise.all([requestLanguage(), workflowView(page.host, params, page.now, shared),
     healthReport(process.env, page.host, page.now, fetch, shared).catch(() => null), copilotSettingsView(process.env, page.host).catch(() => null),
-    readFinopsReport(page.host, finopsPeriod(page.now, {}).period, page.now).catch(() => null)]);
+    readFinopsReport(page.host, finopsPeriod(page.now, {}).period, page.now).catch(() => null),
+    loadChannelCounts(page.host, { period: channelsPeriod })]);
   const { copy, count } = finopsCopy(language);
   const glance = <Glance health={health} copilot={copilot} language={language}/>;
   const financial = <FinanceSummary report={finance} language={language}/>;
@@ -120,6 +125,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
       </div>
       <p className="admin-diff">{copy('Execution activity includes submissions reported by the wallet whose outcome is still uncertain.')}</p>
     </section>
+    <ChannelCounts result={channels} period={channelsPeriod} environment={view.environment} params={params} language={language}/>
     {financial}
 
     <TechnicalDetails summary={copy('Execution metrics and trends')} className="admin-ops-disclosure" open={filtered || undefined}>
@@ -155,7 +161,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
     <section className="admin-card" aria-labelledby="admin-networks">
       <header><h2 id="admin-networks">Network distribution</h2><p>{env} · executed actions (a multichain workflow contributes each action to its own network)</p></header>
       <form method="get" action="/admin" className="admin-filters" aria-label="Network distribution filters" style={{ marginBottom: 14 }}>
-        {(['range', 'from', 'to'] as const).map(key => params[key] ? <input key={key} type="hidden" name={key} value={params[key]}/> : null)}
+        {(['range', 'from', 'to', 'channels'] as const).map(key => params[key] ? <input key={key} type="hidden" name={key} value={params[key]}/> : null)}
         <input type="hidden" name="env" value={view.environment}/>
         <label htmlFor="admin-filter-action">Action type
           <select id="admin-filter-action" name="action" defaultValue={view.action}>

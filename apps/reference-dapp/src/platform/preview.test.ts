@@ -200,6 +200,32 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review DEV-BP-4): a B
     expect(plain).not.toHaveProperty('batchPayments');
     expect(plain).not.toHaveProperty('batchSimulation');
   });
+  // KAN-20: a Solana Batch Payment's legs are Solana transfers, which alone preview on `solana-transfer`; inside the batch they never do (each would pass
+  // alone where the whole batch, every payment and its fees together, may not), even with a runtime whose `solana-transfer` preview would succeed.
+  it('KAN-20: a Solana Batch Payment previews none of its payments one at a time, though each alone would preview', async () => {
+    const SOL_A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', SOL_B = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty', SOL_C = '8WcnkMD1aZFGDppfnerV37Fob9W1ij3yHkCL3LWgVKiG';
+    const solanaBatch = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: [SOL_A, SOL_B, SOL_C].map((recipient, i) => ({ recipient, amount: `0.0${i + 1}` })) };
+    const composed = composeWorkflow(solanaBatch);
+    if (!composed.ok) throw new Error(composed.code);
+    const flows: string[] = [];
+    const succeeding = { ...blockingRuntime().runtime, preview: async (flow: string) => {
+      flows.push(flow);
+      return { ok: true as const, value: { provenance: 'MOCKED', review: { expiresAt: '2099-01-01T00:00:00.000Z', simulation: { freshness: { observedAt: '2026-11-09T10:00:00.000Z' } },
+        asset: { symbol: 'SOL', decimals: 9 }, simulationResult: { slot: 1 } } } };
+    } } as McpRuntime;
+    // The double is real: one Solana transfer alone previews through it.
+    const single = composeStrategy({ action: 'transfer', network: 'solana', asset: 'SOL', amount: '0.01', recipient: SOL_B });
+    if (!single.ok) throw new Error(single.code);
+    expect((await simulatePreview(succeeding, { strategy: single.strategy, workflowHash: single.workflowHash, simulationSubject: SOL_A }, { scope: 'PUBLIC_MAINNET' })).view.kind)
+      .toBe('SOLANA_TRANSFER');
+    expect(flows).toEqual(['solana-transfer']);
+    flows.length = 0;
+    const preview = await simulateWorkflowPreview(succeeding, { strategy: solanaBatch, workflowHash: composed.workflowHash, simulationSubject: SOL_A }, { scope: 'PUBLIC_MAINNET' });
+    expect(flows).toEqual([]);
+    expect(preview).toMatchObject({ status: 'INCOMPLETE', authorizable: false, batchSimulation: 'ONE_ATOMIC_BATCH_WITH_THE_OWNER_WALLET_AT_SIGNING',
+      batchPayments: [{ step: 0, legs: [0, 2], network: 'solana', asset: 'SOL', recipients: 3, total: '0.06', execution: 'ATOMIC_ONLY' }] });
+    expect(preview.steps.map(s => [s.state, s.code, s.flow, s.view])).toEqual(Array(3).fill(['NOT_COMPLETED', 'SIMULATION_REQUIRES_OWNER_BROWSER', null, null]));
+  });
 });
 
 describe('P0-E: simulation admission waits briefly for a slot instead of refusing at once', () => {

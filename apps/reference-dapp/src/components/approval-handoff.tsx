@@ -29,6 +29,7 @@ import type { ApprovalPreview } from '../platform/approve';
 import { APPROVAL_SECRET_FORMAT } from '../platform/approval-link-format';
 import { walletDeepLinks } from '../platform/wallet-links';
 import { CIRCLE_REFUSAL } from '../domain/token-fee';
+import { SOLANA_BATCH_FALLBACK, SOLANA_BATCH_REFUSAL } from '../domain/approved-ux';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -111,6 +112,8 @@ const CLAIM_TEXT: Record<string, string> = {
   WORKFLOW_RUN_EXPIRED: 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.',
   // ADR-0010: a network fee paid from the owner's USDC through Circle — refusals before anything is relayed (the Editor's words).
   ...CIRCLE_REFUSAL,
+  // KAN-20: a Solana Batch Payment's refusals (its core's families, FloFi Wallet, C.4's earlier request): the Editor's words, one translation each.
+  ...SOLANA_BATCH_REFUSAL,
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**
@@ -397,7 +400,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const proofText = proof.error ? walletProofMessage(proof.error, view.walletNamespace) : secondProof.error ? walletProofMessage(secondProof.error, otherNamespace) : null;
   const errorText = shown === 'APPROVALS_NOT_ENABLED' || shown === 'MCP_OAUTH_NOT_ENABLED'
     ? fromApp ? 'Approvals are unavailable right now. Return to the app that sent this link and try again later.' : 'Approvals are unavailable right now. Return to your assistant and try again later.'
-    : shown ? CLAIM_TEXT[shown] ?? floFiWalletMessage(shown) ?? shown : proofText;
+    : shown ? CLAIM_TEXT[shown] ?? floFiWalletMessage(shown) ?? (shown.startsWith('SOLANA_BATCH_PAYMENT_') ? SOLANA_BATCH_FALLBACK : shown) : proofText;
   const prove = () => void (view.walletNamespace === 'solana' ? proof.proveSolana(true) : proof.proveEvm(true));
   const facts = <dl className="approval-facts">
     <div><dt>{tr("Network")}</dt><dd>{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr([...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → '))}</dd></div>
@@ -409,7 +412,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
     <p>{tr('Prepared by your FloFi automation. Simulate and review before executing.')}</p>
     {!claimed && <WalletProof namespace={view.walletNamespace} proof={proof}/>}
     {busy && <p role="status">{tr('Loading your exact automation workflow…')}</p>}
-    {errorText && <p role="alert">{tr(errorText)}</p>}
+    {errorText && <p role="alert">{tr(errorText, shown ?? '')}</p>}
     {error && <button type="button" disabled={busy || !proven} onClick={() => void claim()}>{tr('Retry loading proposal')}</button>}
     <details><summary>{tr('Automation provenance')}</summary>{facts}</details>
   </section>, slot);
@@ -445,7 +448,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
         </a>}
       </div>
     </div>
-    {errorText && <p className="error-banner" role="alert">{tr(errorText)}</p>}
+    {errorText && <p className="error-banner" role="alert">{tr(errorText, shown ?? '')}</p>}
     {otherNamespace && !claimed && <p className="muted">{tr('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.')}</p>}
     {view.workflowRun && <WorkflowRunPanel claim={view.workflowRun} approvalId={view.approvalId} secret={secret && SECRET.test(secret) ? secret : null}
       onProposal={onRunProposal} onError={setError}/>}

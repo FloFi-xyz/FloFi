@@ -85,7 +85,8 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
     // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment, recipients and amounts exactly as authored, in order.
     case 'ADD_BATCH_PAYMENT': {
       const i = c.input as { network: string; asset: string; payments: readonly { recipient: string; amount: string }[] };
-      const network = CATALOG_NETWORK[i.network];
+      // KAN-20: a Solana mainnet batch (Devnet never: the authoring refuses it); its base58 recipients pass verbatim.
+      const network = i.network === 'Solana' ? 'solana' : CATALOG_NETWORK[i.network];
       return !network ? null : { version: 1, action: 'batch_payment', network, asset: i.asset,
         recipients: i.payments.map(p => ({ recipient: p.recipient, amount: p.amount })) } as StrategySpec;
     }

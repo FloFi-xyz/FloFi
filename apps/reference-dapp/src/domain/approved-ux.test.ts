@@ -46,6 +46,24 @@ describe('fee shortfall projection (board 07): the server numbers, never underst
     expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: sending })?.parameters).toEqual(['Base', 'ETH', '0x90f5…d303', '0.00012', '0.000300001', '0.00118001', '0.001']);
     expect(feeShortfallView({ ...evidence, chainId: 'eip155:999' })).toBeNull(); expect(feeShortfallView(null)).toBeNull();
   });
+  // KAN-20 (surfaces 9.2 item 13): a Solana Batch Payment's shortfall in lamports, as SOL (9 decimals), with its deposits and the owner's reserve.
+  it('KAN-20: lamports evidence on Solana mainnet reads as SOL, the balance rounded DOWN and every requirement UP; wei evidence is unchanged', () => {
+    const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', OWNER = '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2';
+    const lamports: NativeFeeShortfall = { kind: 'NATIVE_FEE_SHORTFALL', chainId: SOLANA, owner: OWNER, unit: 'lamports', balance: '1000000999',
+      maxFee: '6124481', nativeSpend: '60000000', required: '67015361', shortfall: '1', deposits: '6119280', reserve: '890880' };
+    expect(feeShortfallView(lamports)).toEqual({ network: 'Solana', symbol: 'SOL', owner: OWNER, balance: '1', fee: '0.00612449', sends: '0.06', required: '0.0670154',
+      missing: '0.000000001', deposits: '0.00611928', reserve: '0.00089088' });
+    // An SPL batch sends no SOL itself, and a deposit or reserve of zero is not a row.
+    expect(feeShortfallView({ ...lamports, nativeSpend: '0', deposits: '0', reserve: '0' })).toEqual({ network: 'Solana', symbol: 'SOL', owner: OWNER, balance: '1',
+      fee: '0.00612449', sends: null, required: '0.0670154', missing: '0.000000001' });
+    expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: lamports })?.parameters).toEqual(['Solana', 'SOL', '7Np41o…T4K2', '1', '0.00612449', '0.000000001', '0.06',
+      '0.00089088']);
+    // Lamports only on Solana mainnet, wei only on an EVM network FloFi labels: any other pairing shows no numbers.
+    expect(feeShortfallView({ ...lamports, chainId: 'eip155:8453' })).toBeNull();
+    expect(feeShortfallView({ ...lamports, unit: 'wei' })).toBeNull();
+    expect(feeShortfallView({ ...lamports, chainId: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1' })).toBeNull();
+    expect(feeShortfallView({ ...evidence, deposits: '1', reserve: '1' })).toEqual(feeShortfallView(evidence));
+  });
 });
 
 describe('the assistant explains the active blocker (board 07)', () => {
@@ -61,6 +79,33 @@ describe('the assistant explains the active blocker (board 07)', () => {
     for (const text of [en, pt]) { expect(text).toContain('0.00012'); expect(text).toContain('0.000300001'); expect(text).toContain('0.000180001'); expect(text).toContain('0x90f5…d303'); }
     expect(en).toMatch(/Simulate again\. Nothing was sent\./); expect(pt).toMatch(/Simular novamente\. Nada foi enviado\./);
     expect(blockerExplanation({ title: 'Wallet not linked to your FloFi account', message: 'x' })).toBeNull();
+  });
+  // KAN-20: a Solana Batch Payment's fee includes the token-account deposits, and Solana keeps the wallet's minimum balance: both are named, so
+  // the sentence's numbers add up (fee + minimum balance [+ SOL sent] - balance = missing). EVM evidence keeps its own sentences.
+  it('KAN-20: the Solana explanation names the deposits and Solana\'s minimum balance, in English and Portuguese', () => {
+    const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', OWNER = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb';
+    const usdc: NativeFeeShortfall = { kind: 'NATIVE_FEE_SHORTFALL', chainId: SOLANA, owner: OWNER, unit: 'lamports', balance: '1000000', maxFee: '6122840', nativeSpend: '0',
+      required: '7013720', shortfall: '6013720', deposits: '6117840', reserve: '890880' };
+    const tokens = blockerExplanation({ title: 't', message: 'm', feeShortfall: usdc })!;
+    expect(tokens.parameters).toEqual(['Solana', 'SOL', '2CERLk…mCzb', '0.001', '0.00612284', '0.00601372', '0.00611784', '0.00089088']);
+    expect(translate('EN', tokens.text, ...tokens.parameters)).toBe('Every transaction on Solana pays a network fee in SOL. Your wallet 2CERLk…mCzb has 0.001 SOL; '
+      + 'this Batch Payment\'s fee can reach 0.00612284 SOL, including up to 0.00611784 SOL in deposits for recipients who need a token account, and Solana keeps '
+      + '0.00089088 SOL in your wallet as its minimum balance, so at least 0.00601372 SOL is missing. Send a little SOL on the Solana network to 2CERLk…mCzb, then '
+      + 'choose Simulate again. Nothing was sent.');
+    expect(translate('PT', tokens.text, ...tokens.parameters)).toBe('Toda transação na Solana paga uma taxa de rede em SOL. Sua carteira 2CERLk…mCzb tem 0.001 SOL; '
+      + 'a taxa deste pagamento em lote pode chegar a 0.00612284 SOL, incluindo até 0.00611784 SOL em depósitos para destinatários que precisam de uma conta de token, '
+      + 'e a Solana mantém 0.00089088 SOL na sua carteira como saldo mínimo, então faltam pelo menos 0.00601372 SOL. Envie um pouco de SOL na rede Solana para '
+      + '2CERLk…mCzb e depois escolha Simular novamente. Nada foi enviado.');
+    // A SOL batch sends the payments in SOL itself and needs no token account.
+    const sol = { ...usdc, maxFee: '5000', nativeSpend: '30000000', required: '30895880', shortfall: '29895880', deposits: '0' };
+    const native = blockerExplanation({ title: 't', message: 'm', feeShortfall: sol })!;
+    expect(native.parameters).toEqual(['Solana', 'SOL', '2CERLk…mCzb', '0.001', '0.000005', '0.0298959', '0.03', '0.00089088']);
+    expect(translate('EN', native.text, ...native.parameters)).toContain('has 0.001 SOL; this Batch Payment sends 0.03 SOL, its fee can reach 0.000005 SOL and Solana keeps '
+      + '0.00089088 SOL in your wallet as its minimum balance, so at least 0.0298959 SOL is missing.');
+    expect(translate('PT', native.text, ...native.parameters)).toContain('tem 0.001 SOL; este pagamento em lote envia 0.03 SOL, a taxa pode chegar a 0.000005 SOL e a Solana '
+      + 'mantém 0.00089088 SOL na sua carteira como saldo mínimo, então faltam pelo menos 0.0298959 SOL.');
+    // EVM evidence keeps its own sentence and parameters.
+    expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: evidence })!.text).toBe('Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}, and this fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.');
   });
 });
 

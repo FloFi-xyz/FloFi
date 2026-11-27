@@ -68,7 +68,7 @@ export const COPILOT_AUTHORING_COMMANDS = Object.freeze(['ADD_SWAP', 'ADD_TESTNE
   'ADD_UNIVERSAL_BRIDGE',
   // PR B: a Solana Devnet swap's output funding an Orca position, added and linked exactly as the Canvas does.
   'ADD_SOLANA_COMPOSITION',
-  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several sends of one asset on one EVM mainnet), as the chat's grammar authors it.
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several sends of one asset on one mainnet), as the chat's grammar authors it.
   'ADD_BATCH_PAYMENT'] as const);
 export type CopilotAuthoringCommand = (typeof COPILOT_AUTHORING_COMMANDS)[number];
 export const COPILOT_CAPABILITIES = copilotCopy('EN').capabilities;
@@ -307,14 +307,19 @@ function slippageWritten(text: string, value: string): boolean {
 }
 /**
  * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review H2): the payments a person's own words pair, in their order: each explicit clause
- * "<amount> <asset> to <0x address>" ("para" / "pra" in Portuguese). `groundedAmount` and `groundedAddress` only show that a value appears somewhere
- * in the request; they never show which amount belongs to which recipient. A Batch Payment is proposed only when the interpreted sends are exactly
- * these clauses (`readings`: every exact reading of the written amount).
+ * "<amount> <asset> to <0x address>" ("para" / "pra" in Portuguese), or (KAN-20) "<amount> <asset> to <base58 Solana address>", on one mainnet.
+ * `groundedAmount` and `groundedAddress` only show that a value appears somewhere in the request; they never show which amount belongs to which
+ * recipient. A Batch Payment is proposed only when the interpreted sends are exactly these clauses (`readings`: every exact reading of the written
+ * amount).
  */
 export type WrittenPayment = { readonly written: string; readonly readings: readonly string[]; readonly asset: string; readonly recipient: string };
 const PAYMENT_CLAUSE = /(?<![A-Za-z0-9_.,])(\d(?:[\d.,]*\d)?)\s*([A-Za-z][A-Za-z0-9.-]{0,23})\s+(?:to|para|pra)\s+(0x[0-9a-fA-F]{40})(?![0-9a-fA-F])/gi;
+// KAN-20: a Solana clause. No `i` flag: the base58 address is matched and kept exactly as written (letter case is part of the key); only the
+// prepositions accept either case. A 0x address can never match it (`0` is not base58).
+const SOLANA_PAYMENT_CLAUSE = /(?<![A-Za-z0-9_.,])(\d(?:[\d.,]*\d)?)\s*([A-Za-z][A-Za-z0-9.-]{0,23})\s+(?:[Tt][Oo]|[Pp][Aa][Rr][Aa]|[Pp][Rr][Aa])\s+([1-9A-HJ-NP-Za-km-z]{32,44})(?![0-9A-Za-z])/g;
 export function writtenPayments(text: string): WrittenPayment[] {
-  return [...text.matchAll(PAYMENT_CLAUSE)].map(match => ({ written: match[1]!, readings: amountReadings(match[1]!), asset: match[2]!, recipient: match[3]! }));
+  return [...text.matchAll(PAYMENT_CLAUSE), ...text.matchAll(SOLANA_PAYMENT_CLAUSE)].sort((a, b) => a.index! - b.index!)
+    .map(match => ({ written: match[1]!, readings: amountReadings(match[1]!), asset: match[2]!, recipient: match[3]! }));
 }
 export function groundedAddress(text: string, address: string): boolean {
   if (!address.startsWith('0x')) return [...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => match[0] === address);

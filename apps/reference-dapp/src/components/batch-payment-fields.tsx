@@ -17,6 +17,10 @@ export type BatchPaymentCardData = {
   readonly networks: readonly string[]; readonly assets: readonly string[];
   readonly rows: readonly BatchPaymentCardRow[]; readonly maxRecipients: number; readonly minRecipients: number;
   readonly check: BatchPaymentDraftCheck;
+  /** KAN-20: the catalog key of the recipient placeholder ('Solana address' on Solana rows); absent: the EVM '0x…'. */
+  readonly recipientPlaceholder?: string | undefined;
+  /** KAN-20: recipients are case-sensitive (base58): mobile keyboards must never capitalize or correct a typed letter. Absent on EVM rows. */
+  readonly recipientCaseSensitive?: boolean | undefined;
   /** The draft differs from the saved step (a new card is always a draft). */
   readonly changed: boolean;
   /** The card is a saved step (its draft is an edit of that step); false for a brand-new card, which has no step yet. */
@@ -88,7 +92,8 @@ export function BatchPaymentFields({ batch }: { batch: BatchPaymentCardData }) {
       {batch.rows.map((row, index) => <li key={index} className="batch-payment-row" data-batch-row={index + 1}>
         <span className="batch-payment-index numeric" aria-hidden="true">{index + 1}</span>
         <input className="composer-recipient-input numeric batch-payment-recipient" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
-          aria-label={tr('Recipient {0} address', index + 1)} placeholder="0x…" value={row.recipient} title={row.recipient || undefined}
+          aria-label={tr('Recipient {0} address', index + 1)} placeholder={batch.recipientPlaceholder ? tr(batch.recipientPlaceholder) : '0x…'} value={row.recipient}
+          title={row.recipient || undefined} {...batch.recipientCaseSensitive ? { autoCapitalize: 'none', autoCorrect: 'off' } : {}}
           aria-invalid={invalid(index, 'recipient') || undefined} aria-describedby={describedBy(index, 'recipient')}
           onChange={event => edited(() => batch.onRow(index, 'recipient', event.target.value))}/>
         <input className="composer-recipient-input numeric batch-payment-amount" type="text" inputMode="decimal" autoComplete="off" maxLength={40}

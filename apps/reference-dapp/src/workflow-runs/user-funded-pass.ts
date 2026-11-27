@@ -27,8 +27,9 @@
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
-import { advanceSolanaSubmission, checkUserOperation, koraGroupProgress, koraGroupSubmission, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget,
-  solanaSubmission, type Prepared, type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
+import { advanceSolanaSubmission, checkUserOperation, earlierSolanaBatchRequestOutcome, isSolanaBatchPrepared, koraGroupProgress, koraGroupSubmission, reconcileEvmGroup,
+  reconcileSolanaGroup, relayUserOperation, settleExpiredSolanaBatch, solanaBatchAuthorizationRefusal, solanaSendBudget, solanaSubmission, type Prepared, type Reconciled,
+  type SolanaBatchLeg, type SolanaBatchSettlement, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { bridgeOf, bridgeProgressOf, observeBridgeDelivery, type BridgeDelivery } from '../user-funded/bridge-delivery.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
@@ -46,6 +47,8 @@ export type UserFundedPassDeps = {
   readonly confirmPass: (run: RunRecord) => Promise<Pass>;
 };
 const OWNER_WAIT_MS = 5 * 60_000, SUBMIT_RETRY_MS = 15_000;
+/** KAN-20 (C.4): how soon an expired Solana Batch Payment preparation is looked at again while the chain cannot decide it yet. */
+export const SOLANA_BATCH_SETTLE_RETRY_MS = 10_000;
 const TRANSIENT = new Set(['USER_FUNDED_RPC_UNAVAILABLE', 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE', 'USER_OPERATION_BUNDLER_UNAVAILABLE', 'DELEGATION_RPC_UNAVAILABLE',
   'SOLANA_RPC_UNAVAILABLE', 'SOLANA_RPC_RATE_LIMITED']);
 const settled = (run: RunRecord, retryMs: number | null = null, progressed = false, code: string | null = run.code): Pass => ({ state: run.state, code, retryMs, progressed });
@@ -93,7 +96,7 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   if (!g) return settled(run);
   if (ownerStep(g)) { const pass = await deps.confirmPass(run); await syncOwnerGroups(deps, run.runId); return pass; }
   const now = deps.now();
-  const block = async (refusal: string): Promise<Pass> => {
+  const block = async (refusal: string, options: { readonly halt?: boolean; readonly outcome?: Readonly<Record<string, unknown>> } = {}): Promise<Pass> => {
     const code = stored(refusal);
     // A wallet batch handed to the owner's wallet and never answered may have executed (its answer lost on the way): the run HALTS (its owner
     // ends it, and is told to check the wallet's activity), never FAILED, which would say nothing irreversible happened. Its group and steps
@@ -104,13 +107,30 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
     // read: a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be
     // on their way) is never reported blocked, and never leaves a run failed with a send in flight. Once that write won, the run stops from its
     // CURRENT version (a status poll may have moved it since this pass read it), never left RUNNING behind a blocked group and blocked steps.
-    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
+    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked, ...options.outcome ? { outcome: options.outcome } : {} }, 'GROUP_STATE',
+      g.version)) return { ...settled(run), progressed: true };
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: marked });
     const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
-    const moved = await stopRunFromCurrent(deps, run.runId, partial || unanswered ? 'HALTED' : 'FAILED', code);
+    const moved = await stopRunFromCurrent(deps, run.runId, options.halt || partial || unanswered ? 'HALTED' : 'FAILED', code);
     deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial, unanswered });
     return moved ? settled(moved) : { ...settled(run), progressed: true };
   };
+  // KAN-20 (C.4, H1 + H3): an unsigned Solana Batch Payment preparation past its validity (or at the run's expiry) may still land: its owner's wallet
+  // may have signed it and broadcast it outside FloFi. Until the chain decides, it stays PREPARED (never offered again: its answer is refused after
+  // `validUntil`) and the run is never failed or planned again; once its blockhash provably expired, the owner's history decides. A copy that landed,
+  // or a window no scan can cover, stops the group and HALTS the run (the owner checks the wallet's activity and ends it): never prepared twice.
+  if (g.state === 'PREPARED' && isSolanaBatchPrepared(g.prepared) && (g.validUntil !== null && g.validUntil <= now || run.expiresAt <= now)) {
+    const settlement: SolanaBatchSettlement = deps.userFunded ? await settleExpiredSolanaBatch(deps.userFunded, g.prepared!) : { outcome: 'UNKNOWN' };
+    const outcome = settlement.outcome;
+    deps.log('workflow_run.solana_batch_earlier_request', { run: run.runId, group: g.groupIndex, outcome });
+    if (outcome === 'LIVE') return settled(run, SOLANA_BATCH_SETTLE_RETRY_MS, false, 'SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE');
+    if (outcome === 'UNKNOWN') return settled(run, SOLANA_BATCH_SETTLE_RETRY_MS, false, 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
+    // The group keeps what the chain proved (the landed copy's signature) in its outcome: evidence of funds that moved, never a reconciliation.
+    if (settlement.outcome === 'LANDED' || settlement.outcome === 'UNPROVABLE')
+      return block(settlement.outcome === 'LANDED' ? 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' : 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE',
+        { halt: true, outcome: earlierSolanaBatchRequestOutcome(settlement) });
+    // ABSENT: provably never paid — expired (or blocked at the run's expiry) exactly as any other preparation below.
+  }
   // At the run's expiry a group nobody signed yet is blocked — never one the owner's wallet may still be confirming: a wallet batch inside its
   // validity (`groupInFlight`) executes if the owner confirms before its on-chain deadline, and that answer must still be taken. It is blocked
   // only once its validity passed (the deadline then reverts any late confirmation). Nothing AUTHORIZED is blocked for expiry (already signed).
@@ -129,11 +149,18 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
           const back = await expireTokenGasPreparation(deps.store, run.runId, g, 'USER_FUNDED_PREPARED_EXPIRED', null);
           return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: back !== null };
         }
-        const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' });
-        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
-        return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
+        // KAN-20 (C.4): a Solana Batch Payment preparation is expired only from exactly the row version read before its chain proof (which takes RPC
+        // calls): one prepared again meanwhile (P2, possibly open in the owner's wallet) is never expired by this stale pass, which looks again at once.
+        const batchVersion = isSolanaBatchPrepared(g.prepared) ? g.version : null;
+        const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' }, 'GROUP_STATE', batchVersion);
+        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null }, 'GROUP_STATE',
+          batchVersion === null ? null : expired.version);
+        return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null || batchVersion !== null };
       }
-      // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.
+      // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed. KAN-20: a Solana Batch Payment
+      // preparation right after its validity, so its chain proof runs while the owner's history in its window is still short.
+      if (isSolanaBatchPrepared(g.prepared) && g.validUntil)
+        return settled(run, Math.min(OWNER_WAIT_MS, Math.max(1_000, g.validUntil.getTime() - now.getTime() + 1_000)), false, 'OWNER_SIGNS_GROUP');
       return settled(run, run.expiresAt <= now && g.validUntil ? Math.max(1_000, Math.min(OWNER_WAIT_MS, g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS - now.getTime())) : OWNER_WAIT_MS,
         false, 'OWNER_SIGNS_GROUP');
     case 'AUTHORIZED': {
@@ -165,6 +192,10 @@ async function authorizedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Grou
   if (paused) return settled(run, SUBMIT_RETRY_MS, false, paused);
   if (!deps.userFunded) return settled(run, ADVANCE_RETRY_MS, false, 'USER_FUNDED_NOT_ENABLED');
   if (g.strategy === 'SOLANA_SIGN_ALL') {
+    // KAN-20: a Batch Payment is sent only while its stored artifact still decodes to exactly the reviewed manifest and the recorded signed bytes
+    // still verify against it (pure; before any chain read). Otherwise it is BLOCKED with nothing sent.
+    const changed = solanaBatchAuthorizationRefusal(prepared, authorization);
+    if (changed) return block(changed);
     // P0 universal execution: while the group is AUTHORIZED provably nothing of it was sent, so this is the only point where a signed group
     // may be stopped for lack of blockhash budget: BLOCKED with nothing sent (the run FAILS, or HALTS after earlier reconciled steps and the
     // owner ends it; the signed transactions are never sent and die with their blockhash). Once SUBMITTED, only a provable expiry stops it.
@@ -264,6 +295,9 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     // The artifact the batch was actually sent from (an earlier preparation, when it reconciled against one), else the group's own.
     const group = r.group ?? (prepared as { group?: EvmGroupCalls }).group, stepCalls = group?.steps.find(s => s.stepIndex === index);
     if (stepCalls) return stepCalls.spend.amount;
+    // KAN-20: a Batch Payment's one transaction spends every leg; each leg step spent exactly its own payment (never the batch total).
+    const leg = (prepared.transactions as readonly { legs?: readonly SolanaBatchLeg[] }[] | undefined)?.flatMap(t => t.legs ?? []).find(l => l.stepIndex === index);
+    if (leg) return leg.spend.amount;
     const sol = (prepared.transactions as readonly { stepIndex: number; spend: { amount: string } }[] | undefined)?.find(t => t.stepIndex === index);
     return sol?.spend.amount ?? null;
   };

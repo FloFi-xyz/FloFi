@@ -63,7 +63,9 @@ const WHY_NOT_ONCE: Readonly<Record<string, string>> = {
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: how each execution group is authorized, in plain words. */
 const GROUP_HOW: Readonly<Record<string, string>> = { EVM_WALLET_BATCH: 'One wallet confirmation (atomic batch)', EVM_USER_OPERATION: 'One signature now; FloFi relays it when due',
   EVM_OWNER_STEP: 'One wallet confirmation per step', SOLANA_SIGN_ALL: 'One Solana signing request for every transaction', SOLANA_DURABLE_NONCE: 'One Solana signing request now',
-  SOLANA_OWNER_STEP: 'One Solana prompt per step' };
+  SOLANA_OWNER_STEP: 'One Solana prompt per step',
+  // KAN-20: a prepared Solana Batch Payment group (`solanaBatch`): every payment in ONE transaction, signed once.
+  SOLANA_BATCH: 'One Solana signing request for one atomic transaction' };
 const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Not signed yet', PREPARED: 'Waiting for your wallet', AUTHORIZED: 'Authorized', SUBMITTED: 'Sent to the network', RECONCILED: 'Reconciled',
   FAILED: 'Failed', UNCERTAIN: 'Outcome pending', BLOCKED: 'Stopped before submission', SKIPPED: 'Not run', EXPIRED: 'Expired' };
 const NETWORK: Readonly<Record<string, string>> = { 'eip155:1': 'Ethereum', 'eip155:8453': 'Base', 'eip155:42161': 'Arbitrum One', 'eip155:4663': 'Robinhood Chain',
@@ -484,7 +486,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
         <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(g.gasPayment?.upgrade
           ? 'Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation'
-          : g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation' : GROUP_HOW[g.strategy] ?? g.strategy)}</span>
+          : g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation' : g.solanaBatch ? GROUP_HOW.SOLANA_BATCH! : GROUP_HOW[g.strategy] ?? g.strategy)}</span>
         <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
           ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
           : tr(stateText(GROUP_STATE, g))}</span>
@@ -494,7 +496,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {g.maxFee?.token && !g.gasPaid && <span className="muted">{g.chain.startsWith('solana:')
           ? tr('Network fee, at most {0} · paid from your {1} to Pimlico', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token), g.maxFee.token.symbol)
           : tr('Network fee, at most {0} — paid from your USDC through Circle', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token))}</span>}
-        {g.maxFee && !g.maxFee.token && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
+        {/* KAN-20: a prepared Solana Batch Payment says its network fee and, when a recipient needs a token account, the deposits at most (both in SOL). */}
+        {g.solanaBatch && !g.gasPaid && <span className="muted">{/^[1-9][0-9]*$/.test(g.solanaBatch.maximumAccountCreationLamports)
+          ? tr('about {0} in network fees, plus up to {1} in deposits for recipients who need a token account; your wallet pays both in SOL',
+            units(g.solanaBatch.estimatedFeeLamports, 'lamports', 'up'), units(g.solanaBatch.maximumAccountCreationLamports, 'lamports', 'up'))
+          : tr('about {0} in network fees; your wallet pays it in SOL', units(g.solanaBatch.estimatedFeeLamports, 'lamports', 'up'))}</span>}
+        {g.maxFee && !g.maxFee.token && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && !g.solanaBatch && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
         {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</span>}

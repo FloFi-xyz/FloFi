@@ -28,8 +28,17 @@ type WorkflowRunProgress = NonNullable<Progress['workflowRun']>;
  * view, `boundaries.test.ts`). The wallet may have executed that batch before its on-chain deadline: FloFi cannot know.
  */
 const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
-/** Whether a batch of the run may have executed without FloFi knowing (a step or group carries WALLET_BATCH_OUTCOME_UNKNOWN). */
-const batchOutcomeUnknown = (run: WorkflowRunProgress) => [...run.groups ?? [], ...run.steps].some(item => item.code === WALLET_BATCH_OUTCOME_UNKNOWN);
+/**
+ * KAN-20: the codes a Solana Batch Payment group and its legs are BLOCKED with (the run HALTED) when an earlier request of it landed outside FloFi, or
+ * the chain can never prove it did not (`workflow-runs/service.ts`, named here as `WALLET_BATCH_OUTCOME_UNKNOWN` is). Its recipients may have been
+ * paid: worded exactly as WALLET_BATCH_OUTCOME_UNKNOWN, never "stopped before submission" or "stopped before any step completed".
+ */
+const MAY_HAVE_EXECUTED: ReadonlySet<string> = new Set([WALLET_BATCH_OUTCOME_UNKNOWN, 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED', 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE']);
+const mayHaveExecuted = (code: string | null | undefined) => typeof code === 'string' && MAY_HAVE_EXECUTED.has(code);
+/** Whether a batch of the run may have executed without FloFi knowing (a step or group carries one of `MAY_HAVE_EXECUTED`). */
+const batchOutcomeUnknown = (run: WorkflowRunProgress) => [...run.groups ?? [], ...run.steps].some(item => mayHaveExecuted(item.code))
+  // KAN-20 (C.4): after End rewrites the codes, the group's own record still says an earlier request may have paid every recipient.
+  || (run.groups ?? []).some(group => group.mayHaveExecuted === true);
 /**
  * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: in a user-funded run a grouped step is DELEGATED from the start (its group, not FloFi, holds it): it reads
  * "signed in your wallet" once the owner's wallet answered for its group — never "authorized" before that — and, until then, "waiting for your
@@ -39,9 +48,12 @@ const batchOutcomeUnknown = (run: WorkflowRunProgress) => [...run.groups ?? [], 
 const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][number], unprovable: readonly [number, number] | null = null) => {
   // A step stopped at the run's expiry (BLOCKED) or skipped when the run ended (SKIPPED) while its wallet batch was in the owner's wallet without
   // an answer may have executed: never "stopped before submission", never "not run".
-  if ((step.state === 'BLOCKED' || step.state === 'SKIPPED') && step.code === WALLET_BATCH_OUTCOME_UNKNOWN) return 'OUTCOME_UNKNOWN';
-  if (run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return step.state;
+  if ((step.state === 'BLOCKED' || step.state === 'SKIPPED') && mayHaveExecuted(step.code)) return 'OUTCOME_UNKNOWN';
   const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
+  // KAN-20 (C.4): End rewrites the codes of a Solana Batch Payment stopped because an earlier request of it may have paid every recipient; the
+  // group's own record keeps that, so its legs still read "outcome unknown", never "not run".
+  if ((step.state === 'BLOCKED' || step.state === 'SKIPPED') && group?.mayHaveExecuted === true) return 'OUTCOME_UNKNOWN';
+  if (run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return step.state;
   if (group?.signed) return 'GROUP_SIGNED';
   // Review SEC-3: once the owner decides about an unprovable Batch Payment request (`unprovableBatchRequest`), nothing waits for the wallet any more:
   // that request's legs may have executed, and every other unsigned leg reads "not signed".

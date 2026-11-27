@@ -22,24 +22,27 @@ import { readEditorRunConfig, startEditorRun, withdrawUnstartedHandoff, type Edi
 import { createPgHandoffStore } from '../platform/index';
 import { EMBEDDED_APPROVAL_PATH } from '../server/embedded-approval';
 import { createPgWorkflowRunStore, singleStepRunsSupported } from '../workflow-runs/pg-store';
-import { bindingOf, runMatchesBinding } from '../editor/authorize-binding';
+import { bindingOf, reviewedWallets, runMatchesBinding, SOLANA_OWNER } from '../editor/authorize-binding';
 import { editorWorkflowStrategy, singleCardRunRecord, type SingleRunRecord } from '../editor/workflow-strategy';
 import { prepareCatalogs } from '../server/editor-catalogs';
 import { platformStateHost } from '../server/platform-state-host';
 import { deploymentEngineRuntime, evaluateGates, fixedWindow, type HandoffPolicy } from '../platform/index';
-import { reviewEditorExecution, type EditorExecutionReview } from '../editor/workflow-execution';
+import { reviewEditorExecution, solanaBatchOnly, type EditorExecutionReview } from '../editor/workflow-execution';
 import { walletProfileOf, workflowRunCancel, workflowRunStatus, workflowRunUserFundedPrepare, workflowRunUserFundedStart, claimApproval, type ClaimedProposal } from '../platform/index';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { approvalSurface } from '../server/approval-surface';
 import { currentWalletPrincipals } from '../server/session-principal';
 import { userFundedRuntime } from '../user-funded/runtime';
 import { startEditorWorkflowRun } from './editor-run-action';
+import { requirementOf } from '../delegation/steps';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string; step?: number };
 const CODE = /^[A-Z][A-Z0-9_:]{2,100}$/;
 const failure = (cause: unknown, fallback = 'EDITOR_EXECUTION_FAILED'): { ok: false; code: string } =>
   ({ ok: false, code: cause instanceof Error && CODE.test(cause.message) ? cause.message : fallback });
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** KAN-20: a Solana owner (base58, case-sensitive: never lower-cased); its workflow is re-validated as Solana Batch Payments only. */
+const SOLANA_ADDRESS = SOLANA_OWNER;
 /** Whole-workflow Reviews per FloFi account (each one reads quotes, allowances and a batch simulation on FloFi's RPC). */
 const REVIEW_LIMIT = 30, REVIEW_WINDOW_SECONDS = 600;
 /** Only the deployment and code facts of a bridge step's gates are read for the Review (the run's start applies its requester's own policy). */
@@ -97,7 +100,8 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
     if (!readEditorRunConfig(env).enabled) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
     const accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
     if (!session) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
-    if (typeof owner !== 'string' || !EVM_ADDRESS.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
+    // KAN-20: a Solana Batch Payment is reviewed for the owner's Solana wallet (base58, passed verbatim); every other workflow for an EVM wallet.
+    if (typeof owner !== 'string' || !EVM_ADDRESS.test(owner) && !SOLANA_ADDRESS.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
     // P0: the Review is computed for the wallet the API will bind, so its Flight decision is the API's (a value, before any quote or simulation).
     const flight = await flightWalletRefusal(owner, env);
     if (flight) return { ok: false, code: flight };
@@ -165,9 +169,11 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     const parsed = walletProfileOf(profile);
     const binding = bindingOf(reviewed);
     if (!binding) return { ok: false, code: 'REVIEW_REQUIRED' };
-    // Only the reviewed EVM wallet is claimed (another proven EVM wallet of this browser never runs a workflow it did not review).
-    const wallets = (await currentWalletPrincipals()).filter(w => w.namespace !== 'eip155' || w.address.toLowerCase() === binding.owner);
-    if (!wallets.some(w => w.namespace === 'eip155')) return { ok: false, code: 'EVM_WALLET_PROOF_REQUIRED' };
+    // Only the reviewed EVM wallet is claimed (another proven EVM wallet of this browser never runs a workflow it did not review). KAN-20: a reviewed
+    // Solana owner claims with exactly that proven Solana wallet only (SOLANA_WALLET_PROOF_REQUIRED otherwise: the Editor asks its sign-in once).
+    const selected = reviewedWallets(await currentWalletPrincipals(), binding);
+    if (!selected.ok) return { ok: false, code: selected.code };
+    const wallets = selected.wallets, solanaOwner = binding.namespace === 'solana';
     // The workflow sent is the reviewed one before anything is created (no handoff or run for a workflow that changed since the Review).
     await prepareCatalogs(workflow);
     // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE card runs as a workflow run of that one step only where the database accepts it (0032).
@@ -175,6 +181,12 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     if (singleCard(workflow) && !singleStep) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
     const converted = editorWorkflowStrategy(workflow, { singleStep });
     if (!converted.ok || converted.workflowHash !== binding.workflowHash) return { ok: false, code: 'EDITOR_EXECUTION_PLAN_CHANGED' };
+    // KAN-20: a Solana owner runs in place only a workflow of Solana Batch Payments on Solana mainnet (re-validated here from the canonical
+    // composition, never from the browser's hint); nothing is created for anything else.
+    if (solanaOwner) {
+      const req = requirementOf(converted.composition);
+      if (!req.ok || !solanaBatchOnly(converted.composition, req.value.steps)) return { ok: false, code: 'EDITOR_EXECUTION_PLAN_CHANGED' };
+    }
     const started = singleStep ? await startSingleCardRun(workflow) : await startEditorWorkflowRun(workflow);
     if (!started.ok) return started;
     approvalId = started.value.approvalId;
@@ -186,8 +198,10 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     const first = run?.groups?.[0];
     // The Editor authorizes in place only a run whose first group is one wallet-grouped interaction; anything else is ended, never half-started.
     // A single card's run is one EVM group (its batch, or Circle's operation of the same calls) — nothing else is ever started for it.
-    const grouped = singleStep ? ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION'] : ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'];
-    if (!run || run.mode !== 'USER_FUNDED' || !first || !grouped.includes(first.strategy) || singleStep && run.stepCount !== 1)
+    // KAN-20: a Solana Batch Payment's run is Solana sign-all groups only (each exactly one batch's legs, one atomic transaction).
+    const grouped = solanaOwner ? ['SOLANA_SIGN_ALL'] : singleStep ? ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION'] : ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'];
+    if (!run || run.mode !== 'USER_FUNDED' || !first || !grouped.includes(first.strategy) || singleStep && run.stepCount !== 1
+      || solanaOwner && (run.groups ?? []).some(g => g.strategy !== 'SOLANA_SIGN_ALL'))
       throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
     // Exactly the reviewed workflow and plan: the same canonical workflow hash, the same groups (mechanism and steps) in the same order.
     if (!runMatchesBinding(run, binding)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');

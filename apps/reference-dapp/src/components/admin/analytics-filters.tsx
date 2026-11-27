@@ -10,7 +10,7 @@ const day = (date: Date) => date.toISOString().slice(0, 10);
 /** BUILD-ADMIN-001: time range and environment, as links and a GET form (no client script). Environments are never combined. */
 export function AnalyticsFilters({ base, params, range, environment, executedByEnvironment, defaulted }: { base: string; params: AnalyticsParams; range: AnalyticsRange;
   environment: AnalyticsEnvironment; executedByEnvironment: Readonly<Record<AnalyticsEnvironment, number>>; defaulted: boolean }) {
-  const keep = { env: params.env ?? null, action: params.action ?? null, outcome: params.outcome ?? null };
+  const keep = { env: params.env ?? null, action: params.action ?? null, outcome: params.outcome ?? null, channels: params.channels ?? null };
   return <section className="admin-card" aria-label="Filters">
     <div className="admin-filters">
       <div className="admin-field">Time range

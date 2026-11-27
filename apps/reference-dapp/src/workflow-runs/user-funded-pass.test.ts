@@ -5,8 +5,10 @@
  * while it is AUTHORIZED (provably nothing sent), and once anything may have been sent it is never recorded FAILED while its blockhash is valid.
  */
 import { describe, expect, it } from 'vitest';
+import { createMockedSolanaTransferChain, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
+import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflow } from '../engine/strategy-engine';
-import type { UserFundedDeps } from '../user-funded/groups.ts';
+import { authorizeGroup, prepareGroup, type Prepared, type SolanaGroupTx, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { GroupPatch, GroupRecord, GroupState, RunPatch, RunRecord, RunStepRecord, StepPatch, WorkflowRunStore } from './pg-store.ts';
 import { WALLET_BATCH_SETTLE_MS, type RunState, type StepState } from './state-machine.ts';
 import { userFundedPass, type UserFundedPassDeps } from './user-funded-pass.ts';
@@ -371,5 +373,172 @@ describe('final review (P1): what the chain decided is recorded even when the ru
     expect(mem.steps().map(s => [s.state, s.code])).toEqual([['UNCERTAIN', 'WORKFLOW_RUN_STALE']]);
     expect(mem.run()).toMatchObject({ state: 'ATTENTION', code: 'WORKFLOW_RUN_STALE' });
     expect(chain.state.sent).toEqual([]);
+  });
+});
+
+describe('KAN-20 C.4 (H1 + H3): an expired, unsigned Solana Batch Payment preparation is settled by the chain before anything else happens', () => {
+  const SOL_SWAP = { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '5' };
+  /** A real batch group prepared on the MOCKED mainnet cluster (its Review read at NOW), held PREPARED in the in-memory store; `bound`: Swap -> Batch. */
+  async function batch(opts: { readonly bound?: boolean; readonly runExpired?: boolean } = {}) {
+    const chain = createMockedSolanaTransferChain(), wallet = createMockedSolanaWallet();
+    chain.fundWallet(wallet.owner, 10_000_000_000n);
+    const recipients = Array.from({ length: 3 }, () => createMockedSolanaWallet().owner);
+    const pay = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: recipients.map((recipient, i) => ({ recipient, amount: `0.0${i + 1}` })) };
+    const strategy = opts.bound ? { version: 2, steps: [SOL_SWAP, pay], bindings: [{ step: 1, amountFrom: 0 }] } : pay;
+    const composed = composeWorkflow(strategy);
+    if (!composed.ok) throw new Error(composed.code);
+    const requirement = requirementOf(composed);
+    if (!requirement.ok) throw new Error(requirement.code);
+    const from = opts.bound ? 1 : 0, to = from + 2;
+    const uf: UserFundedDeps = { chains: [SOLANA], evm: () => null, bundler: () => null, jupiter: null, solana: chain.rpc, now: () => NOW };
+    const p = await prepareGroup(uf, composed, requirement.value, { runId: 'wfr_' + 'b'.repeat(26), groupIndex: from > 0 ? 1 : 0, strategy: 'SOLANA_SIGN_ALL', chain: SOLANA,
+      feePayer: wallet.owner, stepFrom: from, stepTo: to });
+    if (!p.ok) throw new Error(p.code);
+    const prepared = p.value.prepared as Prepared & { transactions: SolanaGroupTx[] };
+    const run = { runId: 'wfr_' + 'b'.repeat(26), handoffId: 'h', requester: { kind: 'MCP', ref: 'r' }, owner: { namespace: 'solana', address: wallet.owner },
+      wallets: { solana: wallet.owner }, strategy: composed.strategy, workflowHash: composed.workflowHash, engineVersion: 'test', stepCount: composed.steps.length, mode: 'USER_FUNDED',
+      state: 'RUNNING', currentStep: from, authorizationId: null, code: null, completedAt: null,
+      expiresAt: new Date(NOW.getTime() + (opts.runExpired ? 30_000 : 3_600_000)), version: 7, createdAt: NOW, updatedAt: NOW } as unknown as RunRecord;
+    const group = { runId: run.runId, groupIndex: from > 0 ? 1 : 0, namespace: 'solana', chain: SOLANA, feePayer: wallet.owner, stepFrom: from, stepTo: to,
+      strategy: 'SOLANA_SIGN_ALL', signing: from > 0 ? 'WHEN_DUE' : 'UPFRONT', awaitsDelivery: null, state: 'PREPARED', prepared, authorization: null, submission: null,
+      outcome: null, code: null, validUntil: p.value.validUntil, version: 3, updatedAt: NOW } as GroupRecord;
+    const mem = memoryStore(run, group, [...from > 0 ? ['RECONCILED' as const] : [], 'DELEGATED', 'DELEGATED', 'DELEGATED']), logs: string[] = [], logged: string[] = [];
+    const deps = (now: Date, solana: UserFundedDeps['solana'] = chain.rpc): UserFundedPassDeps => ({ store: mem.store, userFunded: { ...uf, solana }, now: () => now,
+      log: (event, fields) => { logs.push(`${event}${fields.outcome ? `:${String(fields.outcome)}` : ''}`); logged.push(JSON.stringify({ event, fields })); },
+      confirmPass: async () => { throw new Error('UNEXPECTED_CONFIRM_PASS'); } });
+    const after = new Date(NOW.getTime() + 60_000);
+    /** The same group prepared again on the cluster as it is now (what the owner's next prepare request builds: a new blockhash, the same manifest). */
+    const reprepare = async () => {
+      const again = await prepareGroup(uf, composed, requirement.value, { runId: run.runId, groupIndex: group.groupIndex, strategy: 'SOLANA_SIGN_ALL', chain: SOLANA,
+        feePayer: wallet.owner, stepFrom: from, stepTo: to });
+      if (!again.ok) throw new Error(again.code);
+      return again.value.prepared as Prepared & { transactions: SolanaGroupTx[] };
+    };
+    return { chain, wallet, recipients, prepared, mem, deps, logs, logged, after, validUntil: p.value.validUntil, reprepare };
+  }
+
+  it('(a) past its validity while its blockhash may still land: stays PREPARED, nothing written or sent, looked at again in 10 s', async () => {
+    const b = await batch();
+    expect(await userFundedPass(b.deps(b.after), b.mem.run())).toEqual({ state: 'RUNNING', code: 'SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE', retryMs: 10_000, progressed: false });
+    expect(b.mem.writes).toEqual([]);
+    expect(b.mem.group().state).toBe('PREPARED');
+    expect(b.logs).toEqual(['workflow_run.solana_batch_earlier_request:LIVE']);
+    expect(b.chain.state.sent).toEqual([]);
+    // Still valid: looked at again right after its validity (not in 5 minutes), so the proof runs while the owner's history is short.
+    expect(await userFundedPass(b.deps(NOW), b.mem.run())).toEqual({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', retryMs: 51_000, progressed: false });
+  });
+
+  it('(b) provably expired and absent from the owner\'s history: EXPIRED, then PLANNED with no artifact (prepared again on request)', async () => {
+    const b = await batch();
+    b.chain.advance(151);
+    expect(await userFundedPass(b.deps(b.after), b.mem.run())).toMatchObject({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', progressed: true });
+    expect(b.mem.writes).toEqual(['group:EXPIRED', 'group:PLANNED']);
+    expect(b.mem.group()).toMatchObject({ state: 'PLANNED', prepared: null, validUntil: null, code: null });
+    expect(b.logs).toEqual(['workflow_run.solana_batch_earlier_request:ABSENT']);
+  });
+
+  it('(c) an owner-signed copy landed outside FloFi: the group and its legs are BLOCKED and the run HALTS; FloFi sent nothing', async () => {
+    const b = await batch();
+    const landed = await b.chain.rpc('sendTransaction', [b.wallet.sign(b.prepared.transactions[0]!.unsignedTransaction), { encoding: 'base64' }]) as string;
+    b.chain.advance(151);
+    expect(await userFundedPass(b.deps(b.after), b.mem.run())).toMatchObject({ state: 'HALTED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' });
+    // The landed copy's signature is kept with the block (evidence of the funds that moved; never a reconciliation), and never logged.
+    expect(b.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED',
+      outcome: { earlierRequest: { settlement: 'LANDED', signature: landed } } });
+    expect(b.logged.join('\n')).not.toContain(landed);
+    expect(b.mem.steps().map(s => [s.state, s.code])).toEqual([0, 1, 2].map(() => ['BLOCKED', 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED']));
+    expect(b.mem.run()).toMatchObject({ state: 'HALTED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' });
+    // Each recipient was paid exactly once (by the copy the wallet broadcast), and FloFi's own sends are that one out-of-band send only.
+    expect(b.recipients.map(r => b.chain.lamports(r))).toEqual([10_000_000n, 20_000_000n, 30_000_000n]);
+    expect(b.chain.state.sent).toHaveLength(1);
+    expect(b.logs).toEqual(['workflow_run.solana_batch_earlier_request:LANDED', 'workflow_run.group_blocked']);
+  });
+
+  it('(e) a window no scan can cover: UNPROVABLE, the run HALTS; (f) an unreadable history decides nothing (retried in 10 s)', async () => {
+    const b = await batch();
+    b.chain.advance(151);
+    const failing: UserFundedDeps['solana'] = async (m, params) => { if (m === 'getSignaturesForAddress') throw new Error('SOLANA_RPC_UNAVAILABLE'); return b.chain.rpc(m, params); };
+    expect(await userFundedPass(b.deps(b.after, failing), b.mem.run())).toEqual({ state: 'RUNNING', code: 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN', retryMs: 10_000, progressed: false });
+    expect(b.mem.writes).toEqual([]);
+    let pages = 0;
+    const busy: UserFundedDeps['solana'] = async (m, params) => {
+      if (m !== 'getSignaturesForAddress') return b.chain.rpc(m, params);
+      pages++;
+      return Array.from({ length: 1000 }, (_, i) => ({ signature: '5' + String(pages * 1000 + i).padStart(87, '1').replace(/0/g, 'z'), slot: b.prepared.transactions[0]!.sinceSlot! + 100 }));
+    };
+    expect(await userFundedPass(b.deps(b.after, busy), b.mem.run())).toMatchObject({ state: 'HALTED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE' });
+    expect(b.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', outcome: { earlierRequest: { settlement: 'UNPROVABLE' } } });
+    expect(b.chain.state.sent).toEqual([]);
+  });
+
+  it('(i) a stale pass never expires a preparation made again while its chain proof ran: P2 stays PREPARED with its messageHash', async () => {
+    const b = await batch();
+    b.chain.advance(151);
+    const p2 = await b.reprepare(), p2Hash = p2.transactions[0]!.messageHash;
+    expect(p2Hash).not.toBe(b.prepared.transactions[0]!.messageHash);
+    // While this pass reads the owner's history for P1, the owner asks again: the service proves P1 absent and stores P2 (EXPIRED, PLANNED, PREPARED:
+    // three writes, a new row version). P2 may now be open in the owner's wallet.
+    let raced = false;
+    const racing: UserFundedDeps['solana'] = async (m, params) => {
+      if (m === 'getSignaturesForAddress' && !raced) {
+        raced = true;
+        b.mem.setGroup({ prepared: p2, validUntil: new Date(b.after.getTime() + 50_000), version: b.mem.group().version + 3 });
+      }
+      return b.chain.rpc(m, params);
+    };
+    // The stale pass's own proof of P1 is ABSENT too, yet it writes nothing over P2 and looks again at once.
+    expect(await userFundedPass(b.deps(b.after, racing), b.mem.run())).toMatchObject({ state: 'RUNNING', progressed: true });
+    expect(raced).toBe(true);
+    expect(b.mem.writes).toEqual([]);
+    expect(b.mem.group()).toMatchObject({ state: 'PREPARED', code: null, prepared: { transactions: [{ messageHash: p2Hash }] } });
+    expect(b.logs).toEqual(['workflow_run.solana_batch_earlier_request:ABSENT']);
+    // The next pass sees P2 inside its validity and waits for its answer.
+    expect(await userFundedPass(b.deps(b.after), b.mem.run())).toMatchObject({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', progressed: false });
+    expect(b.mem.group().prepared).toBe(p2);
+    expect(b.chain.state.sent).toEqual([]);
+  });
+
+  it('(g) the run expires while the earlier request is LIVE: never FAILED until settled; once ABSENT, WORKFLOW_RUN_EXPIRED (nothing was sent)', async () => {
+    const b = await batch({ runExpired: true });
+    expect(await userFundedPass(b.deps(b.after), b.mem.run())).toMatchObject({ state: 'RUNNING', code: 'SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE', retryMs: 10_000 });
+    expect(b.mem.writes).toEqual([]);
+    b.chain.advance(151);
+    expect(await userFundedPass(b.deps(b.after), b.mem.run())).toMatchObject({ state: 'FAILED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect(b.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED' });
+  });
+
+  it('T15: signed too late for the send budget: BLOCKED, every leg BLOCKED, nothing sent; a tampered artifact is never sent either', async () => {
+    for (const tamper of [false, true]) {
+      const b = await batch();
+      const answer = authorizeGroup(b.prepared, { kind: 'SOLANA_SIGN_ALL', transactions: [b.wallet.sign(b.prepared.transactions[0]!.unsignedTransaction)] }, b.wallet.owner, NOW);
+      if (!answer.ok) throw new Error(answer.code);
+      const stored = tamper ? JSON.parse(JSON.stringify(b.prepared)) as typeof b.prepared : b.prepared;
+      if (tamper) (stored.transactions[0]!.legs as unknown as { amount: string }[])[2]!.amount = '30000001';
+      b.mem.setGroup({ state: 'AUTHORIZED', authorization: answer.value, prepared: stored });
+      // Tampered: refused before any chain read. Not tampered: the shortest blockhash leaves fewer than 25 blocks.
+      if (!tamper) b.chain.advance(130);
+      const code = tamper ? 'SOLANA_BATCH_PAYMENT_TRANSACTION_CHANGED' : 'SOLANA_GROUP_SIGNED_TOO_LATE';
+      expect(await userFundedPass(b.deps(NOW), b.mem.run()), code).toMatchObject({ state: 'FAILED', code });
+      expect(b.mem.group()).toMatchObject({ state: 'BLOCKED', code, submission: null });
+      expect(b.mem.steps().map(s => [s.state, s.code])).toEqual([0, 1, 2].map(() => ['BLOCKED', code]));
+      expect(b.chain.state.sent).toEqual([]);
+    }
+  });
+
+  it('a bound batch reconciles per leg: each leg records exactly its own payment as spent and used (never the batch total)', async () => {
+    const b = await batch({ bound: true });
+    const answer = authorizeGroup(b.prepared, { kind: 'SOLANA_SIGN_ALL', transactions: [b.wallet.sign(b.prepared.transactions[0]!.unsignedTransaction)] }, b.wallet.owner, NOW);
+    if (!answer.ok) throw new Error(answer.code);
+    b.mem.setGroup({ state: 'AUTHORIZED', authorization: answer.value });
+    const patches: StepPatch[] = [];
+    const store = { ...b.mem.store, stepTransition: async (...args: Parameters<WorkflowRunStore['stepTransition']>) => {
+      patches.push(args[4]); return b.mem.store.stepTransition(...args);
+    } } as WorkflowRunStore;
+    for (let pass = 0; pass < 4 && b.mem.run().state === 'RUNNING'; pass++) await userFundedPass({ ...b.deps(NOW), store }, b.mem.run());
+    expect(b.mem.run().state).toBe('COMPLETED');
+    expect(b.mem.group().state).toBe('RECONCILED');
+    expect(b.chain.state.sent).toHaveLength(1);
+    expect(patches.map(p => (p.bound as { used?: string } | undefined)?.used)).toEqual(['10000000', '20000000', '30000000']);
+    expect(patches.map(p => p.outcome?.spent)).toEqual([1, 2, 3].map(i => [{ asset: `${SOLANA}/token:So11111111111111111111111111111111111111112`, amount: String(i * 10_000_000) }]));
   });
 });

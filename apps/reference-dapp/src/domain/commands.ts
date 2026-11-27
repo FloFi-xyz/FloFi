@@ -13,7 +13,7 @@ import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput, isSolanaTransferNetwork } from './robinhood-transfer-authoring';
-import { BATCH_PAYMENT_NETWORKS, createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
+import { BATCH_PAYMENT_NETWORKS, BATCH_PAYMENT_SOLANA_NETWORK, createAuthoredBatchPayment, SOLANA_BATCH_PAYMENT_ASSETS, type BatchPaymentInput } from './batch-payment-authoring';
 import { parseSolanaTransferChat } from './solana-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
@@ -45,6 +45,13 @@ const lendingNetwork = (text: string): SupplyInput['network'] => {
   return network;
 };
 const assetReference = '([^\\x00-\\x1f\\x7f]{1,160}?)';
+/**
+ * KAN-20: one Solana payment clause ("0.01 SOL to <base58>"): amount, symbol, recipient. The address class is wider than base58 (it also takes `O`,
+ * `I` and `l`) so a mistyped address is refused by the authoring as an invalid Solana recipient instead of falling to another grammar; `0` stays out,
+ * so a 0x address never matches.
+ */
+const SOLANA_PAY_CLAUSE = String.raw`([0-9]+(?:\.[0-9]+)?)\s+(SOL|USDC|USDT)\s+(?:to|para)\s+([1-9A-Za-z]{32,44})`;
+const SOLANA_PAY_LIST = new RegExp(String.raw`^(?:batch\s+)?(?:pay|send|transfer|pague|pagar|envie|enviar|transfira|transferir)\s+(${SOLANA_PAY_CLAUSE}(?:\s*(?:,\s*(?:and\s+|e\s+)?|\s+and\s+|\s+e\s+)${SOLANA_PAY_CLAUSE})+)(?:\s+(?:on|na|em)\s+Solana)?\s*[.!]?$`, 'i');
 /** Where a request continues with another step ("…, then bridge", "… and then …", "… e depois …"). */
 const SEQUENCED = /[,;]|\b(?:and|then|after|afterwards|next|e|depois|ent[aã]o)\b/i;
 /**
@@ -232,6 +239,19 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     createAuthoredTransfer('node-preview', fields);
     return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
+  // KAN-20: a Solana pay list: 2..8 "<amount> SOL|USDC|USDT to <base58>" clauses, one asset, optional " on Solana" (mainnet only; base58 recipients name
+  // Solana, as the single Solana send already infers). Recipients exactly as typed (validated case-sensitively by the authoring), never lower-cased.
+  // The `i` flag covers the verbs, prepositions and symbols; the captured address is the original text. No decimal comma here (it would be ambiguous
+  // with the list separator: such a request reaches the Copilot, which asks). "on Solana Devnet" does not match and stays the closed refusal below.
+  const solanaPay = SOLANA_PAY_LIST.exec(input);
+  if (solanaPay) {
+    const lines = [...solanaPay[1]!.matchAll(new RegExp(SOLANA_PAY_CLAUSE, 'gi'))];
+    const symbols = new Set(lines.map(line => line[2]!.toUpperCase()));
+    if (symbols.size !== 1) throw new Error('BATCH_PAYMENT_ASSET_MIXED');
+    const fields: BatchPaymentInput = { network: BATCH_PAYMENT_SOLANA_NETWORK, asset: [...symbols][0]!, payments: lines.map(line => ({ recipient: line[3]!, amount: line[1]! })) };
+    createAuthoredBatchPayment('node-preview', fields);
+    return { type: 'ADD_BATCH_PAYMENT', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: "pay 25 USDC to 0x… and 50 USDC to 0x… on Base" (also "batch pay …", commas between payments): ONE Batch
   // Payment, every recipient and amount exactly as written, in order; one asset for all of them. A recipient written twice is refused, never merged.
   const batchPay = new RegExp(`^(?:batch )?pay (.+) on (${CATALOG_CHAT_NETWORKS})$`, 'i').exec(input);
@@ -262,9 +282,15 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     const lines = payList[1]!.split(/\s*(?:,|\band\b)\s*/i).filter(Boolean).map(part => new RegExp(`^[0-9]+(?:\\.[0-9]+)? ${SYMBOL} to (\\S.*)$`, 'i').exec(part.trim()));
     if (lines.length >= 2 && lines.every(Boolean)) {
       if (!(BATCH_PAYMENT_NETWORKS as readonly string[]).includes(payNetwork.name)) throw new Error('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
+      // KAN-20: on Solana every recipient is one base58 wallet key, exactly as written ("my wallet", a name or a 0x address is never resolved).
+      if (payNetwork.name === BATCH_PAYMENT_SOLANA_NETWORK) {
+        if (lines.some(line => !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(line![2]!.trim()))) throw new Error('BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID');
+        // Only SOL, USDC and USDT of the verified registry (never a mint, a Token-2022 or another token): a closed refusal, never an interpretation.
+        if (lines.some(line => !SOLANA_BATCH_PAYMENT_ASSETS.includes(line![1]!.trim().toUpperCase()))) throw new Error('BATCH_PAYMENT_ASSET_UNSUPPORTED');
+      }
       // A recipient that names no full address at all. One that holds an address with more words ("0x… on Base") is not this grammar: it is read as
       // before (the interpretation must still pair every payment exactly as written).
-      if (lines.some(line => !/0x[0-9a-fA-F]{40}/.test(line![2]!))) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
+      else if (lines.some(line => !/0x[0-9a-fA-F]{40}/.test(line![2]!))) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
     }
   }
   const catalogTransfer = new RegExp(`^(?:transfer|send) ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: to (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);

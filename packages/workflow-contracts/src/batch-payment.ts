@@ -17,6 +17,7 @@
  */
 import { canonicalJson } from './canonical.js';
 import type { SemanticWorkflow } from './semantic-workflow.js';
+import { SOLANA_TOKEN_PROGRAMS, type SolanaTokenProgram } from './solana-transfer.js';
 
 export const BATCH_PAYMENT_ACTION = 'asset.transfer.batch';
 /** The semantic adapter: an atomic batch of `evm.native-transfer` / `evm.token-transfer` legs. */
@@ -120,4 +121,132 @@ export function readBatchPaymentNode(node: Node): BatchPaymentFields {
     asset: asset.kind === 'TOKEN' ? { ...asset, officialId: id?.kind === 'IDENTIFIER' ? id.value : null } : asset };
   if (canonicalJson(ordered(node)) !== canonicalJson(ordered(createBatchPaymentNode(node.nodeId, fields)))) fail('BATCH_PAYMENT_DECLARATION_INVALID');
   return fields;
+}
+
+/*
+ * KAN-20 (BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 WS02): the same Batch Payment operation on Solana mainnet-beta. A parallel family: the
+ * EVM types, readers and node bytes above are unchanged. ONE semantic node pays 2..8 explicit Solana wallets from the owner's wallet in one asset
+ * (native SOL or one SPL token bound by mint, decimals and token program), each its own exact amount, executed as ONE atomic owner-signed v0
+ * transaction (System `Transfer` / ATA `CreateIdempotent` + `TransferChecked` legs). Base58 keys are case-sensitive: recipients are compared and
+ * stored exactly as written, never lower-cased or trimmed. Shape checks only here; the compiler decodes every key to 32 canonical bytes, refuses
+ * off-curve keys and reads every account from the chain.
+ */
+/** The semantic adapter of a Solana batch: ONE atomic owner-signed transaction of System / SPL transfer legs. */
+export const BATCH_PAYMENT_SOLANA_ADAPTER = 'solana.batch-payment';
+export type SolanaBatchPaymentAsset =
+  | { readonly kind: 'NATIVE' }
+  | { readonly kind: 'SPL_TOKEN'; readonly mint: string; readonly decimals: number; readonly program: SolanaTokenProgram };
+export type SolanaBatchPaymentFields = { readonly chain: string; readonly asset: SolanaBatchPaymentAsset; readonly payments: readonly BatchPaymentLine[] };
+/** Either family, tagged, for the few readers that serve both (linter dispatch, engine authoring, MCP views). */
+export type BatchPaymentManifest = ({ readonly family: 'EVM' } & BatchPaymentFields) | ({ readonly family: 'SOLANA' } & SolanaBatchPaymentFields);
+
+const SOLANA_CHAIN = /^solana:[1-9A-HJ-NP-Za-km-z]{32}$/, BASE58_KEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, SOLANA_UNITS = /^[1-9][0-9]{0,19}$/, U64 = 1n << 64n;
+const WRAPPED_SOL_MINTS: readonly string[] = Object.freeze(['So11111111111111111111111111111111111111112', '9pan9bMn5HatX4EJdBwg9VgCa7Uz5HL8N1m5D3NdXejP']);
+/**
+ * Addresses that are never a payee: native programs, loaders, sysvars, precompiles, the token, ATA, compute-budget, memo and Lighthouse programs and
+ * both native mints. Nobody holds a wallet key for them, and most ARE Ed25519 curve points, so the compiler's on-curve check alone does not exclude them.
+ */
+export const SOLANA_BATCH_PAYMENT_RESERVED_RECIPIENTS: readonly string[] = Object.freeze([
+  '11111111111111111111111111111111', 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', 'ComputeBudget111111111111111111111111111111', 'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95',
+  'So11111111111111111111111111111111111111112', '9pan9bMn5HatX4EJdBwg9VgCa7Uz5HL8N1m5D3NdXejP',
+  'Sysvar1111111111111111111111111111111111111', 'SysvarC1ock11111111111111111111111111111111', 'SysvarRent111111111111111111111111111111111',
+  'SysvarRecentB1ockHashes11111111111111111111', 'SysvarEpochSchedu1e111111111111111111111111', 'SysvarFees111111111111111111111111111111111',
+  'Sysvar1nstructions1111111111111111111111111', 'SysvarS1otHashes111111111111111111111111111', 'SysvarS1otHistory11111111111111111111111111',
+  'SysvarStakeHistory1111111111111111111111111', 'SysvarEpochRewards1111111111111111111111111', 'SysvarLastRestartS1ot1111111111111111111111',
+  'NativeLoader1111111111111111111111111111111', 'BPFLoader1111111111111111111111111111111111', 'BPFLoader2111111111111111111111111111111111',
+  'BPFLoaderUpgradeab1e11111111111111111111111', 'LoaderV411111111111111111111111111111111111', 'Config1111111111111111111111111111111111111',
+  'Stake11111111111111111111111111111111111111', 'StakeConfig11111111111111111111111111111111', 'Vote111111111111111111111111111111111111111',
+  'AddressLookupTab1e1111111111111111111111111', 'Ed25519SigVerify111111111111111111111111111', 'KeccakSecp256k11111111111111111111111111111',
+  'Secp256r1SigVerify1111111111111111111111111', 'Feature111111111111111111111111111111111111', '1nc1nerator11111111111111111111111111111111',
+  'ZkTokenProof1111111111111111111111111111111', 'ZkE1Gama1Proof11111111111111111111111111111', 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
+  'Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo']);
+
+/** The exact integer total of a Solana manifest (lamports or token base units): each amount 1..2^64-1 and the total below 2^64 (u64 accounts). */
+export function solanaBatchPaymentTotal(payments: readonly BatchPaymentLine[]): bigint {
+  let total = 0n;
+  for (const p of payments) {
+    if (typeof p?.amount !== 'string' || !SOLANA_UNITS.test(p.amount) || BigInt(p.amount) >= U64) fail('BATCH_PAYMENT_AMOUNT_INVALID');
+    total += BigInt(p.amount);
+  }
+  if (total >= U64) fail('BATCH_PAYMENT_TOTAL_OUT_OF_RANGE');
+  return total;
+}
+/** Every rule of a Solana manifest that does not depend on the chain: cluster shape, asset identity shape, count, recipients, duplicates, amounts, total. */
+export function validateSolanaBatchPaymentFields(fields: SolanaBatchPaymentFields): void {
+  if (!fields || typeof fields.chain !== 'string' || !SOLANA_CHAIN.test(fields.chain)) fail('BATCH_PAYMENT_FIELDS_INVALID');
+  const a = fields.asset as { readonly kind?: unknown; readonly mint?: unknown; readonly decimals?: unknown; readonly program?: unknown } | null;
+  if (!a || (a.kind !== 'NATIVE' && a.kind !== 'SPL_TOKEN')) fail('BATCH_PAYMENT_FIELDS_INVALID');
+  if (a.kind === 'SPL_TOKEN' && (typeof a.mint !== 'string' || !BASE58_KEY.test(a.mint) || !Number.isSafeInteger(a.decimals) || (a.decimals as number) < 0 ||
+      (a.decimals as number) > 18 || !SOLANA_TOKEN_PROGRAMS.includes(a.program as SolanaTokenProgram))) fail('BATCH_PAYMENT_FIELDS_INVALID');
+  // Wrapped SOL is native SOL held in a token account: a batch pays native SOL with the System Program, never by wrapping.
+  if (a.kind === 'SPL_TOKEN' && WRAPPED_SOL_MINTS.includes(a.mint as string)) fail('BATCH_PAYMENT_ASSET_UNSUPPORTED');
+  const mint = a.kind === 'SPL_TOKEN' ? a.mint as string : null;
+  if (!Array.isArray(fields.payments) || fields.payments.length < BATCH_PAYMENT_MIN_RECIPIENTS) fail('BATCH_PAYMENT_TOO_FEW_RECIPIENTS');
+  if (fields.payments.length > BATCH_PAYMENT_MAX_RECIPIENTS) fail('BATCH_PAYMENT_TOO_MANY_RECIPIENTS');
+  const seen = new Set<string>();
+  for (const p of fields.payments) {
+    if (!p || typeof p.recipient !== 'string' || !BASE58_KEY.test(p.recipient) || SOLANA_BATCH_PAYMENT_RESERVED_RECIPIENTS.includes(p.recipient) || p.recipient === mint)
+      fail('BATCH_PAYMENT_RECIPIENT_INVALID');
+    // Exact string: base58 is case-sensitive, so two spellings that differ in case are two different keys (never merged, never lower-cased).
+    if (seen.has(p.recipient)) fail('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
+    seen.add(p.recipient);
+  }
+  solanaBatchPaymentTotal(fields.payments);
+}
+/** The canonical node of a Solana Batch Payment (closed declaration; the order of `payments` is part of it). */
+export function createSolanaBatchPaymentNode(nodeId: string, fields: SolanaBatchPaymentFields): Node {
+  validateSolanaBatchPaymentFields(fields);
+  const { chain, asset } = fields;
+  const quantity = asset.kind === 'NATIVE' ? { chainId: chain, nativeId: 'SOL', decimals: 9 } : { chainId: chain, address: asset.mint, decimals: asset.decimals };
+  const total = solanaBatchPaymentTotal(fields.payments).toString();
+  const payments = fields.payments.flatMap((p, i) => [
+    { name: batchPaymentRecipientInput(i), kind: 'ACCOUNT' as const, value: { chainId: chain, address: p.recipient } },
+    { name: batchPaymentAmountInput(i), kind: 'QUANTITY' as const, value: { asset: quantity, amount: p.amount } }]);
+  const program = asset.kind === 'SPL_TOKEN' ? [{ name: 'token-program', kind: 'IDENTIFIER' as const, value: asset.program }] : [];
+  return { nodeId, actionType: BATCH_PAYMENT_ACTION, actionSchemaVersion: '1.0.0', chainId: chain,
+    requiredCapabilities: [BATCH_PAYMENT_SOLANA_ADAPTER],
+    adapterConstraints: { adapters: [{ id: BATCH_PAYMENT_SOLANA_ADAPTER, version: '1.0.0' }], protocols: [asset.kind === 'NATIVE' ? 'native' : asset.program] },
+    inputs: [...payments, ...program], expectedOutputs: [], dependencies: [],
+    userConstraints: [{ kind: 'MAXIMUM_INPUT', quantity: { asset: quantity, amount: total } }],
+    failurePolicy: 'ABORT', requiredAuthorizationClass: 'MODE_A', lockedParameters: [], editableBounds: [] };
+}
+/** A Batch Payment whose one adapter is the Solana batch adapter (the action alone, `isBatchPaymentNode`, serves both families). */
+export const isSolanaBatchPaymentNode = (node: { readonly actionType: string; readonly adapterConstraints: { readonly adapters: readonly { readonly id: string }[] } }) =>
+  node.actionType === BATCH_PAYMENT_ACTION && node.adapterConstraints.adapters.length === 1 && node.adapterConstraints.adapters[0]!.id === BATCH_PAYMENT_SOLANA_ADAPTER;
+/**
+ * The manifest of a Solana Batch Payment node. Closed declaration: an EVM adapter, a non-Solana chain, any extra port (a 9th slot, a stray
+ * `token-program` on SOL), a missing `token-program`, a lock, a dependency or another constraint is `BATCH_PAYMENT_DECLARATION_INVALID`.
+ */
+export function readSolanaBatchPaymentNode(node: Node): SolanaBatchPaymentFields {
+  if (!isBatchPaymentNode(node)) fail('BATCH_PAYMENT_PORTS_INVALID');
+  if (!isSolanaBatchPaymentNode(node) || !SOLANA_CHAIN.test(node.chainId)) fail('BATCH_PAYMENT_DECLARATION_INVALID');
+  const program = node.inputs.find(p => p.name === 'token-program');
+  const payments: BatchPaymentLine[] = [];
+  let asset: SolanaBatchPaymentAsset | null = null;
+  for (let i = 0; i < BATCH_PAYMENT_MAX_RECIPIENTS; i++) {
+    const recipient = node.inputs.find(p => p.name === batchPaymentRecipientInput(i)), amount = node.inputs.find(p => p.name === batchPaymentAmountInput(i));
+    if (!recipient && !amount) break;
+    if (recipient?.kind !== 'ACCOUNT' || amount?.kind !== 'QUANTITY' || recipient.value.chainId !== node.chainId || amount.value.asset.chainId !== node.chainId)
+      fail('BATCH_PAYMENT_PORTS_INVALID');
+    const a = amount.value.asset as { readonly nativeId?: string; readonly address?: string; readonly decimals: number };
+    let here: SolanaBatchPaymentAsset;
+    if (typeof a.address === 'string') {
+      if (program?.kind !== 'IDENTIFIER' || !SOLANA_TOKEN_PROGRAMS.includes(program.value as SolanaTokenProgram)) fail('BATCH_PAYMENT_DECLARATION_INVALID');
+      here = { kind: 'SPL_TOKEN', mint: a.address, decimals: a.decimals, program: (program as { readonly value: string }).value as SolanaTokenProgram };
+    } else if (a.nativeId === 'SOL' && a.decimals === 9) here = { kind: 'NATIVE' };
+    else return fail('BATCH_PAYMENT_PORTS_INVALID');
+    if (asset && canonicalJson(asset) !== canonicalJson(here)) fail('BATCH_PAYMENT_ASSET_MIXED');
+    asset = here;
+    payments.push({ recipient: recipient.value.address, amount: amount.value.amount });
+  }
+  if (!asset) return fail('BATCH_PAYMENT_PORTS_INVALID');
+  const fields: SolanaBatchPaymentFields = { chain: node.chainId, asset, payments };
+  if (canonicalJson(ordered(node)) !== canonicalJson(ordered(createSolanaBatchPaymentNode(node.nodeId, fields)))) fail('BATCH_PAYMENT_DECLARATION_INVALID');
+  return fields;
+}
+/** Either family's manifest, tagged. A Solana adapter or a Solana chain reads as Solana; everything else is the unchanged EVM reader. */
+export function readAnyBatchPaymentNode(node: Node): BatchPaymentManifest {
+  if (isSolanaBatchPaymentNode(node) || node.chainId.startsWith('solana:')) return { family: 'SOLANA', ...readSolanaBatchPaymentNode(node) };
+  return { family: 'EVM', ...readBatchPaymentNode(node) };
 }

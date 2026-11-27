@@ -18,6 +18,7 @@ import { callbackParts, deeplinkTestWallet } from '../../server/native-signing/d
 import { handleChannelDispatch } from '../dispatch-http.ts';
 import { botApi, telegramEnv, telegramRequest, textUpdate } from './fixtures.test-harness.ts';
 import { handleTelegramWebhook } from './handler.ts';
+import { ownerFlowRuntime } from '../../workflow-runs/workflow-run.test-harness.ts';
 
 let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); });
@@ -106,5 +107,46 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001 Telegram native wallet signing 
       await say('STOP');
       await expect(startFromChannelToken(env, token, overrides)).rejects.toThrow('NATIVE_START_INVALID');
     } finally { await runtime.close(); }
+  });
+});
+
+/**
+ * KAN-20 (WS02 evaluation A.5 / T4): a Solana Batch Payment authored in Telegram keeps FloFi's /approve link and never gets the native signing buttons
+ * (it is SEQUENTIAL: one user-funded SOLANA_SIGN_ALL group, not a SINGLE_FLOW flow), while a single Solana transfer in the same deployment still does.
+ * MOCKED owner flows with Solana user-funded groups enabled; nothing is signed or sent.
+ */
+describe('KAN-20: a Solana Batch Payment from Telegram keeps the /approve link', () => {
+  it('the batch APPROVAL message carries the /approve link and no Phantom / Solflare buttons; a single Solana transfer keeps them', async () => {
+    const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+    const A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', B = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty';
+    const tenantId = `nb-${randomBytes(6).toString('hex')}`;
+    await t.db.query('INSERT INTO tenants (tenant_id) VALUES ($1)', [tenantId]);
+    const tg = telegramEnv({ FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS: 'solana' });
+    const env = { ...tg.env, TENANT_ID: tenantId, FLOFI_WORKFLOW_RUNS: 'enabled' } as Record<string, string>;
+    const now = () => new Date();
+    const flows = ownerFlowRuntime(['solana-transfer'], { enabled: true, delegation: null,
+      userFunded: { enabled: true, code: null, chains: [SOLANA], bundlerChains: [], solanaNonceAccounts: false, bridgeRoutes: [] } }, now);
+    const api = botApi(), common = { env, host: { db: t.db, tenantId }, runtime: flows.runtime, interpreter: null, now, sleep: async () => undefined, random: () => 0.5 };
+    const say = async (text: string) => { const r = await handleTelegramWebhook(telegramRequest(textUpdate(text), tg.webhookSecret), { ...common, fetch: api.fetch }); expect(r.status).toBe(200); };
+    const approvalMessage = () => [...api.delivered()].reverse().find(call => keyboardOf(call)?.inline_keyboard[0]?.[0]?.url?.includes('/approve#'));
+    const nativeRow = (call: { params: Record<string, unknown> }) => keyboardOf(call)!.inline_keyboard.flat().filter(b => /Phantom|Solflare|native-signing/.test(`${b.text} ${b.url ?? ''}`));
+
+    await say(`send 0.01 SOL to ${A} and 0.02 SOL to ${B}`);
+    const batch = approvalMessage();
+    expect(batch, api.texts().join('\n---\n')).toBeTruthy();
+    expect(keyboardOf(batch!)!.inline_keyboard[0]).toEqual([{ text: 'Authorize', url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:3100\/approve#flofi_chs_/) }]);
+    expect(nativeRow(batch!)).toEqual([]);
+    expect(textOf(batch!)).not.toContain('sign in your wallet app with the Phantom or Solflare button');
+    // The stored approval is the batch, planned SEQUENTIAL, with its recipients exactly as written.
+    const { rows } = await t.db.query(`SELECT plan, strategy FROM mcp_handoffs WHERE tenant_id = $1 ORDER BY created_at`, [tenantId]);
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as { plan: { kind: string; flow: string | null } }).plan).toMatchObject({ kind: 'SEQUENTIAL', flow: null });
+    expect(JSON.stringify((rows[0] as { strategy: unknown }).strategy)).toContain(`"recipient":"${A}"`);
+
+    // Control: in the same deployment a single Solana transfer is natively signable and gets the buttons.
+    await say(`send 0.01 SOL to ${A} on Solana`);
+    const single = approvalMessage()!;
+    expect(single).not.toBe(batch);
+    expect(nativeRow(single).map(b => b.text)).toEqual(['Sign with Phantom', 'Sign with Solflare']);
   });
 });

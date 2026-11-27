@@ -1,0 +1,1823 @@
+{
+ "robinhood|batch|supported|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:4663",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "robinhood|batch|supported|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:4663",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "robinhood|batch|ready|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:4663",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "robinhood|batch|ready|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:4663",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "robinhood|batch|unsupported|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "robinhood|batch|unsupported|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "robinhood|batch|unknown|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "robinhood|batch|unknown|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "robinhood|batch|flofi|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "robinhood|batch|flofi|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "robinhood|batch|assumed|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:4663",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "robinhood|batch|assumed|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:4663",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "base|batch|supported|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "base|batch|supported|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "base|batch|ready|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "base|batch|ready|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "base|batch|unsupported|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "base|batch|unsupported|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "base|batch|unknown|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|batch|unknown|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|batch|flofi|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|batch|flofi|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|batch|assumed|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "base|batch|assumed|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "base|swapThenBatch|supported|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "swap",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 3,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 3,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "base|swapThenBatch|supported|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "swap",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 3,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 3,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "base|swapThenBatch|ready|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "swap",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 3,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 3,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "base|swapThenBatch|ready|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "swap",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 3,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 3,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "base|swapThenBatch|unsupported|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "base|swapThenBatch|unsupported|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "base|swapThenBatch|unknown|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|swapThenBatch|unknown|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|swapThenBatch|flofi|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|swapThenBatch|flofi|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "base|swapThenBatch|assumed|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "swap",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 3,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 3,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "base|swapThenBatch|assumed|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:8453",
+    "steps": [
+     {
+      "index": 0,
+      "action": "swap",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     },
+     {
+      "index": 3,
+      "action": "transfer",
+      "amount": "GUARANTEED_MINIMUM",
+      "boundTo": 0
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 3,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "arbitrum-one|batch|supported|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:42161",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "arbitrum-one|batch|supported|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:42161",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "arbitrum-one|batch|ready|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:42161",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "arbitrum-one|batch|ready|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:42161",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "arbitrum-one|batch|unsupported|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "arbitrum-one|batch|unsupported|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "arbitrum-one|batch|unknown|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "arbitrum-one|batch|unknown|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "arbitrum-one|batch|flofi|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "arbitrum-one|batch|flofi|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "arbitrum-one|batch|assumed|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:42161",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "arbitrum-one|batch|assumed|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:42161",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "ethereum|batch|supported|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:1",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "ethereum|batch|supported|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:1",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "ethereum|batch|ready|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:1",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "ethereum|batch|ready|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:1",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [
+     "EVM_SMART_ACCOUNT_UPGRADE"
+    ],
+    "downgrades": [],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [
+    "EVM_SMART_ACCOUNT_UPGRADE"
+   ],
+   "single": false,
+   "atLeast": true
+  }
+ },
+ "ethereum|batch|unsupported|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "ethereum|batch|unsupported|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNSUPPORTED"
+  ]
+ },
+ "ethereum|batch|unknown|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "ethereum|batch|unknown|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "ethereum|batch|flofi|native": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "ethereum|batch|flofi|tokenGas": {
+  "ok": false,
+  "code": "BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE",
+  "because": [
+   "WALLET_ATOMIC_BATCH_UNKNOWN"
+  ]
+ },
+ "ethereum|batch|assumed|native": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:1",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": true,
+   "atLeast": false
+  }
+ },
+ "ethereum|batch|assumed|tokenGas": {
+  "ok": true,
+  "groups": [
+   {
+    "index": 0,
+    "namespace": "eip155",
+    "chain": "eip155:1",
+    "steps": [
+     {
+      "index": 0,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 1,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     },
+     {
+      "index": 2,
+      "action": "transfer",
+      "amount": "EXACT",
+      "boundTo": null
+     }
+    ],
+    "stepFrom": 0,
+    "stepTo": 2,
+    "strategy": "EVM_WALLET_BATCH",
+    "signing": "UPFRONT",
+    "awaitsDelivery": null,
+    "interactions": 1,
+    "setup": [],
+    "downgrades": [
+     "WALLET_CAPABILITIES_ASSUMED"
+    ],
+    "feePayer": "OWNER_WALLET",
+    "tokenGas": "CIRCLE_USDC_PAYMASTER"
+   }
+  ],
+  "interactions": {
+   "upfront": 1,
+   "whenDue": 0,
+   "perNamespace": {
+    "eip155": 1
+   },
+   "networkSwitches": 0,
+   "oneTimeSetup": [],
+   "single": false,
+   "atLeast": true
+  }
+ }
+}

@@ -28,8 +28,8 @@ import { useWorkflow } from '../state/workflow-store';
 import { editorReducer, resolveCanvasRemoval } from '../domain/editor';
 import { checkConnection, connectionEnd, handleHitScale } from '../domain/canvas-connect';
 import { CANVAS_ACTIONS, canvasAddCommand, type CanvasAction } from '../domain/canvas-authoring';
-import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, batchPaymentAssetChoices, batchPaymentChain, batchPaymentNetworkChange,
-  batchDraftWithSavedAsset, checkBatchPaymentDraft, defaultBatchPaymentDraft, savedBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, BATCH_PAYMENT_SOLANA_NETWORK, batchPaymentAssetChoices, batchPaymentChain,
+  batchPaymentNetworkChange, batchDraftWithSavedAsset, checkBatchPaymentDraft, defaultBatchPaymentDraft, savedBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
 import type { BatchPaymentCardData } from './batch-payment-fields';
 import { activeNetworkScope, isTestNetwork, mainnetCounterpart, testNetworkTemplate, workflowTestNetworks } from '../domain/network-scope';
 import { walletChainRef } from '../wallet/evm-networks';
@@ -470,9 +470,13 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   // Apply runs the editor's own command, which validates it again; nothing is signed or sent.
   /** The Batch Payment card's data: its draft (or the saved step), the network's asset choices, the exact total and Apply/Cancel. */
   function batchCardData(id: string, draft: BatchPaymentInput, nodeId: string | null, fresh = false): BatchPaymentCardData {
+    // KAN-20: a Solana row takes base58 recipients exactly as typed; the connected mainnet Solana wallet (when one is) is never a recipient.
+    const solanaRow = draft.network === BATCH_PAYMENT_SOLANA_NETWORK;
+    const solanaOwner = solanaRow && solanaWallets?.session?.chain === 'solana:mainnet' ? solanaWallets.session.account.address : null;
     return { network: draft.network, asset: draft.asset, networks: BATCH_PAYMENT_NETWORKS, assets: batchPaymentAssetChoices(draft.network, draft.asset),
       rows: draft.payments, minRecipients: BATCH_PAYMENT_MIN_RECIPIENTS, maxRecipients: BATCH_PAYMENT_MAX_RECIPIENTS,
-      check: checkBatchPaymentDraft(draft), changed: nodeId === null || batchDrafts[id] !== undefined, saved: nodeId !== null, fresh,
+      recipientPlaceholder: solanaRow ? 'Solana address' : undefined, recipientCaseSensitive: solanaRow || undefined,
+      check: checkBatchPaymentDraft(draft, { solanaOwner }), changed: nodeId === null || batchDrafts[id] !== undefined, saved: nodeId !== null, fresh,
       applyLabel: nodeId ? 'Apply changes' : 'Apply batch payment',
       onNetwork: network => editBatchDraft?.(id, d => batchPaymentNetworkChange(d, network as BatchPaymentInput['network'])),
       onAsset: asset => editBatchDraft?.(id, d => ({ ...d, asset })),

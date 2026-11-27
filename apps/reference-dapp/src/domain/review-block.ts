@@ -6,6 +6,7 @@
  * value carries the full value for a tooltip.
  */
 import { shortTokenDecimal } from './token-amount-display';
+import { feeAmountText } from './token-fee';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 
 /** A catalog key and its parameters; `full` holds the untruncated amounts (tooltip). */
@@ -19,6 +20,11 @@ export type ReviewBlockView = {
    * A request whose fee FloFi must sponsor (REQUIRED) is not counted; an OFFERED one is.
    */
   readonly fee: ReviewBlockText | null;
+  /**
+   * KAN-20: a Solana Batch Payment whose recipients may need a token account: the deposits at most that its network-fee ceiling includes. Absent
+   * for every other Review (EVM Reviews are unchanged).
+   */
+  readonly feeNote?: ReviewBlockText | null;
   /**
    * One sentence per token approval in the prepared request ("Uniswap uses up to 2 USDC") and per USDC permit a Circle-paid request asks (ADR-0010:
    * Circle's paymaster may take up to its cap); a fallback sentence when none is known.
@@ -120,15 +126,24 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   const circle = owner.filter(g => !g.fee && g.gasPayment?.mechanism === 'CIRCLE_USDC_PAYMASTER');
   const usdc = circle.reduce((sum, g) => sum + BigInt(g.gasPayment!.maxFee.amount), 0n);
   const usdcText = circle.length ? `${shortDecimal(usdc.toString(), 6, 'up')} USDC` : null, later = priced.length + circle.length < owner.length;
-  const fee = owner.length === 0 ? text('None from your wallet: FloFi offers to pay it')
+  // KAN-20: a Solana Batch Payment prepared by this Review: its network fee plus the token-account deposits it may charge, at most, in SOL (rounded
+  // UP, never understated); never added to an ETH amount. No EVM group carries `solanaBatch`, so every EVM fee below is unchanged.
+  const solana = owner.filter(g => g.solanaBatch);
+  const lamports = (pick: (b: NonNullable<EditorExecutionReview['groups'][number]['solanaBatch']>) => string) =>
+    solana.reduce((sum, g) => sum + BigInt(pick(g.solanaBatch!)), 0n).toString();
+  const solanaFee = solana.length && !priced.length && !circle.length ? text(solana.length < owner.length ? '{0} + later requests, quoted when due' : '{0}',
+    [feeAmountText(lamports(b => b.maximumNetworkCostLamports), 'lamports')]) : null;
+  const deposits = solana.length ? lamports(b => b.maximumAccountCreationLamports) : '0';
+  const fee = solanaFee ?? (owner.length === 0 ? text('None from your wallet: FloFi offers to pay it')
     : usdcText && priced.length ? text(later ? '{0} + {1} — paid from your USDC through Circle + later requests, quoted when due' : '{0} + {1} — paid from your USDC through Circle',
       [ethUp(total), usdcText])
     : usdcText ? text(later ? '{0} — paid from your USDC through Circle + later requests, quoted when due' : '{0} — paid from your USDC through Circle', [usdcText])
     : priced.length === 0 ? text(sponsored ? 'Later requests, quoted when due' : 'Quoted when each request is due')
-    : priced.length < owner.length ? text('{0} + later requests, quoted when due', [ethUp(total)]) : text('{0}', [ethUp(total)]);
+    : priced.length < owner.length ? text('{0} + later requests, quoted when due', [ethUp(total)]) : text('{0}', [ethUp(total)]));
   // Token permissions: each step whose prepared calls include an approval lets its protocol spend exactly the step's amount.
-  const prepared = review.groups.filter(g => g.calls);
-  const approving = [...new Set(prepared.flatMap(g => g.calls!.filter(c => c.kind === 'ERC20_APPROVE').map(c => c.step)))].sort((a, b) => a - b);
+  // KAN-20: a Solana Batch Payment prepared by this Review asks no token approval (the owner's wallet signs the transfers themselves).
+  const prepared = review.groups.filter(g => g.calls || g.solanaBatch);
+  const approving = [...new Set(prepared.flatMap(g => (g.calls ?? []).filter(c => c.kind === 'ERC20_APPROVE').map(c => c.step)))].sort((a, b) => a - b);
   const access: ReviewAccessLine[] = [];
   const permissions = approving.flatMap(index => {
     const step = review.steps.find(s => s.index === index);
@@ -150,6 +165,7 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   const otherPermissions = permissionLines.filter(line => !permissions.includes(line));
   const counts = review.counts;
   return { steps: review.steps.map(stepLine), minimum, fee, permissions: permissionLines, access, otherPermissions,
+    ...solana.length ? { feeNote: BigInt(deposits) > 0n ? text('Includes up to {0} in deposits for recipients who need a token account.', [feeAmountText(deposits, 'lamports')]) : null } : {},
     // The one-time smart-account upgrade happens inside a confirmation: it is an account change the owner approves, so it is said here.
     setup: counts.oneTimeSetup.includes('EVM_SMART_ACCOUNT_UPGRADE') ? text('includes a one-time smart-account upgrade of this account') : null,
     signatures: circle.length ? text('Two signatures: a USDC permit for the fee, then the operation') : null,
