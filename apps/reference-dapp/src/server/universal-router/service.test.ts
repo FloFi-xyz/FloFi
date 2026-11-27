@@ -409,7 +409,7 @@ describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified deliv
       outputAsset: token('base'), amount: '25000000', recipient: EVM_RECIPIENT });
     const run = await reviewed(c, w, c.wallet.publicKey);
     expect(run.review).toMatchObject({ owner: c.wallet.publicKey, recipient: EVM_RECIPIENT, recipientKind: 'EXPLICIT', authorizations: { sourceSignatures: 1, destinationAuthorization: 'NONE' },
-      feePolicy: { flofiFee: 'WORKFLOW_0_1_PCT', flofiFeeRateBps: 10, flofiFeeBasis: 'COMPLETED_WORKFLOW_INPUT', flofiFeeCollection: 'OBLIGATION_RECORDED',
+      feePolicy: { flofiFee: 'WORKFLOW_0_80_PCT', flofiFeeRateBps: 80, flofiFeeBasis: 'COMPLETED_WORKFLOW_INPUT', flofiFeeCollection: 'OBLIGATION_RECORDED',
         networkFeeSymbol: 'SOL' }, selection: { selected: 'relay' }, source: { ecosystem: 'SOLANA', simulation: { ownerDebit: '25000000' } } });
     expect(run.phase).toBe('AUTHORIZED');
     const confirmed = await executeSolana(c, run.id, w);
@@ -418,9 +418,9 @@ describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified deliv
     expect(c.solana.state.tokens.get(c.solana.ata(RELAY_SOLANA_VAULT, USDC.solana))?.amount).toBe(25_000_000n);
     const done = await settle(c, confirmed);
     expect(done).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', received: done.review.route.expectedOutput, destination: { recipient: EVM_RECIPIENT, orderBound: true, final: true },
-      feeObligation: { status: 'OBLIGATED', rateBps: 10, feeAmount: '25000', collection: 'NOT_SETTLED', notional: { amount: '25000000', symbol: 'USDC' } } });
+      feeObligation: { status: 'OBLIGATED', rateBps: 80, feeAmount: '200000', collection: 'NOT_SETTLED', notional: { amount: '25000000', symbol: 'USDC' } } });
     expect(done.evidence).toMatchObject({ evidenceClass: 'MOCKED', route: { provider: 'relay', orderId: done.review.route.order.orderId }, reconciliation: 'RECONCILED',
-      feeObligation: { status: 'OBLIGATED', feeAmount: '25000' } });
+      feeObligation: { status: 'OBLIGATED', feeAmount: '200000' } });
     expect(universalNeedsObservation(done)).toBe(false);
     await roundTripLog(c, run.id);
   });
@@ -792,7 +792,7 @@ describe('P0: all 20 directions reach verified simulation and Review on MOCKED c
       const done = await settle(c, submitted);
       expect(done.verdict).toBe('RECONCILED');
       expect(done.evidence?.evidenceClass).toBe('MOCKED');
-      expect(done.feeObligation).toMatchObject({ rateBps: 10, status: 'OBLIGATED', collection: 'NOT_SETTLED' });
+      expect(done.feeObligation).toMatchObject({ rateBps: 80, status: 'OBLIGATED', collection: 'NOT_SETTLED' });
     });
   }
   it('mandatory 1 Base USDC → Arbitrum WETH preserves token identities through quote, simulation, Review and mocked settlement', async () => {
@@ -1142,5 +1142,49 @@ describe('BUILD-P0-MAINNET-EXECUTION-RELIABILITY: pre-send wallet nonce refusals
     c.tick(121_000); for (const m of Object.values(c.evm)) m.mine();
     const fresh = await c.service.refresh(run.id);
     expect(fresh.review).toMatchObject({ recipient: SOLANA_RECIPIENT, recipientKind: 'EXPLICIT' });
+  });
+});
+
+describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 R01/R05: Nitro destinations fold L1 posting gas into gasUsed', () => {
+  // A direct registered-executor native payout on an Arbitrum Nitro chain: 21,000 + one calldata word of execution, plus L1 posting gas the
+  // receipt itemizes as gasUsedForL1 (RH-DEMO-001 recorded 25,359 = 21,000 + 4,359 on Robinhood Chain). No trace namespace is served.
+  const payout = async (from: UniversalNetworkKey, to: UniversalNetworkKey, receipt: { gasUsed: string; gasUsedForL1?: string }) => {
+    const c = await setup(), source = c.chainOf(from), destination = c.chainOf(to);
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS[from].chain, destinationChain: UNIVERSAL_NETWORKS[to].chain,
+      inputAsset: native(from), outputAsset: native(to), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const confirmed = await executeEvm(c, source, (await reviewed(c, w, EVM_OWNER)).id, w);
+    const route = confirmed.review.route;
+    const executor = UNIVERSAL_ROUTER_DEPLOYMENT.evm[route.destinationChain]!.relaySettlement!.executors.find(address => address !== route.order.solver)!;
+    const hash = destination.deliver({ recipient: EVM_OWNER, token: null, amount: BigInt(route.expectedOutput), orderId: route.order.orderId, sender: executor });
+    destination.state.txs.get(hash)!.type = '0x2';
+    const stored = destination.state.receipts.get(hash)!;
+    stored.gasUsed = receipt.gasUsed;
+    if (receipt.gasUsedForL1 === undefined) delete stored.gasUsedForL1; else stored.gasUsedForL1 = receipt.gasUsedForL1;
+    destination.state.traces.delete(hash); destination.state.callTraces.delete(hash);
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    return { c, source, destination, confirmed, hash, amount: BigInt(route.expectedOutput) };
+  };
+
+  it.each([['ethereum', 'robinhood'], ['base', 'robinhood'], ['base', 'arbitrum-one']] as const)(
+    'reconciles a %s -> %s native payout without traces once its execution gas (gasUsed - gasUsedForL1) is within the direct bound', async (from, to) => {
+      const { c, source, destination, confirmed, hash, amount } = await payout(from, to, { gasUsed: '0x6317', gasUsedForL1: '0x1107' });
+      expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'DESTINATION_OBSERVED', error: 'UNIVERSAL_AWAITING_FINALITY',
+        destination: { transactionHash: hash, orderBound: true, final: false } });
+      for (let i = 0; i < 3; i++) { source.mine(); destination.mine(); }
+      // A worker restart between observations changes nothing: the durable record is re-read and the same delivery reconciles once.
+      const reconciled = await c.restart().observe(confirmed.id);
+      expect(reconciled).toMatchObject({ verdict: 'RECONCILED', received: amount.toString(), destination: { transactionHash: hash, final: true } });
+      expect(reconciled.attempts.map(a => a.transactionHash)).toEqual(confirmed.attempts.map(a => a.transactionHash));
+      expect((await c.restart().observe(confirmed.id)).evidence?.bundleHash).toBe(reconciled.evidence?.bundleHash);
+    });
+
+  it.each([
+    ['no gasUsedForL1 on a Nitro chain', 'robinhood', { gasUsed: '0x6317' }],
+    ['gasUsedForL1 above gasUsed', 'robinhood', { gasUsed: '0x6317', gasUsedForL1: '0x7000' }],
+    ['execution gas still above the bound', 'arbitrum-one', { gasUsed: '0x7000', gasUsedForL1: '0x0400' }],
+    ['a non-Nitro chain that reports gasUsedForL1', 'ethereum', { gasUsed: '0x6317', gasUsedForL1: '0x1107' }],
+  ] as const)('stays not independently verifiable with %s (never a looser bound)', async (_label, to, receipt) => {
+    const { c, confirmed } = await payout('base', to, receipt);
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ error: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE', destination: null, evidence: null });
   });
 });

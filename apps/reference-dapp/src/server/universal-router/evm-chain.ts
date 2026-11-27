@@ -284,6 +284,22 @@ function directTokenPayout(data: string, sender: string, recipient: string, orde
 }
 
 /**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R01/R05): Arbitrum Nitro chains (Arbitrum One, Robinhood Chain and their testnets) report the L1
+ * posting gas inside the receipt's `gasUsed` and itemize it as `gasUsedForL1`; only the remainder is EVM execution. A direct native payout there
+ * (21,000 + one calldata word) reads e.g. 25,359 gas on Robinhood Chain (RH-DEMO-001: 21,000 execution + 4,359 L1), so the 23k execution bound
+ * below wrongly sent every such delivery to the trace path, and a destination RPC without traces left it UNVERIFIABLE_NATIVE forever. The bound
+ * now applies to execution gas on those chains only; anywhere else, or with a missing or inconsistent `gasUsedForL1`, it applies to `gasUsed`
+ * unchanged (never a looser bound).
+ */
+const NITRO_RECEIPT_CHAINS: ReadonlySet<number> = new Set([42161, 421614, 4663, 46630]);
+export function executionGasUsed(receipt: Record<string, unknown>, chainId: number): bigint {
+  const used = quantity(receipt.gasUsed);
+  if (!NITRO_RECEIPT_CHAINS.has(chainId) || typeof receipt.gasUsedForL1 !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(receipt.gasUsedForL1)) return used;
+  const l1 = BigInt(receipt.gasUsedForL1);
+  return l1 <= used ? used - l1 : used;
+}
+
+/**
  * Native fills carry the order ID as direct calldata or as a suffix on a
  * solver/committed fill-contract call. Only successful EVM value movements
  * in that canonical transaction count towards a recipient's net credit.
@@ -341,7 +357,7 @@ export async function verifyEvmCredit(rpc: Rpc, input: EvmCreditInput): Promise<
     // With at most one 32-byte calldata word and 23k gas used, execution
     // cannot have paid for an outgoing value call or self-destruct.
     const direct = directOrder && t.type !== '0x4'
-      && quantity(raw.gasUsed) <= 23_000n && await rpc('eth_getCode', [to, { blockHash, requireCanonical: true }]).catch(() => null) === '0x';
+      && executionGasUsed(raw, input.chainId) <= 23_000n && await rpc('eth_getCode', [to, { blockHash, requireCanonical: true }]).catch(() => null) === '0x';
     if (direct) amount = quantity(t.value);
     else {
       try { movements = await tracedMovements(rpc, input.hash, t, raw); }

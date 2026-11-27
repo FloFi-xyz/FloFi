@@ -38,7 +38,7 @@ import * as evm from './evm-chain.ts';
 import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from '../evm-submission-discovery.ts';
 import * as sol from './solana-chain.ts';
 import type { ProviderStatusHint, UniversalProviderAdapter, UniversalQuoteRequest } from './relay-provider.ts';
-import { feeObligationFor, flofiFeePolicy } from './fee-obligation.ts';
+import { feeObligationFor, flofiFeePolicy, reviewedFeeRate } from './fee-obligation.ts';
 import { refusalNote, WALLET_NONCE_REFUSAL } from '../../domain/wallet-nonce.ts';
 import { chainRelationOf, type WalletNonceCheck } from './nonce-check.ts';
 import { assertUnwrapEffects, unwrapCall, wrappedNativeOf } from './wrapped-native.ts';
@@ -194,7 +194,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     ({ ...record, authorization: null, phase: record.phase === 'AUTHORIZED' || record.phase === 'SOURCE_SUBMITTED' ? 'PREPARED' : record.phase, error, routeChanges: changes,
       requote: requote && ['AUTHORIZED', 'SOURCE_SUBMITTED', 'PREPARED'].includes(record.phase) });
   const divergent = (record: UniversalRecord, code: string): UniversalRecord => ({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', authorization: null, error: code,
-    feeObligation: feeObligationFor(record.review.route, 'DIVERGENT') });
+    feeObligation: feeObligationFor(record.review.route, 'DIVERGENT', reviewedFeeRate(record.review.feePolicy)) });
 
   // --- intent, tokens, recipient ----------------------------------------------------------------------------------------
   function intentOf(workflow: SemanticWorkflow): UniversalBridgeFields & { nodeId: string; source: UniversalNetwork; destination: UniversalNetwork } {
@@ -552,7 +552,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       submissionKind: facts.direct ? 'DIRECT' as const : 'DELEGATED_SINGLE' as const };
     if (facts.status === 0) {
       if (attempt.step === 'DEPOSIT') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED',
-        feeObligation: feeObligationFor(record.review.route, 'FAILED') },
+        feeObligation: feeObligationFor(record.review.route, 'FAILED', reviewedFeeRate(record.review.feePolicy)) },
         { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt, note: 'UNIVERSAL_DEPOSIT_REVERTED' }));
       const reverted = attempt.step === 'UNWRAP' ? 'UNIVERSAL_UNWRAP_REVERTED' : 'UNIVERSAL_APPROVAL_REVERTED';
       return save(replaceAttempt(deauthorized(record, reverted), { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt,
@@ -707,7 +707,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     }
     if (!landed) return save(replaceAttempt({ ...record, error: 'UNIVERSAL_AWAITING_SOURCE_FINALITY' }, pending));
     if (landed.status === 'REVERTED') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED',
-      feeObligation: feeObligationFor(record.review.route, 'FAILED') },
+      feeObligation: feeObligationFor(record.review.route, 'FAILED', reviewedFeeRate(record.review.feePolicy)) },
       { ...pending, state: 'REVERTED', feeLamports: landed.fee.toString(), note: 'UNIVERSAL_DEPOSIT_REVERTED' }));
     const settled: SourceSettlement = { chainId: record.review.route.sourceChain, transactionHash: attempt.transactionHash, position: { kind: 'SLOT', height: landed.slot },
       blockHash: null, timestamp: landed.timestamp, orderId: record.review.route.order.orderId, ownerDebit: landed.ownerDebit.toString(), final: true, confirmedAt: now().toISOString() };
@@ -838,7 +838,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         // Recovery is recorded before the refund, so the history shows the run left the normal settlement path first.
         if (record.phase !== 'RECOVERY_REQUIRED') record = await save({ ...transition(record, 'RECOVERY_REQUIRED'), error: 'UNIVERSAL_REFUND_NOT_OBSERVED' });
         if (refund) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', refund, error: null,
-          feeObligation: feeObligationFor(record.review.route, 'REFUNDED') });
+          feeObligation: feeObligationFor(record.review.route, 'REFUNDED', reviewedFeeRate(record.review.feePolicy)) });
         return save({ ...record, error: 'UNIVERSAL_REFUND_NOT_OBSERVED' });
       } else {
         // No delivery yet: past the attention window (or a provider failure report) the run needs attention; it keeps observing and verifies a late fill or a refund.
@@ -882,7 +882,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
           return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
         record = { ...record, destination: { ...destination, orderBound: true, orderProof: 'RELAY_EVM_TOKEN_V1' } };
       }
-      const feeObligation = feeObligationFor(record.review.route, 'RECONCILED');
+      const feeObligation = feeObligationFor(record.review.route, 'RECONCILED', reviewedFeeRate(record.review.feePolicy));
       const evidence = buildEvidence(record, feeObligation);
       return save({ ...transition(record, 'RECONCILED'), evidence, verdict: 'RECONCILED', error: null, feeObligation });
     }
