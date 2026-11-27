@@ -9,7 +9,7 @@
  * run reads (as the wallet that claimed and shared the approval).
  */
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
-import { strategyTestNetworks, approvalWorkflowResults, capabilityFacts, composeWorkflowOrRefuse, developerReturnTarget, ENGINE_VERSION, evaluateWorkflowGates, evidenceView as ownerEvidence, findOwnedRun, openApprovalSession, PlatformRefusal,
+import { strategyTestNetworks, approvalWorkflowResults, batchPaymentGates, capabilityFacts, composeWorkflowOrRefuse, developerReturnTarget, ENGINE_VERSION, evaluateWorkflowGates, evidenceView as ownerEvidence, findOwnedRun, openApprovalSession, PlatformRefusal,
   prepareApprovalRequest, sharedRuns, simulatePreview, simulateWorkflowPreview, TERMINAL, typedId, type ApprovalDeps, type EngineRuntime, type HandoffPolicy, type HandoffStore,
   type ApprovalRunReader, type HandoffRecord, type RequesterScope, type WindowLimit } from '../platform/index.ts';
 import { developerApprovalLinkScheme, developerHandoffRules, developerRequester } from './approval-profile.ts';
@@ -36,12 +36,15 @@ export type DeveloperContext = {
 const policyOf = (ctx: DeveloperContext): HandoffPolicy => ctx.scope.environment === 'sandbox' ? SANDBOX_POLICY : MAINNET_POLICY;
 const requesterOf = (ctx: DeveloperContext): RequesterScope => ({ kind: 'DEVELOPER_PROJECT', ref: developerRequesterRef(ctx.scope.projectId, ctx.scope.environment) });
 export const limitBucket = (scope: ProjectScope, metric: string) => `dev:${scope.projectId}:${scope.environment}:${metric}`;
+/**
+ * The gates `createApproval` applies, in its order: a production key's owner-step refusals first, then (review DEV-BP-2) the Batch Payment rule of every
+ * approval request — a production key's approvals offer only the owner's own steps (`ownerStepsOnly`), so a batch is never approvable there.
+ */
 async function strategyGates(ctx: DeveloperContext, workflow: WorkflowComposition) {
   const live = ctx.scope.environment === 'production';
   const gates = await evaluateWorkflowGates(workflow, ctx.runtime, policyOf(ctx), { run: live });
-  if (!live) return gates;
-  const reason = gates.enabledByDeployment.mockedHarness ? 'MAINNET_RUNTIME_REQUIRED' : gates.supportedByCode.modes?.confirmEachStep;
-  return reason ? { ...gates, handoff: { allowed: false, reason } } : gates;
+  const reason = !live ? null : gates.enabledByDeployment.mockedHarness ? 'MAINNET_RUNTIME_REQUIRED' : gates.supportedByCode.modes?.confirmEachStep;
+  return reason ? { ...gates, handoff: { allowed: false, reason } } : batchPaymentGates(workflow, gates, ctx.runtime, { ownerStepsOnly: live });
 }
 
 const write = <T>(ctx: DeveloperContext, work: (stores: WriteStores) => Promise<T>) => ctx.write ? ctx.write(work) : work(ctx);
@@ -52,7 +55,7 @@ export async function listCapabilities(ctx: DeveloperContext, query: { network?:
   const live = ctx.scope.environment === 'production';
   const [facts, publishedIntegrations] = await Promise.all([
     capabilityFacts(ctx.runtime, policyOf(ctx), query as Parameters<typeof capabilityFacts>[2],
-      live ? 'PUBLIC_MAINNET' : undefined, { singleStepRun: live }),
+      live ? 'PUBLIC_MAINNET' : undefined, { singleStepRun: live, ownerStepsOnly: live }),
     !query.network && !query.action ? ctx.publishedIntegrations?.() : undefined,
   ]);
   return { object: 'list', environment: ctx.scope.environment, data: facts.map(f => capabilityView(f, ctx.scope.environment)),

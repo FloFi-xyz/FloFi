@@ -9,12 +9,13 @@ import { validateBridgeWorkflow } from './bridge.js';
 import { validateRouterBridgeWorkflow } from './crosschain-router.js';
 import { validateBridgeSwapWorkflow } from './bridge-swap.js';
 import { validateCrossChainLiquidityWorkflow } from './cross-chain-liquidity.js';
-import { BRIDGE_ACTION, isRouterBridgeNode, isSolanaTransferNode, isUniversalBridgeNode, validateUniversalBridgeWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { BRIDGE_ACTION, isBatchPaymentNode, isRouterBridgeNode, isSolanaTransferNode, isUniversalBridgeNode, validateUniversalBridgeWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { validateLendingComposition } from './lending-composition.js';
 import { validateSupplyWorkflow } from './supply.js';
 import { validateNativeTransferWorkflow } from './native-transfer.js';
+import { validateBatchPaymentWorkflow } from './batch-payment.js';
 import { validateSolanaTransferWorkflow } from './solana-transfer.js';
 import { isSolanaSwapNode, validateSolanaSwapWorkflow } from './solana-swap.js';
 import { isSolanaCompositionCandidate, validateSolanaCompositionWorkflow } from './solana-composition.js';
@@ -112,6 +113,8 @@ export function validateAuthoringWorkflow(input: unknown, context: ReviewContext
   // BUILD-SOLANA-TRANSFER-UX-001: the same transfer action on Solana (System Program / SPL TransferChecked) has its own validator.
   if (workflow.nodes.some(isSolanaTransferNode)) { validateSolanaTransferWorkflow(workflow); return workflow; }
   if (workflow.nodes.some(node => node.actionType === 'asset.transfer')) { validateNativeTransferWorkflow(workflow); return workflow; }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the Batch Payment declaration (several recipients, one asset, one EVM mainnet).
+  if (workflow.nodes.some(isBatchPaymentNode)) { validateBatchPaymentWorkflow(workflow); return workflow; }
   // BUILD-RH-002: the canonical swap over a network's official asset catalog (Robinhood Chain Stock Tokens, USDG, WETH).
   if (workflow.nodes.some(isCatalogSwapNode)) { validateCatalogSwapWorkflow(workflow); return workflow; }
   // A registered bound composition (Solana Devnet Swap → Orca liquidity): checked before the isolated Solana validators, which

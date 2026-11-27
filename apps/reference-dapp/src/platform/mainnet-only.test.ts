@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
-import { composeStrategy } from '../engine/strategy-engine';
+import { composeStrategy, composeWorkflow } from '../engine/strategy-engine';
 import { codeCapabilities, strategyInScope, supportedAssets, supportedNetworks } from '../engine/capability-catalog';
 import { compileSchema, PUBLIC_NETWORK_IDS, PUBLIC_STRATEGY_ACTIONS, PublicStrategyInputSchema, TEST_NETWORK_IDS, type StrategyInput } from '../engine/strategy-spec';
 import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
@@ -34,7 +34,8 @@ describe('BUILD-FLOFI-MAINNET-PRODUCT-001: public composition, discovery and han
   });
   it('composes every mainnet strategy unchanged in the public product (same canonical IR and hash as before)', () => {
     for (const { id, strategy } of mainnetExamples) {
-      const before = composeStrategy(strategy), after = composeWorkflowOrRefuse(strategy, undefined, 'PUBLIC_MAINNET');
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment's canonical identity is its workflow (its legs and its batch).
+      const before = strategy.action === 'batch_payment' ? composeWorkflow(strategy) : composeStrategy(strategy), after = composeWorkflowOrRefuse(strategy, undefined, 'PUBLIC_MAINNET');
       if (!before.ok) throw new Error(id);
       expect(after.workflowHash, id).toBe(before.workflowHash);
       expect(strategyTestNetworks(after), id).toEqual([]);

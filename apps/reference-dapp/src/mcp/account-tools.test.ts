@@ -23,7 +23,7 @@ import { WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow';
 
 const A = '0x' + 'a'.repeat(40), B = '0x' + 'b'.repeat(40), S = 'So11111111111111111111111111111111111111112';
 // Links made at or after this instant were made under the Connections text that discloses balance and position reads.
-const env = { FLOFI_MCP: 'enabled', ...oauthEnv(), FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-01-01T00:00:00Z' };
+const env = { FLOFI_MCP: 'enabled', ...oauthEnv(), FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-11-24T05:00:00Z' };
 const config = readOAuthConfig(env) as OAuthConfig;
 const accounts = { X: 'mcpacct_' + 'x'.repeat(26), Y: 'mcpacct_' + 'y'.repeat(26), Z: 'mcpacct_' + 'z'.repeat(26), W: 'mcpacct_' + 'w'.repeat(26) };
 const tokens = { X: newCredential('access'), Y: newCredential('access'), Z: newCredential('access'), W: newCredential('access') };
@@ -152,17 +152,44 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 account tools', () => {
   });
 
   it('balances and positions are read only for links made after the Connections page disclosed them (fail closed when unconfigured)', async () => {
-    for (const cutoff of [undefined, 'not-a-date', '2999-01-01T00:00:00Z']) {
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): a deployment that reads no balances (unset, invalid or a future instant) says so: re-linking
+    // cannot change an operator setting, so the person is never told to link again; the hourly budget is not spent; nothing is read or shown as zero.
+    for (const [cutoff, deployment] of [[undefined, 'NOT_ENABLED'], ['not-a-date', 'NOT_ENABLED'], ['2999-01-01T00:00:00Z', 'NOT_YET_EFFECTIVE']] as const) {
       const { port: p, calls } = port(), configured = { ...env, FLOFI_MCP_PORTFOLIO_LINKS_FROM: cutoff as unknown as string };
       if (cutoff === undefined) delete (configured as Record<string, unknown>).FLOFI_MCP_PORTFOLIO_LINKS_FROM;
-      const client = session({ env: configured, token: tokens.X, state: state(handoffs([])), portfolio: p });
-      expect((await client.callTool('get_portfolio', {})).output, String(cutoff)).toMatchObject({ ok: false, code: 'PORTFOLIO_RELINK_REQUIRED',
-        linkWalletUrl: `${config.origin}/connections` });
+      const buckets: string[] = [];
+      const client = session({ env: configured, token: tokens.X, state: state(handoffs([]), undefined, { allow: bucket => { buckets.push(bucket); return true; } }), portfolio: p });
+      const out = (await client.callTool('get_portfolio', {})).output;
+      expect(out, String(cutoff)).toMatchObject({ ok: false, code: 'PORTFOLIO_READS_NOT_ENABLED', deployment, relinkHelps: false });
+      expect(out, String(cutoff)).not.toHaveProperty('linkWalletUrl');
       expect(calls, String(cutoff)).toEqual([]);
-      expect(((await client.callTool('get_account', {})).output.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([false, false]);
+      expect(buckets.filter(b => b.startsWith('portfolio:')), String(cutoff)).toEqual([]);
+      const account = (await client.callTool('get_account', {})).output;
+      expect((account.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([false, false]);
+      expect((account.wallets as { balancesUnreadableReason: string }[]).map(w => w.balancesUnreadableReason))
+        .toEqual(Array(2).fill(deployment === 'NOT_ENABLED' ? 'DEPLOYMENT_PORTFOLIO_READS_NOT_ENABLED' : 'DEPLOYMENT_PORTFOLIO_READS_NOT_YET_EFFECTIVE'));
+      expect(account.portfolioReads).toMatchObject({ status: deployment });
+      // get_account never sends the person to get_portfolio (or to link again) for balances this deployment does not read.
+      expect((account.nextSteps as string[]).some(step => step.startsWith('get_portfolio'))).toBe(false);
+      expect((account.nextSteps as string[]).some(step => /Linking the wallet again does not change that/.test(step))).toBe(true);
     }
     const account = (await session({ env, token: tokens.X, state: state(handoffs([])) }).callTool('get_account', {})).output;
     expect((account.wallets as { balancesReadable: boolean }[]).map(w => w.balancesReadable)).toEqual([true, true]);
+    for (const wallet of account.wallets as Record<string, unknown>[]) expect(wallet).not.toHaveProperty('balancesUnreadableReason');
+    expect(account.portfolioReads).toEqual({ status: 'ENABLED', consentSince: '2026-11-24T05:00:00.000Z' });
+  });
+
+  it('a link made before an effective consent instant is renewed by re-linking; every other link is still read and none is shown as zero', async () => {
+    // The cutoff is now: X's links (made a moment before, by the double) predate it.
+    const now = new Date(), later = { ...env, FLOFI_MCP_PORTFOLIO_LINKS_FROM: new Date(now.getTime() + 3_000).toISOString().replace(/\.\d{3}Z$/, 'Z') };
+    const { port: p, calls } = port();
+    const predating = session({ env: later, token: tokens.X, state: state(handoffs([])), portfolio: p, now: () => new Date(now.getTime() + 10_000) });
+    const out = (await predating.callTool('get_portfolio', {})).output;
+    expect(out).toMatchObject({ ok: false, code: 'PORTFOLIO_RELINK_REQUIRED', relinkHelps: true, linkWalletUrl: `${config.origin}/connections` });
+    expect(calls).toEqual([]);
+    const account = (await predating.callTool('get_account', {})).output;
+    expect((account.wallets as { balancesUnreadableReason: string }[]).map(w => w.balancesUnreadableReason)).toEqual(['LINK_PREDATES_PORTFOLIO_CONSENT', 'LINK_PREDATES_PORTFOLIO_CONSENT']);
+    expect((account.nextSteps as string[]).some(step => /becomes readable once the person links it again/.test(step))).toBe(true);
   });
 
   it('a balance that cannot be interpreted carries no raw number; a partly checked network is incomplete; reads stop before the deadline', async () => {
@@ -292,5 +319,32 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 approval requests', () => {
     const call = await client.post({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'cancel_approval', arguments: { approvalId: apr('a') } } },
       { 'mcp-protocol-version': '2025-11-25' });
     expect(call.status).toBe(403);
+  });
+});
+
+describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 P0: the consent instant itself (flofi-data-privacy review)', () => {
+  it('never backdates consent before the disclosure went live, and never rolls an impossible date forward', async () => {
+    const { portfolioConsent, portfolioLinksFrom, PORTFOLIO_DISCLOSURE_LIVE_FROM } = await import('./config');
+    const now = new Date('2026-11-26T12:00:00Z');
+    expect(portfolioConsent({ FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-01-01T00:00:00Z' }, now)).toEqual({ status: 'NOT_ENABLED', cause: 'BEFORE_DISCLOSURE' });
+    // The minute form one second before the floor is still before it.
+    expect(portfolioConsent({ FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-11-24T04:39Z' }, now)).toEqual({ status: 'NOT_ENABLED', cause: 'BEFORE_DISCLOSURE' });
+    expect(portfolioConsent({ FLOFI_MCP_PORTFOLIO_LINKS_FROM: PORTFOLIO_DISCLOSURE_LIVE_FROM }, now)).toEqual({ status: 'ENABLED', since: '2026-11-24T04:40:00.000Z' });
+    expect(portfolioConsent({}, now)).toEqual({ status: 'NOT_ENABLED', cause: 'UNSET_OR_INVALID' });
+    expect(portfolioLinksFrom({ FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-11-31T00:00:00Z' })).toBeNull();
+    expect(portfolioLinksFrom({ FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-11-24T05:00:00+00:00' })).toBeNull();
+  });
+
+  it('a backdated cutoff reads nothing and says so; no wallet address reaches the logs', async () => {
+    const { memoryLogger } = await import('./gateway.test-harness');
+    const { port: p, calls } = port(), logger = memoryLogger();
+    const client = session({ env: { ...env, FLOFI_MCP_PORTFOLIO_LINKS_FROM: '2026-01-01T00:00:00Z' }, token: tokens.X, state: state(handoffs([])), portfolio: p, logger });
+    expect((await client.callTool('get_portfolio', {})).output).toMatchObject({ ok: false, code: 'PORTFOLIO_READS_NOT_ENABLED', deployment: 'NOT_ENABLED', relinkHelps: false });
+    expect((await client.callTool('get_account', {})).output.wallets).toEqual([expect.objectContaining({ balancesReadable: false,
+      balancesUnreadableReason: 'DEPLOYMENT_PORTFOLIO_READS_NOT_ENABLED' }), expect.objectContaining({ balancesReadable: false })]);
+    expect(calls).toEqual([]);
+    expect(logger.lines.some(l => l.event === 'mcp.portfolio_consent_before_disclosure')).toBe(true);
+    const logged = JSON.stringify(logger.lines).toLowerCase();
+    for (const address of [A, S]) expect(logged).not.toContain(address.toLowerCase());
   });
 });

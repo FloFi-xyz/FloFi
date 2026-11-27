@@ -132,7 +132,9 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 visual model: a deterministic p
     for (const { id, strategy } of STRATEGY_EXAMPLES) {
       const model = visualOf(strategy);
       expect(Object.keys(model).sort(), id).toEqual(MODEL_KEYS);
-      for (const s of model.steps) expect(Object.keys(s).sort(), id).toEqual(STEP_KEYS);
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-2): a Batch Payment step additionally lists its payments and that it is all or nothing
+      // (every other step keeps its keys).
+      for (const s of model.steps) expect(Object.keys(s).sort(), id).toEqual(s.action === 'BATCH_PAYMENT' ? [...STEP_KEYS, 'allOrNothing', 'payments'].sort() : STEP_KEYS);
       for (const language of ['EN', 'PT'] as const) {
         const all = [...textsOf(workflowVisualLayout(model, language).tree), workflowVisualText(model, language).alt].join('\n');
         expect(all, id).not.toMatch(/minimum|mínimo|received|recebid|\bfee\b|taxa|estimated|estimad|≈|quote|cota/i);
@@ -154,6 +156,82 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 visual model: a deterministic p
       expect(json).not.toMatch(/0x[0-9a-fA-F]{40}|flofi_|https?:|approve|secret|token|bearer|session|calldata|signature|privateKey|apr_/i);
       for (const text of visualModelStrings(model)) expect(text).not.toMatch(/0x[0-9a-fA-F]{20,}/);
     }
+  });
+});
+
+describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-2): a Batch Payment is ONE card, all or nothing, never N transfers run step by step', () => {
+  const payees = (n: number) => Array.from({ length: n }, (_, i) => ({ recipient: '0x' + (i + 1).toString(16).padStart(2, '0').repeat(20), amount: `${i + 1}.5` }));
+  const SWAP = { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2', slippageBps: 50 };
+  const batchOf = (n: number, network = 'base') => ({ action: 'batch_payment', network, asset: 'USDC', recipients: payees(n) });
+  it('a lone Batch Payment: one card, and the whole workflow is all or nothing (the warning, said once), never step by step, in EN and PT', () => {
+    const composition = composeWorkflowOrRefuse(batchOf(3), undefined);
+    expect(composition.steps).toHaveLength(3);
+    const model = workflowVisualModel(composition);
+    expect(only(model)).toMatchObject({ action: 'BATCH_PAYMENT', allOrNothing: true, account: { role: 'RECIPIENTS', count: 3 } });
+    expect(model.warnings).toEqual(['REAL_FUNDS', 'BATCH_PAYMENT_ALL_OR_NOTHING']);
+    const en = workflowVisualText(model, 'EN'), pt = workflowVisualText(model, 'PT');
+    // The card does not repeat what the workflow warning already says.
+    expect(en.lines[0]).toBe('1. Batch Payment · Total 7.5 USDC · Base · 3 recipients · 1.5 USDC → 0x0101…0101 · 2.5 USDC → 0x0202…0202 · 3.5 USDC → 0x0303…0303');
+    expect(en.alt).toContain('All or nothing: every payment in one wallet authorization.');
+    expect(pt.alt).toContain('Tudo ou nada: todos os pagamentos em uma só autorização.');
+    expect(`${en.alt}\n${pt.alt}`).not.toMatch(/step by step|etapa por etapa|one wallet authorization ·|uma só autorização da carteira/i);
+  });
+  // Review M3: this case first expected the workflow-wide all-or-nothing warning, which overclaimed: the swap is not part of the batch's atomic
+  // authorization. A workflow with other steps runs step by step; only its Batch Payment card is all or nothing.
+  it('a swap then a Batch Payment: two cards in order, the batch with its total, recipient count, all-or-nothing mark and every payment; the workflow runs step by step', () => {
+    const composition = composeWorkflowOrRefuse({ version: 2, steps: [SWAP, batchOf(3)] }, undefined);
+    expect(composition.steps).toHaveLength(4);
+    const model = workflowVisualModel(composition);
+    expect(model.steps.map(s => [s.index, s.action])).toEqual([[1, 'SWAP'], [2, 'BATCH_PAYMENT']]);
+    expect(model.steps[1]).toMatchObject({ amounts: [{ amount: '7.5', asset: 'USDC' }], account: { role: 'RECIPIENTS', count: 3 }, allOrNothing: true,
+      payments: [{ recipient: '0x0101…0101', amount: '1.5' }, { recipient: '0x0202…0202', amount: '2.5' }, { recipient: '0x0303…0303', amount: '3.5' }] });
+    expect(model.steps[0]).not.toHaveProperty('allOrNothing');
+    expect(model.connections).toEqual([{ from: 's1', to: 's2' }]);
+    expect(model.warnings).toEqual(['REAL_FUNDS', 'SEQUENCE_STEP_BY_STEP']);
+    expect(model.workflowHash).toBe(composition.workflowHash);
+    expect(visualModelStrings(model)).toEqual(expect.arrayContaining(['0x0101…0101', '1.5', '0x0303…0303', '3.5']));
+    const en = workflowVisualText(model, 'EN'), pt = workflowVisualText(model, 'PT');
+    expect(en.title).toBe('Swap → Batch Payment');
+    expect(en.lines[1]).toBe('2. Batch Payment · Total 7.5 USDC · Base · 3 recipients · All or nothing: one wallet authorization · 1.5 USDC → 0x0101…0101 · ' +
+      '2.5 USDC → 0x0202…0202 · 3.5 USDC → 0x0303…0303');
+    expect(pt.title).toBe('Trocar → Pagamento em lote');
+    expect(pt.lines[1]).toMatch(/^2\. Pagamento em lote · Total 7\.5 USDC · Base · 3 destinatários · Tudo ou nada: uma só autorização da carteira · 1\.5 USDC → 0x0101…0101/);
+    expect(en.lines[0]).not.toMatch(/All or nothing/);
+    expect(en.alt).toContain('Runs step by step: each step after the previous one settles.');
+    expect(pt.alt).toContain('Roda etapa por etapa: cada uma após a anterior se concluir.');
+    expect(`${en.alt}\n${pt.alt}`).not.toMatch(/every payment in one wallet authorization\.|todos os pagamentos em uma só autorização\./);
+    for (const language of ['EN', 'PT'] as const)
+      expect(textsOf(workflowVisualLayout(model, language).tree)).toContain(language === 'EN' ? 'All or nothing: one wallet authorization' : 'Tudo ou nada: uma só autorização da carteira');
+    for (const text of [en.alt, pt.alt]) expect(text.replace(VISUAL_GLYPHS, '')).toBe(text);
+  });
+  it('a compact picture (more than four cards) keeps the Batch Payment card\'s total, recipient count and all-or-nothing mark; the text lists every payment', () => {
+    // Five operations, six legs: four swaps on Arbitrum One, then a two-recipient batch on Base.
+    const swap = { ...SWAP, network: 'arbitrum-one' };
+    const model = visualOf({ version: 2, steps: [swap, swap, swap, swap, batchOf(2)] });
+    expect(model.steps.map(s => s.action)).toEqual(['SWAP', 'SWAP', 'SWAP', 'SWAP', 'BATCH_PAYMENT']);
+    expect(model.warnings).toEqual(['REAL_FUNDS', 'SEQUENCE_STEP_BY_STEP']);
+    for (const language of ['EN', 'PT'] as const) {
+      const texts = textsOf(workflowVisualLayout(model, language).tree), text = workflowVisualText(model, language);
+      expect(texts, language).toContain('Total 4 USDC · Base');
+      expect(texts, language).toContain(language === 'EN' ? '2 recipients' : '2 destinatários');
+      expect(texts, language).toContain(language === 'EN' ? 'All or nothing: one wallet authorization' : 'Tudo ou nada: uma só autorização da carteira');
+      // Compact cards draw no payment (nor any other step's facts); the text alternative carries every one.
+      expect(texts.some(t => t.includes('→ 0x0101')), language).toBe(false);
+      expect(texts.some(t => /^(Max slippage|Desvio máximo)/.test(t)), language).toBe(false);
+      for (const payment of ['1.5 USDC → 0x0101…0101', '2.5 USDC → 0x0202…0202']) expect(text.alt, `${language} ${payment}`).toContain(payment);
+    }
+    // The compact card is taller only by its own two facts.
+    const layout = workflowVisualLayout(model, 'EN'), single = workflowVisualLayout(visualOf({ version: 2, steps: [swap, swap, swap, swap, swap] }), 'EN');
+    expect(layout.height - single.height).toBe(40);
+  });
+  it('a full-size picture never leaves a payment out: all eight payments of a full batch are drawn', () => {
+    const model = visualOf({ action: 'batch_payment', network: 'base', asset: 'USDC', recipients: payees(8) });
+    for (const language of ['EN', 'PT'] as const) {
+      const texts = textsOf(workflowVisualLayout(model, language).tree);
+      for (let i = 1; i <= 8; i++) expect(texts.some(t => t.includes(`${i}.5 USDC → 0x${i.toString(16).padStart(2, '0').repeat(2)}`)), `${language} ${i}`).toBe(true);
+      expect(texts).toContain(language === 'EN' ? '8 recipients' : '8 destinatários');
+    }
+    expect(only(model).payments).toHaveLength(8);
   });
 });
 

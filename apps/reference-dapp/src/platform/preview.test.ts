@@ -170,6 +170,38 @@ describe('canonical workflow preview across surfaces', () => {
   });
 });
 
+describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review DEV-BP-4): a Batch Payment is previewed only as one atomic batch with the owner\'s wallet', () => {
+  const recipients = ['a1', 'b2'].map((byte, i) => ({ recipient: '0x' + byte.repeat(20), amount: String(i + 1) }));
+  const batch = { action: 'batch_payment', network: 'base', asset: 'USDC', recipients };
+  it('the single-step preview refuses it with SIMULATION_REQUIRES_OWNER_BROWSER (alone or in a list), never SIMULATE_ONE_STEP_AT_A_TIME, and previews nothing', async () => {
+    const { runtime, calls } = blockingRuntime();
+    for (const strategy of [batch, { version: 2, steps: [batch, BRIDGE] }]) {
+      const composed = composeWorkflow(strategy);
+      if (!composed.ok) throw new Error(composed.code);
+      expect(await codeOf(simulatePreview(runtime, { strategy, workflowHash: composed.workflowHash, simulationSubject: SUBJECT }, { scope: 'ENGINEERING' }))).toBe('SIMULATION_REQUIRES_OWNER_BROWSER');
+    }
+    // Any other multi-step list keeps its refusal.
+    const two = { version: 2, steps: [BRIDGE, BRIDGE] }, composed = composeWorkflow(two);
+    if (!composed.ok) throw new Error(composed.code);
+    expect(await codeOf(simulatePreview(runtime, { strategy: two, workflowHash: composed.workflowHash, simulationSubject: SUBJECT }, { scope: 'ENGINEERING' }))).toBe('SIMULATE_ONE_STEP_AT_A_TIME');
+    expect(calls()).toBe(0);
+  });
+  it('the workflow preview names the batch and how it is simulated, and previews none of its payments one at a time', async () => {
+    const { runtime, calls } = blockingRuntime(), composed = composeWorkflow(batch);
+    if (!composed.ok) throw new Error(composed.code);
+    const preview = await simulateWorkflowPreview(runtime, { strategy: batch, workflowHash: composed.workflowHash, simulationSubject: SUBJECT });
+    expect(preview).toMatchObject({ status: 'INCOMPLETE', authorizable: false, batchSimulation: 'ONE_ATOMIC_BATCH_WITH_THE_OWNER_WALLET_AT_SIGNING',
+      batchPayments: [{ step: 0, legs: [0, 1], network: 'base', asset: 'USDC', recipients: 2, total: '3', execution: 'ATOMIC_ONLY' }] });
+    expect(preview.steps.map(s => [s.state, s.code])).toEqual([['NOT_COMPLETED', 'SIMULATION_REQUIRES_OWNER_BROWSER'], ['NOT_COMPLETED', 'SIMULATION_REQUIRES_OWNER_BROWSER']]);
+    expect(calls()).toBe(0);
+    // A workflow without a batch carries neither field (a runtime that answers at once: nothing here waits).
+    const answering = { ...runtime, preview: async () => ({ ok: false as const, code: 'PREVIEW_DONE' }) } as McpRuntime;
+    const plain = await simulateWorkflowPreview(answering, { strategy: BRIDGE, workflowHash: hashOf(BRIDGE), simulationSubject: SUBJECT });
+    expect(plain).not.toHaveProperty('batchPayments');
+    expect(plain).not.toHaveProperty('batchSimulation');
+  });
+});
+
 describe('P0-E: simulation admission waits briefly for a slot instead of refusing at once', () => {
   it('defaults to 4 slots and a 5 s wait, configurable within bounds (anything else keeps the default)', () => {
     expect(simulationAdmission({})).toEqual({ slots: MAX_CONCURRENT_SIMULATIONS, waitMs: SIMULATION_SLOT_WAIT_MS });

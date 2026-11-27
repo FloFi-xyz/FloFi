@@ -67,7 +67,9 @@ export const COPILOT_AUTHORING_COMMANDS = Object.freeze(['ADD_SWAP', 'ADD_TESTNE
   // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge between the five mainnets.
   'ADD_UNIVERSAL_BRIDGE',
   // PR B: a Solana Devnet swap's output funding an Orca position, added and linked exactly as the Canvas does.
-  'ADD_SOLANA_COMPOSITION'] as const);
+  'ADD_SOLANA_COMPOSITION',
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several sends of one asset on one EVM mainnet), as the chat's grammar authors it.
+  'ADD_BATCH_PAYMENT'] as const);
 export type CopilotAuthoringCommand = (typeof COPILOT_AUTHORING_COMMANDS)[number];
 export const COPILOT_CAPABILITIES = copilotCopy('EN').capabilities;
 
@@ -303,6 +305,17 @@ function slippageWritten(text: string, value: string): boolean {
   return [...own.matchAll(new RegExp(SLIPPAGE_WORD, 'giu'))].some(word => [...own.slice(word.index, word.index + word[0].length + 40)
     .matchAll(new RegExp(String.raw`(${UNSIGNED_SLIPPAGE})\s*(%|${BPS_UNIT})`, 'giu'))].some(match => bps(match[1]!, match[2] === '%' ? '%' : undefined) === value));
 }
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review H2): the payments a person's own words pair, in their order: each explicit clause
+ * "<amount> <asset> to <0x address>" ("para" / "pra" in Portuguese). `groundedAmount` and `groundedAddress` only show that a value appears somewhere
+ * in the request; they never show which amount belongs to which recipient. A Batch Payment is proposed only when the interpreted sends are exactly
+ * these clauses (`readings`: every exact reading of the written amount).
+ */
+export type WrittenPayment = { readonly written: string; readonly readings: readonly string[]; readonly asset: string; readonly recipient: string };
+const PAYMENT_CLAUSE = /(?<![A-Za-z0-9_.,])(\d(?:[\d.,]*\d)?)\s*([A-Za-z][A-Za-z0-9.-]{0,23})\s+(?:to|para|pra)\s+(0x[0-9a-fA-F]{40})(?![0-9a-fA-F])/gi;
+export function writtenPayments(text: string): WrittenPayment[] {
+  return [...text.matchAll(PAYMENT_CLAUSE)].map(match => ({ written: match[1]!, readings: amountReadings(match[1]!), asset: match[2]!, recipient: match[3]! }));
+}
 export function groundedAddress(text: string, address: string): boolean {
   if (!address.startsWith('0x')) return [...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => match[0] === address);
   return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => match[0].toLowerCase() === address.toLowerCase());
@@ -439,10 +452,16 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   if (maximum !== undefined && Number(value) > maximum) return reject('COPILOT_SLIPPAGE_OUT_OF_RANGE', m.slippageAtMost(maximum));
   return value;
 }
-function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+/**
+ * `sent`: the asset a catalog transfer sends, already resolved to its catalog identity (BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001). Its token is a catalog
+ * symbol, never an address the person typed, so "send 25 USDC to 0x… on Base" names a recipient, not a token: only that token's own address can collide.
+ */
+function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field),
+  sent?: { readonly address?: string | null }): string | null {
   if (value !== null && field === 'recipient' && g.saved?.includes(value)) return value;
   if (value !== null && !g.carried.has(field)) {
-    const assetAddresses = [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
+    const assetAddresses = sent ? sent.address ? [sent.address.toLowerCase()] : []
+      : [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
     const mentions = [...g.text.matchAll(/0x[0-9a-fA-F]{40}/g)].filter(match => match[0].toLowerCase() === value.toLowerCase());
     if (assetAddresses.includes(value.toLowerCase()) && mentions.length === 1) return ask([field], copyOf(g).addressIsAsset);
   }
@@ -804,7 +823,7 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const token = catalogToken(a.asset, network, g, 'transfer', 'asset', 'ANY', notes).asset;
   const amount = amountOf(a.amount, g, 'transfer');
   // The Canvas "To" field's own network-aware check: the same canonical recipient whichever surface authored it.
-  const typed = self ? null : addressOf(a.recipient, g, 'recipient', m.sendRecipientNotFound);
+  const typed = self ? null : addressOf(a.recipient, g, 'recipient', m.sendRecipientNotFound, { address: (token as { readonly address?: string | null }).address ?? null });
   const check = self ? { ok: true as const, recipient: 'CONNECTED_OWNER' } : checkRecipient(label, typed === null ? null : typedAddress(g.text, typed));
   if (!check.ok) return check.code === 'TRANSFER_RECIPIENT_REQUIRED' ? ask(['recipient'], m.sendRecipientQuestion)
     : check.code === 'TRANSFER_RECIPIENT_INVALID' ? ask(['recipient'], m.sendRecipientInvalid(label)) : refuse(m.cannotAuthor);

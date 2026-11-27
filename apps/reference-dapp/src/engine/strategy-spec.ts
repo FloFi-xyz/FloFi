@@ -24,7 +24,7 @@ export type NetworkId = (typeof NETWORK_IDS)[number];
 export const TEST_NETWORK_IDS: readonly NetworkId[] = Object.freeze(['base-sepolia', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana-devnet', 'robinhood-testnet']);
 /** The networks a public client may name: every mainnet, in `NETWORK_IDS` order. */
 export const PUBLIC_NETWORK_IDS: readonly NetworkId[] = Object.freeze(NETWORK_IDS.filter(id => !TEST_NETWORK_IDS.includes(id)));
-export const STRATEGY_ACTIONS = ['bridge', 'swap', 'supply', 'borrow', 'repay', 'withdraw', 'add_liquidity', 'lending_composition', 'transfer'] as const;
+export const STRATEGY_ACTIONS = ['bridge', 'swap', 'supply', 'borrow', 'repay', 'withdraw', 'add_liquidity', 'lending_composition', 'transfer', 'batch_payment'] as const;
 export type StrategyAction = (typeof STRATEGY_ACTIONS)[number];
 /** The public actions: the lending composition exists only on Base Sepolia, so the Mainnet-only product has none. */
 export const PUBLIC_STRATEGY_ACTIONS: readonly StrategyAction[] = Object.freeze(STRATEGY_ACTIONS.filter(action => action !== 'lending_composition'));
@@ -130,9 +130,31 @@ const Transfer = Type.Object({
   decimals: Type.Optional(Type.Integer({ minimum: 0, maximum: 18, description: 'Solana SPL mint transfers only: the token\'s decimals (verified on chain).' })),
   tokenProgram: Type.Optional(enumOf(['spl-token', 'token-2022'] as const, 'Solana SPL mint transfers only: the token program (verified on chain).')),
 }, strict);
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): one Batch Payment: one source wallet, one EVM mainnet, one asset, 2..8 recipients each with its
+ * own exact amount. It is ONE operation (one step of a workflow) whose ordered manifest the workflow hash binds; FloFi executes it only as one atomic
+ * authorization of the owner's own wallet (every payment settles, or none does), and refuses it where that is not available. Each recipient counts
+ * as one step of the workflow's 8-step budget.
+ */
+export const BATCH_PAYMENT_NETWORK_IDS = ['robinhood', 'base', 'arbitrum-one', 'ethereum'] as const;
+const BatchPaymentLine = Type.Object({
+  recipient: EvmAddress('Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. ' +
+    'EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped ' +
+    'letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).'),
+  amount: Decimal('This recipient\'s exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).'),
+}, strict);
+const BatchPayment = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('batch_payment'),
+  network: enumOf(BATCH_PAYMENT_NETWORK_IDS, 'The EVM mainnet of this same-network batch (real funds). Solana is not available for batch payments.'),
+  asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'Native ETH, or a symbol or whole name of the network\'s validated official catalog ' +
+    '(Stock Tokens are not paid in batches). Every recipient receives this one asset.' }),
+  recipients: Type.Array(BatchPaymentLine, { minItems: 2, maxItems: 8, description: 'Ordered payments, each one recipient and its amount. Two to eight; ' +
+    'each recipient counts as one step of the workflow\'s 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient ' +
+    'the person asked for: more than eight is refused; the person decides which to remove.' }),
+}, strict);
 const BRANCHES = Object.freeze({ bridge: Bridge, swap: Swap, supply: Lending('supply', 'Account credited with the supplied position.'),
   borrow: Lending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: Lending('repay', 'Account whose debt is repaid (onBehalfOf).'),
-  withdraw: Withdraw, add_liquidity: Liquidity, lending_composition: LendingComposition, transfer: Transfer }) satisfies Readonly<Record<StrategyAction, TSchema>>;
+  withdraw: Withdraw, add_liquidity: Liquidity, lending_composition: LendingComposition, transfer: Transfer, batch_payment: BatchPayment }) satisfies Readonly<Record<StrategyAction, TSchema>>;
 export const StrategySpecSchema = Type.Union(Object.values(BRANCHES), { description: 'A FloFi strategy: structured intent only. FloFi maps it to registered profiles.' });
 export type StrategySpec = Static<typeof StrategySpecSchema>;
 
@@ -227,7 +249,7 @@ const PublicTransfer = Type.Object({
 }, strict);
 const PUBLIC_BRANCHES = Object.freeze({ bridge: PublicBridge, swap: PublicSwap, supply: PublicLending('supply', 'Account credited with the supplied position.'),
   borrow: PublicLending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: PublicLending('repay', 'Account whose debt is repaid (onBehalfOf).'),
-  withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer });
+  withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer, batch_payment: BatchPayment });
 /**
  * BUILD-FLOFI-INTELLIGENCE-001: the fields a strategy of `action` must carry, read from the canonical schema branch (the public contract when the
  * action is public, else the engineering one) — the Capability API's "required parameters" are never a separate hand-written list.

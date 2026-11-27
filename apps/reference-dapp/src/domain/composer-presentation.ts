@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { batchPaymentDetails } from './batch-payment-authoring';
 import type { ReviewContext, ReviewResult } from '@defi-workflow-engine/reference-linter';
 import { liquidityDetails } from '@defi-workflow-engine/reference-linter';
 import { workflowDependencyOrder } from '@defi-workflow-engine/workflow-contracts';
@@ -50,7 +51,7 @@ export function singleAmountProposalTarget(workflow: Workflow, command: Command,
 const actionLabels: Record<string, string> = {
   'asset.swap.exact-input': 'Swap', 'asset.bridge': 'Bridge',
   'asset.liquidity.concentrated': 'Pool / Liquidity', 'asset.liquidity.uniswap-v3': 'Pool / Liquidity',
-  'asset.liquidity.prepare': 'Prepare liquidity', 'asset.transfer': 'Send',
+  'asset.liquidity.prepare': 'Prepare liquidity', 'asset.transfer': 'Send', 'asset.transfer.batch': 'Batch Payment',
   supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
 };
 const providerLabels: Record<string, string> = {
@@ -58,7 +59,7 @@ const providerLabels: Record<string, string> = {
   'lifi.rest': 'LI.FI', lifi: 'LI.FI', 'across.direct': 'Across',
   'flofi.router': 'Cross-chain Router', 'flofi.router.universal': 'Universal Router', 'cow-protocol': 'CoW Protocol',
   'solana.system-transfer': 'System Program', 'solana.spl-transfer': 'SPL Token',
-  'evm.native-transfer': 'Wallet send', 'evm.token-transfer': 'Token transfer',
+  'evm.native-transfer': 'Wallet send', 'evm.token-transfer': 'Token transfer', 'evm.batch-payment': 'Wallet batch',
 };
 /** What a Canvas card, the Simulate panel, the Review and the chat say about one step (display only). */
 export type ComposerSummary = { action: string; provider: string; chain: string; amount: string; detail: string | undefined; bridgePair: string | undefined; linked: boolean;
@@ -85,6 +86,8 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const repay = lending ? null : repayDetails(node as Parameters<typeof repayDetails>[0]);
   const withdraw = lending ? null : withdrawDetails(node as Parameters<typeof withdrawDetails>[0]);
   const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment states its exact total and how many recipients it pays.
+  const batch = batchPaymentDetails(node as Parameters<typeof batchPaymentDetails>[0]);
   const money = supply ?? borrow ?? repay ?? withdraw;
   const providers = node.adapterConstraints.adapters.map(adapter => adapter.id);
   const protocols = node.adapterConstraints.protocols;
@@ -96,12 +99,12 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
     ? `${shellChainLabel(node.chainId)} → ${shellChainLabel(destinationChain)}` : shellChainLabel(node.chainId);
   const linked = node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE');
   const amount = lending ? `${node.actionType === 'supply' ? lending.supply : lending.borrow} USDC` : money ? `${money.amount} ${money.asset}` :
-    transfer ? `${transfer.amount} ${transfer.asset}` : universal ? `${universal.amount} ${universal.inputSymbol}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
+    transfer ? `${transfer.amount} ${transfer.asset}` : batch ? `${batch.total} ${batch.asset}` : universal ? `${universal.amount} ${universal.inputSymbol}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
     solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` : catalogSwap ? `${catalogSwap.amount} ${catalogSwap.from}` :
     uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : rhPool ? `${rhPool.amountA} ${rhPool.tokenA} + ${rhPool.amountB} ${rhPool.tokenB}` : orca ? orcaAmount(orca) :
     position ? `${formatHumanAmount(position.amountWeth, 'WETH', context)} WETH + ${formatHumanAmount(position.amountUsdc, 'USDC', context)} USDC` :
     linked ? 'Amount from linked step' : 'Amount not available';
-  const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
+  const detail = batch ? `${batch.payments.length} recipients` : solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
     lending && node.actionType === 'asset.swap.exact-input' ? 'Borrowed USDC → WETH' :
     uni ? 'USDC / WETH' : rhPool ? `${rhPool.tokenA} / ${rhPool.tokenB}` : orca ? `SOL / ${orca.tokenB}` : position ? 'WETH / USDC' : undefined;
   // The router pair names both assets (BUILD-RH-002: USDC → USDG into Robinhood Chain); legacy bridge readers describe USDC on both ends.

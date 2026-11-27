@@ -348,6 +348,11 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     await panel.getByRole('button', { name: /^Link 0x/ }).click();
     await expect(panel.getByRole('button', { name: 'Remove link' })).toBeVisible();
     expect(await client.tool('get_execution_status', { executionId: runId })).toMatchObject({ ok: true, executionId: runId, owner: owner.address, accessBasis: 'ACCOUNT_LINKED_WALLET' });
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): this deployment sets no FLOFI_MCP_PORTFOLIO_LINKS_FROM (as production did), so the wallet
+    // just linked in the browser is listed with the deployment's reason, account and portfolio agree, and the person is never told to link again.
+    expect(await client.tool('get_account', {})).toMatchObject({ portfolioReads: { status: 'NOT_ENABLED' },
+      wallets: [{ address: expect.stringMatching(new RegExp(`^${owner.address}$`, 'i')), balancesReadable: false, balancesUnreadableReason: 'DEPLOYMENT_PORTFOLIO_READS_NOT_ENABLED' }] });
+    expect(await client.tool('get_portfolio', {})).toMatchObject({ ok: false, code: 'PORTFOLIO_READS_NOT_ENABLED', relinkHelps: false });
     await panel.getByRole('button', { name: 'Remove link' }).click();
     await expect(panel).toContainText('No linked wallet.');
     expect(await client.tool('get_execution_status', { executionId: runId })).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });

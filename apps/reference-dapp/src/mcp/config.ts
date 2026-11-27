@@ -38,7 +38,12 @@ export type McpOAuthPrincipal = { readonly kind: 'mcp-oauth'; readonly id: strin
    * BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the linked wallets whose owner agreed to balance and position reads — links made on `/connections` at or after
    * FLOFI_MCP_PORTFOLIO_LINKS_FROM, when that page discloses those reads (`portfolioLinksFrom`). Absent or empty: no portfolio read for anyone.
    */
-  readonly portfolioOwners?: readonly McpWalletOwner[] };
+  readonly portfolioOwners?: readonly McpWalletOwner[];
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): whether this deployment reads balances and positions at all (`portfolioConsent`), so an
+   * unreadable wallet says why: a deployment that reads none is never answered with "link the wallet again" (relinking cannot change it).
+   */
+  readonly portfolioReads?: PortfolioConsent };
 export type McpPrincipal = McpCredentialPrincipal | McpOAuthPrincipal;
 /**
  * The wallets a principal may read owner-scoped records as, namespace included: an OAuth account's linked wallets (EVM or Solana, filled by the
@@ -53,7 +58,32 @@ export function portfolioLinksFrom(env: Env): Date | null {
   const raw = env.FLOFI_MCP_PORTFOLIO_LINKS_FROM?.trim();
   if (!raw || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/.test(raw)) return null;
   const at = new Date(raw);
-  return Number.isNaN(at.getTime()) ? null : at;
+  // A calendar date that does not exist (2026-11-31) is invalid, never rolled forward into another day.
+  return Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== raw.slice(0, 10) ? null : at;
+}
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0, flofi-data-privacy review): no link made before FloFi's Connections page disclosed balance and
+ * position reads can carry that consent. The disclosure was introduced by e470945 (PR #248) and went live in production with deployment
+ * dpl_F4z2qXAHRrAt2VABL9K6hmwWtWzy (READY 2026-11-24T04:39:34Z); this floor rounds that up. A configured FLOFI_MCP_PORTFOLIO_LINKS_FROM earlier than it
+ * would backdate consent, so it reads nothing (NOT_ENABLED) instead of widening access. Later is always allowed.
+ */
+export const PORTFOLIO_DISCLOSURE_LIVE_FROM = '2026-11-24T04:40:00Z';
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): the deployment's portfolio consent state at `now`.
+ *   ENABLED            links made at or after `since` may be read (a link made before it is re-linked on `/connections` to renew consent)
+ *   NOT_ENABLED        FLOFI_MCP_PORTFOLIO_LINKS_FROM is unset or invalid: no link qualifies, and re-linking cannot change that (an operator setting)
+ *   NOT_YET_EFFECTIVE  the instant is still in the future: no link made before it ever qualifies, so a link qualifies only once made after it
+ * Fail closed in every case but ENABLED; consent is never backdated, inferred or represented as a zero balance.
+ */
+export type PortfolioConsent =
+  | { readonly status: 'ENABLED'; readonly since: string }
+  | { readonly status: 'NOT_ENABLED'; readonly cause: 'UNSET_OR_INVALID' | 'BEFORE_DISCLOSURE' }
+  | { readonly status: 'NOT_YET_EFFECTIVE'; readonly since: string };
+export function portfolioConsent(env: Env, now: Date): PortfolioConsent {
+  const from = portfolioLinksFrom(env);
+  if (!from) return { status: 'NOT_ENABLED', cause: 'UNSET_OR_INVALID' };
+  if (from.getTime() < Date.parse(PORTFOLIO_DISCLOSURE_LIVE_FROM)) return { status: 'NOT_ENABLED', cause: 'BEFORE_DISCLOSURE' };
+  return from.getTime() > now.getTime() ? { status: 'NOT_YET_EFFECTIVE', since: from.toISOString() } : { status: 'ENABLED', since: from.toISOString() };
 }
 export const principalOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principal.kind === 'mcp-oauth' ? principal.owners ?? []
   : principal.wallets.map(address => ({ namespace: 'eip155' as const, address }));

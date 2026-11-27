@@ -16,16 +16,19 @@ import { transferDetails } from '../domain/robinhood-transfer-authoring';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
-import { semanticWorkflowHash, type WorkflowComposition } from '../engine/strategy-engine';
+import { operationSteps, semanticWorkflowHash, type WorkflowComposition } from '../engine/strategy-engine';
 import { strategyFlow } from '../mcp/simulation.ts';
 
 export const WORKFLOW_VISUAL_VERSION = 1;
-export type VisualAction = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'ADD_LIQUIDITY' | 'TRANSFER' | 'OTHER';
+export type VisualAction = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'ADD_LIQUIDITY' | 'TRANSFER' | 'BATCH_PAYMENT' | 'OTHER';
 export type VisualChain = 'EVM' | 'SOLANA';
 /** An exact amount as the IR states it (a decimal string, never rounded) and its asset symbol. */
 export type VisualAmount = { readonly amount: string; readonly asset: string };
-/** The one account a step names, shortened (`0x1234…abcd`), or the wallet that signs in FloFi. */
-export type VisualAccount = { readonly role: 'RECIPIENT' | 'BENEFICIARY' | 'OWNER'; readonly address: string } | { readonly role: 'CONNECTED_WALLET' };
+/** The one account a step names, shortened (`0x1234…abcd`), or the wallet that signs in FloFi; a Batch Payment names how many recipients it pays. */
+export type VisualAccount = { readonly role: 'RECIPIENT' | 'BENEFICIARY' | 'OWNER'; readonly address: string } | { readonly role: 'CONNECTED_WALLET' }
+  | { readonly role: 'RECIPIENTS'; readonly count: number };
+/** One payment of a Batch Payment: its recipient (shortened) and its exact amount, in the step's one asset. */
+export type VisualPayment = { readonly recipient: string; readonly amount: string };
 export type VisualStep = {
   /** Stable within one model: `s1`, `s2`, … in canonical order. */
   readonly id: string; readonly index: number; readonly action: VisualAction;
@@ -40,9 +43,21 @@ export type VisualStep = {
   readonly account: VisualAccount | null;
   /** Test tokens, real funds, or unknown (null). */
   readonly testFunds: boolean | null;
+  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment's every payment, in order (present on a Batch Payment step only). */
+  readonly payments?: readonly VisualPayment[];
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: this step's payments are one atomic authorization of the owner's own wallet, all or nothing (present,
+   * and true, on a Batch Payment step only: that is its only execution). It says nothing about the workflow's other steps.
+   */
+  readonly allOrNothing?: true;
 };
-/** BUILD-CHAT-E2E-001: an executable sequence runs step by step (`SEQUENCE_STEP_BY_STEP`); only a sequence no FloFi flow executes is NOT_EXECUTABLE. */
-export type VisualWarning = 'REAL_FUNDS' | 'DEBT_REMAINS' | 'SEQUENCE_NOT_EXECUTABLE' | 'SEQUENCE_STEP_BY_STEP';
+/**
+ * BUILD-CHAT-E2E-001: an executable sequence runs step by step (`SEQUENCE_STEP_BY_STEP`); only a sequence no FloFi flow executes is NOT_EXECUTABLE.
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a workflow that is only its one Batch Payment never runs payment by payment: its payments are one atomic
+ * authorization of the owner's own wallet, all or nothing (`BATCH_PAYMENT_ALL_OR_NOTHING`, in place of the step-by-step warning). A workflow with other
+ * steps keeps the step-by-step warning (it is never all or nothing as a whole); its Batch Payment card says it is all or nothing (`allOrNothing`).
+ */
+export type VisualWarning = 'REAL_FUNDS' | 'DEBT_REMAINS' | 'SEQUENCE_NOT_EXECUTABLE' | 'SEQUENCE_STEP_BY_STEP' | 'BATCH_PAYMENT_ALL_OR_NOTHING';
 export type WorkflowVisualModel = {
   readonly version: typeof WORKFLOW_VISUAL_VERSION;
   /** The canonical workflow hash this picture shows (single step: its semanticWorkflowHash; a step list: its sequence hash). */
@@ -117,6 +132,10 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
     // BUILD-BASE-001: transfers are typed steps; an explicit recipient is shown as such.
     case 'TRANSFER': return step({ action: 'TRANSFER', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],
       account: d.input.recipient === 'CONNECTED_OWNER' ? { role: 'CONNECTED_WALLET' } : { role: 'RECIPIENT', address: short(d.input.recipient) }, testFunds });
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-2): ONE Batch Payment card: its exact total, how many recipients, and every payment in order.
+    case 'BATCH_PAYMENT': return step({ action: 'BATCH_PAYMENT', network: d.input.network, amounts: [{ amount: d.total, asset: d.input.asset }],
+      account: { role: 'RECIPIENTS', count: d.input.payments.length }, payments: d.input.payments.map(p => ({ recipient: short(p.recipient), amount: p.amount })),
+      allOrNothing: true, testFunds });
     case 'OTHER': {
       const transfer = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
       if (transfer) return step({ action: 'TRANSFER', network: transfer.network, amounts: [{ amount: transfer.amount, asset: transfer.asset }],
@@ -161,16 +180,19 @@ function deepFreeze<T>(value: T): T {
 
 /**
  * The visual model of a composed workflow (`composeWorkflowOrRefuse`): one step or a step list, in canonical order, bound to its canonical
- * workflow hash. Reads the composition; never modifies it.
+ * workflow hash. Reads the composition; never modifies it. A Batch Payment is the ONE operation the person authored (`operationSteps`): one card with its
+ * recipients and total, never one Transfer card per payment.
  */
 export function workflowVisualModel(workflow: WorkflowComposition): WorkflowVisualModel {
-  const parts = workflow.steps.map(c => partOf(c.workflow, c.context));
+  const operations = operationSteps(workflow), parts = operations.map(c => partOf(c.workflow, c.context));
   const extra: VisualWarning[] = [];
   if (workflow.steps.some(c => c.strategy.action === 'lending_composition')) extra.push('DEBT_REMAINS');
-  // Keep the presentation model free of MCP runtime/backend closure (Channel Core boundary). Same SEQUENTIAL rule as `workflowPlan`.
+  // Keep the presentation model free of MCP runtime/backend closure (Channel Core boundary). Same SEQUENTIAL rule as `workflowPlan` (over the executed legs).
   if (workflow.steps.length > 1) {
     const sequential = workflow.steps.every(c => c.strategy.action === 'lending_composition' || strategyFlow(c.strategy) !== null);
-    extra.push(sequential ? 'SEQUENCE_STEP_BY_STEP' : 'SEQUENCE_NOT_EXECUTABLE');
+    // All or nothing as a whole only when the workflow is its one Batch Payment; with any other step it still runs step by step.
+    const onlyBatch = operations.length === 1 && (workflow.batches?.length ?? 0) === 1;
+    extra.push(!sequential ? 'SEQUENCE_NOT_EXECUTABLE' : onlyBatch ? 'BATCH_PAYMENT_ALL_OR_NOTHING' : 'SEQUENCE_STEP_BY_STEP');
   }
   return assemble(parts, workflow.workflowHash, workflow.fundsClass, extra);
 }
@@ -184,5 +206,6 @@ export function workflowVisualModelOfIr(workflow: Workflow, context: ReviewConte
 /** Every string a picture of this model can show (for output guards). */
 export function visualModelStrings(model: WorkflowVisualModel): readonly string[] {
   return [...model.networks, ...model.steps.flatMap(s => [s.provider ?? '', s.network, s.toNetwork ?? '', s.toAsset ?? '', ...s.amounts.flatMap(a => [a.amount, a.asset]),
-    ...s.range ? [s.range.lower, s.range.upper, s.range.unit] : [], ...s.account && 'address' in s.account ? [s.account.address] : []])].filter(Boolean);
+    ...s.range ? [s.range.lower, s.range.upper, s.range.unit] : [], ...s.account && 'address' in s.account ? [s.account.address] : [],
+    ...(s.payments ?? []).flatMap(p => [p.recipient, p.amount])])].filter(Boolean);
 }

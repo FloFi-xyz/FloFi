@@ -13,6 +13,7 @@ import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput, isSolanaTransferNetwork } from './robinhood-transfer-authoring';
+import { BATCH_PAYMENT_NETWORKS, createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
 import { parseSolanaTransferChat } from './solana-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
@@ -26,7 +27,7 @@ import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
 import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
-import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, copilotNetworksMentioned, networkIdentity, networkOfCopilot } from './network-registry';
+import { CATALOG_CHAT_NETWORKS, NETWORKS, catalogNetworkOfChatName, copilotNetworksMentioned, networkIdentity, networkOfCopilot, type NetworkIdentity } from './network-registry';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
 /**
@@ -59,6 +60,15 @@ function nativeSwapNetwork(tail: string): boolean {
 const lendingAsset = (network: SupplyInput['network'], text: string): SupplyInput['asset'] =>
   lendingProfileFor(network, text).symbol;
 /**
+ * The registry network a chat sentence names after "on", as a whole (a catalog chat name, a display name or alias in any case, a Copilot mention,
+ * or a network FloFi only names), or null for a name FloFi does not know.
+ */
+function namedNetwork(text: string): NetworkIdentity | null {
+  const name = text.trim(), lower = name.toLowerCase();
+  return catalogNetworkOfChatName(name) ?? NETWORKS.find(n => n.name.toLowerCase() === lower || n.aliases.some(alias => alias.toLowerCase() === lower)
+    || (n.mention !== null && new RegExp(`^(?:${n.mention.source})$`, 'i').test(name))) ?? networkIdentity(name);
+}
+/**
  * BUILD-FLOFI-INTELLIGENCE-001: the authoring commands a goal plan may combine into one `ADD_SEQUENCE` (each step is an independent single-action
  * runtime step of a reviewed sequence, `domain/workflow-sequence.ts`).
  */
@@ -73,6 +83,9 @@ export type Command = Base & (
   | {readonly type:'AUTHOR_LENDING';readonly input:LendingInput}
   | { readonly type: 'ADD_RH_TRANSFER'; readonly input: RobinhoodTransferInput }
   | { readonly type: 'SET_RH_TRANSFER'; readonly nodeId: string; readonly input: RobinhoodTransferInput }
+  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment card (several recipients, one asset, one EVM mainnet). */
+  | { readonly type: 'ADD_BATCH_PAYMENT'; readonly input: BatchPaymentInput }
+  | { readonly type: 'SET_BATCH_PAYMENT'; readonly nodeId: string; readonly input: BatchPaymentInput }
   | { readonly type: 'ADD_WITHDRAW'; readonly input: WithdrawInput }
   | { readonly type: 'SET_WITHDRAW'; readonly nodeId: string; readonly input: WithdrawInput }
   | { readonly type: 'ADD_REPAY'; readonly input: SupplyInput }
@@ -219,6 +232,41 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     createAuthoredTransfer('node-preview', fields);
     return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: "pay 25 USDC to 0x… and 50 USDC to 0x… on Base" (also "batch pay …", commas between payments): ONE Batch
+  // Payment, every recipient and amount exactly as written, in order; one asset for all of them. A recipient written twice is refused, never merged.
+  const batchPay = new RegExp(`^(?:batch )?pay (.+) on (${CATALOG_CHAT_NETWORKS})$`, 'i').exec(input);
+  const batchNetwork = batchPay ? catalogNetworkOfChatName(batchPay[2]!) : null;
+  if (batchPay && batchNetwork) {
+    const parts = batchPay[1]!.split(/\s*(?:,|\band\b)\s*/i).filter(Boolean);
+    const lines = parts.map(part => new RegExp(`^([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} to (0x[0-9a-fA-F]{40})$`, 'i').exec(part.trim()));
+    if (lines.length >= 2 && lines.every(Boolean)) {
+      const symbols = new Set(lines.map(line => symbolOn(batchNetwork.chain, line![2]!)));
+      // Chat review M2: one asset pays every recipient. Two assets are a closed refusal, never left to an interpretation that could turn them into
+      // separate (non-atomic) transfers.
+      if (symbols.size !== 1) throw new Error('BATCH_PAYMENT_ASSET_MIXED');
+      // Chat review H1: each recipient exactly as typed. `createAuthoredBatchPayment` applies the EIP-55 rule (a mixed-case address must be its exact
+      // checksum encoding) and lower-cases it in the node; lower-casing it here first would have accepted a mistyped checksum.
+      const fields: BatchPaymentInput = { network: batchNetwork.name as BatchPaymentInput['network'], asset: [...symbols][0]!,
+        payments: lines.map(line => ({ recipient: line![3]!, amount: line![1]! })) };
+      createAuthoredBatchPayment('node-preview', fields);
+      return { type: 'ADD_BATCH_PAYMENT', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+    }
+  }
+  // Chat review C3: a request that is clearly a pay list ("(batch) pay <amount> <asset> to <x>, … on <network>", two or more payments, a network FloFi
+  // knows) is only ever one Batch Payment. On a network Batch Payment does not pay (a test network, Solana, a network FloFi only names), or with a
+  // recipient that is not an explicit 0x address ("my wallet", a name: never resolved inside a batch), it is a closed refusal, never left to an
+  // interpretation that could author separate, non-atomic transfers.
+  const payList = /^(?:batch )?pay (.+) on (.+)$/i.exec(input);
+  const payNetwork = payList ? namedNetwork(payList[2]!) : null;
+  if (payList && payNetwork) {
+    const lines = payList[1]!.split(/\s*(?:,|\band\b)\s*/i).filter(Boolean).map(part => new RegExp(`^[0-9]+(?:\\.[0-9]+)? ${SYMBOL} to (\\S.*)$`, 'i').exec(part.trim()));
+    if (lines.length >= 2 && lines.every(Boolean)) {
+      if (!(BATCH_PAYMENT_NETWORKS as readonly string[]).includes(payNetwork.name)) throw new Error('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
+      // A recipient that names no full address at all. One that holds an address with more words ("0x… on Base") is not this grammar: it is read as
+      // before (the interpretation must still pair every payment exactly as written).
+      if (lines.some(line => !/0x[0-9a-fA-F]{40}/.test(line![2]!))) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
+    }
+  }
   const catalogTransfer = new RegExp(`^(?:transfer|send) ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: to (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   const transferNetwork = catalogTransfer ? catalogNetworkOfChatName(catalogTransfer[3]!) : null;
   if (catalogTransfer && transferNetwork) {
@@ -361,7 +409,7 @@ export function commandIsValid(input: unknown): input is Command {
       || !['CHAT', 'CANVAS'].includes(command.source as string)) return false;
   const fields: Record<string, string[]> = {
     ADD_SEQUENCE: ['steps'], ADD_CRYPTO_ACTION: ['input'], SET_CRYPTO_ACTION: ['nodeId', 'input'],
-    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], MANAGE_LIQUIDITY_POSITION: ['choice', 'pool'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD_UNIVERSAL_BRIDGE: ['input'], SET_UNIVERSAL_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
+    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_BATCH_PAYMENT: ['input'], SET_BATCH_PAYMENT: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], MANAGE_LIQUIDITY_POSITION: ['choice', 'pool'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD_UNIVERSAL_BRIDGE: ['input'], SET_UNIVERSAL_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
     CONNECT: ['from', 'to'], DISCONNECT: ['from', 'to'], REMOVE: ['nodeId'], REMOVE_MANY: ['nodeIds'], ADD_SWAP: ['direction', 'amount', 'slippage'], ADD_TESTNET_SWAP: ['direction', 'amount', 'slippage'], ADD_ETHEREUM_SEPOLIA_SWAP: ['direction', 'amount', 'slippage'], ADD_COW_SWAP: ['direction', 'amount', 'slippage'],
     SET_SWAP_AMOUNT: ['nodeId', 'amount'], SET_SLIPPAGE: ['nodeId', 'slippage'],
   };
@@ -390,6 +438,19 @@ export function commandIsValid(input: unknown): input is Command {
       const keys=Reflect.ownKeys(fields??{}).sort().join(), base=['network','asset','amount','recipient'].sort().join(), mint=['network','asset','amount','recipient','decimals','program'].sort().join();
       if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||(keys!==base&&!(keys===mint&&isSolanaTransferNetwork(String((fields as {network?:unknown}).network))))||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=64))return false;
       try{createAuthoredTransfer('node-preview',fields as RobinhoodTransferInput);return true;}catch{return false;}
+    }
+    case 'ADD_BATCH_PAYMENT':
+    case 'SET_BATCH_PAYMENT': {
+      if (command.type === 'SET_BATCH_PAYMENT' && !id(command.nodeId)) return false;
+      const fields = command.input as unknown;
+      // A closed input: network, asset and 2..8 payments of exactly {recipient, amount}, all short strings.
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.getPrototypeOf(fields) !== Object.prototype) return false;
+      const f = fields as { network?: unknown; asset?: unknown; payments?: unknown };
+      if (Reflect.ownKeys(f).sort().join() !== 'asset,network,payments' || typeof f.network !== 'string' || typeof f.asset !== 'string' || f.asset.length > 64 ||
+          !Array.isArray(f.payments) || f.payments.length > 8 || !f.payments.every(p => p && typeof p === 'object' && !Array.isArray(p) &&
+            Reflect.ownKeys(p).sort().join() === 'amount,recipient' && typeof (p as { recipient: unknown }).recipient === 'string' &&
+            typeof (p as { amount: unknown }).amount === 'string' && (p as { amount: string }).amount.length <= 64 && (p as { recipient: string }).recipient.length <= 64)) return false;
+      try { createAuthoredBatchPayment('node-preview', fields as BatchPaymentInput); return true; } catch { return false; }
     }
     case 'ADD_WITHDRAW':
     case 'SET_WITHDRAW': {

@@ -18,15 +18,16 @@
  * (`singleStep`, BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001).
  */
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
-import { parseArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { isBatchPaymentNode, parseArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { nodeSemantics } from '../automations/binding.ts';
 import { strategyOfCommand } from '../channels/core/strategy.ts';
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import { compositionWorkflow, sequenceOrder, stepProjection, workflowSequence } from '../domain/workflow-sequence';
 import { workflowSteps, type StepDetail } from '../domain/workflow-steps';
-import { composeWorkflow, dappReviewContext, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
+import { composeWorkflow, dappReviewContext, operationSteps, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
 import { editorReducer, initialEditor } from '../domain/editor';
+import { loneCardRunVerdict } from '../domain/batch-run-record';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 
 /** The Editor's workflow-run limits: 2..8 steps for a sequence (0015), and one step only on the single-card opt-in (`workflow_runs.step_count BETWEEN 1 AND 8` from migration 0032). */
@@ -60,6 +61,7 @@ export function authoringCommandOf(detail: StepDetail): Command | null {
         secondAmount: i.amountB, slippage: i.slippage, fee: i.fee, ...i.rangeUnit === 'TICK' ? { rangeUnit: 'TICK', lower: i.lower, upper: i.upper } : {} } } as Command;
     }
     case 'TRANSFER': return { ...base, type: 'ADD_RH_TRANSFER', input: detail.input } as Command;
+    case 'BATCH_PAYMENT': return { ...base, type: 'ADD_BATCH_PAYMENT', input: detail.input } as Command;
     default: return null;
   }
 }
@@ -89,7 +91,10 @@ export function editorWorkflowStrategy(input: unknown, options: { readonly singl
   if (!ordered.length) return { ok: false, code: 'EDITOR_WORKFLOW_EMPTY' };
   // A workflow one of FloFi's composition runtimes executes as a whole keeps that path; it is not a sequence of independent steps.
   if (compositionWorkflow(workflow)) return { ok: false, code: 'EDITOR_WORKFLOW_COMPOSITION' };
-  const single = ordered.length === 1 && options.singleStep === true;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a lone Batch Payment card is one operation whose run is its 2..8 payments (one atomic group), so it
+  // takes the shared workflow run without the single-card opt-in.
+  const loneBatch = ordered.length === 1 && isBatchPaymentNode(ordered[0]!);
+  const single = ordered.length === 1 && (options.singleStep === true || loneBatch);
   if (ordered.length < EDITOR_RUN_MIN_STEPS && !single) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
   if (ordered.length > EDITOR_RUN_MAX_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_TOO_LONG' };
   // Exactly the Canvas's own sequence: every step must lint alone with its own network's trusted context, as its runtime receives it. One card
@@ -118,10 +123,12 @@ export function editorWorkflowStrategy(input: unknown, options: { readonly singl
   const strategy = { version: 2, steps: specs, ...unique.length ? { bindings: unique } : {} } as StrategyInput;
   const composed = composeWorkflow(strategy);
   if (!composed.ok) return { ok: false, code: composed.code };
-  if (composed.steps.length !== steps.length) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED' };
+  // One operation per Canvas card: a Batch Payment card is its own semantic composition (its legs are the engine's verified transfers of it).
+  const operations = operationSteps(composed);
+  if (operations.length !== steps.length) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED' };
   // Every composed step must be exactly its Canvas node: the run executes the engine's composition, so anything else is not this workflow.
   for (const [index, step] of steps.entries()) {
-    const reproduced = financialNodes(composed.steps[index]!.workflow), node = ordered.find(candidate => candidate.nodeId === step.nodeId);
+    const reproduced = financialNodes(operations[index]!.workflow), node = ordered.find(candidate => candidate.nodeId === step.nodeId);
     if (!node || reproduced.length !== 1 || nodeSemantics(reproduced[0]!) !== nodeSemantics(node)) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED', step: index };
   }
   return { ok: true, strategy: composed.strategy, workflowHash: composed.workflowHash, stepCount: composed.steps.length, composition: composed };
@@ -141,7 +148,8 @@ export function canvasWorkflowOfStrategy(input: unknown): CanvasOfStrategy {
   if (composed.steps.length < EDITOR_RUN_MIN_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
   const context = dappReviewContext();
   let state = initialEditor();
-  for (const [index, step] of composed.steps.entries()) {
+  // One Canvas card per operation: a Batch Payment is ONE card (never one Send card per payment).
+  for (const [index, step] of operationSteps(composed).entries()) {
     const before = new Set(state.workflow.nodes.map(n => n.nodeId));
     // The same authoring command, applied at the Canvas's current revision (each edit advances it).
     const next = editorReducer(state, { ...step.command, baseRevision: state.workflow.revision } as Command, context);
@@ -167,9 +175,15 @@ export function canvasWorkflowOfStrategy(input: unknown): CanvasOfStrategy {
 
 /**
  * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (workflow review): what a single-card run proves about ONE Canvas card — or null when the run is not
- * exactly that card's run: it must have exactly one step and the canonical hash of exactly this card (`editorWorkflowStrategy` single-step; the
- * run's engine workflow carries no Canvas ids, so the card's own ids are echoed only once it is proven). `verdict` RECONCILED only for a completed
- * run whose step reconciled; `received` is the step's reconciled delivery; `owner` the run's own EVM wallet (its group's fee payer). Pure.
+ * exactly that card's run: it must have exactly the card's steps and the canonical hash of exactly this card (`editorWorkflowStrategy` single-step;
+ * the run's engine workflow carries no Canvas ids, so the card's own ids are echoed only once it is proven). `verdict` RECONCILED only for a completed
+ * run whose every step reconciled; `received` is the step's reconciled delivery; `owner` the run's own EVM wallet (its group's fee payer). Pure.
+ *
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (FE-BATCH-02): a lone Batch Payment card's run is its N payments (2..8 steps, one atomic group), so its
+ * record is proven the same way with N steps: a completed run of exactly this card whose N steps all reconciled is this card executed, never offered
+ * again. A Batch Payment delivers nothing to the owner's wallet (each payment goes to its own recipient): it proves no delivery a later step could spend.
+ * The step reading is the client-safe one the Editor uses in the browser (`loneCardRunVerdict`, `domain/batch-run-record.ts`: the card's own legs); the
+ * server also proves the engine composed exactly that many steps under the run's canonical hash.
  */
 export type SingleRunRecord = { readonly verdict: string; readonly workflow: { readonly workflowId: string; readonly nodes: readonly { readonly nodeId: string }[] };
   readonly received: readonly { readonly asset: string; readonly amount: string }[]; readonly owner: string | null };
@@ -178,9 +192,10 @@ export function singleCardRunRecord(run: { readonly state: string; readonly step
   readonly groups: readonly { readonly feePayer?: string | null }[] }, card: unknown): SingleRunRecord | null {
   const workflow = canonicalWorkflow(card);
   if (!workflow) return null;
-  const nodes = financialNodes(workflow), converted = editorWorkflowStrategy(workflow, { singleStep: true });
-  if (!converted.ok || nodes.length !== 1 || run.stepCount !== 1 || run.steps.length !== 1 || run.workflowHash !== converted.workflowHash) return null;
-  const step = run.steps[0]!;
-  return { verdict: run.state === 'COMPLETED' && step.state === 'RECONCILED' ? 'RECONCILED' : run.state,
-    workflow: { workflowId: workflow.workflowId, nodes: [{ nodeId: nodes[0]!.nodeId }] }, received: step.outcome?.received ?? [], owner: run.groups[0]?.feePayer ?? null };
+  const nodes = financialNodes(workflow);
+  if (nodes.length !== 1) return null;
+  const verdict = loneCardRunVerdict(run, workflow), converted = editorWorkflowStrategy(workflow, { singleStep: true });
+  if (verdict === null || !converted.ok || converted.stepCount !== run.stepCount || run.workflowHash !== converted.workflowHash) return null;
+  return { verdict, workflow: { workflowId: workflow.workflowId, nodes: [{ nodeId: nodes[0]!.nodeId }] },
+    received: isBatchPaymentNode(nodes[0]!) ? [] : run.steps[0]!.outcome?.received ?? [], owner: run.groups[0]?.feePayer ?? null };
 }

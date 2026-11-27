@@ -32,7 +32,12 @@ export type StepRequirement = {
 export type WorkflowRequirement = { readonly workflowHash: string; readonly strategy: StrategyInput; readonly steps: readonly StepRequirement[];
   readonly chains: readonly string[]; readonly actionTypes: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
   /** BUILD-CHAT-E2E-001: typed amount dependencies; a bound step's input amount is its cap until the producer step reconciled. */
-  readonly bindings: WorkflowComposition['bindings'] };
+  readonly bindings: WorkflowComposition['bindings'];
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: step ranges (inclusive) that must execute as ONE atomic owner-wallet authorization (a Batch
+   * Payment's legs). Absent or empty: none.
+   */
+  readonly atomic?: readonly { readonly from: number; readonly to: number }[] };
 
 type Node = Composition['workflow']['nodes'][number];
 type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly nativeId?: string; readonly decimals: number }; readonly amount: string };
@@ -129,8 +134,9 @@ export function requirementOf(composed: WorkflowComposition): { readonly ok: tru
   try {
     const steps = composed.steps.map((c, i) => stepOf(c, i));
     const chains = [...new Set(steps.flatMap(s => [s.chain, ...s.destinationChain ? [s.destinationChain] : []]))];
+    const atomic = (composed.batches ?? []).map(b => ({ from: b.from, to: b.to }));
     return { ok: true, value: { workflowHash: composed.workflowHash, strategy: composed.strategy, steps, chains,
-      actionTypes: [...new Set(steps.flatMap(s => s.actionTypes))], fundsClass: composed.fundsClass, bindings: composed.bindings } };
+      actionTypes: [...new Set(steps.flatMap(s => s.actionTypes))], fundsClass: composed.fundsClass, bindings: composed.bindings, ...atomic.length ? { atomic } : {} } };
   } catch (cause) {
     return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'DELEGATION_STEP_INVALID' };
   }

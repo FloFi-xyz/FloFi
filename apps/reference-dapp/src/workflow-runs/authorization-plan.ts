@@ -115,8 +115,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   // A sequence reports each mode on its own (a delegated-only workflow is supported by code overall, yet not in confirm mode).
   const runsOff = gates.enabledByDeployment.reason === 'WORKFLOW_RUNS_NOT_ENABLED' ? 'WORKFLOW_RUNS_NOT_ENABLED' : null;
   const modes = gates.supportedByCode.modes;
-  const confirmReason = modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
-    : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is never confirmed payment by payment: it runs only as one atomic authorization.
+  const batchOnlyAtomic = (workflow.batches ?? []).length > 0 ? 'BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION' : null;
+  const confirmReason = batchOnlyAtomic ?? (modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
+    : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason);
   const namespaces = [...new Set(steps.map(s => s.network.startsWith('solana') ? 'solana' as const : 'eip155' as const))].sort();
   // Every distinct chain a delegated run signs one workflow grant on (one-time setup there: the MetaMask EIP-7702 smart account).
   const enrollments = req.ok ? [...new Map(req.value.steps.flatMap(s => {
@@ -131,7 +133,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   // User-funded groups: every step must pass its own gates exactly as in confirm mode (an owner-step group IS a confirm-mode step).
   const facts = userFunded?.facts ?? null;
   const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, userFunded?.evmOwner, facts.bridgeRoutes) ?? true)) : null;
-  const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : confirmReason);
+  // A user-funded group passes the same per-step gates as confirm mode; a Batch Payment's own "never confirmed step by step" rule is not one of them.
+  const stepGates = batchOnlyAtomic ? modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
+    : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason : confirmReason;
+  const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : stepGates);
   const groupsPlan = grouped && grouped.ok ? grouped : null;
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;
   // Recommended: at least one grouped interaction and never more wallet interactions than confirming each step (`userFundedPreferred`); a
@@ -146,7 +151,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   // (`summarize` counts it as a minimum), and the plan says how many signatures Circle needs.
   if (userFundedAvailable && groupsPlan?.groups.some(g => g.tokenGas)) notes.push('When your ETH cannot pay a group\'s network fee, FloFi may offer to pay it from your '
     + 'USDC through Circle: that group then needs two signatures (a USDC permit, then the operation) instead of one.');
-  if (bindingCodes.length) notes.push(userFundedAvailable
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment's legs are bound EXACTLY (never capped down): the plan says so, never "up to its amount".
+  if (workflow.bindings.some(b => b.exact)) notes.push('A Batch Payment funded by an earlier step pays every recipient exactly its amount from what that step actually '
+    + 'delivered (after reconciliation); if that is not enough, nothing is paid and a new Review is needed.');
+  if (workflow.bindings.some(b => !b.exact)) notes.push(userFundedAvailable
     ? 'A dependent step in the same group spends the earlier step\'s signed guaranteed minimum, fixed when you sign (anything above it stays in your wallet); '
       + 'a dependent step in a later group spends what was actually delivered after reconciliation, capped by its own amount, and is signed when it becomes due.'
     : 'A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.');

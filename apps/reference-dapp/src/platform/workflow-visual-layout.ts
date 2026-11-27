@@ -27,23 +27,27 @@ export const glyphSafe = (text: string) => text.replace(VISUAL_GLYPHS, '?');
 
 const ACTIONS = {
   EN: { SWAP: 'Swap', BRIDGE: 'Bridge', SUPPLY: 'Supply', BORROW: 'Borrow', REPAY: 'Repay', WITHDRAW: 'Withdraw', ADD_LIQUIDITY: 'Add liquidity', TRANSFER: 'Transfer',
-    OTHER: 'Step' },
+    BATCH_PAYMENT: 'Batch Payment', OTHER: 'Step' },
   PT: { SWAP: 'Trocar', BRIDGE: 'Transferir entre redes', SUPPLY: 'Depositar', BORROW: 'Pedir emprestado', REPAY: 'Reembolsar', WITHDRAW: 'Levantar',
-    ADD_LIQUIDITY: 'Adicionar liquidez', TRANSFER: 'Transferir', OTHER: 'Etapa' },
+    ADD_LIQUIDITY: 'Adicionar liquidez', TRANSFER: 'Transferir', BATCH_PAYMENT: 'Pagamento em lote', OTHER: 'Etapa' },
 } as const;
 const WORDS = {
   EN: { eyebrow: 'FLOFI · WORKFLOW', test: 'Test funds', real: 'Real funds', steps: (n: number) => `${n} ${n === 1 ? 'step' : 'steps'}`,
     many: (n: number) => `${n}-step workflow`, upTo: 'Up to', slippage: 'Max slippage', range: 'Price range', recipient: 'Recipient', beneficiary: 'On behalf of',
     owner: 'Owner', connected: 'To your connected wallet', step: 'Step', on: 'on', via: 'via',
+    total: 'Total', recipients: (n: number) => `${n} ${n === 1 ? 'recipient' : 'recipients'}`, allOrNothing: 'All or nothing: one wallet authorization',
     warnings: { REAL_FUNDS: 'Real funds: this workflow uses a mainnet', DEBT_REMAINS: 'Debt remains after the swap',
       SEQUENCE_NOT_EXECUTABLE: 'This sequence cannot run as one workflow yet', SEQUENCE_STEP_BY_STEP: 'Runs step by step: each step after the previous one settles',
+      BATCH_PAYMENT_ALL_OR_NOTHING: 'All or nothing: every payment in one wallet authorization',
     } satisfies Record<VisualWarning, string>,
     footer: 'Review and sign in FloFi · nothing is authorized yet', reference: 'Workflow', alt: 'FloFi workflow' },
   PT: { eyebrow: 'FLOFI · FLUXO', test: 'Fundos de teste', real: 'Fundos reais', steps: (n: number) => `${n} ${n === 1 ? 'etapa' : 'etapas'}`,
     many: (n: number) => `Fluxo de ${n} etapas`, upTo: 'Até', slippage: 'Desvio máximo', range: 'Faixa de preço', recipient: 'Destinatário', beneficiary: 'Em nome de',
     owner: 'Titular', connected: 'Para a sua carteira conectada', step: 'Etapa', on: 'na', via: 'via',
+    total: 'Total', recipients: (n: number) => `${n} ${n === 1 ? 'destinatário' : 'destinatários'}`, allOrNothing: 'Tudo ou nada: uma só autorização da carteira',
     warnings: { REAL_FUNDS: 'Fundos reais: este fluxo usa uma mainnet', DEBT_REMAINS: 'A dívida continua após a troca',
       SEQUENCE_NOT_EXECUTABLE: 'Esta sequência ainda não roda como um fluxo único', SEQUENCE_STEP_BY_STEP: 'Roda etapa por etapa: cada uma após a anterior se concluir',
+      BATCH_PAYMENT_ALL_OR_NOTHING: 'Tudo ou nada: todos os pagamentos em uma só autorização',
     } satisfies Record<VisualWarning, string>,
     footer: 'Revise e assine no FloFi · nada está autorizado ainda', reference: 'Fluxo', alt: 'Fluxo FloFi' },
 } as const;
@@ -58,6 +62,8 @@ const amountText = (s: VisualStep, language: VisualLanguage) => {
   if (!s.amounts.length) return '';
   const amounts = s.amounts.map(a => `${a.amount} ${a.asset}`).join(' + ');
   if (s.amountKind === 'MAXIMUM') return `${WORDS[language].upTo} ${amounts}`;
+  // A Batch Payment's amount is the exact total of its payments (each payment is its own fact).
+  if (s.payments) return `${WORDS[language].total} ${amounts}`;
   return s.toAsset ? `${amounts} → ${s.toAsset}` : amounts;
 };
 const networkText = (s: VisualStep) => s.toNetwork ? `${s.network} → ${s.toNetwork}` : s.network;
@@ -68,15 +74,23 @@ const accountText = (account: VisualAccount, language: VisualLanguage) => {
     case 'RECIPIENT': return `${w.recipient} ${account.address}`;
     case 'BENEFICIARY': return `${w.beneficiary} ${account.address}`;
     case 'OWNER': return `${w.owner} ${account.address}`;
+    case 'RECIPIENTS': return w.recipients(account.count);
   }
 };
 const sameAccount = (a: VisualAccount | null, b: VisualAccount | null) => JSON.stringify(a) === JSON.stringify(b);
-/** The facts of one step that the IR states; `previous` lets a repeated account (the lending composition's owner) be shown once. */
-function factsOf(s: VisualStep, previous: VisualStep | null, language: VisualLanguage): string[] {
+/**
+ * The facts of one step that the IR states; `previous` lets a repeated account (the lending composition's owner) be shown once. A Batch Payment states how
+ * many recipients it pays, that it is all or nothing (unless the whole workflow is that batch and its warning already says so) and then every payment, in
+ * order (never deduplicated against another card: each batch names its own). Its payments are always the last facts.
+ */
+function factsOf(s: VisualStep, previous: VisualStep | null, language: VisualLanguage, model: WorkflowVisualModel): string[] {
   const w = WORDS[language], facts: string[] = [];
   if (s.range) facts.push(`${w.range} ${s.range.lower} – ${s.range.upper} ${s.range.unit}`);
   if (s.slippageBps !== null) facts.push(`${w.slippage} ${percentOfBps(s.slippageBps)}%`);
-  if (s.account && !(previous && sameAccount(previous.account, s.account))) facts.push(accountText(s.account, language));
+  if (s.account && (s.account.role === 'RECIPIENTS' || !(previous && sameAccount(previous.account, s.account)))) facts.push(accountText(s.account, language));
+  if (s.allOrNothing && !model.warnings.includes('BATCH_PAYMENT_ALL_OR_NOTHING')) facts.push(w.allOrNothing);
+  const asset = s.amounts[0]?.asset ?? '';
+  for (const p of s.payments ?? []) facts.push(`${p.amount} ${asset} → ${p.recipient}`);
   return facts;
 }
 const headline = (s: VisualStep, language: VisualLanguage) => ACTIONS[language][s.action];
@@ -89,7 +103,7 @@ export function workflowVisualText(model: WorkflowVisualModel, language: VisualL
   const funds = model.fundsClass === 'REAL_FUNDS' ? w.real : w.test;
   const summary = [title, funds, w.steps(n), model.networks.join(' · ')].filter(Boolean).join(' · ');
   const lines = model.steps.map((s, i) => {
-    const facts = factsOf(s, model.steps[i - 1] ?? null, language), amount = amountText(s, language);
+    const facts = factsOf(s, model.steps[i - 1] ?? null, language, model), amount = amountText(s, language);
     return `${s.index}. ${headline(s, language)}${s.provider ? ` (${s.provider})` : ''}${amount ? ` · ${amount}` : ''} · ${networkText(s)}${facts.length ? ` · ${facts.join(' · ')}` : ''}`;
   });
   const alt = [`${w.alt}: ${title}. ${funds} · ${w.steps(n)}.`, ...lines.map(l => `${l}.`), ...model.warnings.map(x => `${w.warnings[x]}.`), `${w.footer}.`,
@@ -134,10 +148,14 @@ function card(s: VisualStep, facts: readonly string[], language: VisualLanguage,
   if (compact) {
     const text = [amount, network].filter(Boolean).join(' · ');
     rows.push(line(clip(text, 46), 15, M.network, C.ink, scale)); height += M.network;
+    // A compact Batch Payment card (more than four cards) keeps its total (above), its recipient count and its all-or-nothing mark, never its payments:
+    // the text alternative (`alt`) always lists every payment.
+    if (s.payments) for (const fact of facts.slice(0, facts.length - s.payments.length)) { rows.push(line(clip(fact, 46), 15, M.fact, C.muted, scale)); height += M.fact; }
   } else {
     if (amount) { rows.push(line(clip(amount, 44), amountSize(amount), M.amount, C.ink, scale)); height += M.amount; }
     rows.push(line(clip(network, 46), 15, M.network, C.muted, scale)); height += M.network;
-    for (const fact of facts.slice(0, MAX_FACTS)) { rows.push(line(clip(fact, 46), 15, M.fact, C.muted, scale)); height += M.fact; }
+    // A full-size Batch Payment card shows every fact: its recipient count, its all-or-nothing mark and every payment (at most 8).
+    for (const fact of facts.slice(0, s.payments ? facts.length : MAX_FACTS)) { rows.push(line(clip(fact, 46), 15, M.fact, C.muted, scale)); height += M.fact; }
   }
   height += 2 * pad + 2;
   const badge = div({ width: px(M.badge, scale), height: px(M.badge, scale), borderRadius: px(M.badge / 2, scale), backgroundColor: C.blue, color: '#ffffff',
@@ -174,7 +192,7 @@ export function workflowVisualLayout(model: WorkflowVisualModel, language: Visua
   let height = M.pad + M.header + M.headerGap;
   model.steps.forEach((s, i) => {
     if (i > 0) { const c = connector(linked(model.steps[i - 1]!.id, s.id), compact, scale); body.push(c.node); height += c.height; }
-    const c = card(s, factsOf(s, model.steps[i - 1] ?? null, language), language, compact, scale);
+    const c = card(s, factsOf(s, model.steps[i - 1] ?? null, language, model), language, compact, scale);
     body.push(c.node); height += c.height;
   });
   const warnings = model.warnings.map((x, i) => {

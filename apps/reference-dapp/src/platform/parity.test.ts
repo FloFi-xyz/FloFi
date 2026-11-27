@@ -76,10 +76,15 @@ describe('BUILD-DEVELOPER-001 platform parity: MCP ≡ platform ≡ engine', () 
       for (const workflowHash of [undefined, H('e'), ...composeWorkflow(strategy).ok ? [hashOf(strategy)] : []]) {
         const args = { strategy, ...workflowHash ? { workflowHash } : {} };
         // BUILD-FLOFI-UNIVERSAL-CHANNELS-001: the MCP result adds only the conversational state, derived from the same platform validation.
-        const { conversationState: validated, ...validation } = (await client.callTool('validate_strategy', args)).output as Record<string, unknown>;
+        // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): and the stage-by-stage `readiness`, derived from it too (validity is never readiness).
+        const { conversationState: validated, readiness, ...validation } = (await client.callTool('validate_strategy', args)).output as Record<string, unknown>;
         const platformValidation = validateStrategy(strategy, workflowHash);
         expect(validation, `${id} ${workflowHash}`).toEqual({ ok: true, ...platformValidation });
         expect(validated, `${id} ${workflowHash}`).toEqual(validationState(platformValidation));
+        expect(readiness, `${id} ${workflowHash}`).toMatchObject(platformValidation.valid
+          ? { authoring: 'VALID', review: platformValidation.reviewSummary.block ? expect.stringMatching(/^(?:BLOCKERS_FOUND|OWNER_PRE_EXECUTION_PENDING)$/) : 'NO_BLOCKERS',
+            execution: 'NOT_EVALUATED', ownerAuthorization: 'NONE', submission: 'NOT_SUBMITTED' }
+          : { authoring: 'INVALID', execution: 'NOT_EVALUATED', ownerAuthorization: 'NONE', submission: 'NOT_SUBMITTED' });
         const review = (await client.callTool('review_strategy', args)).output as Record<string, unknown>;
         const refusal = refusalOf(() => composeWorkflowOrRefuse(strategy, workflowHash));
         if (refusal) { expect(review, id).toEqual({ ok: false, ...refusal.extra, code: refusal.code }); continue; }

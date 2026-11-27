@@ -143,7 +143,7 @@ export type InteractionSummary = {
   readonly single: boolean;
 };
 export type GroupPlan = { readonly ok: true; readonly groups: readonly ExecutionGroup[]; readonly interactions: InteractionSummary }
-  | { readonly ok: false; readonly code: string };
+  | { readonly ok: false; readonly code: string; /** Why the steps could not be grouped as required (the planner's own downgrade codes). */ readonly because?: readonly string[] };
 
 const namespaceOfChain = (chain: string): Namespace => chain.startsWith('solana:') ? 'solana' : 'eip155';
 /** Default buildability: the action is in `USER_FUNDED_BUILDABLE` and spends at most one asset. Callers may narrow it further per step. */
@@ -289,6 +289,14 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     groups.push({ index: groups.length, namespace, chain, steps, stepFrom: first.index, stepTo: members.at(-1)!.index, strategy, signing, awaitsDelivery,
       interactions, setup: [...new Set(setup)], downgrades: assumed ? [...downgrades, 'WALLET_CAPABILITIES_ASSUMED'] : downgrades, feePayer: 'OWNER_WALLET',
       ...tokenGas ? { tokenGas: 'CIRCLE_USDC_PAYMASTER' as const } : {} });
+  }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment executes only as ONE atomic authorization of the owner's own wallet: all of its legs in
+  // one group that is an EIP-5792 atomic wallet batch or the owner's own smart-account operation. Anything else (the wallet reports no atomic batch,
+  // a leg FloFi cannot batch, the chain not enabled for user-funded groups) refuses the payment here; it is never split into owner steps.
+  for (const set of requirement.atomic ?? []) {
+    const group = groups.find(g => g.stepFrom <= set.from && set.to <= g.stepTo);
+    if (!group || (group.strategy !== 'EVM_WALLET_BATCH' && group.strategy !== 'EVM_USER_OPERATION'))
+      return { ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', ...group?.downgrades.length ? { because: group.downgrades.filter(d => d !== 'WALLET_CAPABILITIES_ASSUMED') } : {} };
   }
   return { ok: true, groups, interactions: summarize(groups) };
 }

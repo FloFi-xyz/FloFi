@@ -43,7 +43,7 @@ type FakeRun = { runId: string; flow: FlowName; owner: string; workflow: unknown
  * TEST DOUBLE (isolated tests only): the deployment's flow runtime for owner-signed steps. `ownerRuns` are what FloFi's flows would have recorded
  * after the owner's own wallet signature; `mode` reports the enabled flows; `sequences` reports this deployment's workflow-run facts.
  */
-export function ownerFlowRuntime(enabled: readonly FlowName[], sequences: { readonly enabled: boolean; readonly delegation: DelegationFacts }, clock: () => Date) {
+export function ownerFlowRuntime(enabled: readonly FlowName[], sequences: { readonly enabled: boolean; readonly delegation: DelegationFacts; readonly userFunded?: import("./execution-groups.ts").UserFundedFacts | null }, clock: () => Date) {
   const ownerRuns: FakeRun[] = [];
   const find = (runId: string, owner: string) => ownerRuns.find(r => r.runId === runId && r.owner === owner) ?? null;
   const runtime: McpRuntime = {
@@ -103,10 +103,17 @@ export async function workflowRunHarness(db: Database, options: {
   /** ADR-0010 §4: a MOCKED Solana cluster for user-funded Solana groups and a Kora runtime against the loopback double (default: none). */
   readonly solana?: SolanaRpc;
   readonly kora?: KoraGas | null;
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: report the user-funded facts in the runtime's sequence facts too, as a deployment does
+   * (`workflow-runs/facts.ts`), so an approval request sees them (default: not reported, as before).
+   */
+  readonly sequencesUserFunded?: boolean;
 } = {}) {
   const d = await delegationHarness(db);
   const facts: DelegationFacts = options.delegation === false ? null : { mode: 'MOCKED_HARNESS', unavailable: null };
-  const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'solana-devnet-swap'], { enabled: options.sequences ?? true, delegation: facts }, d.now);
+  const reported = options.sequencesUserFunded && options.userFundedChains ? { userFunded: { enabled: true, code: null, chains: options.userFundedChains, bundlerChains: [],
+    solanaNonceAccounts: false } } : {};
+  const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'solana-devnet-swap'], { enabled: options.sequences ?? true, delegation: facts, ...reported }, d.now);
   const handoffs = createPgHandoffStore(db, d.tenantId), store = createPgWorkflowRunStore(db, d.tenantId);
   const scheme = approvalLinkScheme('flofi_chs_', randomBytes(32), ['CHANNEL_CONVERSATION']);
   const policy = readHandoffPolicy(options.policyEnv ?? {});

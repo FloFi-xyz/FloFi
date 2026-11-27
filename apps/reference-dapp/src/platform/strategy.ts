@@ -10,6 +10,7 @@ import { TEST_NETWORK_IDS, type NetworkId, type StrategySpec } from '../engine/s
 import { mainnetCounterpart, TEST_NETWORK_NOT_AVAILABLE, type NetworkScope } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
 import { refuse } from './refusal.ts';
+import { batchPaymentDetails } from '../domain/batch-payment-authoring';
 
 /**
  * BUILD-FLOFI-MAINNET-PRODUCT-001: the test networks a composed workflow names (every step's network, a bridge's source and destination), and
@@ -36,11 +37,25 @@ export function composeWorkflowOrRefuse(strategy: unknown, workflowHash: string 
   return test.length ? refuse(TEST_NETWORK_NOT_AVAILABLE, { issues: test.map(t => ({ path: t.path, rule: 'mainnetOnly' })),
     networks: [...new Set(test.map(t => t.network))], mainnets: [...new Set(test.map(t => t.mainnet).filter((m): m is string => m !== null))] }) : result;
 }
-/** The single-step composition, or a refusal naming the per-step alternative (for operations that work on one action). */
-export function composeSingleStep(strategy: unknown, workflowHash: string | undefined, multiStepCode: string, scope: NetworkScope = networkScope()): Composition {
+/**
+ * The single-step composition, or a refusal naming the per-step alternative (for operations that work on one action). A workflow with a Batch Payment is
+ * refused with `batchCode` (default: the multi-step code): the batch is one operation of several legs that is never worked on one leg at a time.
+ */
+export function composeSingleStep(strategy: unknown, workflowHash: string | undefined, multiStepCode: string, scope: NetworkScope = networkScope(),
+  batchCode: string = multiStepCode): Composition {
   const workflow = composeWorkflowOrRefuse(strategy, workflowHash, scope);
+  if (workflow.batches?.length && batchCode !== multiStepCode) return refuse(batchCode);
   return workflow.steps.length === 1 ? workflow.steps[0]! : refuse(multiStepCode, { stepCount: workflow.steps.length });
 }
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the Batch Payments of a composed workflow, as every surface reports them: the strategy step, the legs it
+ * executes as (inclusive), its recipient count and exact total (decimal, from the batch node's own integer total), and its only execution mode.
+ */
+export const batchPaymentViews = (w: Pick<WorkflowComposition, 'batches'>) => (w.batches ?? []).map(b => {
+  const node = b.composition.workflow.nodes.find(n => n.actionType === 'asset.transfer.batch');
+  return { step: b.step, legs: [b.from, b.to] as const, network: b.network, asset: b.asset, recipients: b.recipients,
+    total: node ? batchPaymentDetails(node as Parameters<typeof batchPaymentDetails>[0])?.total ?? null : null, execution: 'ATOMIC_ONLY' as const };
+});
 export const reviewCounts = (findings: readonly { level: string }[]) => ({ block: findings.filter(f => f.level === 'BLOCK').length,
   warning: findings.filter(f => f.level === 'WARNING').length, information: findings.filter(f => f.level === 'INFORMATION').length });
 /** The public view of a composition's workflow steps. */
@@ -50,16 +65,18 @@ export const stepViews = (c: Composition) => c.steps.map(s => ({ index: s.index,
 export type StrategyValidation =
   | { readonly valid: false; readonly code: string; readonly issues: readonly { readonly path: string; readonly rule: string }[] }
   | { readonly valid: true; readonly workflowHash: string; readonly fundsClass: WorkflowComposition['fundsClass']; readonly notes: readonly string[];
-      readonly stepCount: number; readonly reviewSummary: { readonly block: number; readonly warning: number } };
+      readonly stepCount: number; readonly reviewSummary: { readonly block: number; readonly warning: number };
+      /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-6): present only with a Batch Payment (`stepCount` counts its payments as legs). */
+      readonly batchPayments?: readonly ReturnType<typeof batchPaymentViews>[number][] };
 /** Authoring rules plus, when given, the workflow hash the caller saw: never a refusal, always a verdict. */
 export function validateStrategy(strategy: unknown, workflowHash: string | undefined, scope: NetworkScope = networkScope()): StrategyValidation {
   const result = composeWorkflowBound(strategy, workflowHash);
   if (!result.ok) return { valid: false, code: result.code, issues: result.issues };
   const test = scope === 'ENGINEERING' ? [] : strategyTestNetworks(result);
   if (test.length) return { valid: false, code: TEST_NETWORK_NOT_AVAILABLE, issues: test.map(t => ({ path: t.path, rule: 'mainnetOnly' })) };
-  const findings = result.steps.flatMap(c => reviewComposition(c).findings), counts = reviewCounts(findings);
+  const findings = result.steps.flatMap(c => reviewComposition(c).findings), counts = reviewCounts(findings), batches = batchPaymentViews(result);
   return { valid: true, workflowHash: result.workflowHash, fundsClass: result.fundsClass, notes: result.notes, stepCount: result.steps.length,
-    reviewSummary: { block: counts.block, warning: counts.warning } };
+    reviewSummary: { block: counts.block, warning: counts.warning }, ...batches.length ? { batchPayments: batches } : {} };
 }
 
 export type StepReview = { readonly index: number; readonly workflowHash: string; readonly environment: ReturnType<typeof reviewComposition>['environment'];

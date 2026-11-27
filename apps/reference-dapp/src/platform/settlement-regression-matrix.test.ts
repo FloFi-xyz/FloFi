@@ -31,6 +31,12 @@ const SETTLEMENT: Readonly<Record<string, Settlement>> = {
   'asset.transfer|evm.token-transfer': { proof: 'Exact ERC-20 Transfer logs and both balances', finality: 'Profile minimumConfirmations, reorg re-check',
     suites: [S + 'robinhood-transfer-mainnet.test.ts', S + 'robinhood-transfer-service.test.ts'] },
   'supply|aave-v3': AAVE, 'borrow|aave-v3': AAVE, 'repay|aave-v3': AAVE, 'withdraw|aave-v3': AAVE,
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment settles only as its one atomic owner-wallet batch of transfer legs.
+  'asset.transfer.batch|evm.batch-payment': { proof: 'One atomic owner-wallet batch (EIP-5792 atomicRequired, or the owner\'s own smart-account operation) carrying exactly the ' +
+    'prepared transfer calls: every receipt from the owner, nothing mined before the prepared block, each ERC-20 leg attributed to its own recipient\'s Transfer log; ' +
+    'native legs credited from the atomic success of the reviewed calls; a failed batch settles no leg',
+    finality: 'Transfer-profile confirmation depth for the batch receipt, reorg re-check', suites: ['apps/reference-dapp/src/engine/batch-payment.test.ts',
+      'apps/reference-dapp/src/user-funded/groups.test.ts', 'apps/reference-dapp/src/workflow-runs/batch-payment-run.pg.test.ts'] },
   'asset.bridge|flofi.router': { proof: 'Destination FilledRelay and the exact ERC-20 Transfer to the recipient (durable log scan fallback); ERC-20 profiles only',
     finality: 'Safe head on both chains, reorg re-check', suites: [S + 'router-service.test.ts', S + 'router-arbitrum-base.test.ts', S + 'router-robinhood.test.ts', S + 'router-ethereum.test.ts'] },
   'asset.bridge|flofi.router.universal': { proof: 'Source deposit logs bound to the order id; destination ERC-20 net Transfer, or native net credit from a validated trace (trace_transaction or callTracer) of an order-bound Relay solver fill; provider status is never proof',

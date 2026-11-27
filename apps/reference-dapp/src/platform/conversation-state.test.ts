@@ -154,6 +154,47 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
     expect(userFacingError('MCP_CLOUD_RUNTIME_REQUIRED').EN).not.toMatch(/missing or invalid/);
   });
 
+  it('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-5): each Batch Payment refusal is said as it is, in EN and PT, never as a rate limit or a fallback', () => {
+    const fallback = userFacingError('SOMETHING_ELSE'), rateLimit = userFacingError('MCP_SIMULATION_RATE_LIMITED');
+    const expected: Readonly<Record<string, readonly [RegExp, RegExp]>> = {
+      BATCH_PAYMENT_TOO_MANY_RECIPIENTS: [/at most 8 recipients.*No recipient was dropped/, /no máximo 8 destinatários.*Nenhum destinatário foi descartado/],
+      BATCH_PAYMENT_TOO_FEW_RECIPIENTS: [/at least 2 recipients\. To pay one recipient, use a transfer/, /pelo menos 2 destinatários.*use uma transferência/],
+      BATCH_PAYMENT_ASSET_MIXED: [/^One Batch Payment pays one asset on one network\. Nothing was signed or sent\.$/, /um único ativo em uma única rede\. Nada foi assinado nem enviado/],
+      BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE: [/cannot prove from the chain that the earlier request .*never executed \(for example, an ETH batch\), so it will not ask your wallet again\. Check your wallet.s activity first, then end the run and start a new Review/,
+        /não consegue provar pela rede .*\(por exemplo, um lote em ETH\).*não vai pedir de novo à sua carteira.*encerre a execução e comece uma nova Revisão/],
+      WALLET_BATCH_PARTIALLY_EXECUTED: [/only some of them succeeded, so part of it executed/, /só algumas deram certo/],
+    };
+    for (const [code, [en, pt]] of Object.entries(expected)) {
+      const plain = userFacingError(code);
+      expect(plain.EN, code).toMatch(en);
+      expect(plain.PT, code).toMatch(pt);
+      expect([plain.EN, plain.PT], code).not.toContain(fallback.EN);
+      expect(plain.EN, code).not.toBe(rateLimit.EN);
+      expect(plain.EN, code).not.toMatch(/too many requests/i);
+      expect(`${plain.EN}\n${plain.PT}`, code).not.toContain(code);
+    }
+  });
+
+  it('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review M6): an invalid recipient or amount says what each payment needs; every batch refusal has its own text', () => {
+    const generic = userFacingError('STRATEGY_SCHEMA_INVALID'), fallback = userFacingError('SOMETHING_ELSE'), rateLimit = userFacingError('MCP_SIMULATION_RATE_LIMITED');
+    const recipient = userFacingError('BATCH_PAYMENT_RECIPIENT_INVALID'), amount = userFacingError('BATCH_PAYMENT_AMOUNT_INVALID');
+    expect(recipient.EN).toMatch(/valid 0x wallet address: a mixed-case address must match its checksum, and a reserved system address \(0x…000 to 0x…fff\) is never a recipient\..*Nothing was signed or sent/);
+    expect(recipient.PT).toMatch(/endereço de carteira 0x válido: um endereço com maiúsculas e minúsculas precisa corresponder ao seu checksum, e um endereço reservado do sistema \(0x…000 a 0x…fff\) nunca é destinatário\..*Nada foi assinado nem enviado/);
+    expect(amount.EN).toMatch(/^Every recipient of a Batch Payment needs a positive amount\. Nothing was signed or sent\./);
+    expect(amount.PT).toMatch(/^Cada destinatário de um Pagamento em lote precisa de um valor positivo\. Nada foi assinado nem enviado\./);
+    const codes = ['BATCH_PAYMENT_RECIPIENT_INVALID', 'BATCH_PAYMENT_AMOUNT_INVALID', 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', 'BATCH_PAYMENT_TOO_MANY_RECIPIENTS',
+      'BATCH_PAYMENT_TOO_FEW_RECIPIENTS', 'BATCH_PAYMENT_ASSET_MIXED'];
+    for (const language of ['EN', 'PT'] as const) {
+      const texts = codes.map(code => userFacingError(code)[language]);
+      // Each code its own family: no two share a text, and none is the generic invalid-details, rate-limit or fallback text.
+      expect(new Set(texts).size, language).toBe(codes.length);
+      for (const [i, text] of texts.entries()) {
+        expect([generic[language], fallback[language], rateLimit[language]], `${language} ${codes[i]}`).not.toContain(text);
+        expect(text, `${language} ${codes[i]}`).not.toContain(codes[i]);
+      }
+    }
+  });
+
   it('final and completed are consistent for every state', () => {
     for (const state of CONVERSATION_STATES) {
       const s = conversationState(state);

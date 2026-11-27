@@ -81,6 +81,13 @@ function naturalTurn(strategy: StrategySpec): { text: string; model: Record<stri
         model: intent.action(act.transfer({ network: on(s.network).copilot, asset: s.asset, amount: s.amount, recipient: s.recipient })) }
       : { text: `Please send ${s.amount} ${s.asset} on ${on(s.network).name} to my own wallet`,
         model: intent.action(act.transfer({ network: on(s.network).copilot, asset: s.asset, amount: s.amount })) };
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: several payments of one asset in one sentence (address before "on <network>", the exact external
+    // example's phrasing); the model reports one TRANSFER per recipient and FloFi makes them one Batch Payment.
+    case 'batch_payment': {
+      const lines = (s.recipients as { recipient: string; amount: string }[]);
+      return { text: `Send ${lines.map(l => `${l.amount} ${s.asset} to ${l.recipient}`).join(' and ')} on ${on(s.network).name}`,
+        model: intent.composition(lines.map(l => act.transfer({ network: on(s.network).copilot, asset: s.asset, amount: l.amount, recipient: l.recipient }))) };
+    }
     case 'lending_composition': return { text: `On ${on(s.network).name}, supply ${s.supplyAmount} ${s.asset} to Aave, borrow ${s.borrowAmount} ${s.asset} and swap it to ${s.outputAsset}`,
       model: intent.composition([act.lending('SUPPLY', { network: on(s.network).copilot, asset: s.asset, amount: s.supplyAmount }),
         act.lending('BORROW', { network: on(s.network).copilot, asset: s.asset, amount: s.borrowAmount }),

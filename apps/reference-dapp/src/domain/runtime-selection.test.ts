@@ -46,7 +46,9 @@ describe('BUILD-FLOFI-UNIVERSAL-E2E-001 owner-wallet runtime selection', () => {
         // with their own destination asset; every other bridge example is a certified Router route.
         bridge: id.includes('solana') || id.endsWith('-native-to-stable') ? 'universal' : 'router',
         supply: 'supply', borrow: 'supply', repay: 'supply', withdraw: 'supply', add_liquidity: id.includes('solana') ? 'solana-pool' : 'uniswap-pool',
-        lending_composition: 'lending' }[action];
+        lending_composition: 'lending',
+        // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: no browser runtime executes a Batch Payment card: only the whole-workflow run does (atomically).
+        batch_payment: null }[action];
       expect([id, kind]).toEqual([id, expected]);
     }
   });

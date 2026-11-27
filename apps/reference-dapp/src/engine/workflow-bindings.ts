@@ -25,7 +25,19 @@ export type AssetIdentity = { readonly chainId: string; readonly address: string
 /** A validated binding with the bound asset's identity and the consumer's cap (native units of that asset). */
 export type WorkflowBinding = WorkflowBindingInput & { readonly asset: AssetIdentity; readonly cap: string;
   /** A liquidity consumer has two inputs; this is the exact canonical maxAmounts key selected by token identity. */
-  readonly inputAsset?: string };
+  readonly inputAsset?: string;
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg spends EXACTLY its cap, never min(cap, received): a recipient's payment is
+   * never silently reduced. Less funding than the cap stops the step (WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT) and needs a new Review.
+   */
+  readonly exact?: true };
+/** The amount an exact binding (a Batch Payment leg) spends: exactly its cap when the funding covers it, otherwise a refusal (never less). */
+export function exactBoundAmount(cap: string | bigint, available: string | bigint): bigint {
+  const c = BigInt(cap), a = BigInt(available);
+  if (c <= 0n) throw new Error('WORKFLOW_BINDING_AMOUNT_INVALID');
+  if (a < c) throw new Error('WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
+  return c;
+}
 type Node = Composition['workflow']['nodes'][number];
 type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly nativeId?: string; readonly decimals: number }; readonly amount: string };
 

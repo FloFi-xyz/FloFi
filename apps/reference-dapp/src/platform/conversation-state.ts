@@ -25,6 +25,8 @@
  * `final` means nothing changes without a new action by the person. Only CONFIRMED is ever reported as completion.
  */
 import { canonicalRunLifecycle, type CanonicalExecutionStatus, type CanonicalLifecycle } from '../domain/canonical-execution-status.ts';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS } from '@defi-workflow-engine/workflow-contracts';
+import { MAX_WORKFLOW_STEPS } from '../engine/strategy-spec';
 
 export const CONVERSATION_STATES = Object.freeze(['DRAFT_CREATED', 'MISSING_INFORMATION', 'VALIDATION_REQUIRED', 'SIMULATION_COMPLETED', 'REVIEW_REQUIRED',
   'AWAITING_WALLET_CONNECTION', 'AWAITING_SIGNATURE', 'SUBMITTED', 'PENDING_CONFIRMATION', 'PARTIALLY_EXECUTED', 'CONFIRMED', 'FAILED', 'CANCELLED', 'EXPIRED',
@@ -209,6 +211,83 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
     PT: 'Nenhuma rota de bridge que o FloFi consiga verificar e executar está disponível para esse valor agora. Nada foi assinado nem enviado. Tente mais tarde ou mude o valor.' }],
   [/(?:QUOTE|PREVIEW|SIMULATION_UNAVAILABLE|PROVIDER|UPSTREAM|ROUTE_UNAVAILABLE)/, { EN: 'The current quote is temporarily unavailable. You can try again without rebuilding your workflow.',
     PT: 'A cotação atual está temporariamente indisponível. Você pode tentar de novo sem refazer o seu fluxo.' }],
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): a workflow longer than FloFi accepts, or a step list that arrived with fewer steps than the
+  // person asked for, is said so (before the TOO_MANY rate-limit family): FloFi never drops, merges or reorders a requested step.
+  [/^WORKFLOW_TOO_MANY_STEPS$/, { EN: `FloFi accepts at most ${MAX_WORKFLOW_STEPS} steps in one workflow, and this one has more. Nothing was dropped, signed or sent. ` +
+      'Remove steps or split it into two workflows.',
+    PT: `O FloFi aceita no máximo ${MAX_WORKFLOW_STEPS} etapas em um fluxo, e este tem mais. Nenhuma etapa foi descartada, assinada ou enviada. Remova etapas ou ` +
+      'divida-o em dois fluxos.' }],
+  [/^WORKFLOW_STEP_COUNT_MISMATCH$/, { EN: 'FloFi received a different number of steps than you asked for, so it stopped. Nothing was signed or sent. Check the steps and ' +
+      'try again.',
+    PT: 'O FloFi recebeu um número de etapas diferente do que você pediu, então parou. Nada foi assinado nem enviado. Confira as etapas e tente de novo.' }],
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): Batch Payment refusals, each said as it is (before the generic families that would word them as
+  // "too many requests", "invalid details" or "not available").
+  [/^BATCH_PAYMENT_DUPLICATE_RECIPIENT$/, { EN: 'A recipient appears more than once. A Batch Payment pays each recipient once, and FloFi never merges or drops a payment: ' +
+      'give that recipient one amount.',
+    PT: 'Um destinatário aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez, e o FloFi nunca junta nem descarta um pagamento: dê um único ' +
+      'valor a esse destinatário.' }],
+  [/^BATCH_PAYMENT_(?:ATOMIC_EXECUTION_UNAVAILABLE|REQUIRES_ATOMIC_EXECUTION)$/, { EN: 'This Batch Payment can only run as one atomic authorization of your own wallet ' +
+      '(every payment, or none), and that is not available here. Nothing was signed or sent. Use a wallet that supports atomic batches, or send separate transfers.',
+    PT: 'Este Pagamento em lote só pode executar como uma autorização atômica da sua própria carteira (todos os pagamentos, ou nenhum), e isso não está disponível ' +
+      'aqui. Nada foi assinado nem enviado. Use uma carteira que suporte lotes atômicos, ou envie transferências separadas.' }],
+  // Review MCP-5: a recipient count outside 2..8 is said as such (TOO_MANY would otherwise read as the rate-limit family, TOO_FEW as the fallback).
+  [/^BATCH_PAYMENT_TOO_MANY_RECIPIENTS$/, { EN: `A Batch Payment pays at most ${BATCH_PAYMENT_MAX_RECIPIENTS} recipients, and this one has more. No recipient was ` +
+      'dropped, and nothing was signed or sent. Remove recipients, or split the payments into two separate workflows.',
+    PT: `Um Pagamento em lote paga no máximo ${BATCH_PAYMENT_MAX_RECIPIENTS} destinatários, e este tem mais. Nenhum destinatário foi descartado, e nada foi ` +
+      'assinado nem enviado. Remova destinatários ou divida os pagamentos em dois fluxos separados.' }],
+  [/^BATCH_PAYMENT_TOO_FEW_RECIPIENTS$/, { EN: `A Batch Payment pays at least ${BATCH_PAYMENT_MIN_RECIPIENTS} recipients. To pay one recipient, use a transfer. ` +
+      'Nothing was signed or sent.',
+    PT: `Um Pagamento em lote paga pelo menos ${BATCH_PAYMENT_MIN_RECIPIENTS} destinatários. Para pagar um único destinatário, use uma transferência. ` +
+      'Nada foi assinado nem enviado.' }],
+  // Review M6: an invalid recipient or amount names what each payment needs (the generic INVALID family would only say "some details are invalid").
+  [/^BATCH_PAYMENT_RECIPIENT_INVALID$/, { EN: 'Every recipient of a Batch Payment must be a valid 0x wallet address: a mixed-case address must match its checksum, ' +
+      'and a reserved system address (0x…000 to 0x…fff) is never a recipient. FloFi never corrects an address. Nothing was signed or sent. Check each address.',
+    PT: 'Cada destinatário de um Pagamento em lote precisa ser um endereço de carteira 0x válido: um endereço com maiúsculas e minúsculas precisa corresponder ao ' +
+      'seu checksum, e um endereço reservado do sistema (0x…000 a 0x…fff) nunca é destinatário. O FloFi nunca corrige um endereço. Nada foi assinado nem enviado. ' +
+      'Confira cada endereço.' }],
+  [/^BATCH_PAYMENT_AMOUNT_INVALID$/, { EN: 'Every recipient of a Batch Payment needs a positive amount. Nothing was signed or sent. Check each amount.',
+    PT: 'Cada destinatário de um Pagamento em lote precisa de um valor positivo. Nada foi assinado nem enviado. Confira cada valor.' }],
+  [/^BATCH_PAYMENT_ASSET_MIXED$/, { EN: 'One Batch Payment pays one asset on one network. Nothing was signed or sent.',
+    PT: 'Um Pagamento em lote paga um único ativo em uma única rede. Nada foi assinado nem enviado.' }],
+  [/^BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET$/, { EN: `Each recipient of a Batch Payment counts as one of the ${MAX_WORKFLOW_STEPS} steps of a workflow, and this ` +
+      'workflow has more. Nothing was dropped, signed or sent. Pay fewer recipients or split it into two workflows.',
+    PT: `Cada destinatário de um Pagamento em lote conta como uma das ${MAX_WORKFLOW_STEPS} etapas de um fluxo, e este fluxo tem mais. Nada foi descartado, assinado ` +
+      'ou enviado. Pague menos destinatários ou divida em dois fluxos.' }],
+  [/^WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT$/, { EN: 'The earlier step delivered less than the payments need, so no payment was made: FloFi never reduces a ' +
+      'recipient\u2019s amount. Review the workflow again with amounts that fit.',
+    PT: 'A etapa anterior entregou menos do que os pagamentos precisam, então nenhum pagamento foi feito: o FloFi nunca reduz o valor de um destinatário. Revise o fluxo ' +
+      'de novo com valores que caibam.' }],
+  [/^BATCH_PAYMENT_(?:NETWORK|ASSET|TOKEN|RECIPIENT)_UNSUPPORTED$/, { EN: 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, ' +
+      'Ethereum and Robinhood Chain (never Stock Tokens, never Solana in this version).',
+    PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens, nunca Solana ' +
+      'nesta versão).' }],
+  [/^BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM$/, { EN: 'An ETH amount in this Batch Payment is above the per-payment maximum FloFi sends on this network. Nothing was signed or sent. '
+      + 'Lower the amount or split the payment.',
+    PT: 'Um valor em ETH neste Pagamento em lote está acima do máximo por pagamento que o FloFi envia nesta rede. Nada foi assinado nem enviado. Diminua o valor ou '
+      + 'divida o pagamento.' }],
+  [/^BATCH_PAYMENT_AMOUNT_TOO_PRECISE$/, { EN: 'An amount in this Batch Payment has more decimal places than the asset allows. Nothing was rounded, signed or sent.',
+    PT: 'Um valor neste Pagamento em lote tem mais casas decimais do que o ativo permite. Nada foi arredondado, assinado nem enviado.' }],
+  [/^BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN$/, { EN: 'FloFi cannot yet prove from the chain that the earlier request of this Batch Payment never executed, so it does not '
+      + 'ask your wallet again (that could pay every recipient twice). Check your wallet\u2019s activity; you can end the run at any time.',
+    PT: 'O FloFi ainda não consegue provar pela rede que o pedido anterior deste Pagamento em lote nunca executou, então não pede de novo à sua carteira (isso poderia '
+      + 'pagar cada destinatário duas vezes). Confira a atividade da sua carteira; você pode encerrar a execução a qualquer momento.' }],
+  // Review MCP-5: the earlier request can never be proven unexecuted (e.g. an ETH batch): FloFi will not ask the wallet again; the person starts afresh.
+  [/^BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE$/, { EN: 'FloFi cannot prove from the chain that the earlier request of this Batch Payment never executed (for example, '
+      + 'an ETH batch), so it will not ask your wallet again. Check your wallet’s activity first, then end the run and start a new Review.',
+    PT: 'O FloFi não consegue provar pela rede que o pedido anterior deste Pagamento em lote nunca executou (por exemplo, um lote em ETH), então não vai pedir '
+      + 'de novo à sua carteira. Confira primeiro a atividade da sua carteira; depois encerre a execução e comece uma nova Revisão.' }],
+  [/^WALLET_BATCH_PARTIALLY_EXECUTED$/, { EN: 'Your wallet sent this batch as several transactions and only some of them succeeded, so part of it executed. FloFi records '
+      + 'it for review and never sends it again; check each transaction before doing anything else.',
+    PT: 'Sua carteira enviou este lote como várias transações e só algumas deram certo, então parte dele foi executada. O FloFi registra isso para revisão e nunca o '
+      + 'envia de novo; confira cada transação antes de fazer qualquer outra coisa.' }],
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): balance reads that this FloFi deployment has not turned on (an operator setting), before the
+  // generic portfolio family: re-linking the wallet cannot change it, and it is never a zero balance.
+  [/^PORTFOLIO_READS_NOT_ENABLED$/, { EN: 'This FloFi deployment does not read wallet balances through this connection yet. Linking your wallet again does not change ' +
+      'that; your runs and history are still available.',
+    PT: 'Esta implantação do FloFi ainda não lê saldos de carteira por esta conexão. Vincular a carteira de novo não muda isso; as suas execuções e o histórico ' +
+      'continuam disponíveis.' }],
+  [/^PORTFOLIO_REQUIRES_FLOFI_ACCOUNT$/, { EN: 'Wallet balances are read only for a FloFi account connection. This connection cannot read them.',
+    PT: 'Saldos de carteira só são lidos para uma conexão de conta FloFi. Esta conexão não consegue lê-los.' }],
   [/(?:PENDING_LIMIT|HANDOFF_LIMIT)/, { EN: 'You already have the maximum number of open approval requests. Cancel one or let it expire, then try again.',
     PT: 'Você já tem o número máximo de solicitações de aprovação abertas. Cancele uma ou deixe-a expirar e tente de novo.' }],
   [/(?:RATE_LIMIT|BUSY|_LIMIT$|TOO_MANY)/, { EN: 'There are too many requests right now. Wait a moment and try again.',

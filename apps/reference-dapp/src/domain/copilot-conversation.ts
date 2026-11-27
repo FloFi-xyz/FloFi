@@ -11,13 +11,13 @@ import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
 import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, groundedSigned, liquidityUnits, mentionedNetworks,
-  planCopilotActions, proposalFromPlan, SELF_RECIPIENT, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
+  planCopilotActions, proposalFromPlan, SELF_RECIPIENT, writtenPayments, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource, type WrittenPayment } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
 import { orcaLiquidityAmounts, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotFeeTier, type CopilotLendingAction, type CopilotNetwork,
-  type CopilotSwapAction } from './copilot-intent';
+  type CopilotSwapAction, type CopilotTransferAction } from './copilot-intent';
 import { groundExplicitAssets } from './copilot-asset-intent';
 import { answerDraftField, draftSlots, mergeDraftIntent, validatedDraftFields, type DraftField, type ValidatedDraftField } from './copilot-draft';
 import { applyRangeAnswer, readRangeAnswer, type RangeHold } from './copilot-range-dialogue';
@@ -52,7 +52,9 @@ import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } fro
 import { copilotNetworksFor, lendingOffers } from './authoring-capabilities';
 import { followOnSelection, type CryptoAction } from './crypto-action-picker';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
-import { resolveNetworkAsset } from './asset-catalogs';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
+import { TRANSFER_NETWORKS, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
+import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
 import { lendingProfileOfReserve } from './supply-authoring';
 import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
 import { groundedProse } from './intelligence/grounding';
@@ -375,6 +377,7 @@ function question(state: CopilotConversation, m: CopilotCopy, text: string, opti
       askedAt: state.askedAt ?? state.segment.length,
       transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
 }
+const TOO_MANY_ACTIONS = 'COPILOT_TOO_MANY_ACTIONS';
 export const failureText = (code: string, language: CopilotLanguage, retryAfterSeconds?: number): string => {
   const m = copilotCopy(language);
   return `${m.failures[code] ?? m.failureDefault}${retryAfterSeconds ? m.retryAfter(retryAfterSeconds) : ''}${m.failureSuffix}`;
@@ -1335,11 +1338,12 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   if (turn.contextKey && result.contextKey !== undefined && result.contextKey !== turn.contextKey)
     return { reply: reply('FAILED', m.workflowChanged), next: closeSegment(turn.before) };
   let intent: CopilotIntentV2;
+  const discarded = (code: string): Result => tallied({ reply: withDraftReminder(reply('FAILED', failureText(code, language), { code }), rollback, language), next: rollback }, env);
   try { intent = parseCopilotIntentV2(withoutRecipientMarker(result.intent)); }
-  catch (cause) {
-    const code = isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID';
-    return tallied({ reply: withDraftReminder(reply('FAILED', failureText(code, language), { code }), rollback, language), next: rollback }, env);
-  }
+  catch (cause) { return discarded(isCopilotIntentError(cause) && cause.message === TOO_MANY_ACTIONS ? cause.message : 'COPILOT_INTENT_INVALID'); }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review M3): the interpretation may name up to a Batch Payment's recipients only for sends that
+  // can be one; any other composition longer than a proposal's steps is discarded exactly as before.
+  if (intent.kind === 'COMPOSITION' && intent.actions.length > COPILOT_LIMITS.maxActions && !batchShaped(intent.actions)) return discarded(TOO_MANY_ACTIONS);
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
   // BUILD-P1: an interpreted answer that filled a slot the open request never had is progress: the clarification budget opens again for the next one.
   const progressed = filledSlots(turn.before, intent);
@@ -1361,8 +1365,11 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
     read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
-  const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language, slots: progressed.slots, ...progressed.progress ? { clarifications: 0 } : {} }, env, null,
-    carriedOver(turn.before.draft, intent)), env);
+  const answered = resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language, slots: progressed.slots, ...progressed.progress ? { clarifications: 0 } : {} }, env, null,
+    carriedOver(turn.before.draft, intent));
+  // Chat review M3: sends that looked like one Batch Payment but are not one (a Stock Token, for example) and outnumber a sequence's steps.
+  if (answered.reply.code === TOO_MANY_ACTIONS) return discarded(TOO_MANY_ACTIONS);
+  const resolved = tallied(answered, env);
   if (!said || said !== read) return resolved;
   return withAdaptation({ ...resolved, next: { ...resolved.next, languageObserved: true } }, env, { ...NO_ADAPTATION, observations: [{ kind: 'LANGUAGE', language: said }] });
 }
@@ -1506,6 +1513,12 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
       if (intent.kind === 'ACTION' && intent.action.type === 'WITHDRAW' && liquidityRemovalNamed(segmentText(state)) && !tokenAmountWithdrawal(intent.action, segmentText(state)))
         return resolvePosition(positionIntentOf(intent, segmentText(state)), state, env, extras);
       let actions = intent.kind === 'ACTION' ? [intent.action] : intent.actions;
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review H2): one send read from a message that pairs several payments would drop a
+      // recipient; FloFi lists what it read and asks instead.
+      if (intent.kind === 'ACTION' && intent.action.type === 'TRANSFER' && !extras.target) {
+        const written = newestWrittenPayments(state);
+        if (written.length > 1) return unpairedPayments(state, m, language, written, [intent.action]);
+      }
       // Mainnet combinations share the canonical sequence runtime. Historical engineering compositions keep their atomic runtime.
       // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001: in the public (mainnet-only) product a request that names no network yet ("troque 1 USDC por ETH e
       // depois troque o ETH recebido por USDC") is a sequence too: its steps ask for the network instead of falling into the legacy test-network
@@ -1770,6 +1783,144 @@ function bindDependentStep(action: CopilotAction, producer: CopilotAction | unde
   const cap = action.amount === null && delivered.same ? delivered.amount : null;
   return { action: cap !== null ? { ...next, amount: cap } : next, inherited, copiedCap: cap !== null };
 }
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the Batch Payment several planned sends make, or null when they are not one. Chat review M1: sends
+ * Batch Payment does not pay (a Stock Token, an asset or network it does not support) are not one either: they stay separate transfers, exactly as
+ * before Batch Payment existed. Any other refusal of the batch is kept (`refusal`) and said in its own words, never as a raw code.
+ */
+type BatchCandidate = { readonly command: Extract<Command, { type: 'ADD_BATCH_PAYMENT' }>; readonly sends: readonly RobinhoodTransferInput[]; readonly chain: string;
+  readonly refusal: string | null };
+const BATCH_PAYMENT_INELIGIBLE: ReadonlySet<string> = new Set(['BATCH_PAYMENT_ASSET_UNSUPPORTED', 'BATCH_PAYMENT_TOKEN_UNSUPPORTED', 'BATCH_PAYMENT_NETWORK_UNSUPPORTED',
+  'ASSET_CATALOG_UNAVAILABLE']);
+function batchPaymentOf(steps: readonly Command[], baseRevision: number): BatchCandidate | null {
+  if (steps.length < BATCH_PAYMENT_MIN_RECIPIENTS || steps.length > BATCH_PAYMENT_MAX_RECIPIENTS) return null;
+  const sends = steps.map(step => step.type === 'ADD_RH_TRANSFER' ? step.input : null);
+  if (sends.some(send => send === null)) return null;
+  const [first] = sends as RobinhoodTransferInput[];
+  if (!first || !(BATCH_PAYMENT_NETWORKS as readonly string[]).includes(first.network)) return null;
+  if ((sends as RobinhoodTransferInput[]).some(send => send.network !== first.network || send.asset !== first.asset || send.recipient === 'CONNECTED_OWNER'
+    || send.decimals !== undefined || send.program !== undefined)) return null;
+  const input: BatchPaymentInput = { network: first.network as BatchPaymentInput['network'], asset: first.asset,
+    payments: (sends as RobinhoodTransferInput[]).map(send => ({ recipient: send.recipient, amount: send.amount })) };
+  let refusal: string | null = null;
+  try { createAuthoredBatchPayment('batch-payment-preview', input); }
+  catch (cause) {
+    const code = cause instanceof Error ? cause.message : 'BATCH_PAYMENT_FIELDS_INVALID';
+    if (BATCH_PAYMENT_INELIGIBLE.has(code)) return null;
+    refusal = code;
+  }
+  return { command: { type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision, input }, sends: sends as RobinhoodTransferInput[],
+    chain: TRANSFER_NETWORKS[input.network]!.chain, refusal };
+}
+/** The first recipient a batch names twice (as the person wrote it), or null: a duplicate is refused, never merged. */
+function duplicateRecipient(sends: readonly RobinhoodTransferInput[]): string | null {
+  const seen = new Set<string>();
+  for (const send of sends) {
+    const key = send.recipient.toLowerCase();
+    if (seen.has(key)) return send.recipient;
+    seen.add(key);
+  }
+  return null;
+}
+/** The payments the newest turn of the open request that writes any states, in the person's order (an earlier turn's clauses never mix in). */
+function newestWrittenPayments(state: CopilotConversation): readonly WrittenPayment[] {
+  for (const entry of [...state.segment].reverse()) { const written = writtenPayments(entry); if (written.length) return written; }
+  return [];
+}
+/**
+ * Chat review C1: the payments the newest paying turn of the open request writes, each amount with more than one exact reading ("1.000": 1 or 1000)
+ * settled only by the person's own answer to FloFi's question about it: a later reply that is just one of its readings, taken in order, one answer
+ * per ambiguous payment. `unsettled` is the first payment still read more than one way (FloFi asks about it, never choosing a reading), or null.
+ */
+function settledPayments(state: CopilotConversation): { readonly written: readonly WrittenPayment[]; readonly unsettled: WrittenPayment | null; readonly stray: boolean } {
+  let at = state.segment.length - 1;
+  while (at >= 0 && !writtenPayments(state.segment[at]!).length) at -= 1;
+  if (at < 0) return { written: [], unsettled: null, stray: false };
+  // Final security review: every 0x address the paying turn writes must be a paired payment's recipient. An address outside any
+  // "<amount> <asset> to <address>" clause ("25 USDC to 0xA, 0xB and 50 USDC to 0xC") is never left out silently: FloFi asks.
+  const recipients = new Set(writtenPayments(state.segment[at]!).map(clause => clause.recipient.toLowerCase()));
+  const stray = [...state.segment[at]!.matchAll(/(?<![0-9A-Za-z])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => !recipients.has(match[0].toLowerCase()));
+  const answers = state.segment.slice(at + 1).map(bareAmount);
+  let next = 0, unsettled: WrittenPayment | null = null;
+  const written = writtenPayments(state.segment[at]!).map(clause => {
+    if (clause.readings.length <= 1 || unsettled) return clause;
+    const found = answers.findIndex((answer, index) => index >= next && answer !== null && clause.readings.includes(answer));
+    if (found < 0) { unsettled = clause; return clause; }
+    next = found + 1;
+    return { ...clause, readings: [answers[found]!] };
+  });
+  return { written, unsettled, stray };
+}
+/**
+ * Chat review H2: the model's sends are exactly the payments the person paired in their own words: as many sends as written clauses, and send i is
+ * clause i (the same amount, the same asset, the same address in any case). Each clause is used once; nothing is matched by value alone.
+ * Chat review C1: the clause's amount must have exactly one reading, and it must be the send's amount; a reading FloFi would choose never pairs.
+ */
+function paymentsPaired(sends: readonly RobinhoodTransferInput[], written: readonly WrittenPayment[], chain: string): boolean {
+  if (sends.length !== written.length) return false;
+  return sends.every((send, index) => {
+    const clause = written[index]!;
+    let symbol = clause.asset;
+    try { symbol = authoringAssetSymbol(chain, clause.asset); } catch { /* compared as written */ }
+    return clause.readings.length === 1 && clause.readings[0] === canonicalDecimal(send.amount) && symbol.toUpperCase() === send.asset.toUpperCase()
+      && clause.recipient.toLowerCase() === send.recipient.toLowerCase();
+  });
+}
+const paymentLine = (index: number, amount: string, asset: string, recipient: string) => `${index + 1}. ${amount} ${asset} → ${recipient}`;
+const BATCH_PAYMENT_COPY = {
+  EN: { pairs: (written: readonly string[]) => `Your message pairs: ${written.join('; ')}.`,
+    sentence: (n: number, asset: string, network: string) => `batch payment of ${asset} to ${n} recipients on ${network}`,
+    intro: (n: number, network: string) => `One Batch Payment on ${network} to ${n} recipients:`,
+    atomic: 'It runs only as one atomic authorization of your wallet: every payment settles, or none does. Review every recipient before you authorize.',
+    duplicate: (address: string) => `${address} appears more than once. A Batch Payment pays each recipient once and FloFi never merges or drops a payment: say the one amount for that recipient.`,
+    unpaired: (written: readonly string[], read: readonly string[]) => 'FloFi did not prepare these payments: the interpretation did not match each amount to its '
+      + 'recipient exactly as your message pairs them, and FloFi never pairs an amount with a recipient by itself. '
+      + `Your message pairs: ${written.length ? `${written.join('; ')}.` : 'no payment written as “<amount> <token> to <address>”.'} The interpretation read: ${read.join('; ')}. `
+      + 'Write each payment as “<amount> <token> to <address>”, for example “send 25 USDC to 0x… and 50 USDC to 0x… on Base”.' },
+  PT: { pairs: (written: readonly string[]) => `Sua mensagem associa: ${written.join('; ')}.`,
+    sentence: (n: number, asset: string, network: string) => `pagamento em lote de ${asset} para ${n} destinatários na ${network}`,
+    intro: (n: number, network: string) => `Um Pagamento em lote na ${network} para ${n} destinatários:`,
+    atomic: 'Ele só executa como uma autorização atômica da sua carteira: todos os pagamentos são liquidados, ou nenhum. Revise cada destinatário antes de autorizar.',
+    duplicate: (address: string) => `${address} aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez e a FloFi nunca junta nem descarta um pagamento: diga o valor único desse destinatário.`,
+    unpaired: (written: readonly string[], read: readonly string[]) => 'O FloFi não preparou estes pagamentos: a interpretação não associou cada valor ao seu '
+      + 'destinatário exatamente como a sua mensagem os associa, e o FloFi nunca associa um valor a um destinatário por conta própria. '
+      + `Sua mensagem associa: ${written.length ? `${written.join('; ')}.` : 'nenhum pagamento escrito como “<valor> <token> para <endereço>”.'} A interpretação leu: ${read.join('; ')}. `
+      + 'Escreva cada pagamento como “<valor> <token> para <endereço>”, por exemplo “envie 25 USDC para 0x… e 50 USDC para 0x… na Base”.' },
+} as const;
+/** Chat review H2: FloFi's question when the sends are not exactly the payments the person paired (it lists both, and never chooses). */
+function unpairedPayments(state: CopilotConversation, m: CopilotCopy, language: CopilotLanguage, written: readonly WrittenPayment[],
+  read: readonly { readonly amount: string | null; readonly asset: string | null; readonly recipient: string | null }[]): Result {
+  return question(state, m, BATCH_PAYMENT_COPY[language].unpaired(written.map((clause, index) => paymentLine(index, clause.written, clause.asset, clause.recipient)),
+    read.map((send, index) => paymentLine(index, send.amount ?? '…', send.asset ?? '…', send.recipient ?? '…'))), [], null);
+}
+/**
+ * Chat review C1: FloFi's amount-ambiguity question for a payment whose written amount has several exact readings: the payments as the message pairs
+ * them (each amount exactly as written), then which reading is meant, offered as the answers. No batch is built until the person says it.
+ */
+function ambiguousPayment(state: CopilotConversation, m: CopilotCopy, language: CopilotLanguage, written: readonly WrittenPayment[], unsettled: WrittenPayment): Result {
+  return question(state, m, [BATCH_PAYMENT_COPY[language].pairs(written.map((clause, index) => paymentLine(index, clause.written, clause.asset, clause.recipient))),
+    intelligenceCopy(language).amountAmbiguous(unsettled.written, unsettled.readings)].join(' '), unsettled.readings, null);
+}
+/**
+ * Chat review L1: what a Batch Payment proposal pays, line by line, and its all-or-nothing rule, for the confirmation the product chat shows before
+ * Review (the same lines the Copilot's proposal text lists).
+ */
+export function batchPaymentConfirmation(input: BatchPaymentInput, language: CopilotLanguage): readonly string[] {
+  return [...input.payments.map((payment, index) => paymentLine(index, payment.amount, input.asset, payment.recipient)), BATCH_PAYMENT_COPY[language].atomic];
+}
+/**
+ * Chat review M3: a composition longer than a sequence of steps may be (`COPILOT_LIMITS.maxActions`) is read only as one Batch Payment: sends of one
+ * written asset on one Batch Payment network, each to its own explicit recipient. Anything else is answered exactly as before Batch Payment existed.
+ */
+function batchShaped(actions: readonly CopilotAction[]): boolean {
+  if (!actions.every(action => action.type === 'TRANSFER' && action.recipient !== null)) return false;
+  const sends = actions as readonly CopilotTransferAction[], network = sends[0]?.network ?? null, asset = sends[0]?.asset ?? null;
+  // Chat review C5: sends that name no network yet reach the sequence authoring (which asks for the network) only in the public, mainnet-only product;
+  // in any other scope they are not a Batch Payment shape, so the request is discarded exactly as before Batch Payment existed.
+  if (network === null && activeNetworkScope() !== 'PUBLIC_MAINNET') return false;
+  if (network !== null && (network === 'OTHER' || !(BATCH_PAYMENT_NETWORKS as readonly string[]).includes(networkOfCopilot(network).name))) return false;
+  return sends.every(send => send.network === network && (send.asset === asset || sameWrittenAsset(send.asset, asset)));
+}
 function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind: 'PLAN' }> | null, sequenceActions: readonly CopilotAction[], state: CopilotConversation,
   env: CopilotEnvironment, notesIn: readonly string[], extras: Extras = {}): Result {
   const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language);
@@ -1815,6 +1966,28 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
     steps.push(outcome.command); sentences.push(outcome.sentence); stepNotes.push(...outcome.notes); workflow = next.workflow;
   }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: several sends of one asset on one EVM mainnet, each to its own explicit recipient, are ONE Batch
+  // Payment (every recipient and amount exactly as planned and grounded above, in the person's order), never separate transfer cards.
+  const batch = !plan && !bound.size ? batchPaymentOf(steps, env.workflow.revision) : null;
+  if (batch) {
+    // Chat review H2: each send must be a payment the person paired in their own words (amount, asset and recipient together, in their order);
+    // otherwise FloFi lists both readings and asks, never choosing which amount goes to which recipient.
+    // Chat review C1: a written amount with several readings ("1.000") is asked about first; a send never pairs with a reading FloFi chose.
+    const { written, unsettled, stray } = settledPayments(state);
+    if (unsettled) return ambiguousPayment(state, m, language, written, unsettled);
+    if (stray || !paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends);
+    const duplicate = duplicateRecipient(batch.sends);
+    if (duplicate) return refused(state, m, BATCH_PAYMENT_COPY[language].duplicate(duplicate));
+    if (batch.refusal) return failedWith(state, m, copilotRejection(batch.refusal, language).message, batch.refusal);
+    const next = editorReducer({ workflow: env.workflow, error: null }, batch.command, env.context);
+    if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
+    const input = batch.command.input;
+    return propose(state, env, batch.command, BATCH_PAYMENT_COPY[language].sentence(input.payments.length, input.asset, input.network),
+      [BATCH_PAYMENT_COPY[language].intro(input.payments.length, input.network), ...batchPaymentConfirmation(input, language)].join(' '), [...notes, ...stepNotes], m.subject.request);
+  }
+  // Chat review M3: more sends than a sequence may hold are only ever one Batch Payment. When they are not one, the request is answered exactly as
+  // before Batch Payment existed (`finishTurn` gives the interpretation's "too many steps" reply for this code).
+  if (!plan && actions.length > COPILOT_LIMITS.maxActions) return failedWith(state, m, failureText(TOO_MANY_ACTIONS, language), TOO_MANY_ACTIONS);
   const command = { type: 'ADD_SEQUENCE', steps, source: 'CHAT', baseRevision: env.workflow.revision } as Command;
   // The existing sequence runtime must take every step on its own, funded exactly as planned; otherwise this is not executable and FloFi says so.
   const sequence = workflowSequence(workflow, candidate => lintWorkflow(candidate, env.context));

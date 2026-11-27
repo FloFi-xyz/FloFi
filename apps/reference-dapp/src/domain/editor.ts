@@ -19,6 +19,8 @@ import { readConcentratedLiquiditySource, isLendingComposition, workflowDependen
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw } from './supply-authoring';
 import { ownDeclaration } from './node-declaration';
 import { createAuthoredTransfer } from './robinhood-transfer-authoring';
+import { createAuthoredBatchPayment } from './batch-payment-authoring';
+import { BATCH_PAYMENT_ACTION } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION, markConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
@@ -111,6 +113,20 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
       validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'TRANSFER_INPUT_INVALID'); }
+  }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the Batch Payment card, exactly as a Send card is added or edited.
+  if (command.type === 'ADD_BATCH_PAYMENT' || command.type === 'SET_BATCH_PAYMENT') {
+    const editing = command.type === 'SET_BATCH_PAYMENT';
+    try {
+      if (editing && !current.nodes.some(n => n.nodeId === command.nodeId && n.actionType === BATCH_PAYMENT_ACTION)) return reject('UNKNOWN_BATCH_PAYMENT_NODE');
+      const id = editing ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
+      let replacement = createAuthoredBatchPayment(id, command.input);
+      if (editing) replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
+      if (editing && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
+      const workflow = { ...current, revision: current.revision + 1, nodes: !editing ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
+      if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
+    } catch (cause) { return reject(cause instanceof Error ? cause.message : 'BATCH_PAYMENT_INPUT_INVALID'); }
   }
   if (command.type === 'ADD_WITHDRAW' || command.type === 'SET_WITHDRAW' || command.type === 'ADD_REPAY' || command.type === 'SET_REPAY' || command.type === 'ADD_SUPPLY' || command.type === 'SET_SUPPLY' || command.type === 'ADD_BORROW' || command.type === 'SET_BORROW') {
     const withdrawing=command.type==='ADD_WITHDRAW'||command.type==='SET_WITHDRAW';

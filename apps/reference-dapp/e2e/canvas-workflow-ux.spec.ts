@@ -117,7 +117,8 @@ async function toolbarGeometry(page: Page, name: string) {
 for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — rail by default, docked row in EN and PT — at ${width}px`, async ({ page, networkGuard }, testInfo) => {
   await page.setViewportSize({ width, height: 1080 }); await open(page);
   await useToolbarRail(page);
-  const actions = ['Swap','Bridge','Send','Pool / Liquidity','Supply','Withdraw','Borrow','Repay','Lending','Stocks'];
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: Batch Payment joins the first group, after Send (authorized catalog entry).
+  const actions = ['Swap','Bridge','Send','Batch Payment','Pool / Liquidity','Supply','Withdraw','Borrow','Repay','Lending','Stocks'];
   const rail = await toolbarGeometry(page, 'Canvas tools');
   expect(rail.buttons.map(b => b.text)).toEqual(actions);
   // One column inside the graph.

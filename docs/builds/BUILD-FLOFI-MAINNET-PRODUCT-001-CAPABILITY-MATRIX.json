@@ -330,6 +330,33 @@
       "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
+      "id": "batch-payment-robinhood",
+      "action": "batch_payment",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.batch-payment"
+      ],
+      "flow": "workflow-run",
+      "webRuntime": "per group",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
       "id": "bridge-arbitrum-base",
       "action": "bridge",
       "network": "arbitrum-one",
@@ -394,6 +421,33 @@
       ],
       "flow": "base-mainnet-transfer",
       "webRuntime": "transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "batch-payment-base",
+      "action": "batch_payment",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.batch-payment"
+      ],
+      "flow": "workflow-run",
+      "webRuntime": "per group",
       "ownerWalletExecutionImplemented": true,
       "channels": {
         "canvas": true,
@@ -681,6 +735,33 @@
       "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
+      "id": "batch-payment-arbitrum",
+      "action": "batch_payment",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.batch-payment"
+      ],
+      "flow": "workflow-run",
+      "webRuntime": "per group",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
       "id": "add-liquidity-arbitrum",
       "action": "add_liquidity",
       "network": "arbitrum-one",
@@ -853,6 +934,33 @@
       ],
       "flow": "ethereum-mainnet-transfer",
       "webRuntime": "transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "batch-payment-ethereum",
+      "action": "batch_payment",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.batch-payment"
+      ],
+      "flow": "workflow-run",
+      "webRuntime": "per group",
       "ownerWalletExecutionImplemented": true,
       "channels": {
         "canvas": true,

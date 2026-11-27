@@ -28,6 +28,9 @@ import { useWorkflow } from '../state/workflow-store';
 import { editorReducer, resolveCanvasRemoval } from '../domain/editor';
 import { checkConnection, connectionEnd, handleHitScale } from '../domain/canvas-connect';
 import { CANVAS_ACTIONS, canvasAddCommand, type CanvasAction } from '../domain/canvas-authoring';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, batchPaymentAssetChoices, batchPaymentChain, batchPaymentNetworkChange,
+  batchDraftWithSavedAsset, checkBatchPaymentDraft, defaultBatchPaymentDraft, savedBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
+import type { BatchPaymentCardData } from './batch-payment-fields';
 import { activeNetworkScope, isTestNetwork, mainnetCounterpart, testNetworkTemplate, workflowTestNetworks } from '../domain/network-scope';
 import { walletChainRef } from '../wallet/evm-networks';
 import { shellChainLabel } from '../domain/product-shell';
@@ -161,12 +164,14 @@ function InsertionViewport({ workflowId, ids, padding = COMPOSER_FIT_PADDING }: 
 }
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: `lending` (Supply → Borrow → Swap) exists only on Base Sepolia, so the Mainnet-only product does not offer it. */
 /** Every step action the Canvas offers today (the rail lists exactly these, grouped: `RAIL_GROUPS`). */
-export const CANVAS_STEP_ACTIONS: readonly (CanvasAction | 'stocks')[] = Object.freeze([...CANVAS_ACTIONS, 'stocks']);
+export const CANVAS_STEP_ACTIONS: readonly RailAction[] = Object.freeze([...CANVAS_ACTIONS, 'stocks', 'batch']);
+/** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): `batch` is the Batch Payment card (one network, one asset, 2..8 recipients). */
+type RailAction = CanvasAction | 'stocks' | 'batch';
 /** BUILD-SOLANA-MAINNET-001: the owner is told about every linked step a deletion also removed; undo restores them. */
 const removalFeedback = (count: number) => count === 1 ? 'Also removed 1 linked step that cannot run without the deleted one. Undo restores it.'
   : 'Also removed the linked steps that cannot run without the deleted one. Undo restores them.';
 // UX-005: the canonical transfer action is presented as Send; its action id and IR stay `transfer` / `asset.transfer`.
-function actionLabel(action: CanvasAction | 'stocks') { return action === 'lending' ? 'Lending' : action === 'pool' ? 'Pool / Liquidity' : action === 'transfer' ? 'Send' : action[0]!.toUpperCase() + action.slice(1); }
+function actionLabel(action: RailAction) { return action === 'batch' ? 'Batch Payment' : action === 'lending' ? 'Lending' : action === 'pool' ? 'Pool / Liquidity' : action === 'transfer' ? 'Send' : action[0]!.toUpperCase() + action.slice(1); }
 function HistoryIcon({ direction }: { direction: 'undo' | 'redo' }) {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {direction === 'undo' ? <><path d="m10 8-4 4 4 4"/><path d="M6 12h9a5 5 0 0 1 0 10"/></>
@@ -190,8 +195,8 @@ function LockIcon() {
  * Stocks. Only actions that exist today: Lending (Supply → Borrow → Swap) stays engineering-only as before, and Privacy is not shown until it is
  * available. The order is presentation only; each button calls the same `addAction` as before.
  */
-export const RAIL_GROUPS: readonly (readonly (CanvasAction | 'stocks')[])[] = Object.freeze([
-  ['swap', 'bridge', 'transfer'], ['pool', 'supply', 'withdraw'], ['borrow', 'repay', 'lending'], ['stocks'],
+export const RAIL_GROUPS: readonly (readonly RailAction[])[] = Object.freeze([
+  ['swap', 'bridge', 'transfer', 'batch'], ['pool', 'supply', 'withdraw'], ['borrow', 'repay', 'lending'], ['stocks'],
 ]);
 /** The rail's expanded state (icon + name) is a per-viewer convenience in this browser only; storage is optional and may throw. */
 export const RAIL_EXPANDED_KEY = 'flofi.canvas.rail-expanded';
@@ -413,7 +418,8 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
 function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, runStatus = null, onNewWorkflow, execution: executionInput = null }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, rememberCanvasViewport, forgetCanvasViewport, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
-    sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
+    sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal,
+    batchSetup = null, batchDrafts = {}, startBatchSetup, editBatchDraft, discardBatchDraft, applyBatchDraft } = useWorkflow();
   const workflow: Workflow = state.workflow;
   const wallet=useBuild009Wallet();
   // BUILD-FLOFI-MAINNET-EXEC-002: the owner's wallets a bridge can deliver to (session, account, Credentials), for each card's destination wallet.
@@ -426,8 +432,10 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-06): a universal bridge node's `chainId` is its SOURCE chain only; its destination network's
   // catalog is loaded too, so the Bridge card shows the destination token's symbol instead of a raw contract reference.
   const bridgeDestinationChains = workflow.nodes.map(node => universalBridgeDetails(node)?.fields.destinationChain).filter(Boolean).join();
+  // FE-BATCH-12: a Batch Payment draft's network (a new card's, or a saved card moved to another network) loads its catalog too.
+  const batchDraftChains = Object.values(batchDrafts).map(draft => batchPaymentChain(draft.network)).filter(Boolean).join();
   const shownCatalogs = CATALOG_NETWORK_IDENTITIES.filter(network => actionSetup?.cryptoSelection?.network === network.name ||
-    Object.values(cryptoSelections).some(selection => selection.network === network.name) ||
+    Object.values(cryptoSelections).some(selection => selection.network === network.name) || batchDraftChains.split(',').includes(network.chain) ||
     workflow.nodes.some(node => node.chainId === network.chain) || bridgeDestinationChains.split(',').includes(network.chain)).map(network => network.chain).join();
   useEffect(() => { for (const chain of shownCatalogs ? shownCatalogs.split(',') : []) void ensureNetworkCatalog(false, chain); }, [shownCatalogs]);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>(() => selectedId ? [selectedId] : []);
@@ -456,7 +464,25 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const [railExpanded, setRailExpanded] = useState(false);
   const compactRail = useCompactRail();
   const railWide = railExpanded && !compactRail;
-  const [lastAdded, setLastAdded] = useState<CanvasAction | 'stocks' | null>(null);
+  const [lastAdded, setLastAdded] = useState<RailAction | null>(null);
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): the Batch Payment card's draft (a new card, or an edit of a saved step) lives in the workflow
+  // store beside the Canvas's other drafts (FE-BATCH-01), so leaving Build never loses it and Simulate waits for it. Drafts are authoring text only:
+  // Apply runs the editor's own command, which validates it again; nothing is signed or sent.
+  /** The Batch Payment card's data: its draft (or the saved step), the network's asset choices, the exact total and Apply/Cancel. */
+  function batchCardData(id: string, draft: BatchPaymentInput, nodeId: string | null, fresh = false): BatchPaymentCardData {
+    return { network: draft.network, asset: draft.asset, networks: BATCH_PAYMENT_NETWORKS, assets: batchPaymentAssetChoices(draft.network, draft.asset),
+      rows: draft.payments, minRecipients: BATCH_PAYMENT_MIN_RECIPIENTS, maxRecipients: BATCH_PAYMENT_MAX_RECIPIENTS,
+      check: checkBatchPaymentDraft(draft), changed: nodeId === null || batchDrafts[id] !== undefined, saved: nodeId !== null, fresh,
+      applyLabel: nodeId ? 'Apply changes' : 'Apply batch payment',
+      onNetwork: network => editBatchDraft?.(id, d => batchPaymentNetworkChange(d, network as BatchPaymentInput['network'])),
+      onAsset: asset => editBatchDraft?.(id, d => ({ ...d, asset })),
+      onRow: (index, field, value) => editBatchDraft?.(id, d => ({ ...d, payments: d.payments.map((p, i) => i === index ? { ...p, [field]: value } : p) })),
+      onAdd: () => editBatchDraft?.(id, d => d.payments.length >= BATCH_PAYMENT_MAX_RECIPIENTS ? d : { ...d, payments: [...d.payments, { recipient: '', amount: '' }] }),
+      onRemove: index => editBatchDraft?.(id, d => d.payments.length <= BATCH_PAYMENT_MIN_RECIPIENTS ? d : { ...d, payments: d.payments.filter((_, i) => i !== index) }),
+      onSameAmount: () => editBatchDraft?.(id, d => ({ ...d, payments: d.payments.map(p => ({ ...p, amount: d.payments[0]?.amount ?? p.amount })) })),
+      onApply: () => applyBatchDraft ? applyBatchDraft(id) : 'Check the recipients and amounts.',
+      onCancel: () => discardBatchDraft?.(id) };
+  }
   const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
   const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const railId = useId();
@@ -507,12 +533,14 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     if (selectedEdge && !composerConnections(workflow).some(edge => edge.source === selectedEdge.from && edge.target === selectedEdge.to)) setSelectedEdge(null);
   }, [workflow, selectedEdge]);
   useEffect(() => {
-    const remaining = selectedIdsRef.current.filter(id => actionSetup?.id === id || workflow.nodes.some(node => node.nodeId === id));
+    // FE-BATCH-05: the Batch Payment card being set up is a card too (its toolbar Delete and the Delete key act on it), exactly like a setup card.
+    const setupCard = (id: string) => actionSetup?.id === id || batchSetup?.id === id;
+    const remaining = selectedIdsRef.current.filter(id => setupCard(id) || workflow.nodes.some(node => node.nodeId === id));
     if (remaining.length !== selectedIdsRef.current.length) { selectedIdsRef.current = remaining; setSelectedIds(remaining); }
     // A newly accepted node replaces its setup card's ID; let the addition effect transfer selection without closing explicitly opened settings.
-    if (selectedId && selectedId !== actionSetup?.id && !workflow.nodes.some(node => node.nodeId === selectedId) &&
+    if (selectedId && !setupCard(selectedId) && !workflow.nodes.some(node => node.nodeId === selectedId) &&
       !composerActions(workflow).some(node => !previousNodeIds.current.has(node.nodeId))) select(null);
-  }, [workflow, actionSetup, selectedId, select]);
+  }, [workflow, actionSetup, batchSetup?.id, selectedId, select]);
   const previousSetupId = useRef(actionSetup?.id);
   useEffect(() => {
     if (actionSetup && previousSetupId.current !== actionSetup.id) selectNodes([actionSetup.id], actionSetup.id);
@@ -562,6 +590,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       event.preventDefault();
       // BUILD-SOLANA-MAINNET-001 (requirement D): every selected card is deleted; linked steps that cannot run without it go too, and are named.
       const removingSetup = Boolean(actionSetup && selected.includes(actionSetup.id));
+      if (batchSetup && selected.includes(batchSetup.id)) discardBatchDraft?.(batchSetup.id);
       const canonicalSelection = selected.filter(id => id !== actionSetup?.id && workflow.nodes.some(node => node.nodeId === id));
       const plan = canonicalSelection.length ? resolveCanvasRemoval(workflow, canonicalSelection, context) : null;
       if (removingSetup) removeActionSetup();
@@ -571,7 +600,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dispatch, workflow, context, actionSetup, removeActionSetup, selectedEdge, select, undo, redo, runActive]);
+  }, [dispatch, workflow, context, actionSetup, removeActionSetup, selectedEdge, select, undo, redo, runActive, batchSetup, discardBatchDraft]);
   const previousEnvironment = useRef(environment);
   useEffect(() => {
     if (previousEnvironment.current === environment) return;
@@ -930,8 +959,26 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
           blocked: actionSetup.followOnIssue ? FOLLOW_ON_SELECTION_MESSAGES[actionSetup.followOnIssue] : actionSetup.action === 'bridge' ? bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid ? null : 'Choose matching networks.'
             : actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid ? null : 'Choose a network available for the connected wallet.' } } : {}),
       } });
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): an authored Batch Payment card edits its recipients in place; a new one is a draft card.
+    for (const [index, card] of projected.entries()) {
+      const saved = savedBatchPayment(workflow.nodes.find(node => node.nodeId === card.id) as Parameters<typeof savedBatchPayment>[0]);
+      if (!saved) continue;
+      const stored = batchDrafts[card.id], draft = stored && batchDraftWithSavedAsset(stored, saved.input);
+      // FE-BATCH-06: while a draft exists the card's header names the draft's network (its fields show the draft), and the card is a draft.
+      projected[index] = { ...card, data: { ...card.data, batchPayment: batchCardData(card.id, draft ?? saved.input, card.id),
+        ...draft ? { summary: { ...(card.data.summary as ComposerCardData['summary']), chain: draft.network }, cardStatus: canvasCardStatus({ status: 'Draft', tone: 'neutral' }, true) } : {} } };
+    }
+    if (batchSetup) {
+      const draft = batchDrafts[batchSetup.id] ?? defaultBatchPaymentDraft();
+      projected.push({ id: batchSetup.id, type: 'workflow', ariaLabel: tr('Step {0}: {1}', projected.length + 1, tr('Batch Payment')),
+        position: batchSetup.position, selected: selectedId === batchSetup.id,
+        data: { composer: true, connectable: false, step: projected.length + 1, selected: selectedId === batchSetup.id, vertical: false,
+          summary: { action: 'Batch Payment', provider: 'Wallet batch', chain: draft.network, amount: '', detail: undefined, bridgePair: undefined, linked: false, risk: undefined },
+          validation: { findings: [], status: 'Draft', tone: 'neutral', message: undefined, next: undefined },
+          cardStatus: canvasCardStatus({ status: 'Draft', tone: 'neutral' }, true), batchPayment: batchCardData(batchSetup.id, draft, null, !batchSetup.edited) } });
+    }
     return projected;
-  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, wallet.connect, solanaWallets, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
+  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, wallet.connect, solanaWallets, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr, batchSetup, batchDrafts, editBatchDraft, discardBatchDraft, applyBatchDraft]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
   // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution state joins each card's data (no position, size or content change). A card whose
   // step has started executing keeps the estimate it shows and asks for no new one (`useLiveQuote` frozen); a waiting step keeps its live estimate.
@@ -967,8 +1014,17 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     style: { stroke, strokeWidth: selected || visual && visual !== 'waiting' ? 2 : 1.5 },
     ...CANVAS_EDGE_LABEL,
   }; }), [workflow, selectedEdge, tr, execution]);
-  function addAction(action: CanvasAction | 'stocks') {
+  function addAction(action: RailAction) {
     if (actionSetup) { selectNodes([actionSetup.id], actionSetup.id); setFeedback('Configure this action before adding another.'); return; }
+    if (batchSetup) { selectNodes([batchSetup.id], batchSetup.id); setFeedback('Configure this action before adding another.'); return; }
+    if (action === 'batch') {
+      let slot = projectedNodes.length, position = defaultCanvasPosition(slot);
+      while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
+      if (!startBatchSetup) return;
+      const id = startBatchSetup(position);
+      selectNodes([id], id); setFeedback(''); setLastAdded(action);
+      return;
+    }
     if (action === 'stocks') {
       let slot = projectedNodes.length, position = defaultCanvasPosition(slot);
       while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
@@ -1114,11 +1170,12 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     const ends = connectionEnd({ nodeId: connection.fromNode.id, type: connection.fromHandle.type }, connection.toNode?.id ?? card?.dataset.id ?? null);
     if (ends) connect(ends.from, ends.to, 'output', 'input');
   }
-  const deleteAllowed = Boolean(selectedId && selectedId === actionSetup?.id) || canDeleteCanvasNode(workflow, selectedId);
+  const deleteAllowed = Boolean(selectedId && (selectedId === actionSetup?.id || selectedId === batchSetup?.id)) || canDeleteCanvasNode(workflow, selectedId);
   const emptyProposal = projectedNodes.length === 0 && workflowEditProposalVisible(pending, workflow);
   function deleteSelectedCard() {
     if (!selectedId || !deleteAllowed) return;
     if (selectedId === actionSetup?.id) { removeActionSetup(); selectNodes([], null); return; }
+    if (selectedId === batchSetup?.id) { discardBatchDraft?.(batchSetup.id); selectNodes([], null); return; }
     const plan = resolveCanvasRemoval(workflow, [selectedId], context);
     dispatch({ type: 'REMOVE', nodeId: selectedId, source: 'CANVAS', baseRevision: workflow.revision });
     selectNodes([], null);
@@ -1128,11 +1185,11 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const rail = toolboxMode === 'floating';
   const railTips = rail && !railWide;
   const lendingAllowed = activeNetworkScope() === 'ENGINEERING';
-  const railButton = (action: CanvasAction | 'stocks') => {
+  const railButton = (action: RailAction) => {
     const label = tr(actionLabel(action));
     // The accessible name stays the existing "Add {action}"; the tooltip shows the action's name (a collapsed rail has no visible text).
     return <button key={action} type="button" className="canvas-rail-action" data-active={lastAdded === action || undefined}
-      aria-label={tr(action === 'stocks' ? 'Stocks' : action==='lending'?'Add Supply → Borrow → Swap':'Add ' + (action === 'transfer' ? 'send' : action))}
+      aria-label={tr(action === 'stocks' ? 'Stocks' : action === 'batch' ? 'Add batch payment' : action==='lending'?'Add Supply → Borrow → Swap':'Add ' + (action === 'transfer' ? 'send' : action))}
       disabled={runActive || (action==='lending'&&isLendingComposition(workflow))} onClick={() => { hideTip(); addAction(action); }}
       {...railTips ? {
         onPointerEnter: (event: React.PointerEvent<HTMLButtonElement>) => { if (event.pointerType === 'mouse') showTip(event.currentTarget, label, 300); },

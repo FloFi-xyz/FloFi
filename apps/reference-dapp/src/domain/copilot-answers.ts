@@ -85,6 +85,7 @@ export function stepSummary(step: WorkflowStep, language: CopilotLanguage): stri
       : d.role === 'BORROW' ? `Borrow ${d.input.borrow} USDC · Aave V3 (${pt ? 'composição' : 'composition'})`
       : `Swap ${pt ? 'do USDC emprestado' : 'of the borrowed USDC'} → WETH · Uniswap v3 (${pt ? 'composição' : 'composition'})`;
     case 'TRANSFER': return `${pt ? 'Envio' : 'Send'} ${d.input.amount} ${d.input.asset} · ${d.input.network}`;
+    case 'BATCH_PAYMENT': return `${pt ? 'Pagamento em lote' : 'Batch Payment'} ${d.total} ${d.input.asset} → ${d.input.payments.length} ${pt ? 'destinatários' : 'recipients'} · ${d.input.network}`;
     case 'TEMPLATE': return pt ? `Template ${d.template} (só autoria)` : `Template ${d.template} (authoring only)`;
     case 'OTHER': return `${d.actionType} · ${step.network}`;
   }
@@ -143,6 +144,11 @@ export function stepSentence(step: WorkflowStep, language: CopilotLanguage): str
       : (pt ? `Troca exatamente os ${d.input.borrow} USDC emprestados por WETH na Uniswap v3, com slippage máximo de ${d.input.slippage} bps. A dívida continua.`
         : `Swaps exactly the borrowed ${d.input.borrow} USDC to WETH on Uniswap v3 with at most ${d.input.slippage} bps slippage. The debt remains.`);
     // BUILD-BASE-001: a typed transfer step (real funds on a mainnet).
+    case 'BATCH_PAYMENT': {
+      const lines = d.input.payments.map(p => `${p.amount} ${d.input.asset} → ${p.recipient}`).join('; ');
+      return pt ? `Pagamento em lote na ${d.input.network}: ${d.input.payments.length} pagamentos (${lines}), total ${d.total} ${d.input.asset}. Executa só como uma autorização atômica da sua carteira. Fundos reais.`
+        : `Batch Payment on ${d.input.network}: ${d.input.payments.length} payments (${lines}), total ${d.total} ${d.input.asset}. It runs only as one atomic authorization of your wallet. Real funds.`;
+    }
     case 'TRANSFER': return pt ? `Envia ${d.input.amount} ${d.input.asset} na ${d.input.network} para ${recipientOf(d.input.recipient, pt)}.${step.testFunds ? '' : ' Fundos reais.'}`
       : `Sends ${d.input.amount} ${d.input.asset} on ${d.input.network} to ${recipientOf(d.input.recipient, pt)}.${step.testFunds ? '' : ' Real funds.'}`;
     case 'TEMPLATE': return pt ? `Um passo template "${d.template}": um marcador de autoria que nunca executa.` : `A "${d.template}" template step: an authoring placeholder that never executes.`;
@@ -177,6 +183,8 @@ function approvalLine(step: WorkflowStep, pt: boolean): string {
       : 'Composition: a USDC approval to the Aave Pool before Supply and an approval to the swap router before Swap; each step is signed separately.';
     case 'TEMPLATE': return pt ? 'Template: nunca executa e não precisa de approval.' : 'Template: never executes and needs no approval.';
     case 'TRANSFER': return pt ? 'Envio: sem approval; sua carteira assina a única transação, mostrada na Review.' : 'Send: no approval; your wallet signs the single transaction, shown in Review.';
+    case 'BATCH_PAYMENT': return pt ? 'Pagamento em lote: sem approval; sua carteira autoriza todos os pagamentos de uma vez, em um lote atômico (todos ou nenhum), mostrado na Review.'
+      : 'Batch Payment: no approval; your wallet authorizes every payment at once, as one atomic batch (all or none), shown in Review.';
     case 'OTHER': return pt ? 'Este passo tem seu próprio painel de Review, que lista cada transação.' : 'This step has its own Review panel, which lists every transaction.';
   }
 }

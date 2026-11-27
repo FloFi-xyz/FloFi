@@ -16,6 +16,7 @@ import { flightWalletRefusal, withFlightAccess, withFlightOwner } from '../serve
  * Every refusal is a closed code. A run that was started but could not reach its wallet request is ended (nothing was signed or sent).
  */
 import { cookies, headers } from 'next/headers';
+import { BATCH_PAYMENT_ACTION } from '@defi-workflow-engine/workflow-contracts';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
 import { readEditorRunConfig, startEditorRun, withdrawUnstartedHandoff, type EditorRunStarted } from '../editor/approval';
 import { createPgHandoffStore } from '../platform/index';
@@ -52,11 +53,16 @@ const financialNodes = (workflow: unknown): readonly { readonly actionType: stri
   return Array.isArray(nodes) ? nodes.filter((node): node is { actionType: string; chainId?: unknown } => Boolean(node) && typeof node === 'object'
     && typeof (node as { actionType?: unknown }).actionType === 'string' && !(node as { actionType: string }).actionType.startsWith('mock-')) : [];
 };
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: ONE Batch Payment card is not a single-card run: its run is its 2..8 payments (one atomic group), so it
+ * takes the ordinary workflow run whatever the deployment answers about one-step runs. Only a hint for the path (re-validated by `editorWorkflowStrategy`).
+ */
+const loneBatchPayment = (workflow: unknown): boolean => { const nodes = financialNodes(workflow); return nodes.length === 1 && nodes[0]!.actionType === BATCH_PAYMENT_ACTION; };
 /** ONE financial card (the single-card path: the shell then offers its own flow, or this run). */
-const singleCard = (workflow: unknown): boolean => financialNodes(workflow).length === 1;
+const singleCard = (workflow: unknown): boolean => financialNodes(workflow).length === 1 && !loneBatchPayment(workflow);
 /** The single-card run's scope: ONE EVM card (the user-funded EVM execution groups; a Solana card already signs once through its own flow). */
 const singleEvmCard = (workflow: unknown): boolean => { const nodes = financialNodes(workflow);
-  return nodes.length === 1 && typeof nodes[0]!.chainId === 'string' && nodes[0]!.chainId.startsWith('eip155:'); };
+  return singleCard(workflow) && typeof nodes[0]!.chainId === 'string' && nodes[0]!.chainId.startsWith('eip155:'); };
 /** Whether this deployment's database accepts a one-step workflow run (migration 0032, exact identity; any failure: no). */
 const singleStepRunsHere = async (env: NodeJS.ProcessEnv): Promise<boolean> => {
   try { return await singleStepRunsSupported((await platformStateHost(env)).db); } catch { return false; }
@@ -208,7 +214,8 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
 /**
  * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (workflow review): what a single-card run proves about ONE Canvas card, read as its owner (the run's
  * own wallets, from this browser's sign-in), so a workflow that grew from that card never offers it again after a reload (`domain/sequence-restore.ts`,
- * kind `workflow-run`). Proven here, server-side: the run has exactly one step and its canonical hash is exactly this card's
+ * kind `workflow-run`). Proven here, server-side: the run has exactly the card's steps (one; a lone Batch Payment's are its payments) and its
+ * canonical hash is exactly this card's
  * (`editorWorkflowStrategy` single-step; the run's engine workflow carries no Canvas ids, so the card's ids are echoed only once it is proven).
  * Read-only: a status read, as the run's own poll does; nothing is resolved, prepared, signed or sent.
  */
@@ -219,8 +226,9 @@ export async function editorSingleRunRecord(approvalId: unknown, card: unknown):
     const jar = await cookies();
     const status = await workflowRunStatus(await approvalSurface(process.env, name => jar.get(name)?.value), approvalId, await currentWalletPrincipals());
     const run = status.view.workflowRun?.run;
-    // Only a one-step run can be a single card's (checked before the caller's card is read at all).
-    if (!run || run.stepCount !== 1) return { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };
+    // Only a one-step run can be a single card's (checked before the caller's card is read at all) — or, BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001
+    // (FE-BATCH-02), a lone Batch Payment card's run of its payments (`singleCardRunRecord` proves its exact step count and hash).
+    if (!run || run.stepCount !== 1 && !loneBatchPayment(card)) return { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };
     await prepareCatalogs(card);
     const record = singleCardRunRecord(run, card);
     return record ? { ok: true, value: record } : { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };

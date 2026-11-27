@@ -36,6 +36,8 @@ describe('BUILD-BASE-001 Base network identity', () => {
     // BUILD-CROSSCHAIN-UNIVERSAL-001: plus the universal router's row (owner wallet, Review, no evidence ceiling).
     expect(rows.map(row => `${row.actionType}/${row.adapterId}`).sort()).toEqual(['asset.bridge/flofi.router', 'asset.bridge/flofi.router.universal', 'asset.liquidity.concentrated/uniswap.v3',
       'asset.swap.exact-input/uniswap.v3', 'asset.swap.exact-input/weth9.wrap', 'asset.transfer/evm.native-transfer', 'asset.transfer/evm.token-transfer', 'borrow/aave-v3', 'repay/aave-v3',
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: + Batch Payment (atomic owner-wallet batch of transfer legs; no evidence ceiling).
+      'asset.transfer.batch/evm.batch-payment',
       'supply/aave-v3', 'withdraw/aave-v3'].sort());
     expect(rows.every(row => row.evidenceMaturity === null && row.requirements.includes('INJECTED_WALLET') && row.authorizationModes.join() === 'A')).toBe(true);
     // The historical Base fork and observation rows are unchanged.

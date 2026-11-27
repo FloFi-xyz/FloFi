@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLocalCommand, type Command } from '../../domain/commands';
 import { editorReducer, initialEditor } from '../../domain/editor';
-import { composeWorkflow, dappReviewContext, semanticWorkflowHash } from '../../engine/strategy-engine';
+import { composeWorkflow, operationSteps, dappReviewContext, semanticWorkflowHash } from '../../engine/strategy-engine';
 import { STRATEGY_EXAMPLES } from '../../engine/strategy-examples';
 import { composeWorkflowOrRefuse } from '../../platform/index.ts';
 import { canonicalStrategy, intendedWalletOf, sameCommand, strategyOfCommand } from './strategy.ts';
@@ -16,6 +16,13 @@ import { canonicalStrategy, intendedWalletOf, sameCommand, strategyOfCommand } f
 const OWNER = '0x0000000000000000000000000000000000000001';
 /** The DApp chat sentence of every capability example (the engine's own parity table). */
 const SENTENCES: Readonly<Record<string, string>> = {
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment, in the chat's (and Telegram's) exact grammar. Its payees are the examples' own
+  // (`strategy-examples.ts` EXAMPLE_PAYEES): the former 0x…02 / 0x…03 are precompile addresses a Batch Payment now refuses as payees (nobody holds
+  // their keys), so the parity sentences name the same ordinary addresses the examples do.
+  'batch-payment-robinhood': 'pay 1 USDG to 0x1234567890abcdef1234567890abcdef12345678 and 2 USDG to 0xabcdef0123456789abcdef0123456789abcdef01 on Robinhood Chain',
+  'batch-payment-base': 'pay 25 USDC to 0x1234567890abcdef1234567890abcdef12345678 and 50 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Base',
+  'batch-payment-arbitrum': 'pay 5 USDC to 0x1234567890abcdef1234567890abcdef12345678, 10 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Arbitrum One',
+  'batch-payment-ethereum': 'batch pay 5 USDC to 0x1234567890abcdef1234567890abcdef12345678 and 10 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Ethereum',
   'bridge-base-sepolia-arbitrum-sepolia': 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps',
   'bridge-base-arbitrum-one': 'bridge 5 USDC from Base to Arbitrum via auto slippage 100 bps',
   'swap-base': 'swap 2 USDC to WETH on Base slippage 50 bps',
@@ -114,8 +121,11 @@ describe('BUILD-CHANNELS-001 canonical strategy parity', () => {
       if (!mcp.ok) throw new Error(mcp.code);
       expect(result.workflowHash).toBe(platform.workflowHash);
       expect(result.workflowHash).toBe(mcp.workflowHash);
-      expect(result.workflowHash).toBe(semanticWorkflowHash(dappWorkflow(command)));
-      expect(JSON.stringify(platform.steps[0]!.workflow)).toBe(JSON.stringify(dappWorkflow(command)));
+      // A Batch Payment is one operation executed as its legs: the DApp's card is its semantic composition (the batch node and its own hash).
+      const operation = operationSteps(platform)[0]!;
+      if (example.strategy.action === 'batch_payment') expect(platform.batches![0]!.composition.workflowHash).toBe(semanticWorkflowHash(dappWorkflow(command)));
+      else expect(result.workflowHash).toBe(semanticWorkflowHash(dappWorkflow(command)));
+      expect(JSON.stringify(operation.workflow)).toBe(JSON.stringify(dappWorkflow(command)));
       expect(result.spec).toEqual(platform.strategy);
       expect(sameCommand(result.command, command)).toBe(true);
     });
@@ -124,7 +134,7 @@ describe('BUILD-CHANNELS-001 canonical strategy parity', () => {
   it('maps every authoring command type and refuses anything else', () => {
     const types = new Set(Object.values(SENTENCES).map(s => chat(s).type));
     // BUILD-RH-002: Robinhood Chain catalog swaps and positions (ADD_CRYPTO_ACTION) and transfers (ADD_RH_TRANSFER).
-    expect([...types].sort()).toEqual(['ADD_BORROW', 'ADD_CRYPTO_ACTION', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_REPAY', 'ADD_RH_TRANSFER', 'ADD_ROUTER_BRIDGE', 'ADD_SOLANA_LIQUIDITY',
+    expect([...types].sort()).toEqual(['ADD_BATCH_PAYMENT', 'ADD_BORROW', 'ADD_CRYPTO_ACTION', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_REPAY', 'ADD_RH_TRANSFER', 'ADD_ROUTER_BRIDGE', 'ADD_SOLANA_LIQUIDITY',
       'ADD_SOLANA_SWAP', 'ADD_SUPPLY', 'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_UNISWAP_LIQUIDITY', 'ADD_UNIVERSAL_BRIDGE', 'ADD_WITHDRAW', 'AUTHOR_LENDING']);
     expect(strategyOfCommand({ type: 'ADD', kind: 'read', source: 'CHAT', baseRevision: 0 } as Command)).toBeNull();
     expect(canonicalStrategy({ type: 'REMOVE', nodeId: 'node-002', source: 'CHAT', baseRevision: 0 } as Command)).toEqual({ ok: false, code: 'CHANNEL_COMMAND_NOT_AUTHORING' });

@@ -9,6 +9,13 @@ import type { StrategySpec } from './strategy-spec';
 const EXAMPLE_ACCOUNT = '0x0000000000000000000000000000000000000001';
 /** BUILD-SOLANA-TRANSFER-UX-001: a valid Ed25519 wallet key (sha256("flofi-example-recipient") seed) used only to compose; never simulated. */
 const EXAMPLE_SOLANA_RECIPIENT = 'CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH';
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: two distinct illustrative recipients used only to compose a Batch Payment; never simulated or paid. Ordinary
+ * lower-case addresses outside the precompile range (0x…01..0x…ff, which a Batch Payment refuses as a payee: nobody holds their keys).
+ */
+const EXAMPLE_PAYEES = ['0x1234567890abcdef1234567890abcdef12345678', '0xabcdef0123456789abcdef0123456789abcdef01'] as const;
+const batch = (network: 'robinhood' | 'base' | 'arbitrum-one' | 'ethereum', asset: string, amounts: readonly [string, string]): StrategySpec =>
+  ({ action: 'batch_payment', network, asset, recipients: EXAMPLE_PAYEES.map((recipient, i) => ({ recipient, amount: amounts[i]! })) });
 export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strategy: StrategySpec }[] = Object.freeze([
   { id: 'bridge-base-sepolia-arbitrum-sepolia', strategy: { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5', routing: 'auto' } },
   { id: 'bridge-base-arbitrum-one', strategy: { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5', routing: 'auto' } },
@@ -45,12 +52,14 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'swap-robinhood', strategy: { action: 'swap', network: 'robinhood', inputAsset: 'USDG', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
   { id: 'add-liquidity-robinhood', strategy: { action: 'add_liquidity', network: 'robinhood', maxAmounts: { USDG: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 100 } },
   { id: 'transfer-robinhood', strategy: { action: 'transfer', network: 'robinhood', asset: 'USDG', amount: '1' } },
+  { id: 'batch-payment-robinhood', strategy: batch('robinhood', 'USDG', ['1', '2']) },
   // BUILD-BASE-001: Base mainnet (real funds) as a catalog network. Examples use the code-pinned ETH/USDC/WETH so they compose without the token
   // list; any token-list symbol (e.g. `outputAsset: 'cbBTC'`) is named the same way once the validated list is loaded. `swap-base` above is
   // the USDC ⇄ WETH reference swap (BUILD-002 declaration).
   { id: 'bridge-arbitrum-base', strategy: { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5', routing: 'auto' } },
   { id: 'add-liquidity-base', strategy: { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
   { id: 'transfer-base', strategy: { action: 'transfer', network: 'base', asset: 'USDC', amount: '1' } },
+  { id: 'batch-payment-base', strategy: batch('base', 'USDC', ['25', '50']) },
   ...(['supply', 'borrow', 'repay'] as const).map(action =>
     ({ id: `${action}-base`, strategy: { action, network: 'base', asset: 'USDC', amount: '1', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec })),
   { id: 'withdraw-base', strategy: { action: 'withdraw', network: 'base', asset: 'USDC', amount: '1' } },
@@ -59,12 +68,14 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'withdraw-arbitrum', strategy: { action: 'withdraw', network: 'arbitrum-one', asset: 'USDC', amount: '1' } },
   { id: 'swap-arbitrum', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
   { id: 'transfer-arbitrum', strategy: { action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5' } },
+  { id: 'batch-payment-arbitrum', strategy: batch('arbitrum-one', 'USDC', ['5', '10']) },
   { id: 'add-liquidity-arbitrum', strategy: { action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
   ...(['supply', 'borrow', 'repay'] as const).map(action =>
     ({ id: `${action}-ethereum`, strategy: { action, network: 'ethereum', asset: 'USDC', amount: '1', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec })),
   { id: 'withdraw-ethereum', strategy: { action: 'withdraw', network: 'ethereum', asset: 'USDC', amount: '1' } },
   { id: 'swap-ethereum', strategy: { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
   { id: 'transfer-ethereum', strategy: { action: 'transfer', network: 'ethereum', asset: 'USDC', amount: '5' } },
+  { id: 'batch-payment-ethereum', strategy: batch('ethereum', 'USDC', ['5', '10']) },
   { id: 'add-liquidity-ethereum', strategy: { action: 'add_liquidity', network: 'ethereum', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
   { id: 'bridge-ethereum-base', strategy: { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'base', asset: 'USDC', amount: '5', routing: 'auto' } },
   { id: 'bridge-base-ethereum', strategy: { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'ethereum', asset: 'USDC', amount: '5', routing: 'auto' } },

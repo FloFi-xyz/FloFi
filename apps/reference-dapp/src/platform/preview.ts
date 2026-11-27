@@ -15,7 +15,7 @@ import { previewPlan, projectJupiterMarketQuote, projectSimulation } from '../mc
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import type { Composition } from '../engine/strategy-engine';
 import { PlatformRefusal, refuse } from './refusal.ts';
-import { composeSingleStep, composeWorkflowOrRefuse } from './strategy.ts';
+import { batchPaymentViews, composeSingleStep, composeWorkflowOrRefuse } from './strategy.ts';
 import type { NetworkScope } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
 import { operationWalletAddress, resolveOperationWallet } from '../domain/wallet-inventory.ts';
@@ -131,10 +131,12 @@ async function previewSubject(plan: PreviewPlan, request: PreviewRequest, option
 /**
  * Refusals: the composition's own code (with issues), `SIMULATE_ONE_STEP_AT_A_TIME`, the preview plan's code (e.g.
  * `SIMULATION_LOCAL_FORK_ONLY`), `SIMULATION_SUBJECT_INVALID`, `SIMULATION_BUSY`, `SIMULATION_RATE_LIMITED` (the caller's budget),
- * or the flow's own classified code.
+ * or the flow's own classified code. A workflow with a Batch Payment is `SIMULATION_REQUIRES_OWNER_BROWSER` (review DEV-BP-4, as MCP reports it): the batch
+ * is simulated only as the one atomic batch of the owner's own wallet at FloFi's signing surface, never one payment at a time.
  */
 export async function simulatePreview(runtime: EngineRuntime, request: PreviewRequest, options: PreviewOptions = {}): Promise<SimulationPreview> {
-  const c = composeSingleStep(request.strategy, request.workflowHash, 'SIMULATE_ONE_STEP_AT_A_TIME', options.scope ?? networkScope()), plan = previewPlan(c.strategy);
+  const c = composeSingleStep(request.strategy, request.workflowHash, 'SIMULATE_ONE_STEP_AT_A_TIME', options.scope ?? networkScope(), 'SIMULATION_REQUIRES_OWNER_BROWSER');
+  const plan = previewPlan(c.strategy);
   if ('code' in plan) return refuse(plan.code);
   const binding = await previewSubject(plan, request, options, false);
   return previewBoundStep(runtime, c, plan, binding, request, options);
@@ -212,8 +214,13 @@ export async function simulateWorkflowPreview(runtime: EngineRuntime, request: P
         simulationSubject: binding.address, subjectSource: binding.source, view: null });
     }
   }
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-2, MCP-6): a Batch Payment's legs are never previewed one payment at a time (each is
+  // NOT_COMPLETED, SIMULATION_REQUIRES_OWNER_BROWSER); additively, the result names the batch and how it is simulated: as ONE atomic batch with the owner's
+  // own wallet at FloFi's signing surface, every payment and its fees together. `executionSimulation` keeps its published value for every workflow.
+  const batchPayments = batchPaymentViews(workflow);
   return { workflowHash: workflow.workflowHash, fundsClass: workflow.fundsClass, stepCount: workflow.steps.length, steps,
     status: steps.every(step => step.state === 'SIMULATED') ? 'STEP_PREVIEWS_AVAILABLE' as const : 'INCOMPLETE' as const,
     executionSimulation: 'FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION' as const,
+    ...batchPayments.length ? { batchPayments, batchSimulation: 'ONE_ATOMIC_BATCH_WITH_THE_OWNER_WALLET_AT_SIGNING' as const } : {},
     authorizable: false as const, persisted: false as const };
 }

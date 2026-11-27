@@ -31,6 +31,13 @@ function runtime(sequences = false): McpRuntime {
 describe('BUILD-MCP-002 step-list contract', () => {
   it('a one-step workflow is exactly its version 1 strategy: same canonical form, same hash', () => {
     for (const { id, strategy } of STRATEGY_EXAMPLES) {
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is one strategy step that is itself a workflow (its legs): v1 and its one-step
+      // v2 form are the same workflow, with the same canonical strategy and hash.
+      if (strategy.action === 'batch_payment') {
+        const v1 = workflow(strategy), v2 = workflow({ version: 2, steps: [strategy] });
+        expect([v2.strategy, v2.workflowHash, v2.steps.length], id).toEqual([v1.strategy, v1.workflowHash, strategy.recipients.length]);
+        continue;
+      }
       const v1 = composeStrategy(strategy), v2 = workflow({ version: 2, steps: [strategy] });
       if (!v1.ok) throw new Error(id);
       expect([v2.strategy, v2.workflowHash, v2.steps.length], id).toEqual([v1.strategy, v1.workflowHash, 1]);

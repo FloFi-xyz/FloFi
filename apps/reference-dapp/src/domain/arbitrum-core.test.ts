@@ -105,8 +105,8 @@ describe('BUILD-ARB-001 shared first-class recognition through shared runtime re
   it('keeps runtime capability truth generated, including Phase 5 lending', () => {
     registerNetworkCatalog(catalog());
     expect(discoverNetworkCapabilities(chain)).toHaveLength(10);
-    expect(supportedNetworks('ENGINEERING').find(n => n.id === 'arbitrum-one')).toMatchObject({ class: 'MAINNET', funds: 'REAL_FUNDS', actions: ['bridge', 'supply', 'borrow', 'repay', 'withdraw', 'swap', 'transfer', 'add_liquidity'] });
-    expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => ['bridge', 'swap', 'transfer', 'add_liquidity', 'supply', 'borrow', 'repay', 'withdraw'].includes(c.action))).toBe(true);
+    expect(supportedNetworks('ENGINEERING').find(n => n.id === 'arbitrum-one')).toMatchObject({ class: 'MAINNET', funds: 'REAL_FUNDS', actions: ['bridge', 'supply', 'borrow', 'repay', 'withdraw', 'swap', 'transfer', 'batch_payment', 'add_liquidity'] });
+    expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => ['bridge', 'swap', 'transfer', 'batch_payment', 'add_liquidity', 'supply', 'borrow', 'repay', 'withdraw'].includes(c.action))).toBe(true);
     expect(bridgeOffers().some(r => r.source.chain === chain && r.destination.key === 'base')).toBe(true);
     expect(bridgeOffers().some(r => r.destination.chain === chain && r.source.key === 'base')).toBe(true);
     expect(catalogCapabilityNetworks().map(n => n.key)).toEqual(['base', 'arbitrum-one', 'ethereum', 'robinhood']);

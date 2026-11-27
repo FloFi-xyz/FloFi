@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyCommand, FIXTURE, OTHER_ADDRESS } from './copilot-test-fixtures';
 import { act, CopilotSession, intent, TEST_WALLET } from './copilot-session.test-harness';
 import { looksSecret } from './copilot-conversation';
 import { workflowSteps } from './workflow-steps';
+import { registerFixtureCatalogs } from './intelligence/intelligence.test-harness';
+import { resetNetworkCatalogs } from './asset-catalogs';
+import { setActiveNetworkScope } from './network-scope';
 
 const supply5 = act.lending('SUPPLY', { asset: 'USDC', amount: '5' });
 
@@ -166,5 +169,142 @@ describe('model sentences in another language than the interface', () => {
   it('a model sentence already in the interface language is kept', () => {
     const s = new CopilotSession(); s.interfaceLanguage = 'EN';
     expect(s.say('stake my eth on lido', intent.unsupported('Staking is not supported by FloFi yet.', 'EN'))?.text).toContain('Staking is not supported by FloFi yet.');
+  });
+});
+
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: several sends become ONE Batch Payment only when every send is a payment the person paired in their
+ * own words (chat review H2); sends Batch Payment does not pay stay separate transfers, exactly as before (M1); and more sends than a sequence may hold
+ * are answered exactly as before unless they are one Batch Payment (M3).
+ */
+describe('Batch Payment from the chat', () => {
+  const A = '0x2222222222222222222222222222222222222222', B = '0x3333333333333333333333333333333333333333', C = '0x4444444444444444444444444444444444444444';
+  const D = '0x5555555555555555555555555555555555555555', E = '0x6666666666666666666666666666666666666666';
+  const send = (network: string, asset: string, amount: string, recipient: string) => act.transfer({ network, asset, amount, recipient });
+  const base = (amount: string, recipient: string) => send('BASE', 'USDC', amount, recipient);
+  beforeAll(() => { registerFixtureCatalogs(); setActiveNetworkScope('PUBLIC_MAINNET'); });
+  afterAll(() => { resetNetworkCatalogs(); setActiveNetworkScope(null); });
+  it('the canonical request is ONE Batch Payment, every recipient and amount in the person\'s order', () => {
+    const session = new CopilotSession([]);
+    const reply = session.say(`Send 25 USDC to ${A}, 50 USDC to ${B} and 75 USDC to ${C} on Base`, intent.composition([base('25', A), base('50', B), base('75', C)]))!;
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_BATCH_PAYMENT', input: { network: 'Base', asset: 'USDC',
+      payments: [{ recipient: A, amount: '25' }, { recipient: B, amount: '50' }, { recipient: C, amount: '75' }] } } });
+    expect(reply.text).toContain(`1. 25 USDC → ${A} 2. 50 USDC → ${B} 3. 75 USDC → ${C} It runs only as one atomic authorization of your wallet`);
+    // Portuguese pairs its payments with "para".
+    const pt = new CopilotSession([]);
+    expect(pt.say(`Envie 25 USDC para ${A} e 50 USDC para ${B} na Base`, intent.composition([base('25', A), base('50', B)], 'PT'))).toMatchObject({ kind: 'PROPOSAL',
+      command: { type: 'ADD_BATCH_PAYMENT', input: { payments: [{ recipient: A, amount: '25' }, { recipient: B, amount: '50' }] } } });
+  });
+  it('chat review H2: swapped amounts, a duplicated amount or a dropped recipient never become the batch: FloFi lists both readings and asks', () => {
+    const text = `Send 1 USDC to ${A} and 1000 USDC to ${B} on Base`;
+    for (const sends of [[base('1000', A), base('1', B)], [base('1000', A), base('1000', B)], [base('1', A), base('1000', A)]]) {
+      const session = new CopilotSession([]);
+      const reply = session.say(text, intent.composition(sends))!;
+      expect(reply.kind, JSON.stringify(sends)).toBe('CLARIFICATION');
+      expect(reply.command).toBeUndefined(); expect(session.pending).toBeNull();
+      expect(reply.text).toContain(`Your message pairs: 1. 1 USDC → ${A}; 2. 1000 USDC → ${B}.`);
+      expect(reply.text).toContain(`The interpretation read: 1. ${sends[0]!.amount} USDC → ${sends[0]!.recipient}; 2. ${sends[1]!.amount} USDC → ${sends[1]!.recipient}.`);
+    }
+    // Final security review: an address written outside every "<amount> <asset> to <address>" clause is never left out silently.
+    for (const stray of [`pay 25 USDC to ${A}, ${B} and 50 USDC to ${C} on Base`, `Send 25 USDC to ${A} and 50 USDC to ${B} ${C} on Base`]) {
+      const session = new CopilotSession([]);
+      const reply = session.say(stray, intent.composition([base('25', A), base('50', stray.includes(`${B} and`) ? C : B)]))!;
+      expect(reply.kind, stray).toBe('CLARIFICATION'); expect(reply.command).toBeUndefined(); expect(session.pending).toBeNull();
+    }
+    // A dropped recipient: three payments written, two (or one) read.
+    const three = `Send 25 USDC to ${A}, 50 USDC to ${B} and 75 USDC to ${C} on Base`;
+    for (const model of [intent.composition([base('25', A), base('50', B)]), intent.composition([base('25', A), base('75', C)]), intent.action(base('25', A))]) {
+      const session = new CopilotSession([]);
+      const reply = session.say(three, model)!;
+      expect(reply.kind).toBe('CLARIFICATION'); expect(session.pending).toBeNull();
+      expect(reply.text).toContain(`Your message pairs: 1. 25 USDC → ${A}; 2. 50 USDC → ${B}; 3. 75 USDC → ${C}.`);
+    }
+    // In Portuguese too; and the person's next message, pairing each payment, is the one FloFi reads.
+    const session = new CopilotSession([]);
+    const asked = session.say(`Envie 1 USDC para ${A} e 1000 USDC para ${B} na Base`, intent.composition([base('1000', A), base('1', B)], 'PT'))!;
+    expect(asked.kind).toBe('CLARIFICATION');
+    expect(asked.text).toContain(`Sua mensagem associa: 1. 1 USDC → ${A}; 2. 1000 USDC → ${B}. A interpretação leu: 1. 1000 USDC → ${A}; 2. 1 USDC → ${B}.`);
+    expect(session.say(`1 USDC para ${A} e 1000 USDC para ${B}`, intent.composition([base('1', A), base('1000', B)], 'PT'))).toMatchObject({ kind: 'PROPOSAL',
+      command: { type: 'ADD_BATCH_PAYMENT', input: { payments: [{ recipient: A, amount: '1' }, { recipient: B, amount: '1000' }] } } });
+  });
+  it('chat review C1: an amount with several readings ("1.000") is asked about, never paired with the reading the interpretation chose', () => {
+    const text = `Send 1000 USDC to ${A} and 1.000 USDC to ${B} on Base`;
+    const session = new CopilotSession([]);
+    const asked = session.say(text, intent.composition([base('1000', A), base('1000', B)]))!;
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['1', '1000'] });
+    expect(asked.command).toBeUndefined(); expect(session.pending).toBeNull();
+    expect(asked.text).toBe(`Your message pairs: 1. 1000 USDC → ${A}; 2. 1.000 USDC → ${B}. “1.000” can be read as 1 and 1000. Which amount do you mean? Reply with the number.`);
+    // The person's answer settles that payment: the batch pays exactly what they said, in their order.
+    expect(session.say('1', intent.composition([base('1000', A), base('1', B)]))).toMatchObject({ kind: 'PROPOSAL',
+      command: { type: 'ADD_BATCH_PAYMENT', input: { payments: [{ recipient: A, amount: '1000' }, { recipient: B, amount: '1' }] } } });
+    // An interpretation that ignores the answer is not the batch: FloFi lists both and asks.
+    const ignored = new CopilotSession([]);
+    ignored.say(text, intent.composition([base('1000', A), base('1000', B)]));
+    const unpaired = ignored.say('1', intent.composition([base('1000', A), base('1000', B)]))!;
+    expect(unpaired.kind).toBe('CLARIFICATION'); expect(ignored.pending).toBeNull();
+    expect(unpaired.text).toContain(`The interpretation read: 1. 1000 USDC → ${A}; 2. 1000 USDC → ${B}.`);
+    // A reply that is not one of the readings settles nothing: the same question again.
+    const other = new CopilotSession([]);
+    other.say(text, intent.composition([base('1000', A), base('1000', B)]));
+    expect(other.say('5', intent.composition([base('1000', A), base('1000', B)]))).toMatchObject({ kind: 'CLARIFICATION', options: ['1', '1000'] });
+    expect(other.pending).toBeNull();
+    // In Portuguese too.
+    const pt = new CopilotSession([]);
+    const perguntou = pt.say(`Envie 1000 USDC para ${A} e 1.000 USDC para ${B} na Base`, intent.composition([base('1000', A), base('1000', B)], 'PT'))!;
+    expect(perguntou).toMatchObject({ kind: 'CLARIFICATION', options: ['1', '1000'] });
+    expect(perguntou.text).toBe(`Sua mensagem associa: 1. 1000 USDC → ${A}; 2. 1.000 USDC → ${B}. “1.000” pode ser lido como 1 e 1000. Qual valor você quer? Responda com o número.`);
+    expect(pt.pending).toBeNull();
+  });
+  it('a recipient the person wrote twice is refused, never merged (after the pairing check)', () => {
+    const session = new CopilotSession([]);
+    const reply = session.say(`Send 1 USDC to ${A} and 2 USDC to ${A} on Base`, intent.composition([base('1', A), base('2', A)]))!;
+    expect(reply.kind).toBe('UNSUPPORTED'); expect(session.pending).toBeNull();
+    expect(reply.text).toBe(`${A} appears more than once. A Batch Payment pays each recipient once and FloFi never merges or drops a payment: say the one amount for that recipient.`);
+  });
+  it('chat review H2: a message without one explicit clause per payment is asked about, never paired by value', () => {
+    const session = new CopilotSession([]);
+    const reply = session.say(`Pay ${A} 1 USDC and ${B} 1000 USDC on Base`, intent.composition([base('1', A), base('1000', B)]))!;
+    expect(reply.kind).toBe('CLARIFICATION');
+    expect(reply.text).toContain('Your message pairs: no payment written as “<amount> <token> to <address>”.');
+  });
+  it('chat review M1: Stock Token sends stay two separate transfers, exactly as before Batch Payment', () => {
+    const session = new CopilotSession([]);
+    const reply = session.say(`Send 1 TSLA to ${A} and 2 TSLA to ${B} on Robinhood Chain`,
+      intent.composition([send('ROBINHOOD', 'TSLA', '1', A), send('ROBINHOOD', 'TSLA', '2', B)]))!;
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE', steps: [{ type: 'ADD_RH_TRANSFER', input: { asset: 'TSLA', amount: '1', recipient: A } },
+      { type: 'ADD_RH_TRANSFER', input: { asset: 'TSLA', amount: '2', recipient: B } }] } });
+    expect(reply.text).not.toMatch(/BATCH_PAYMENT|INVALID_COMMAND/);
+  });
+  it('chat review M3: more sends than a sequence holds are one Batch Payment, or the interpretation\'s "too many steps" answer exactly as before', () => {
+    const tooMany = 'The AI returned more steps than one proposal may contain, so it was discarded. Nothing changed. You can also type an exact command.';
+    const five = new CopilotSession([]);
+    expect(five.say(`Send 1 USDC to ${A}, 2 USDC to ${B}, 3 USDC to ${C}, 4 USDC to ${D} and 5 USDC to ${E} on Base`,
+      intent.composition([base('1', A), base('2', B), base('3', C), base('4', D), base('5', E)]))).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_BATCH_PAYMENT' } });
+    // Five Stock Token sends cannot be one Batch Payment, and five separate transfers are more steps than a proposal may hold.
+    const stocks = new CopilotSession([]);
+    const tsla = [A, B, C, D, E].map((recipient, index) => send('ROBINHOOD', 'TSLA', String(index + 1), recipient));
+    expect(stocks.say(`Send 1 TSLA to ${A}, 2 TSLA to ${B}, 3 TSLA to ${C}, 4 TSLA to ${D} and 5 TSLA to ${E} on Robinhood Chain`, intent.composition(tsla)))
+      .toEqual({ kind: 'FAILED', text: tooMany, notes: [], options: [], code: 'COPILOT_TOO_MANY_ACTIONS' });
+    expect(stocks.pending).toBeNull();
+    // Four sends on two networks are not one Batch Payment shape at all: discarded at once, as before.
+    const mixed = new CopilotSession([]);
+    expect(mixed.say(`Send 1 USDC to ${A} and 2 USDC to ${B} on Base, then 3 USDC to ${C} and 4 USDC to ${D} on Arbitrum One`,
+      intent.composition([base('1', A), base('2', B), send('ARBITRUM', 'USDC', '3', C), send('ARBITRUM', 'USDC', '4', D)])))
+      .toEqual({ kind: 'FAILED', text: tooMany, notes: [], options: [], code: 'COPILOT_TOO_MANY_ACTIONS' });
+  });
+  it('chat review C5: sends that name no network are a Batch Payment shape only in the public product; elsewhere "too many steps" exactly as before', () => {
+    const tooMany = 'The AI returned more steps than one proposal may contain, so it was discarded. Nothing changed. You can also type an exact command.';
+    const text = `Send 1 USDC to ${A}, 2 USDC to ${B}, 3 USDC to ${C}, 4 USDC to ${D} and 5 USDC to ${E}`;
+    const unnamed = () => intent.composition([A, B, C, D, E].map((recipient, index) => send(null as never, 'USDC', String(index + 1), recipient)));
+    // Public product: the sequence authoring asks for the network (nothing is discarded).
+    const mainnet = new CopilotSession([]);
+    const asked = mainnet.say(text, unnamed())!;
+    expect(asked.code).not.toBe('COPILOT_TOO_MANY_ACTIONS'); expect(asked.kind).toBe('CLARIFICATION'); expect(mainnet.pending).toBeNull();
+    setActiveNetworkScope('ENGINEERING');
+    try {
+      const engineering = new CopilotSession([]);
+      expect(engineering.say(text, unnamed())).toEqual({ kind: 'FAILED', text: tooMany, notes: [], options: [], code: 'COPILOT_TOO_MANY_ACTIONS' });
+      expect(engineering.pending).toBeNull();
+    } finally { setActiveNetworkScope('PUBLIC_MAINNET'); }
   });
 });

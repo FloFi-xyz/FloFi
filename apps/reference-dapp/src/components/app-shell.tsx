@@ -64,7 +64,10 @@ import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace, executeActionPlacement } from './execute-workspace';
 import { EditorRunAction } from './editor-run-action';
-import { EditorWorkflowRunPanel, EditorWorkflowRunPrimaryAction, EditorWorkflowSimulateAction, useEditorWorkflowRun } from './editor-workflow-run';
+import { EditorWorkflowRunPanel, EditorWorkflowRunPrimaryAction, EditorWorkflowSimulateAction, batchPaymentRunBlocked, useEditorWorkflowRun } from './editor-workflow-run';
+// Client-safe (FE-BATCH-02/03): never `editor/workflow-strategy`, which reaches server-only modules (`app-shell-client-safety.test.tsx`).
+import { canvasRunOrder, loneCardRunVerdict } from '../domain/batch-run-record';
+import { batchPaymentDraftTotal } from '../domain/batch-payment-authoring';
 import { EditorChromeProvider, EditorStageHead } from './editor-chrome';
 import { GroupedSimulationPanel } from './simulation-context-panel';
 import { OperationSummary, WorkflowTechnicalFacts } from './operation-summary';
@@ -104,7 +107,7 @@ import { activeNetworkScope, workflowAllowed } from '../domain/network-scope';
 import { usePublicTestnet } from '../state/public-testnet-store';
 import { PublicTestnetPanel } from './public-testnet-panel';
 
-import { UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { isBatchPaymentNode, UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from '../state/lending-store';
 import {LendingPanel} from './lending-panel';
 import { useSupply } from '../state/supply-store';
@@ -222,7 +225,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   useEffect(() => { setInteractive(true); }, []);
   const { state, context, reviewError, authoringIncomplete, restoreWorkflow, restorationEpoch, propose, createNewWorkflow, newWorkflow, runtimeWorkflow, sequence, sequenceRestore, completeSequenceStep,
     recordExecutedAction, executedActions, amountInputs, actionSetup, commitCanvasAmount, cancelCanvasAmount, removeActionSetup, pending: proposal, canvasRestoring,
-    review: workflowReview, cryptoSelections = {}, bridgeNetworkInputs = {}, recipientInputs = {}, stagedPosition = null, clearStagedPosition, stageLiquidityPosition } = useWorkflow();
+    review: workflowReview, cryptoSelections = {}, bridgeNetworkInputs = {}, recipientInputs = {}, stagedPosition = null, clearStagedPosition, stageLiquidityPosition,
+    batchSetup = null, batchDrafts = {}, applyBatchDraft, discardBatchDraft } = useWorkflow();
   // BUILD-FLOFI-CHAT-E2E-FIX-002: every runtime path below serves `runtimeWorkflow` — the canonical workflow, or the current step of a sequence of
   // independent owner-wallet actions (Swap → Bridge). The Canvas, chat and saving keep the canonical `state.workflow`.
   // UX-004: a run recovered (or just finished) into the visit's initial draft is not re-attached to a workflow the owner created afresh.
@@ -667,8 +671,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Review shows the card cannot run as one confirmation, the card keeps its own flow exactly as before.
   const singleCardRun = !sequence && soleAction.length === 1 && SINGLE_CARD_RUNTIMES.includes(runtime.kind ?? '') && soleAction[0]!.chainId.startsWith('eip155:')
     && !compositionWorkflow(state.workflow);
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): ONE Batch Payment card has no per-card flow: it always runs as the shared workflow run of its
+  // payments (one atomic group), exactly like a multi-step sequence.
+  const batchPaymentRun = !sequence && soleAction.length === 1 && isBatchPaymentNode(soleAction[0]!);
   const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account, single: singleCardRun,
-    enabled: (Boolean(sequence) || singleCardRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+    enabled: (Boolean(sequence) || singleCardRun || batchPaymentRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
   // A single card goes back to its own flow when its Review is not one grouped interaction, refuses the batch, or could not answer at all
   // (`singleCardFallsBack`); a started run of it always stays here.
   const singleCardReview = singleCardRun ? workflowRunHere.review : null;
@@ -677,7 +684,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // it, or the path cannot run here); a safety refusal keeps it primary, so the workflow is fixed before anything runs (a started run always is).
   // A run of this workflow (started here, or followed after a reload) always dominates: whatever the deployment's availability answers (an expired
   // account session, before the answer arrives), the workflow is never offered again through its per-step or own-card path.
-  const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (FE-BATCH-04): ONE Batch Payment card has no per-card flow, so in the Editor it always shows this path's
+  // action: closed with the reason while the path cannot simulate it here (no account session, runs off, the answer pending, a Review that cannot run
+  // it as one atomic approval), and never another runtime's Simulate (it is never split into separate transfers).
+  const batchPaymentHere = batchPaymentRun && !approvalSlot && !autoPrepare && surface === 'workspace';
+  const batchRunBlocked = batchPaymentHere ? batchPaymentRunBlocked(workflowRunHere) : null;
+  const groupedPrimary = workflowRunHere.started || batchPaymentHere || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
   // Incident 9 (`domain/flofi-wallet-bridge.ts`): a bridge on its own flow is never handed to FloFi Wallet, which cannot sign it yet.
   const floFiBridgeIssue = floFiWalletBridgeIssue({ kind: simulationSource.kind, signerIsFloFiWallet: Boolean(signer && usesFloFiWallet(signer)),
     groupedRun: groupedPrimary, executing: Boolean(currentExecution(executionProgress)), ecosystem: networkTarget?.ecosystem,
@@ -705,8 +717,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // A single card's run that completed and reconciled is kept as this workflow's executed first step (as its own flow's run is), so an action added
   // afterwards is its own next step, never a repeat of this one. Its delivery is what the run reconciled for the card's output asset.
   const groupedSingleRun = singleCardRun || !sequence && soleAction.length === 1 ? workflowRunHere.run : null;
-  const groupedSingleDone = Boolean(groupedSingleRun && groupedSingleRun.state === 'COMPLETED' && groupedSingleRun.stepCount === 1
-    && groupedSingleRun.steps[0]?.state === 'RECONCILED' && workflowRunHere.authorizedFor?.workflowId === state.workflow.workflowId
+  // FE-BATCH-02: a lone Batch Payment's run is its N payments: completed with exactly this card's N steps, every one reconciled (`loneCardRunVerdict`), and
+  // (below, as for a single card) authorized for exactly this workflow and revision, it is this workflow's executed step exactly like a single card's, so a
+  // card added afterwards never includes the same payments again. The server proves the run's hash when it restores the record (`editorSingleRunRecord`).
+  const loneBatchDone = useMemo(() => Boolean(batchPaymentRun && groupedSingleRun && groupedSingleRun.state === 'COMPLETED'
+    && loneCardRunVerdict(groupedSingleRun, state.workflow) === 'RECONCILED'), [batchPaymentRun, groupedSingleRun, state.workflow]);
+  const groupedSingleDone = Boolean(groupedSingleRun && groupedSingleRun.state === 'COMPLETED' && (batchPaymentRun ? loneBatchDone
+    : groupedSingleRun.stepCount === 1 && groupedSingleRun.steps[0]?.state === 'RECONCILED') && workflowRunHere.authorizedFor?.workflowId === state.workflow.workflowId
     && workflowRunHere.authorizedFor.revision === state.workflow.revision);
   const groupedSingleDelivered = groupedSingleDone ? deliveredByRun(groupedSingleRun!.steps[0]?.outcome?.received ?? [], stepAssets(soleAction[0]!).output) : null;
   useEffect(() => {
@@ -875,7 +892,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {/* A single card shows no workflow-run note (final frontend-ux review): its one action is followed like the card's own flow. */}
     {workflowRunHere.started && !singleCardRun && <p className="canvas-sequence-note" role="note">{tr('This workflow runs as one workflow run: follow it in Execute.')}</p>}
     <button type="button" className="primary" data-lifecycle-action="workflow-run"
-      disabled={(!groupedRunOpen && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
+      disabled={(!groupedRunOpen && Boolean(authoringIncomplete || batchRunBlocked)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
       onClick={() => {
         if (groupedRunOpen) { setTab('Execute'); return; }
         setTab('Simulate');
@@ -883,6 +900,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       }}>
       {tr(groupedRunOpen ? 'Open workflow progress' : workflowRunHere.phase === 'reviewing' ? 'Simulating workflow…' : 'Simulate workflow')}</button>
     {!groupedRunOpen && authoringIncomplete && <p role="status">{tr('Configure the action amount on the Canvas first')}</p>}
+    {!groupedRunOpen && !authoringIncomplete && batchRunBlocked && <p role="status">{tr(batchRunBlocked)}</p>}
   </div>;
   const simulateActionFor = (note: string | null, options: { readonly stay?: boolean; readonly inExecute?: boolean; readonly labelFor?: (action: CanvasAction) => string } = {}) => groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
       <p role="status">{sequenceIssue}</p>
@@ -925,9 +943,18 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       const selection = cryptoSelections[id], symbol = selection?.from ?? card?.amount.split(' ').slice(1).join(' ');
       return { nodeId: id, step: index + 1, action: card?.action ?? 'Action', value: `${value}${symbol ? ` ${symbol}` : ''}`,
         draft: actionReviewValue(null, id, value, bridgeNetworkInputs[id], selection, recipientInputs[id]) };
+    }),
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (FE-BATCH-01): a Batch Payment draft (the card being set up, or an edit of a saved step) is an unapplied
+    // edit like any other: named by the chat, applied or discarded only on the owner's answer, through the card's own Apply / Cancel.
+    ...Object.entries(batchDrafts).map(([id, draft]) => {
+      const index = orderedActions.findIndex(node => node.nodeId === id), total = batchPaymentDraftTotal(draft);
+      return { nodeId: id, step: index >= 0 ? index + 1 : orderedActions.length + 1, action: 'Batch Payment',
+        value: total !== null ? `${total} ${draft.asset}` : `${draft.payments.map(p => p.amount.trim() || '—').join(' + ')}${draft.asset ? ` ${draft.asset}` : ''}`,
+        draft: JSON.stringify(draft) };
     })];
   const resolveEdit = (nodeId: string, apply: boolean): string | null => {
     if (!pendingEdits.some(edit => edit.nodeId === nodeId)) return 'This edit is no longer pending.';
+    if (batchDrafts[nodeId]) { if (apply) return applyBatchDraft ? applyBatchDraft(nodeId) : 'This edit is no longer pending.'; discardBatchDraft?.(nodeId); return null; }
     if (apply) return commitCanvasAmount(nodeId);
     if (actionSetup?.id === nodeId) removeActionSetup(); else cancelCanvasAmount(nodeId);
     return null;
@@ -956,7 +983,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // made for it; a record of another workflow or revision colors nothing (`domain/canvas-execution.ts`). Kept by value, so the cards re-render only
   // when a step's state changes.
   const ownWorkflowRun = workflowRunHere.started ? workflowRunHere.run : null;
-  const canvasExecutionShown = shellCanvasExecution(state.workflow, { run: ownWorkflowRun, order: ownWorkflowRun ? sequenceOrder(state.workflow) : [],
+  // FE-BATCH-03: each card in run order with the run steps it is (a Batch Payment card: its payments), from the composition the run executes.
+  const runOrder = useMemo(() => ownWorkflowRun ? canvasRunOrder(state.workflow) : [], [Boolean(ownWorkflowRun), state.workflow]);
+  const canvasExecutionShown = shellCanvasExecution(state.workflow, { run: ownWorkflowRun, order: runOrder,
     authorizedFor: workflowRunHere.authorizedFor, unrecorded: workflowRunHere.unrecorded, sequence, live: liveExecution });
   // Execution UX regression fixes: a single card's reconciled whole-workflow run shows the amount the run proved delivered on the card, in place of
   // the estimate from before execution (the per-card flows carry it from their own evidence, `lifecycleNodeExecution`).
@@ -999,12 +1028,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       destinationLoading,
       destinationWalletAction: destinationActions ? { ...destinationActions.connect, retry: destinationActions.retry } : null,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
-      simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+      simulationBlocked: walletIssue ?? batchRunBlocked ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Execute workflow.'
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? conversationDestinationIssue
           ?? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       // P0 hotfix (locale contract): the same reason in either language, so the chat's message follows the interface language.
-      simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+      simulationBlockedIn: shown => walletIssueIn(shown) ?? (batchRunBlocked ? translate(shown, batchRunBlocked) : null) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Execute workflow.')
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? destinationIssueIn(shown, 'approve-embedded')
           ?? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
@@ -1023,10 +1052,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // attention) for the Canvas header, the FloFi panel and the footer. "Show step" selects the card and brings it into view; nothing is edited.
   // Computed for the Editor's Canvas only (no other surface shows it); a refused edit or a failed review is always surfaced as such.
   const overviewShown = tab === 'Build' && surface === 'workspace';
+  // FE-BATCH-01: the Batch Payment card being set up is the card being set up; a saved step's Batch Payment draft is that card's draft (`hasCanvasDraft`
+  // reads any per-card draft record, so the drafts join the card selections it already reads).
   const overview = useMemo(() => overviewShown ? editorOverview(state.workflow, context, workflowReview,
-    { setup: actionSetup ? { id: actionSetup.id, action: setupSummary(actionSetup, context).action } : null, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs },
+    { setup: actionSetup ? { id: actionSetup.id, action: setupSummary(actionSetup, context).action } : batchSetup ? { id: batchSetup.id, action: 'Batch Payment' } : null, amountInputs,
+      cryptoSelections: Object.keys(batchDrafts).length ? { ...cryptoSelections, ...batchDrafts } : cryptoSelections, bridgeNetworkInputs, recipientInputs },
     Boolean(state.error || reviewError)) : EMPTY_EDITOR_OVERVIEW,
-  [overviewShown, state.workflow, state.error, reviewError, context, workflowReview, actionSetup, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs]);
+  [overviewShown, state.workflow, state.error, reviewError, context, workflowReview, actionSetup, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs, batchSetup, batchDrafts]);
   // UX-02: the Simulate and Execute headers name the same networks as the Create header (the configured steps' own networks; presentation only).
   const headNetworks = useMemo(() => overviewShown ? overview.networks : editorOverview(state.workflow, context, null).networks, [overviewShown, overview, state.workflow, context]);
   const showStep = (nodeId: string) => { selectAction(nodeId); focusCanvasStep(nodeId); };
@@ -1165,8 +1197,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const reviewFooterAction = groupedPrimary ? <EditorWorkflowRunPrimaryAction state={workflowRunHere}/> : simulateActionFor(null, { stay: true, inExecute: true, labelFor: executeLabel });
   // B2: Simulate's ONE primary action is inside its panel until the simulation is valid; then the footer's "Review operation" opens Execute (no
   // authorization from Simulate). A wallet, network or restore control the lifecycle needs first stays in the panel too.
-  const simulatePanelAction = groupedPrimary ? <EditorWorkflowSimulateAction state={workflowRunHere} disabled={Boolean(authoringIncomplete || networkQuestion && !actionable)}
-      reason={authoringIncomplete ? 'Configure the action amount on the Canvas first' : null}/>
+  const simulatePanelAction = groupedPrimary ? <EditorWorkflowSimulateAction state={workflowRunHere} disabled={Boolean(authoringIncomplete || networkQuestion && !actionable || batchRunBlocked)}
+      reason={authoringIncomplete ? 'Configure the action amount on the Canvas first' : batchRunBlocked}/>
     : sequenceRestore || walletIssue || networkAction || canvasAction.kind === 'simulate' || simulationSource.state.busy ? simulateActionFor(null) : null;
   const simulationReady = groupedPrimary ? Boolean(runReviewed && workflowRunHere.grouped && !groupedReviewExpired && workflowRunHere.phase !== 'reviewing')
     : !simulationSource.state.busy && (canvasAction.kind === 'approve' || canvasAction.kind === 'execute');

@@ -7,8 +7,9 @@
  *                      node id), phased by `lifecycleStepPhase` exactly as Execute, the FloFi Assistant and the Dashboard phase them
  *   step by step       the Editor's sequence (`workflow-store.tsx`): a completed step is the reconciled record of that node; the current step's
  *                      phase is its runtime's lifecycle (its step projection keeps the node id)
- *   whole workflow     the shared workflow run (`RunView`): step i is the i-th node of `sequenceOrder` — the order `editor/workflow-strategy.ts`
- *                      builds the run's strategy from — accepted only for the exact workflow id and revision that was authorized, with the
+ *   whole workflow     the shared workflow run (`RunView`): its steps are the nodes of `sequenceOrder` — the order `editor/workflow-strategy.ts`
+ *                      builds the run's strategy from — each node as many steps as it executes as (a Batch Payment card: its payments,
+ *                      `canvasRunOrder` in `batch-run-record.ts`), accepted only for the exact workflow id and revision that was authorized, with the
  *                      same number of steps
  *
  * Nothing is inferred from time, animation, card order or position: a node whose state is not proven by its record stays neutral. Green is
@@ -210,19 +211,56 @@ export function runNodeExecution(run: RunLike, step: RunLike['steps'][number], u
   }
 }
 
+/** One card of the whole-workflow run, in run order: `legs` is how many run steps it is (a Batch Payment card is its payments; absent: one step). */
+export type RunOrderCard = { readonly nodeId: string; readonly legs?: number };
+/** In-flight visuals by how much they need the owner now: their authorization or wallet first, then a request being handed over, then the network. */
+const IN_FLIGHT_FIRST: readonly CanvasExecutionVisual[] = ['authorize', 'wallet', 'active', 'pending'];
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (FE-BATCH-03): one card whose run is several steps (a Batch Payment's payments, executed as one atomic
+ * group), from its legs' own states: failed if any leg failed, needing attention if any does, done only once every leg reconciled, waiting while every
+ * leg waits; otherwise in flight, as the leg that most needs the owner says (their authorization or wallet first). Never green before all reconciled.
+ */
+export function aggregateNodeExecution(legs: readonly CanvasNodeExecution[]): CanvasNodeExecution {
+  if (!legs.length) return WAITING;
+  if (legs.length === 1) return legs[0]!;
+  const failed = legs.find(leg => leg.visual === 'failed');
+  if (failed) return failed;
+  const attention = legs.find(leg => leg.visual === 'attention' || leg.phase === 'OUTCOME_UNKNOWN');
+  if (attention) return attention;
+  if (legs.every(leg => leg.visual === 'done')) return { visual: 'done', phase: legs[0]!.phase, text: legs[0]!.text };
+  if (legs.every(leg => leg.visual === 'waiting')) return legs[0]!;
+  for (const visual of IN_FLIGHT_FIRST) { const leg = legs.find(item => item.visual === visual); if (leg) return leg; }
+  // Some legs reconciled while others wait (never a result): in progress, never "Completed".
+  return { visual: 'pending', phase: 'SUBMITTED', text: text('In progress') };
+}
+
 /**
  * The whole-workflow run of THIS Canvas workflow. `authorizedFor`: the workflow id and revision the run was authorized for (the Editor's stored
- * record); a run of any other identity or revision, or whose step count differs from this workflow's sequence, colors nothing.
+ * record); a run of any other identity or revision, or whose step count differs from this workflow's (each card's `legs`), colors nothing.
+ * FE-BATCH-03: run steps map to cards through their leg ranges, so a Batch Payment card shows its payments' aggregate (`aggregateNodeExecution`).
  */
-export function runCanvasExecution(workflow: CanvasWorkflow, order: readonly { readonly nodeId: string }[], run: RunLike | null | undefined,
+export function runCanvasExecution(workflow: CanvasWorkflow, order: readonly RunOrderCard[], run: RunLike | null | undefined,
   authorizedFor: { readonly workflowId: string; readonly revision: number } | null | undefined, unrecorded = false): CanvasExecution | null {
   if (!run || !authorizedFor || authorizedFor.workflowId !== workflow.workflowId || authorizedFor.revision !== workflow.revision) return null;
-  if (run.stepCount !== order.length || run.steps.length !== order.length) return null;
+  const ranges: { readonly nodeId: string; readonly from: number; readonly to: number }[] = [];
+  let next = 0;
+  for (const card of order) {
+    const legs = card.legs ?? 1;
+    if (!Number.isSafeInteger(legs) || legs < 1) return null;
+    ranges.push({ nodeId: card.nodeId, from: next, to: next + legs - 1 });
+    next += legs;
+  }
+  if (run.stepCount !== next || run.steps.length !== next) return null;
+  const byIndex = new Map(run.steps.map(step => [step.index, step] as const));
   const nodes: Record<string, CanvasNodeExecution> = {};
-  for (const step of run.steps) {
-    const node = order[step.index];
-    if (!node) return null;
-    nodes[node.nodeId] = runNodeExecution(run, step, unrecorded);
+  for (const range of ranges) {
+    const legs: CanvasNodeExecution[] = [];
+    for (let index = range.from; index <= range.to; index++) {
+      const step = byIndex.get(index);
+      if (!step) return null;
+      legs.push(runNodeExecution(run, step, unrecorded));
+    }
+    nodes[range.nodeId] = aggregateNodeExecution(legs);
   }
   const started = Object.values(nodes).some(node => node.visual !== 'waiting') || run.state !== 'PENDING';
   // A terminal run is FloFi's final word on it: nothing more is observed, so it is a result even where a step's outcome stays unknown (an
@@ -237,7 +275,7 @@ export function runCanvasExecution(workflow: CanvasWorkflow, order: readonly { r
  * only follows); `order` is `sequenceOrder(workflow)`. A record that is not this workflow's colors nothing, so a stale run falls through to the
  * records after it and never wins over them.
  */
-export function shellCanvasExecution(workflow: CanvasWorkflow, records: { readonly run: RunLike | null; readonly order: readonly { readonly nodeId: string }[];
+export function shellCanvasExecution(workflow: CanvasWorkflow, records: { readonly run: RunLike | null; readonly order: readonly RunOrderCard[];
   readonly authorizedFor: { readonly workflowId: string; readonly revision: number } | null | undefined; readonly unrecorded: boolean;
   readonly sequence: SequenceLike | null | undefined; readonly live: ExecutionLifecycle | null | undefined }): CanvasExecution | null {
   return (records.run ? runCanvasExecution(workflow, records.order, records.run, records.authorizedFor, records.unrecorded) : null)

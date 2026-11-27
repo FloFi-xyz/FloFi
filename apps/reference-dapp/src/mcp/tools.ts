@@ -25,6 +25,7 @@
  * canonical workflow, its hash or any authority, and a picture that cannot be drawn is simply omitted.
  */
 import { Type, type Static, type TSchema } from '@sinclair/typebox';
+import { BATCH_PAYMENT_MAX_RECIPIENTS } from '@defi-workflow-engine/workflow-contracts';
 import { McpServer, type CallToolResult, type StandardSchemaWithJSON, type ToolAnnotations } from '@modelcontextprotocol/server';
 import { supportedAssets, supportedNetworks } from '../engine/capability-catalog';
 import { compileSchema, MAX_WORKFLOW_STEPS, NETWORK_IDS, PUBLIC_NETWORK_IDS, PUBLIC_STRATEGY_ACTIONS, PublicStrategyInputSchema, STRATEGY_ACTIONS, strategyInputIssues,
@@ -37,7 +38,7 @@ import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
 import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet.ts';
 import { arbitrumAuthoringCatalog } from '../server/arbitrum-mainnet.ts';
 import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
-import { approvalForRequester, approvalProgress, approvalStatus, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
+import { approvalForRequester, approvalProgress, approvalStatus, batchPaymentViews, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
   NATIVE_SIGNING_WALLETS, nativeSigningEligible, openApprovalSession, PlatformRefusal, refuse, requestApproval, requesterScope, reviewWorkflow, simulatePreview, stepViews,
   validateStrategy, type ApprovalDeps, type ApprovalRequester, type NativeSigningWallet, type RequesterScope } from '../platform/index.ts';
 import { principalOwners, principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
@@ -50,7 +51,7 @@ import type { CopilotLiquidityAction } from '../domain/copilot-intent';
 import { simulateWorkflowPreview } from '../platform/preview.ts';
 import { LEGACY_PANEL_URI, OLDER_PANEL_URI, PANEL_MIME, PANEL_URI, PREVIOUS_PANEL_URI, panelHtml, panelResourceMeta } from './app/panel.ts';
 import { MCP_HANDOFF_RULES, mcpApprovalLinkScheme } from './approval-profile.ts';
-import { readHandoffPolicy, workflowPlan, type HandoffPolicy } from './execution.ts';
+import { OWNER_PRE_EXECUTION_FINDINGS, readHandoffPolicy, workflowPlan, type HandoffPolicy } from './execution.ts';
 import type { McpScope, OAuthConfig } from './oauth/config.ts';
 import type { McpState } from './oauth/state.ts';
 import { observeRuntime, type McpRuntime } from './runtime.ts';
@@ -66,7 +67,8 @@ import { CONCEPT_IDS, CONCEPT_LEVELS, CONCEPT_PROTOCOLS } from '../domain/intell
 import { matchPlatformTopic, platformAnswer, platformGuide, type PlatformTopic } from '../domain/intelligence/platform-guide';
 import { explainConcept, explainWorkflow } from '../platform/explain.ts';
 import { AUTOMATION_MANAGEMENT, AUTOMATION_RULE_ID, automationStatus, automationTypes, type AutomationReadPort } from './automations.ts';
-import { accountView, historyView, linkedOwners, MAX_ACCOUNT_WALLETS, omittedOwners, portfolioOwners, portfolioView, positionsView, type PortfolioReadPort } from './account.ts';
+import { accountView, balancesUnreadableReason, historyView, linkedOwners, MAX_ACCOUNT_WALLETS, omittedOwners, portfolioOwners, portfolioReadState, portfolioView, positionsView,
+  type PortfolioReadPort } from './account.ts';
 import { approvalState, authoringState, conversationState, executionState, simulationState, userFacingError, validationState } from '../platform/conversation-state.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
@@ -109,6 +111,25 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'get_approval_status (list_approvals finds earlier requests); report only its conversationState — CONFIRMED is the only completed state, and STATUS_UNKNOWN or ' +
   'NEEDS_ATTENTION is never "not run". To change a step before signing, compose again and request a new approval; a changed workflow does not replace the older ' +
   'request, so offer cancel_approval for the older one (only with the person\'s consent). Steps already confirmed are never repeated. When a tool fails, tell the person its userMessage, not the code. ' +
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1, P2)
+  `Never drop, merge, reorder or shorten a step the person asked for: a workflow holds at most ${MAX_WORKFLOW_STEPS} steps, so when they ask for more, tell ` +
+  'them and ask which to remove or how to split it (WORKFLOW_TOO_MANY_STEPS is told to the person, never answered by sending fewer steps). Pass ' +
+  'expectedStepCount with every strategy: the number of steps in the strategy you intend to send, as you described it to the person (a cross-chain ' +
+  'conversion is one bridge step; a Batch Payment is one step however many recipients it pays, never its count of payments, so never a result\'s ' +
+  'stepCount when it holds a Batch Payment; for a plan_strategy result, its stepCount). WORKFLOW_STEP_COUNT_MISMATCH means the strategy that arrived has ' +
+  'another number of steps: compose again with every step, in the person\'s order, and never split a Batch Payment into transfers. `readiness` says ' +
+  'what a result establishes: a valid or reviewed strategy is not authorized and not necessarily executable. ' +
+  'Index spaces: `strategy.bindings` name strategy steps (a Batch Payment is one step); `executionPlan.bindings`, an authorization plan\'s `bindings` and ' +
+  '`workflowRun.steps` name execution legs (a Batch Payment has one leg per payment, all executed in one atomic wallet request): never copy one into the other; ' +
+  '`batchPayments` maps each Batch Payment to its leg range. ' +
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02)
+  'Several payments of one asset on one EVM mainnet (base, arbitrum-one, ethereum, robinhood) are ONE batch_payment step: 2 to 8 recipients, each ' +
+  'with the exact amount the person stated, in their order (the same amount for each only when they asked for equal amounts). Never split it into ' +
+  'transfers, never invent, drop, merge, reorder or shorten a recipient, and ask when a recipient or an amount is missing. More than ' +
+  `${BATCH_PAYMENT_MAX_RECIPIENTS} recipients is refused (BATCH_PAYMENT_TOO_MANY_RECIPIENTS): tell the person and ask which to remove, never send fewer. ` +
+  'Each recipient counts as one step of the 8-step budget: a result\'s stepCount counts these payments (its legs), and `batchPayments` names each ' +
+  'batch as the one step it is. It executes only as one atomic authorization of the owner\'s own wallet (every payment, or none), never step by ' +
+  'step; a wallet or deployment that cannot do that refuses it (BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE). Solana batch payments are not available. ' +
   'When a result carries `display` lines, show those amounts verbatim in the person\'s language; never re-round or convert those amounts yourself.';
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
 export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
@@ -118,9 +139,83 @@ export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every str
  * TypeBox + Ajv (the repo's strict schema stack) behind the Standard Schema interface the SDK consumes. Issues name paths and
  * rules only, never values; a `strategy` is reported against its own action's schema rather than every union branch.
  */
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): a step list longer than MAX_WORKFLOW_STEPS (up to this bound) passes input validation so the tool
+ * itself refuses it with a coded, explained WORKFLOW_TOO_MANY_STEPS (`stepListGuard`), which a host relays to the person; the SDK's plain-text schema
+ * error carried neither a code nor a message, and a model could quietly retry with a shortened list. Nothing beyond MAX_WORKFLOW_STEPS is ever composed.
+ */
+export const MCP_STEP_LIST_REFUSAL_MAX = 64;
+const oversizedStepList = (value: unknown): number | null => {
+  const strategy = value && typeof value === 'object' ? (value as { strategy?: unknown }).strategy : undefined;
+  const steps = strategy && typeof strategy === 'object' && (strategy as { version?: unknown }).version === 2 ? (strategy as { steps?: unknown }).steps : undefined;
+  return Array.isArray(steps) && steps.length > MAX_WORKFLOW_STEPS && steps.length <= MCP_STEP_LIST_REFUSAL_MAX ? steps.length : null;
+};
+/** The steps of a tool's `strategy` argument (a v1 strategy is its own one step), or null when the argument has none. */
+const strategyStepsOf = (args: unknown): readonly unknown[] | null => {
+  const strategy = args && typeof args === 'object' ? (args as { strategy?: unknown }).strategy : undefined;
+  if (!strategy || typeof strategy !== 'object') return null;
+  const steps = (strategy as { version?: unknown; steps?: unknown }).version === 2 ? (strategy as { steps?: unknown }).steps : null;
+  return Array.isArray(steps) ? steps : [strategy];
+};
+/** A Batch Payment step's recipient list (null for any other step). */
+const recipientsOf = (step: unknown): readonly unknown[] | null => step && typeof step === 'object' && (step as { action?: unknown }).action === 'batch_payment'
+  && Array.isArray((step as { recipients?: unknown }).recipients) ? (step as { recipients: unknown[] }).recipients : null;
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-4): like an oversized step list, a Batch Payment with more recipients than FloFi pays (up to
+ * this bound, in a step list FloFi accepts) passes input validation so the tool refuses it with a coded, explained BATCH_PAYMENT_TOO_MANY_RECIPIENTS: the
+ * SDK's plain-text `maxItems` carried no code and no message, and a model could quietly retry without some recipients. Nothing oversized is composed.
+ */
+export const MCP_RECIPIENT_LIST_REFUSAL_MAX = 64;
+const oversizedRecipientList = (value: unknown): { readonly path: string; readonly count: number } | null => {
+  const steps = strategyStepsOf(value);
+  if (!steps || steps.length > MAX_WORKFLOW_STEPS) return null;
+  const list = (value as { strategy: { version?: unknown } }).strategy.version === 2;
+  for (const [index, step] of steps.entries()) {
+    const recipients = recipientsOf(step);
+    if (recipients && recipients.length > BATCH_PAYMENT_MAX_RECIPIENTS && recipients.length <= MCP_RECIPIENT_LIST_REFUSAL_MAX)
+      return { path: list ? `/strategy/steps/${index}/recipients` : '/strategy/recipients', count: recipients.length };
+  }
+  return null;
+};
+/**
+ * The step-list refusals every strategy tool applies before anything else: more steps than FloFi accepts, a Batch Payment with more recipients than it pays,
+ * or a different number of steps than the person asked for (`expectedStepCount`): a list shortened on its way to FloFi — by a host, a model or a client — is
+ * refused, never composed as if it were complete. The count is strictly the number of strategy steps: a Batch Payment is one step however many recipients
+ * it pays. Its payments (legs) are never accepted as the count: a list shortened in transit can have as many payments as the steps the person asked for
+ * (a [swap, 3-recipient batch, swap] cut to the batch alone). A refusal that may come from counting payments (a result's stepCount counts them) says so
+ * (`receivedPayments`, and its `next`), without assuming that is why: steps may be missing.
+ */
+function stepListGuard(args: unknown): void {
+  const oversized = oversizedStepList(args);
+  if (oversized !== null) failWith('WORKFLOW_TOO_MANY_STEPS', { maxSteps: MAX_WORKFLOW_STEPS, receivedSteps: oversized,
+    issues: [{ path: '/strategy/steps', rule: 'maxItems' }],
+    next: 'Tell the person: never drop, merge, reorder or shorten a step they asked for. Ask which steps to remove, or split the request into separate workflows.' });
+  const steps = strategyStepsOf(args);
+  if (steps === null) return;
+  const received = steps.length;
+  if (received > MAX_WORKFLOW_STEPS) failWith('WORKFLOW_TOO_MANY_STEPS', { maxSteps: MAX_WORKFLOW_STEPS, receivedSteps: received,
+    issues: [{ path: '/strategy/steps', rule: 'maxItems' }],
+    next: 'Tell the person: never drop, merge, reorder or shorten a step they asked for. Ask which steps to remove, or split the request into separate workflows.' });
+  const recipients = oversizedRecipientList(args);
+  if (recipients !== null) failWith('BATCH_PAYMENT_TOO_MANY_RECIPIENTS', { maxRecipients: BATCH_PAYMENT_MAX_RECIPIENTS, receivedRecipients: recipients.count,
+    issues: [{ path: recipients.path, rule: 'maxItems' }],
+    next: `Tell the person: a Batch Payment pays at most ${BATCH_PAYMENT_MAX_RECIPIENTS} recipients. Never drop, merge, reorder or shorten a recipient they ` +
+      'asked for. Ask which recipients to remove, or split the payments into separate workflows.' });
+  const expected = (args as { expectedStepCount?: unknown }).expectedStepCount;
+  if (typeof expected !== 'number' || expected === received) return;
+  const batch = steps.some(step => recipientsOf(step) !== null), legs = steps.reduce<number>((n, step) => n + (recipientsOf(step)?.length ?? 1), 0);
+  failWith('WORKFLOW_STEP_COUNT_MISMATCH', { expectedStepCount: expected, receivedSteps: received, ...batch ? { receivedPayments: legs } : {}, maxSteps: MAX_WORKFLOW_STEPS,
+    next: (batch && expected === legs ? 'expectedStepCount counts each Batch Payment as ONE step, never its payments (a result\'s stepCount counts payments): ' +
+      `this strategy arrived with ${received} ${received === 1 ? 'step' : 'steps'} and ${legs} payments. If you counted payments, count each Batch Payment ` +
+      'as one step; if not, steps are missing. ' : '') +
+      'Compose again with every step the person asked for, in their order, and pass that step count; never drop a step. A Batch Payment is one step ' +
+      'however many recipients it pays; never split it into transfers. If they asked for more than the maximum, tell them and ask which to remove.' });
+}
 function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWORK_IDS,
-  networksFor: (action: unknown) => readonly string[] = () => networks): StandardSchemaWithJSON<T, T> {
+  networksFor: (action: unknown) => readonly string[] = () => networks, onRefused?: () => void): StandardSchemaWithJSON<T, T> {
   const compiled = compileSchema<T>(schema), json = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
+  // Only a tool whose arguments carry a strategy takes the oversized-list path; every other tool keeps its whole schema.
+  const takesStrategy = Object.hasOwn((json.properties ?? {}) as Record<string, unknown>, 'strategy');
   // P0 catalog reliability: a network field naming a network of this scope by its registry name, alias or CAIP-2 id is read as that network's id.
   // A refused network names the ids its own action accepts (a bridge field: bridge networks; a filter without an action: every network), once.
   const NETWORK_FIELD = /(?:^|\/)(network|sourceNetwork|destinationNetwork|targetNetwork)$/;
@@ -146,6 +241,9 @@ function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWO
     validate: raw => {
       const value = canonicalNetworkFields(raw, networks);
       if (compiled.check(value)) return { value: value as T };
+      // A strategy tool refuses an oversized step or recipient list itself, with its code and message (never composed: `stepListGuard` runs first).
+      if (takesStrategy && (oversizedStepList(value) !== null || oversizedRecipientList(value) !== null)) return { value: value as T };
+      onRefused?.();
       const hinted = new Set<string>();
       return { issues: issuesOf(value).map(i => {
         // A refused network names the accepted ids, so the caller can correct it (values are still never echoed).
@@ -158,6 +256,13 @@ function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWO
 const strict = { additionalProperties: false } as const;
 const pure = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const Hash = Type.String({ pattern: '^0x[0-9a-f]{64}$', description: 'The workflowHash returned by compose_strategy.' });
+/** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): the number of steps the person asked for, checked against the strategy that arrives. */
+const ExpectedStepCount = Type.Optional(Type.Integer({ minimum: 1, maximum: MCP_STEP_LIST_REFUSAL_MAX, description: 'The number of steps in the strategy you ' +
+  'send, as you described it to the person (1 for a single action; a cross-chain conversion is one bridge step; a Batch Payment is one step however many ' +
+  'recipients it pays, never its count of payments, so not a result\'s stepCount, which counts them; never split it into transfers; a plan_strategy ' +
+  'result: its stepCount). ' +
+  'Always pass it: FloFi refuses (WORKFLOW_STEP_COUNT_MISMATCH) a strategy that carries a different number, so a step list shortened on its way is never ' +
+  'accepted as complete.' }));
 const ExecutionId = Type.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', description: 'A FloFi execution (run) id. It is a lookup key, not an access grant.' });
 const Language = Type.Optional(Type.Union([Type.Literal('EN'), Type.Literal('PT')], { description: 'Answer language: EN (default) or PT (Portuguese).' }));
 /** A short phrase in the user's own words (never echoed back): letters, digits, spaces and ordinary punctuation, no control characters. */
@@ -176,10 +281,10 @@ function schemasFor(scope: NetworkScope) {
   none: Type.Object({}, strict),
   assets: Type.Object({ network: Type.Optional(NetworkFilter) }, strict),
   capabilities: Type.Object({ network: Type.Optional(NetworkFilter), action: Type.Optional(Type.Union(actions.map(a => Type.Literal(a)))) }, strict),
-  compose: Type.Object({ strategy: StrategyInput }, strict),
-  bound: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash) }, strict),
-  request: Type.Object({ strategy: StrategyInput, workflowHash: Hash }, strict),
-  simulate: Type.Object({ strategy: StrategyInput, workflowHash: Hash,
+  compose: Type.Object({ strategy: StrategyInput, expectedStepCount: ExpectedStepCount }, strict),
+  bound: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), expectedStepCount: ExpectedStepCount }, strict),
+  request: Type.Object({ strategy: StrategyInput, workflowHash: Hash, expectedStepCount: ExpectedStepCount }, strict),
+  simulate: Type.Object({ strategy: StrategyInput, workflowHash: Hash, expectedStepCount: ExpectedStepCount,
     simulationSubject: Type.Optional(Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
       description: 'The account whose PUBLIC balances and allowances the read-only simulation uses (EVM address or Solana public key). It is not authenticated, ' +
         'not an owner and grants nothing; nothing is stored for it. Omit for wallet-independent flows or to use an eligible linked wallet.' })),
@@ -192,7 +297,7 @@ function schemasFor(scope: NetworkScope) {
     level: Type.Optional(Type.Union(CONCEPT_LEVELS.map(level => Type.Literal(level)), { description: 'STANDARD (default), SIMPLE, EXAMPLE (illustrative numbers only) or ADVANCED.' })),
     protocol: Type.Optional(Type.Union(CONCEPT_PROTOCOLS.map(protocol => Type.Literal(protocol)), { description: 'Explain it as it works on this protocol.' })),
     language: Language }, strict),
-  explain: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), language: Language }, strict),
+  explain: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), expectedStepCount: ExpectedStepCount, language: Language }, strict),
   help: Type.Object({ topic: Type.Optional(Type.Union(MCP_PLATFORM_TOPICS.map(topic => Type.Literal(topic)), { description: 'A FloFi platform topic. Give this, `question`, or neither for the whole guide.' })),
     question: Type.Optional(Phrase(160, 'A "how / where" question about FloFi in the user\'s words.')), language: Language }, strict),
   language: Type.Object({ language: Language }, strict),
@@ -308,6 +413,52 @@ const MCP_CODES: Readonly<Record<string, string>> = Object.freeze({ SIMULATION_B
   HANDOFF_RATE_LIMITED: 'MCP_HANDOFF_RATE_LIMITED', HANDOFF_PENDING_LIMIT: 'MCP_HANDOFF_LIMIT' });
 const mcpCode = (code: string) => Object.hasOwn(MCP_CODES, code) ? MCP_CODES[code]! : code;
 const AUTHORITY = 'NONE: this result authorizes nothing. Only the owner, in the FloFi app, can review the Strategy Manifest and sign with their own wallet.';
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-2): how a step list runs. A workflow that is only its one Batch Payment runs as ONE atomic
+ * authorization (`ATOMIC_BATCH`, a value only such workflows carry). Any other step list keeps `STEP_BY_STEP`, a Batch Payment among its steps included:
+ * its other steps are not part of that atomic authorization, so the whole workflow is never claimed all or nothing; the batch itself says it is atomic
+ * (`batchPayments[].execution: ATOMIC_ONLY`).
+ */
+const executionMode = (w: { readonly steps: readonly unknown[] }, batches: readonly { readonly legs: readonly [number, number] }[]) =>
+  batches.length === 1 && batches[0]!.legs[0] === 0 && batches[0]!.legs[1] === w.steps.length - 1 ? 'ATOMIC_BATCH' as const : 'STEP_BY_STEP' as const;
+const BATCH_EXECUTION_NOTE = 'A Batch Payment runs only as ONE atomic authorization of the owner\'s own wallet (an atomic wallet batch or their own smart-account ' +
+  'operation): every payment settles, or none does. It is never confirmed payment by payment and never split into separate transfers; the owner\'s wallet ' +
+  'pays every fee. Any other step runs in order, each group after the previous one reconciled.';
+/** A workflow with a Batch Payment AND other steps: confirm-each-step is never offered for it (the batch is atomic-only), so its other steps run in
+ *  the owner's user-funded groups, one group after the previous one reconciled. */
+const BATCH_MIXED_NOTE = 'The other steps of this workflow run in user-funded groups: the owner\'s own wallet authorizes each group of same-network steps once and ' +
+  'pays every fee, and each group starts only after the previous one reconciled. Confirming each step separately is not offered for a workflow with a Batch Payment.';
+const BATCH_APPROVAL_NEXT = 'request_user_approval to hand the whole workflow to its owner (it re-checks every step\'s review). The Batch Payment is handed ' +
+  'off only where it can run as one atomic authorization of the owner\'s own wallet (otherwise BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE: tell the ' +
+  'person); its payments are authorized together, every payment or none, and never split into transfers.';
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P2): what a result does and does not establish, one stage at a time (additive: `ok`, `valid`,
+ * `conversationState` and every existing field keep their meaning). A structurally valid strategy is never authorized and not necessarily executable:
+ * only request_user_approval evaluates this deployment's execution and policy gates, only the owner's wallet authorizes, and only reconciliation completes.
+ */
+type Readiness = { readonly authoring: 'VALID' | 'INVALID'; readonly review: 'NOT_REVIEWED' | 'NO_BLOCKERS' | 'OWNER_PRE_EXECUTION_PENDING' | 'BLOCKERS_FOUND';
+  readonly simulation: 'NOT_RUN' | 'PREVIEW_COMPLETED' | 'MOCKED_PREVIEW' | 'PREVIEW_INCOMPLETE' | 'MARKET_QUOTE_ONLY';
+  readonly execution: 'NOT_EVALUATED' | 'GATES_PASSED_AWAITING_OWNER'; readonly ownerAuthorization: 'NONE' | 'PENDING_OWNER_WALLET';
+  readonly submission: 'NOT_SUBMITTED'; readonly reconciliation: 'NONE'; readonly meaning: string };
+function readiness(stage: Partial<Pick<Readiness, 'authoring' | 'review' | 'simulation' | 'execution' | 'ownerAuthorization'>>): Readiness {
+  const execution = stage.execution ?? 'NOT_EVALUATED';
+  return { authoring: stage.authoring ?? 'VALID', review: stage.review ?? 'NOT_REVIEWED', simulation: stage.simulation ?? 'NOT_RUN', execution,
+    ownerAuthorization: stage.ownerAuthorization ?? 'NONE', submission: 'NOT_SUBMITTED', reconciliation: 'NONE',
+    meaning: execution === 'NOT_EVALUATED'
+      ? 'This result does not check whether this FloFi deployment and its policy can execute the workflow (request_user_approval does), it authorizes ' +
+        'nothing, and nothing was signed or submitted. OWNER_PRE_EXECUTION_PENDING means only the owner\'s own steps in FloFi remain before signing ' +
+        '(a quote, a simulation): it is not a defect.'
+      : 'Handed to the owner: FloFi\'s gates allowed the request, but nothing is authorized until the owner\'s own wallet signs in FloFi, and nothing is ' +
+        'complete until chain confirmation and reconciliation (get_approval_status).' };
+}
+/**
+ * The review stage from BLOCK findings: the owner's own pre-execution steps (OWNER_PRE_EXECUTION_FINDINGS, which request_user_approval hands to the owner
+ * as `preExecution`) are pending steps, not blockers, so every tool reports the same stage for the same workflow (flofi-security review).
+ */
+const reviewReadiness = (findings: readonly { readonly level: string; readonly source: string; readonly code: string }[]): Readiness['review'] => {
+  const blocks = findings.filter(f => f.level === 'BLOCK');
+  return blocks.some(f => !OWNER_PRE_EXECUTION_FINDINGS.has(`${f.source}:${f.code}`)) ? 'BLOCKERS_FOUND' : blocks.length ? 'OWNER_PRE_EXECUTION_PENDING' : 'NO_BLOCKERS';
+};
 
 const DEFAULT_POLICY = readHandoffPolicy({});
 
@@ -428,13 +579,16 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     // OAuth clients read `securitySchemes` to know which scope to request before calling (ChatGPT reads the `_meta` mirror).
     const security = ctx.oauth ? { securitySchemes: [{ type: 'oauth2', scopes: [scope] }] } : {};
     const meta = Object.keys(security).length || Object.keys(toolMeta).length ? { _meta: { ...security, ...toolMeta } } : {};
-    server.registerTool(name, { title, description, inputSchema: standard<Static<S>>(schema, scopeNetworks, networksFor), annotations: { title, ...annotations }, ...meta }, async (args: Static<S>): Promise<CallToolResult> => {
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P1): an argument the SDK refuses before the tool runs is recorded as such (it was logged as OK).
+    const refusedInput = () => ctx.onTool?.({ tool: name, outcome: 'MCP_INPUT_INVALID', durationMs: 0 });
+    server.registerTool(name, { title, description, inputSchema: standard<Static<S>>(schema, scopeNetworks, networksFor, refusedInput), annotations: { title, ...annotations }, ...meta }, async (args: Static<S>): Promise<CallToolResult> => {
       const started = now();
       let result: CallToolResult, outcome = 'OK';
       try {
         // The whole tool — catalog preparation, runtime reads, presentation — waits at most until the request's tool deadline.
         result = await withinBudget(ctx.budget, toolCap(ctx.budget, TIMEOUT_CLASS[name] === 'EFFECT_UNKNOWN' ? MCP_TOOL_TIMEOUTS.approvalWrite : MCP_TOOL_TIMEOUTS.default), async () => {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
+        stepListGuard(args);
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
         const named = args && typeof args === 'object' ? 'strategy' in args ? (args as { strategy: unknown }).strategy : 'goal' in args
@@ -552,6 +706,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   register('compose_strategy', 'Compose strategy', 'Deterministically turn structured intent into FloFi\'s canonical Semantic Workflow IR (revision 1), using the same ' +
     'authoring rules as the FloFi app. Unsupported or ambiguous input is refused with a code, never guessed. Keep `strategy` (normalized) and `workflowHash` for ' +
     'validate/simulate/review. The model must not invent addresses: use only values the user gave. A multi-step workflow is `{version: 2, steps: [...]}` ' +
+    '(several payments of one asset on one EVM mainnet are ONE `batch_payment` step, reported with its legs in `workflowSteps` and in `batchPayments`) ' +
     '(one step is the same as version 1); each step keeps its own IR and hash. A bridge whose destination asset differs (`outputAsset`, e.g. ETH → USDC) ' +
     'is one Universal Bridge step, never a swap plus a bridge.', Schemas.compose, pure, args => {
     const w = composeWorkflowOrRefuse(args.strategy, undefined, scope), visual = workflowVisualModel(w);
@@ -559,20 +714,22 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       const c = w.steps[0]!, plan = workflowPlan(w);
       return { ok: true, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision, fundsClass: c.fundsClass, workflow: c.workflow,
         steps: stepViews(c), explanation: c.explanation, summary: c.summary, notes: c.notes, authority: AUTHORITY, stepCount: 1,
-        executionPlan: { kind: plan.kind, reason: plan.reason }, visual, conversationState: conversationState('DRAFT_CREATED'),
+        executionPlan: { kind: plan.kind, reason: plan.reason }, visual, conversationState: conversationState('DRAFT_CREATED'), readiness: readiness({}),
         nextSteps: canRequestApproval(ctx) ? ['request_user_approval with this strategy and workflowHash to hand it to its owner in FloFi (it re-checks the review; nothing executes from MCP)',
           'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
           : ['review_strategy with this strategy and workflowHash', 'simulate_strategy for a read-only preview (optional)'] };
     }
-    const plan = workflowPlan(w);
-    return { ok: true, strategy: w.strategy, workflowHash: w.workflowHash, fundsClass: w.fundsClass, stepCount: w.steps.length,
-      executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP', bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })) },
+    const plan = workflowPlan(w), batches = batchPaymentViews(w);
+    return { ok: true, strategy: w.strategy, workflowHash: w.workflowHash, fundsClass: w.fundsClass, stepCount: w.steps.length, ...batches.length ? { batchPayments: batches } : {},
+      executionPlan: { kind: plan.kind, reason: plan.reason, mode: executionMode(w, batches), bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })) },
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
         fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),
-      notes: w.notes, authority: AUTHORITY, visual, conversationState: conversationState('DRAFT_CREATED'),
-      nextSteps: canRequestApproval(ctx) ? ['request_user_approval to hand the whole workflow to its owner (it re-checks every step\'s review): it reports how many ' +
-        'authorizations each mode needs. Each step runs only after the previous one reconciled.', 'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
-        : ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview'] };
+      notes: w.notes, authority: AUTHORITY, visual, conversationState: conversationState('DRAFT_CREATED'), readiness: readiness({}),
+      nextSteps: canRequestApproval(ctx) ? [batches.length ? BATCH_APPROVAL_NEXT : 'request_user_approval to hand the whole workflow to its owner (it re-checks every ' +
+        'step\'s review): it reports how many authorizations each mode needs. Each step runs only after the previous one reconciled.',
+        'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
+        : ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview',
+          ...batches.length ? [BATCH_EXECUTION_NOTE, ...executionMode(w, batches) === 'STEP_BY_STEP' ? [BATCH_MIXED_NOTE] : []] : []] };
   });
 
   register('plan_strategy', 'Plan strategy from a goal', 'FloFi\'s goal planner (the same one its own chat uses): from an outcome the user described — the asset and ' +
@@ -618,20 +775,25 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   register('validate_strategy', 'Validate strategy', 'Check a strategy against FloFi\'s authoring rules (networks, assets, amounts, limits) and, when given, the workflowHash ' +
     'from compose_strategy (a mismatch means the strategy changed or FloFi\'s rules changed: compose again).', Schemas.bound, pure, args => {
     const validation = validateStrategy(args.strategy, args.workflowHash, scope);
-    return { ok: true, ...validation, conversationState: validationState(validation) };
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review MCP-6): the platform validation names each Batch Payment (`batchPayments`) itself.
+    const w = validation.valid ? composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope) : null;
+    return { ok: true, ...validation, conversationState: validationState(validation),
+      readiness: readiness(w ? { review: reviewReadiness(reviewWorkflow(w).steps.flatMap(step => step.findings)) } : { authoring: 'INVALID' }) };
   });
 
   register('review_strategy', 'Review strategy', 'FloFi\'s deterministic Strategy Review: linter findings, capability blockers for the network\'s public environment and ' +
     'strategy warnings, as BLOCK / WARNING / INFORMATION. It explains; it never approves or authorizes.', Schemas.bound, { ...pure, idempotentHint: false }, async args => {
     const w = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope), reviewed = reviewWorkflow(w);
     if (w.steps.length > 1) {
-      const plan = workflowPlan(w);
+      const plan = workflowPlan(w), batches = batchPaymentViews(w);
       return { ok: true, workflowHash: w.workflowHash, reviewKind: 'DETERMINISTIC_STRATEGY_REVIEW', authority: AUTHORITY, stepCount: w.steps.length,
-        summary: reviewed.summary, executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP' }, workflowSteps: reviewed.steps,
+        ...batches.length ? { batchPayments: batches } : {},
+        summary: reviewed.summary, executionPlan: { kind: plan.kind, reason: plan.reason, mode: executionMode(w, batches) }, workflowSteps: reviewed.steps,
         conversationState: authoringState('REVIEWED', reviewed.summary.block),
-        nextSteps: ['Steps run in order, each after the previous step reconciled. Confirm each step: every step gets a fresh simulation and the owner\'s Review ' +
-          'and wallet confirmation before it runs. User-funded groups (where request_user_approval reports them available): the owner\'s own wallet ' +
-          'authorizes each group of same-network steps once and pays every fee.'] };
+        readiness: readiness({ review: reviewReadiness(reviewed.steps.flatMap(step => step.findings)) }),
+        nextSteps: batches.length ? [BATCH_EXECUTION_NOTE, ...executionMode(w, batches) === 'STEP_BY_STEP' ? [BATCH_MIXED_NOTE] : []] : ['Steps run in order, each after the previous step reconciled. Confirm each step: every step gets a ' +
+          'fresh simulation and the owner\'s Review and wallet confirmation before it runs. User-funded groups (where request_user_approval reports them available): ' +
+          'the owner\'s own wallet authorizes each group of same-network steps once and pays every fee.'] };
     }
     const c = w.steps[0]!, review = reviewed.steps[0]!, flow = strategyFlow(c.strategy);
     const mode = flow ? await ctx.runtime.mode(flow) : null;
@@ -639,6 +801,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       summary: review.summary,
       findings: review.findings, capability: review.capability,
       deployment: { flow, mode: mode ?? 'UNKNOWN_IN_LOCAL_RUNTIME' }, conversationState: authoringState('REVIEWED', review.summary.block),
+      readiness: readiness({ review: reviewReadiness(review.findings) }),
       nextSteps: ['A fresh simulation (simulate_strategy previews it; the FloFi app runs the authoritative one).',
         'The owner reviews the route-bound Strategy Manifest in the FloFi app and signs with their own wallet. MCP cannot do either.'] };
   });
@@ -656,8 +819,13 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
       return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true,
         conversationState: preview.status === 'INCOMPLETE' ? conversationState('DRAFT_CREATED') : simulationState(),
+        readiness: readiness({ simulation: preview.status === 'INCOMPLETE' ? 'PREVIEW_INCOMPLETE' : 'PREVIEW_COMPLETED' }),
         subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
-        notes: ['Each step uses the corresponding provider preview. A market quote leaves wallet simulation incomplete.',
+        notes: 'batchPayments' in preview ? ['A Batch Payment is never previewed one payment at a time: its payments are NOT_COMPLETED here ' +
+          '(SIMULATION_REQUIRES_OWNER_BROWSER). FloFi simulates the whole batch, every payment and its fees together, with the owner\'s own wallet at its ' +
+          'signing surface before the wallet is asked to authorize it.', BATCH_EXECUTION_NOTE,
+          'Any other step uses its provider preview; dependent balances arrive only after earlier steps reconcile, and an awaiting step is explicitly incomplete.']
+          : ['Each step uses the corresponding provider preview. A market quote leaves wallet simulation incomplete.',
           'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',
           'Confirm each step: FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs that step.',
           'User-funded groups: a dependent step in the same group spends the earlier step\'s signed guaranteed minimum; in a later group, the reconciled delivery.'] };
@@ -673,6 +841,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       // BUILD-FLOFI-POST-257-HOTFIX-001 (P1-5): the amounts as FloFi presents them everywhere (six significant digits), for the host to quote verbatim.
       display: previewDisplay(view.kind, view.facts, view.provenance),
       conversationState: marketOnly ? conversationState('DRAFT_CREATED', 'SOLANA_WALLET_REQUIRED') : simulationState(),
+      readiness: readiness({ simulation: marketOnly ? 'MARKET_QUOTE_ONLY' : view.provenance === 'MOCKED' ? 'MOCKED_PREVIEW' : 'PREVIEW_COMPLETED' }),
       notes: [previewDisplay(view.kind, view.facts) ? 'Show `display.EN` or `display.PT` (the person\'s language) verbatim for these amounts: FloFi\'s own rounding ' +
         '(six significant digits, ≈ marks an estimate, a minimum is rounded down). `facts` stay exact integer native units, for machine use.'
         : 'Amounts are integer native units of the named tokens.', 'Quotes and state expire; the FloFi app re-simulates before any Review.',
@@ -763,17 +932,30 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'Uniswap and Orca positions. Only linked wallets can be read (get_account); a network that could not be read is reported UNAVAILABLE, never as zero. ' +
     'Each figure carries its observedAt time; it is not a quote. Nothing is stored, signed or sent.', Schemas.portfolio, { readOnlyHint: true, destructiveHint: false,
     idempotentHint: false, openWorldHint: true }, async args => {
-    if (!principalOwners(ctx.principal).length) return linkRequired();
+    const principal = ctx.principal, state = ctx.state, reads = portfolioReadState(principal);
+    // A deployment that reads no balances says so first: "link a wallet, then ask again" would also send the person on a step that cannot help.
+    const deploymentOff = principal.kind === 'mcp-oauth' && principal.portfolioReads && (reads.status === 'NOT_ENABLED' || reads.status === 'NOT_YET_EFFECTIVE');
+    if (!deploymentOff && !principalOwners(ctx.principal).length) return linkRequired();
     const port = ctx.portfolio;
     if (!port) return failWith('PORTFOLIO_NOT_AVAILABLE');
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (P0): a deployment that reads no balances is said so (an operator setting): "link again" would ask the
+    // person for something that cannot help. Decided before the hourly budget, so asking spends nothing.
+    if (reads.status === 'NOT_ENABLED' || reads.status === 'NOT_YET_EFFECTIVE') return failWith('PORTFOLIO_READS_NOT_ENABLED', { deployment: reads.status,
+      ...reads.since ? { consentSince: reads.since } : {}, relinkHelps: false,
+      next: 'Tell the person that this FloFi deployment does not read balances or positions through this connection yet; linking the wallet again does not ' +
+        'change it. Their runs, evidence and history remain readable (list_executions, get_execution_status). Never report this as a zero balance.' });
+    if (reads.status === 'NOT_AN_ACCOUNT') return failWith('PORTFOLIO_REQUIRES_FLOFI_ACCOUNT', { relinkHelps: false });
+    const readable = portfolioOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
+    // Linked wallets this call does not read because their link predates consent: named, never silently left out and never shown as zero.
+    const relink = principalOwners(principal).filter(o => balancesUnreadableReason(principal, o) === 'LINK_PREDATES_PORTFOLIO_CONSENT')
+      .map(o => ({ namespace: o.namespace, address: o.address }));
+    // Linked before the Connections page disclosed balance reads: the owner re-links the wallet there to allow them (nothing is read meanwhile).
+    if (!readable.length) return failWith('PORTFOLIO_RELINK_REQUIRED', { linkWalletUrl: `${origin}/connections`, consentSince: reads.since, relinkHelps: true,
+      wallets: relink, next: 'The person opens FloFi Connections and links the wallet again (sign-in message only); linking a wallet there also allows ' +
+        'balance and position reads. Then ask again.' });
     // An OAuth account's hourly portfolio budget: each call reads public chains through the readers (and limiters) the Dashboard uses.
-    const principal = ctx.principal, state = ctx.state;
     if (principal.kind === 'mcp-oauth' && state && !await state.oauth.allow(`portfolio:account:${principal.accountId}`, PORTFOLIO_READS_PER_ACCOUNT_HOUR, 3_600, new Date()))
       return failWith('PORTFOLIO_RATE_LIMITED');
-    const readable = portfolioOwners(principal).slice(0, MAX_ACCOUNT_WALLETS);
-    // Linked before the Connections page disclosed balance reads: the owner re-links the wallet there to allow them (nothing is read meanwhile).
-    if (!readable.length) return failWith('PORTFOLIO_RELINK_REQUIRED', { linkWalletUrl: `${origin}/connections`,
-      next: 'The person opens FloFi Connections, links the wallet again (sign-in message only) and agrees to balance and position reads; then ask again.' });
     // One wallet after another, each read only while the request still has time for it: a skipped read is UNKNOWN, and the rest of the answer survives.
     const timeLeft = () => ctx.budget ? ctx.budget.remaining() >= PORTFOLIO_READ_RESERVE_MS : true;
     const code = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
@@ -795,9 +977,13 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       }
       wallets.push({ read: true, ...view, positions });
     }
-    const omitted = principalOwners(principal).length - readable.length;
-    if (omitted) complete = false;
+    // Beyond MAX_ACCOUNT_WALLETS consented wallets (the relink list is reported on its own).
+    const omitted = principalOwners(principal).length - readable.length - relink.length;
+    if (omitted || relink.length) complete = false;
     return { ok: true, readOnly: true, wallets, complete, authority: AUTHORITY, ...omitted ? { walletsOmitted: omitted } : {},
+      ...relink.length ? { relinkRequired: { code: 'PORTFOLIO_RELINK_REQUIRED', wallets: relink, linkWalletUrl: `${origin}/connections`,
+        note: 'These linked wallets were linked before FloFi asked for balance reads, so nothing was read for them (UNKNOWN, not zero). Linking them again on ' +
+          'linkWalletUrl renews consent.' } } : {},
       ...complete ? {} : { note: 'Some balances, positions, networks or wallets could not be read now; they are UNKNOWN (not zero). Try again.' },
       notes: ['Show displayUnits at decimals; rawUnits is the on-chain base amount. Balances are public chain state at observedAt, not a quote.',
         'Before any action FloFi re-reads balances and simulates again in the signing page.'] };
@@ -901,15 +1087,22 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash, { externalOneStep: true });
     if (!result.ok) return failWith(result.code, result.extra ?? {});
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
-    const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()));
+    const held = composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()), visual = workflowVisualModel(held);
+    const batches = batchPaymentViews(held);
     // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: an approval the owner can sign in a wallet app from the panel says which wallets.
     // The approval exists from here on: a failed read only leaves the offer out (never an error for a created approval).
     const created = native ? await owned(result.value.approvalId).catch(() => null) : null;
     const nativeSigning = created && nativeSigningEligible(created) ? { wallets: [...NATIVE_SIGNING_WALLETS] } : null;
-    return { ok: true, ...result.value, visual, ...nativeSigning ? { nativeSigning } : {}, conversationState: approvalState({ status: 'PENDING' }), message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
-      'Confirm each step: confirm each exact transaction in your wallet. User-funded groups: your own wallet authorizes each group of steps on one network and pays every fee. Opening the FloFi signing link is an optional external fallback, not in-chat completion. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
+    return { ok: true, ...result.value, visual, ...batches.length ? { batchPayments: batches } : {}, ...nativeSigning ? { nativeSigning } : {},
+      conversationState: approvalState({ status: 'PENDING' }),
+      readiness: readiness({ review: (result.value as { preExecution?: readonly unknown[] }).preExecution?.length ? 'OWNER_PRE_EXECUTION_PENDING' : 'NO_BLOCKERS',
+        execution: 'GATES_PASSED_AWAITING_OWNER', ownerAuthorization: 'PENDING_OWNER_WALLET' }), message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
+      (batches.length ? 'Batch Payment: your own wallet authorizes every payment together in one atomic request (every payment, or none) and pays every fee; it is never split into separate transfers. '
+        + (executionMode(held, batches) === 'STEP_BY_STEP' ? `${BATCH_MIXED_NOTE} ` : '')
+        : 'Confirm each step: confirm each exact transaction in your wallet. User-funded groups: your own wallet authorizes each group of steps on one network and pays every fee. ') +
+      'Opening the FloFi signing link is an optional external fallback, not in-chat completion. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
   }, ui ? { ui: { resourceUri: ui.resourceUri }, 'openai/outputTemplate': ui.resourceUri, 'openai/toolInvocation/invoking': 'Preparing approval…',
-    'openai/toolInvocation/invoked': 'Approval ready' } : {});
+    'openai/toolInvocation/invoked': 'Approval request answered' } : {});
 
   register('get_approval_status', 'Approval status', 'The status of an approval request this account created: PENDING, CLAIMED, APPLIED, EXPIRED, SUPERSEDED, ' +
     'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A run approval (several steps, or one ' +

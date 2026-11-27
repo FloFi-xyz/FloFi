@@ -415,6 +415,7 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     expect(html).toContain('<span>1 step · 1 step needs attention</span>');
   });
 
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (intentional, authorized change): Batch Payment joins the Swap / Bridge / Send group, after Send.
   // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (intentional change; approved reference "Criar"): the tools' default home is the docked row of named tools
   // under the Editor header, in the same approved groups; the icon rail (with its expand chevron, covered by e2e/canvas-ux.spec.ts) is a ··· choice.
   it('tools: the docked row of named tools by default, in the approved groups, without Privacy', () => {
@@ -422,7 +423,7 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     try {
       setWorkflow();
       const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() }));
-      expect(labels(html)).toEqual(['Add swap', 'Add bridge', 'Add send', '|', 'Add pool', 'Add supply', 'Add withdraw', '|', 'Add borrow', 'Add repay', '|', 'Stocks']);
+      expect(labels(html)).toEqual(['Add swap', 'Add bridge', 'Add send', 'Add batch payment', '|', 'Add pool', 'Add supply', 'Add withdraw', '|', 'Add borrow', 'Add repay', '|', 'Stocks']);
       expect(html).toMatch(/<section class="canvas panel [^"]*"[^>]*data-toolbox="top"/);
       expect(html).toMatch(/<div class="canvas-toolbar-row"><div class="canvas-toolbox" role="toolbar" aria-label="Canvas tools">/);
       expect(html).not.toContain('class="floating-toolbox"');
@@ -434,7 +435,7 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     setActiveNetworkScope('ENGINEERING');
     try {
       setWorkflow();
-      expect(labels(renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() })))).toEqual(['Add swap', 'Add bridge', 'Add send', '|', 'Add pool',
+      expect(labels(renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() })))).toEqual(['Add swap', 'Add bridge', 'Add send', 'Add batch payment', '|', 'Add pool',
         'Add supply', 'Add withdraw', '|', 'Add borrow', 'Add repay', 'Add Supply → Borrow → Swap', '|', 'Stocks']);
     } finally { setActiveNetworkScope(null); }
   });

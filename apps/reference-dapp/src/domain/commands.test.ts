@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { commandIsValid, parseMockCommand } from './commands';
+import { commandIsValid, parseLocalCommand, parseMockCommand } from './commands';
+import { editorReducer, initialEditor } from './editor';
+import { BASE_CONTEXT } from './copilot-test-fixtures';
+import { batchPaymentDetails } from './batch-payment-authoring';
 
 describe('deterministic mock command grammar', () => {
   it('parses only the approved local edit forms with their captured revision', () => {
@@ -21,5 +24,60 @@ describe('deterministic mock command grammar', () => {
     expect(commandIsValid(symbolic)).toBe(false);
     const hostile = new Proxy({ type: 'ADD' }, { getPrototypeOf() { throw new Error('hostile'); } });
     expect(commandIsValid(hostile)).toBe(false);
+  });
+});
+
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: the exact `pay` grammar the product chat, Telegram and WhatsApp share. Every recipient reaches the
+ * Batch Payment authoring exactly as typed, so its EIP-55 rule applies on every surface (chat review H1), and two assets are a closed refusal (M2).
+ */
+describe('the Batch Payment `pay` grammar', () => {
+  const OWNER = '0x1111111111111111111111111111111111111111', LOWER = '0x3333333333333333333333333333333333333333';
+  // The EIP-55 specification's own example, and the same address with one letter's case changed (a mistyped checksum).
+  const CHECKSUMMED = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', MISTYPED = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD';
+  const pay = (text: string) => parseLocalCommand(text, initialEditor().workflow, BASE_CONTEXT, OWNER);
+  const refusal = (text: string) => { try { pay(text); return 'PARSED'; } catch (cause) { return (cause as Error).message; } };
+  it('chat review H1: a mixed-case recipient with a wrong checksum is refused; a valid checksum and an all-lowercase address are accepted', () => {
+    expect(refusal(`pay 0.001 ETH to ${MISTYPED} and 0.002 ETH to ${LOWER} on Base`)).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+    expect(refusal(`batch pay 0.001 ETH to ${LOWER}, 0.002 ETH to ${MISTYPED} on Arbitrum One`)).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+    const command = pay(`pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Base`);
+    expect(command).toEqual({ type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0,
+      input: { network: 'Base', asset: 'ETH', payments: [{ recipient: CHECKSUMMED, amount: '0.001' }, { recipient: LOWER, amount: '0.002' }] } });
+    expect(commandIsValid(command)).toBe(true);
+    // The canonical node holds every recipient lower-cased, in the order written.
+    const node = editorReducer(initialEditor(), command, BASE_CONTEXT).workflow.nodes.at(-1)!;
+    expect(batchPaymentDetails(node as Parameters<typeof batchPaymentDetails>[0])?.payments).toEqual([{ recipient: CHECKSUMMED.toLowerCase(), amount: '0.001' }, { recipient: LOWER, amount: '0.002' }]);
+  });
+  it('chat review M2: two assets are refused as one closed code, never left to an interpretation that could split them', () => {
+    expect(refusal(`pay 1 USDC to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Base`)).toBe('BATCH_PAYMENT_ASSET_MIXED');
+    expect(refusal(`batch pay 1 USDC to ${CHECKSUMMED}, 2 USDC to ${LOWER} and 0.1 ETH to 0x4444444444444444444444444444444444444444 on Base`)).toBe('BATCH_PAYMENT_ASSET_MIXED');
+  });
+  it('keeps every other refusal closed: a repeated recipient, an invalid or too precise amount', () => {
+    expect(refusal(`pay 0.001 ETH to ${LOWER} and 0.002 ETH to ${LOWER.toUpperCase().replace('0X', '0x')} on Base`)).toBe('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
+    expect(refusal(`pay 0 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Base`)).toBe('BATCH_PAYMENT_AMOUNT_INVALID');
+    expect(refusal(`pay 1.1234567 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on Base`)).toBe('BATCH_PAYMENT_AMOUNT_TOO_PRECISE');
+  });
+  it('chat review C3: a pay list on a network Batch Payment does not pay is its own closed refusal, never the generic help', () => {
+    const SOL_A = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', SOL_B = 'DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy';
+    for (const text of [`batch pay 1 SOL to ${SOL_A} and 2 SOL to ${SOL_B} on Solana`, `pay 1 SOL to ${SOL_A}, 2 SOL to ${SOL_B} on Solana Devnet`,
+      `pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Base Sepolia`, `batch pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on ethereum sepolia`,
+      `pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Arbitrum Sepolia`, `pay 0.001 ETH to ${CHECKSUMMED} and 0.002 ETH to ${LOWER} on Robinhood Chain Testnet`,
+      `pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on Optimism`]) expect(refusal(text), text).toBe('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
+  });
+  it('chat review C3: a recipient that is not an explicit 0x address is refused inside a pay list, never resolved', () => {
+    for (const text of [`pay 1 USDC to my wallet and 2 USDC to ${LOWER} on Base`, `batch pay 1 USDC to ${CHECKSUMMED}, 2 USDC to Alice on Arbitrum One`,
+      `pay 0.001 ETH to 0x1234 and 0.002 ETH to ${LOWER} on Ethereum`, `pay 1 USDG to me and 2 USDG to my wallet on Robinhood Chain`])
+      expect(refusal(text), text).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+  });
+  it('chat review C3: anything that is not clearly a pay list keeps its earlier outcome', () => {
+    // One payment, a network FloFi does not know, or payments not written as "<amount> <asset> to <recipient>" are not a pay list: the generic help.
+    for (const text of [`pay 1 USDC to my wallet on Base`, `pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on Polygon`, `pay ${CHECKSUMMED} 1 USDC and ${LOWER} 2 USDC on Base`,
+      // Every recipient holds a full address (with more words around it): not this exact grammar, never called an invalid recipient.
+      `pay 1 USDC to ${CHECKSUMMED} on Base and 2 USDC to ${LOWER} on Base`])
+      expect(refusal(text), text).toMatch(/^Try /);
+    // A single Solana payment stays the Solana transfer grammar ("pay" is one of its verbs).
+    expect(pay('pay 0.5 SOL to 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU on Solana')).toMatchObject({ type: 'ADD_RH_TRANSFER', input: { network: 'Solana', asset: 'SOL' } });
+    // A valid pay list on a Batch Payment network is still ONE Batch Payment.
+    expect(pay(`pay 1 USDC to ${CHECKSUMMED} and 2 USDC to ${LOWER} on Arbitrum One`)).toMatchObject({ type: 'ADD_BATCH_PAYMENT', input: { network: 'Arbitrum One', asset: 'USDC' } });
   });
 });

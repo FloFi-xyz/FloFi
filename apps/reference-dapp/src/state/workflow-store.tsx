@@ -38,6 +38,7 @@ import { SOLANA_DEVNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { routerStatus } from '../app/router-action';
 import { universalStatus } from '../app/universal-router-action';
 import { ROUTER_NETWORK_OPTIONS, type RouterNetwork } from '../domain/router-authoring';
+import { batchDraftWithSavedAsset, checkBatchPaymentDraft, defaultBatchPaymentDraft, normalizeBatchPaymentDraft, savedBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
 import type { WalletEnvironment } from '../wallet/environment';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
@@ -50,6 +51,19 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   /** BUILD-RH-002: the Stocks card, a Robinhood Chain catalog swap (USDG → Stock Token). */
   startStocksSetup(position: { x: number; y: number }): string;
   editCanvasAmount(id: string, amount: string): void; cancelCanvasAmount(id: string): void;
+  /**
+   * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02, FE-BATCH-01/08): the Batch Payment card being set up (no step yet) and every Batch Payment draft
+   * (that new card's, or an edit of a saved step) by card id. Kept here, beside the Canvas's other drafts, so leaving Build never loses one and
+   * `authoringIncomplete` holds Simulate, Execute and saving back while one exists. A saved step's draft holds only while that step still declares
+   * exactly what the draft was started from (an undo, redo, chat edit or deletion of the step drops it); a new or reopened workflow drops them all.
+   * Drafts are authoring text only: Apply runs the editor's own command (ADD_BATCH_PAYMENT / SET_BATCH_PAYMENT), which validates it again.
+   */
+  batchSetup?: BatchSetup | null; batchDrafts?: Readonly<Record<string, BatchPaymentInput>>;
+  startBatchSetup?(position: { x: number; y: number }): string;
+  editBatchDraft?(id: string, change: (draft: BatchPaymentInput) => BatchPaymentInput): void;
+  discardBatchDraft?(id: string): void;
+  /** Applies a card's draft; the plain-words problem when it is refused (nothing changes then), null once applied. */
+  applyBatchDraft?(id: string): string | null;
   /** UX-001: the Send card's "To" draft; Apply commits it to the transfer's canonical `recipient`. */
   recipientInputs: CanvasRecipientInputs; editCanvasRecipient(id: string, recipient: string): void;
   editPoolSetup(id: string, input: UniswapLiquidityInput): void;
@@ -131,6 +145,19 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   /** PR #254 follow-up: the steps of this workflow that this visit executed (a sequence's steps, or a single action's run), still exactly as executed. */
   executedNodeIds: readonly string[];
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
+/** WS02: the Batch Payment card being set up: its id, where it sits, the workflow it belongs to and whether the person edited it yet (FE-BATCH-10). */
+export type BatchSetup = { readonly id: string; readonly position: { readonly x: number; readonly y: number }; readonly workflowId: string; readonly edited: boolean };
+/** One Batch Payment draft and what it edits: `base` is the saved step's declaration (`savedBatchPayment` key), null for the card being set up. */
+type BatchDraftEntry = { readonly draft: BatchPaymentInput; readonly base: string | null };
+/**
+ * Whether a draft still edits what it was started from: the setup card's draft while that card exists; a saved step's draft while the step's node
+ * still declares exactly its base (FE-BATCH-08: never a draft over a step an undo, redo, chat edit or deletion changed).
+ */
+export function batchDraftHolds(id: string, entry: BatchDraftEntry, setup: BatchSetup | null, workflow: { readonly workflowId: string; readonly nodes: readonly { readonly nodeId: string }[] }): boolean {
+  if (entry.base === null) return Boolean(setup && setup.id === id && setup.workflowId === workflow.workflowId);
+  return savedBatchPayment(workflow.nodes.find(node => node.nodeId === id) as SemanticWorkflow['nodes'][number] | undefined)?.key === entry.base;
+}
+const sameBatchInput = (a: BatchPaymentInput, b: BatchPaymentInput) => JSON.stringify(normalizeBatchPaymentDraft(a)) === JSON.stringify(normalizeBatchPaymentDraft(b));
 /** A step's own reconciled run: delivered amount, durable run id, runtime and the wallet that executed it (from its record). */
 export type StepCompletion = { readonly received: string | null; readonly runKey: string | null; readonly kind?: string; readonly owner?: string | null };
 export type SequenceRestore = { readonly status: 'CHECKING' | 'UNVERIFIED'; readonly step: number; retry(): void; discard(): void };
@@ -231,7 +258,24 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     setPendingRestorations(count => count + 1);
     return read.finally(() => setPendingRestorations(count => count - 1));
   }, []);
-  const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs);
+  // WS02 (FE-BATCH-01/08): the Batch Payment card being set up and the Batch Payment drafts (`batchDraftHolds`: only those that still hold count).
+  const [batchSetupRaw, setBatchSetupRaw] = useState<BatchSetup | null>(null);
+  const [batchEntries, setBatchEntries] = useState<Readonly<Record<string, BatchDraftEntry>>>({});
+  const batchSetup = batchSetupRaw && batchSetupRaw.workflowId === state.workflow.workflowId ? batchSetupRaw : null;
+  const batchDrafts = useMemo(() => {
+    const held: Record<string, BatchPaymentInput> = {};
+    for (const [id, entry] of Object.entries(batchEntries)) if (batchDraftHolds(id, entry, batchSetup, state.workflow)) held[id] = entry.draft;
+    return held;
+  }, [batchEntries, batchSetup, state.workflow]);
+  // Storage follows what holds (the staged-position convention): a draft whose step changed, and a setup card of another workflow, are dropped.
+  useEffect(() => {
+    if (batchSetupRaw && !batchSetup) setBatchSetupRaw(null);
+    if (Object.keys(batchEntries).some(id => !(id in batchDrafts))) setBatchEntries(current => Object.fromEntries(Object.entries(current).filter(([id]) => id in batchDrafts)));
+  }, [batchSetupRaw, batchSetup, batchEntries, batchDrafts]);
+  const batchRef = useRef({ setup: batchSetup, entries: batchEntries }); batchRef.current = { setup: batchSetup, entries: batchEntries };
+  const clearBatchDrafts = useCallback(() => { setBatchSetupRaw(null); setBatchEntries({}); }, []);
+  // The same gate every other unapplied Canvas draft uses: Simulate, Execute and saving wait while a Batch Payment draft exists.
+  const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs) || batchSetup !== null || Object.keys(batchDrafts).length > 0;
   const incompleteRef = useRef(authoringIncomplete);
   incompleteRef.current = authoringIncomplete;
   // A public testnet swap's own chain selects the trusted context (Base Sepolia or Ethereum Sepolia); anything else keeps the initial one.
@@ -243,9 +287,10 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const dispatch = useCallback((command: Command) => {
     dispatchHistory({ type: 'COMMAND', command, context });
   }, [context]);
-  const restoreLendingCanvas=useCallback((workflow:SemanticWorkflow)=>dispatchHistory({type:'RESTORE_LENDING_CANVAS',workflow}),[]);
-  const restoreSolanaCompositionCanvas = useCallback((workflow: SemanticWorkflow) => dispatchHistory({ type: 'RESTORE_SOLANA_COMPOSITION_CANVAS', workflow }), []);
-  const restoreLiquidityCanvas = useCallback((workflow: SemanticWorkflow) => dispatchHistory({ type: 'RESTORE_LIQUIDITY_CANVAS', workflow }), []);
+  // A recovered run's own workflow replaces the Canvas: no Batch Payment draft of the Canvas it replaced survives it (WS02, FE-BATCH-01).
+  const restoreLendingCanvas=useCallback((workflow:SemanticWorkflow)=>{ clearBatchDrafts(); dispatchHistory({type:'RESTORE_LENDING_CANVAS',workflow}); },[clearBatchDrafts]);
+  const restoreSolanaCompositionCanvas = useCallback((workflow: SemanticWorkflow) => { clearBatchDrafts(); dispatchHistory({ type: 'RESTORE_SOLANA_COMPOSITION_CANVAS', workflow }); }, [clearBatchDrafts]);
+  const restoreLiquidityCanvas = useCallback((workflow: SemanticWorkflow) => { clearBatchDrafts(); dispatchHistory({ type: 'RESTORE_LIQUIDITY_CANVAS', workflow }); }, [clearBatchDrafts]);
   const addCanvasCommand = useCallback((command: Command, position: { x: number; y: number }) => {
     const preview = editorReducer(editorRef.current, command, context);
     if (!preview.error && testNetworksIntroduced(editorRef.current.workflow, preview.workflow).length) return;
@@ -276,8 +321,14 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (persistenceReady) delete document.documentElement.dataset.editorRestoring;
   }, [persistenceReady]);
   useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow, newWorkflow); }, [persistCanvas, persistenceReady, state.workflow, newWorkflow]);
-  const moveCanvasNodes = useCallback((positions: Readonly<Record<string, { x: number; y: number }>>) =>
-    dispatchHistory({ type: 'MOVE', positions }), []);
+  const moveCanvasNodes = useCallback((positions: Readonly<Record<string, { x: number; y: number }>>) => {
+    // WS02: the Batch Payment card being set up is no step yet: where it is dragged is kept with it (the history moves steps only).
+    setBatchSetupRaw(current => {
+      const moved = current ? positions[current.id] : undefined;
+      return current && moved && Number.isFinite(moved.x) && Number.isFinite(moved.y) ? { ...current, position: { x: moved.x, y: moved.y } } : current;
+    });
+    dispatchHistory({ type: 'MOVE', positions });
+  }, []);
   const duplicateCanvasNodes = useCallback((nodeIds: readonly string[]) =>
     dispatchHistory({ type: 'DUPLICATE', nodeIds, context }), [context]);
   const undo = useCallback(() => dispatchHistory({ type: 'UNDO' }), []);
@@ -519,13 +570,18 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'UNDO' });
     return true;
   }, []);
+  // F4 (WS02 review): ONE card is set up at a time. While the Batch Payment card is being set up, starting another card (or the Batch Payment card while
+  // another card is being set up) starts nothing and answers the card already being set up, which the Canvas selects with its "Configure this
+  // action before adding another." feedback.
   function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment, inheritedAmount?: string, inheritedFrom?: string) {
     if (history.actionSetup) return history.actionSetup.id;
+    if (batchRef.current.setup) return batchRef.current.setup.id;
     dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}), ...(environment ? { environment } : {}), ...(inheritedAmount ? { inheritedAmount, ...(inheritedFrom ? { inheritedFrom } : {}) } : {}) });
     return `action-setup-${history.setupSerial + 1}`;
   }
   function startStocksSetup(position: { x: number; y: number }) {
     if (history.actionSetup) return history.actionSetup.id;
+    if (batchRef.current.setup) return batchRef.current.setup.id;
     dispatchHistory({ type: 'START_STOCKS_SETUP', position });
     return `action-setup-${history.setupSerial + 1}`;
   }
@@ -600,6 +656,55 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       return null;
     } catch (cause) { return canvasAmountMessage(cause, (history.cryptoSelections[id] ?? history.actionSetup?.cryptoSelection)?.network); }
   }
+  // WS02: the Batch Payment card's drafts (see the Store type). A new card is placed where the Canvas put it (or where it was dragged).
+  const batchSerial = useRef(0);
+  const startBatchSetup = useCallback((position: { x: number; y: number }) => {
+    if (batchRef.current.setup) return batchRef.current.setup.id;
+    // F4: never beside another card being set up (see `startActionSetup`).
+    if (historyRef.current.actionSetup) return historyRef.current.actionSetup.id;
+    const id = `batch-payment-setup-${++batchSerial.current}`;
+    setBatchSetupRaw({ id, position, workflowId: editorRef.current.workflow.workflowId, edited: false });
+    setBatchEntries(current => ({ ...current, [id]: { draft: defaultBatchPaymentDraft(), base: null } }));
+    return id;
+  }, []);
+  const editBatchDraft = useCallback((id: string, change: (draft: BatchPaymentInput) => BatchPaymentInput) => {
+    const setup = batchRef.current.setup, workflow = editorRef.current.workflow;
+    const saved = setup?.id === id ? null : savedBatchPayment(workflow.nodes.find(node => node.nodeId === id) as SemanticWorkflow['nodes'][number] | undefined);
+    if (setup?.id !== id && !saved) return;
+    if (setup?.id === id && !setup.edited) setBatchSetupRaw(current => current?.id === id ? { ...current, edited: true } : current);
+    setBatchEntries(current => {
+      const held = current[id] && batchDraftHolds(id, current[id]!, setup, workflow) ? current[id]! : null;
+      const base = held ? saved ? batchDraftWithSavedAsset(held.draft, saved.input) : held.draft : saved ? saved.input : defaultBatchPaymentDraft();
+      const draft = change(base);
+      // An edit back to exactly the saved step is no draft at all (nothing left to apply).
+      if (saved && sameBatchInput(draft, saved.input)) { const next = { ...current }; delete next[id]; return next; }
+      return { ...current, [id]: { draft, base: saved ? saved.key : null } };
+    });
+  }, []);
+  const discardBatchDraft = useCallback((id: string) => {
+    setBatchEntries(current => { if (!(id in current)) return current; const next = { ...current }; delete next[id]; return next; });
+    setBatchSetupRaw(current => current?.id === id ? null : current);
+  }, []);
+  const applyBatchDraft = useCallback((id: string): string | null => {
+    const setup = batchRef.current.setup, current = editorRef.current, entry = batchRef.current.entries[id];
+    const saved = setup?.id === id ? null : savedBatchPayment(current.workflow.nodes.find(node => node.nodeId === id) as SemanticWorkflow['nodes'][number] | undefined);
+    if (setup?.id !== id && !saved) return 'This edit is no longer pending.';
+    const held = entry && batchDraftHolds(id, entry, setup, current.workflow) ? saved ? batchDraftWithSavedAsset(entry.draft, saved.input) : entry.draft : null;
+    if (saved && !held) return null;
+    const input = normalizeBatchPaymentDraft(held ?? defaultBatchPaymentDraft());
+    const check = checkBatchPaymentDraft(input);
+    if (!check.valid) return check.problem;
+    const command = (saved ? { type: 'SET_BATCH_PAYMENT', nodeId: id, input, source: 'CANVAS', baseRevision: current.workflow.revision }
+      : { type: 'ADD_BATCH_PAYMENT', input, source: 'CANVAS', baseRevision: current.workflow.revision }) as Command;
+    const preview = editorReducer(current, command, context);
+    if (preview.error) return 'Check the recipients and amounts.';
+    const introduced = testNetworksIntroduced(current.workflow, preview.workflow);
+    if (introduced.length) return testNetworkMessage(introduced);
+    if (saved) dispatchHistory({ type: 'COMMAND', command, context });
+    else dispatchHistory({ type: 'COMMAND', command, position: historyRef.current.layout[id] ?? setup!.position, context });
+    discardBatchDraft(id);
+    return null;
+  }, [context, discardBatchDraft]);
   const generateArtifacts = useCallback(() => {
     const workflow = workflowRef.current;
     if (incompleteRef.current || chainRef.current.pending || !generationEligibility(workflow, context).eligible) return;
@@ -637,12 +742,13 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const saved = viewportMemory.current;
     if (saved?.id === canvasId) delete saved[stacked ? 'stacked' : 'standard'];
   }, [canvasId]);
-  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
+  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); setStagedPosition(null); clearBatchDrafts(); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
     canvasRestoring: pendingRestorations > 0, trackCanvasRestoration,
-    createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
+    createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); clearBatchDrafts(); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
+    batchSetup, batchDrafts, startBatchSetup, editBatchDraft, discardBatchDraft, applyBatchDraft,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, readCanvasViewport, rememberCanvasViewport, forgetCanvasViewport,
     pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, clearStagedPosition, stageLiquidityPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions, executedNodeIds,
