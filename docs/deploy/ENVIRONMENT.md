@@ -307,6 +307,7 @@ flows' worker, which keep `WORKER_SUBMISSION_FORBIDDEN`. Startup logs: `delegati
 | --- | --- | --- | --- | --- | --- |
 | `FLOFI_ADMIN` | `enabled` serves the private console (needs `DATABASE_URL` platform state) | no | optional | as chosen | off (`/admin` answers 404) |
 | `FLOFI_ADMIN_SESSION_SECRET` | dedicated key for admin session references and CSRF tokens (32–512 characters); refused when equal to any other FloFi secret | **yes** | with `FLOFI_ADMIN` | with `FLOFI_ADMIN` | — (console off: `ADMIN_SESSION_SECRET_INVALID`) |
+| `FLOFI_ADMIN_WEB_ATTRIBUTION_FROM` | BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): the UTC instant (`YYYY-MM-DDTHH:MM:SSZ`) from which the Overview's *Completed executions by channel* counts a single-flow run that no approval names as a FloFi Web run. Set it to the deployment time of the approval run binder or later; anything invalid or absent counts such runs as Unknown origin | no | optional | optional | unset (Unknown origin) |
 | `FLOFI_SUPPORT_TEXT_RETENTION_DAYS` | BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: scheduled expiry (days, 30–3650) of new Support reasons/notes. **Proposal, not legal advice**; deleting nothing by itself — removal needs an approved `retention-activate` | no | optional (default 365) | — | 365 |
 | `FLOFI_SUPPORT_LOOKUP_RETENTION_DAYS` | days after a quarter ends before its lookup-fingerprint key may be destroyed (30–3650); used by the CLI dry run until an activation records the approved period | no | — | — | 365 |
 

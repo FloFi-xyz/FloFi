@@ -13,7 +13,9 @@ import type { ActionKind } from './actions.ts';
 import type { AnalyticsEnvironment } from './networks.ts';
 import { isOpen, loadExecutionAttention, type ExecutionAttention, type Lifecycle } from '../support/lifecycle.ts';
 
-export type AnalyticsParams = { readonly range?: string; readonly from?: string; readonly to?: string; readonly env?: string; readonly action?: string; readonly outcome?: string };
+export type AnalyticsParams = { readonly range?: string; readonly from?: string; readonly to?: string; readonly env?: string; readonly action?: string; readonly outcome?: string;
+  /** The Overview's "Completed executions by channel" period (`channels.ts` channelPeriod), kept when the other filters change. */
+  readonly channels?: string };
 export type WorkflowView = { readonly ok: true; readonly range: AnalyticsRange; readonly environment: AnalyticsEnvironment; readonly environmentDefaulted: boolean;
   readonly action: ActionKind | 'ALL'; readonly outcome: OutcomeFilter; readonly indexing: IndexSummary | null; readonly indexingCode: string | null;
   readonly analytics: WorkflowAnalytics; readonly executions: readonly Execution[]; readonly savedInRange: number | null;

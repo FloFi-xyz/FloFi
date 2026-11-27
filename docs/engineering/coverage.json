@@ -90,6 +90,18 @@
       "path": "apps/reference-dapp/src/admin/analytics/workflows.test.ts",
       "stage": "unit"
     },
+    "app.admin.analytics.channels": {
+      "path": "apps/reference-dapp/src/admin/analytics/channels.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.analytics.channels.pg": {
+      "path": "apps/reference-dapp/src/admin/analytics/channels.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.server.approval-run-binder": {
+      "path": "apps/reference-dapp/src/server/approval-run-binder.test.ts",
+      "stage": "unit"
+    },
     "app.admin.flight": {
       "path": "apps/reference-dapp/src/admin/flight.test.ts",
       "stage": "unit"
@@ -2376,7 +2388,9 @@
     "app.server.native-signing.deeplink.nacl-box",
     "app.server.native-signing.deeplink.protocol",
     "app.server.native-signing.review",
-    "app.channels.core.native-start"
+    "app.channels.core.native-start",
+    "app.admin.analytics.channels",
+    "app.server.approval-run-binder"
   ],
   "modules": [
     {
@@ -2838,11 +2852,14 @@
         "flofi-chat",
         "flofi-data-privacy",
         "flofi-infrastructure-ci",
-        "flofi-security"
+        "flofi-mcp",
+        "flofi-security",
+        "flofi-workflow"
       ],
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/admin/analytics/actions.ts",
+        "apps/reference-dapp/src/admin/analytics/channels.ts",
         "apps/reference-dapp/src/admin/analytics/classify.ts",
         "apps/reference-dapp/src/admin/analytics/copilot.ts",
         "apps/reference-dapp/src/admin/analytics/indexer.ts",
@@ -2901,11 +2918,15 @@
         "app.backend.plain-node-closure",
         "app.backend.uniswap-position-purge.pg",
         "app.backend.single-step-runs-migrate.pg",
-        "app.backend.workflow-run-purge-migrate.pg"
+        "app.backend.workflow-run-purge-migrate.pg",
+        "app.admin.analytics.channels",
+        "app.admin.analytics.channels.pg",
+        "app.server.approval-run-binder"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
-        "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence. Automatic provider adapters are verified against recorded response shapes from current provider references, not live provider accounts; provider entitlements and project attribution require operator evidence at activation."
+        "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence. Automatic provider adapters are verified against recorded response shapes from current provider references, not live provider accounts; provider entitlements and project attribution require operator evidence at activation.",
+        "Completed executions by channel (KAN-25) are verified against seeded handoff, workflow-run and run records, not production data. Runs without a server-written handoff binding stay Unknown origin (all history before the approval run binder, and Web runs until FLOFI_ADMIN_WEB_ATTRIBUTION_FROM is set); Web Chat and the Editor are not separable; after the cutover a FloFi Web count relies on approval handoffs and their run bindings being retained (a purge of handoffs, or a full 16-run list, would make an approval run read as FloFi Web)."
       ]
     },
     {
@@ -3019,7 +3040,9 @@
         "app.server.copilot-metrics",
         "app.server.copilot-metrics.pg",
         "app.e2e.admin-login-layout",
-        "app.e2e.admin-console"
+        "app.e2e.admin-console",
+        "app.admin.analytics.channels",
+        "app.admin.analytics.channels.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -4110,7 +4133,8 @@
         "apps/reference-dapp/src/components/admin/learning-console.tsx",
         "apps/reference-dapp/src/components/admin/finops-controls.tsx",
         "apps/reference-dapp/src/components/admin/finops-views.tsx",
-        "apps/reference-dapp/src/components/admin/finops-copy.ts"
+        "apps/reference-dapp/src/components/admin/finops-copy.ts",
+        "apps/reference-dapp/src/components/admin/channel-counts.tsx"
       ],
       "suites": [
         "app.admin.analytics.workflows",
@@ -4119,7 +4143,8 @@
         "app.admin.settings.pg",
         "app.e2e.admin-login-layout",
         "app.e2e.admin-console",
-        "app.components.admin.finops-views"
+        "app.components.admin.finops-views",
+        "app.admin.analytics.channels"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -5627,7 +5652,8 @@
         "app.flight.email.templates",
         "app.backend.flight-admin.pg",
         "app.flight.board-access-http",
-        "app.flight.recovery.pg"
+        "app.flight.recovery.pg",
+        "app.server.approval-run-binder"
       ],
       "gaps": [
         "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
@@ -8133,6 +8159,7 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/server/allowance-observation.ts",
+        "apps/reference-dapp/src/server/approval-run-binder.ts",
         "apps/reference-dapp/src/server/approval-surface.ts",
         "apps/reference-dapp/src/server/arbitrum-fees.ts",
         "apps/reference-dapp/src/server/authoring-catalogs.ts",
@@ -8177,7 +8204,9 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "app.server.build-estimate-latency"
+        "app.server.build-estimate-latency",
+        "app.server.approval-run-binder",
+        "app.admin.analytics.channels.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -9603,6 +9632,7 @@
     "app.channels.telegram.universal-actions.pg",
     "app.server.native-signing.pg",
     "app.mcp.native-signing.pg",
-    "app.channels.telegram.native-signing.pg"
+    "app.channels.telegram.native-signing.pg",
+    "app.admin.analytics.channels.pg"
   ]
 }
