@@ -138,7 +138,7 @@ the run stops for a new Review (`WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT
 ### 3.4 Validation and limits
 
 - **Recipients.** 2 to 8. The maximum is the workflow-run budget: every payment is one run step, and `workflow_runs.step_count` is at most 8 (migration 0015). A batch inside a longer workflow shares that budget (`BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET`). The bound also keeps one atomic EIP-5792 request well within wallet and gas limits.
-- **Addresses.** Each must be a 0x address. The zero address and the reserved system range `0x…00`–`0x…ff` (precompiles) are refused. A mixed-case address must be its exact EIP-55 checksum encoding (the Send card's rule), in every channel. The network's transfer profile must allow explicit recipients. Recipients are lower-cased, and a duplicate (case-insensitive) is refused with `BATCH_PAYMENT_DUPLICATE_RECIPIENT`, never merged or dropped. Addresses are never invented: every channel requires the explicit address.
+- **Addresses.** Each must be a 0x address. The zero address and the reserved system range `0x…000`–`0x…fff` (precompiles, including P256VERIFY at `0x…0100`) are refused. A mixed-case address must be its exact EIP-55 checksum encoding (the Send card's rule), in every channel. The network's transfer profile must allow explicit recipients. Recipients are lower-cased, and a duplicate (case-insensitive) is refused with `BATCH_PAYMENT_DUPLICATE_RECIPIENT`, never merged or dropped. Addresses are never invented: every channel requires the explicit address.
 - **Amounts.** Positive exact decimals, turned into integer base units with the asset's decimals. Native amounts respect the profile's per-transfer maximum. The total is an exact integer sum, refused above 2^256−1.
 - **Asset.** Native ETH or a non-stock ERC-20 of the network's validated catalog. A mixed asset is refused at the IR. There is no USD cap. Internal transfers count toward the step budget.
 - **Prerequisites.** Balance, fee balance, gas and wallet capabilities are evaluated by the existing user-funded Review (simulation of the exact calls) before authorization.
@@ -219,6 +219,16 @@ WS02 was reviewed in three rounds. The specialists are Read-only. Round 1 was th
 | 2 | flofi-developers | medium | A production-key batch approval returned HTTP 500, and `approvable: true` was reported when the approval is always refused. The simulate reason, example payees on precompiles (now refused) and the OpenAPI wording. All fixed |
 | 3 | verifiers | high | The client shell imported a server-only module (now `domain/batch-run-record.ts`, with a client-safety test). The step-list guard briefly accepted the leg count (restored to the semantic count). Ambiguous amounts in pairing. The `explain_strategy` alignment. Atomic wording for mixed workflows. All fixed |
 
+A final pass on the clean HEAD `e3f03f1` used flofi-security, flofi-workflow and flofi-wallet-execution. It found no defect in the execution path and six low findings. Five were fixed:
+
+- **Unpaired address.** An address written outside every `<amount> <asset> to <address>` clause now makes the Copilot ask instead of building the batch.
+- **Reserved range.** It is widened to `0x…000`–`0x…fff`, which includes P256VERIFY at `0x…0100`.
+- **Permanent proof failures.** Re-preparation proof failures that can only get worse (owner transaction or activity, scan range too wide) are permanent: `BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE`.
+- **History Delete.** A recorded batch refusal closes as "not sent" only on the owner's ordinary End, never through History's Delete. Delete keeps its 0033 purge rule.
+- **Index spaces.** The MCP instructions now label which fields use strategy-step indexes and which use execution-leg indexes.
+
+The sixth is kept as a documented hardening gap (§11): an undecodable self-call that carries ETH payments.
+
 Left open, with reasons:
 
 - **Undo/redo of two setup cards.** Undo/redo can place a Batch Payment setup card beside another action's setup card. This is presentation only; Simulate, Execute and save stay held. Changing undo semantics is an owner decision.
@@ -256,12 +266,12 @@ Visual evidence of the Batch Payment card (EN and PT, draft and applied), render
 
 ## 9. Production configuration (CTO approval required)
 
-Nothing below has been applied. The P0 remediation:
+The owner authorized this change together with the merge and deploy, once CI is green. The value applied is recorded in the PR. The P0 remediation:
 
 1. In the Vercel project's **Production** environment, set `FLOFI_MCP_PORTFOLIO_LINKS_FROM` to a UTC ISO-8601 instant **at or after `2026-11-24T04:40:00Z`**. The earliest defensible value is that instant, the PR #248 deployment that published the Connections disclosure, rounded up. The instant of applying the change is the conservative choice. An earlier value is rejected by the code as backdating.
 2. Redeploy Production so the variable is read.
 3. Links made before that instant stay without consent. Their owners re-link in Connections; `get_account` names those wallets (`relinkRequired`). Do not backdate the variable to include them.
-4. Not verified from here: the exact alias time of that deployment and the Skew Protection setting. Confirm the alias time in Vercel before choosing the earliest value.
+4. Verified read-only in Vercel: the PR #248 production deployment `dpl_F4z2qXAHRrAt2VABL9K6hmwWtWzy` was READY with the production aliases at `2026-11-24T04:39:34.475Z`. The project's Skew Protection setting could not be read through the API summary. An older browser tab could still call the previous deployment's server actions after that instant, without the disclosure. So the conservative value is used: the instant the variable is applied. Nothing is backdated. Links made earlier are named in `get_account` and need a re-link.
 
 Batch Payment needs no new variable. It runs where user-funded execution and Editor workflow runs are already enabled.
 
@@ -289,6 +299,8 @@ LIVE VERIFIED is claimed only after step 4 is performed and reconciled on mainne
 - **Developer API production keys.** Production keys cannot hand off a Batch Payment: their approvals use owner steps only, and a batch is atomic-only. They get a coded 422 `CAPABILITY_NOT_SUPPORTED`, and `approvable` reports false. Allowing user-funded atomic groups for developer production approvals is an owner decision.
 - **MCP idempotency and OAuth logs.** `request_user_approval` and `cancel_approval` carry no idempotency key (mitigated by supersession and `retryable: false`). OAuth endpoints carry no request id.
 - **Visual baselines.** See §4.
+- **Non-standard 7702 delegates.** A wallet's EIP-7702 delegate that encodes its batch with a selector other than ERC-7579 `execute`, and lets single calls fail, is matched by substring. An ETH payment that failed inside such a batch would leave no log to catch it. No known delegate behaves this way (MetaMask uses default-mode `execute`; Coinbase and Simple7702 `executeBatch` revert on failure). Refusing every undecodable self-call with ETH payments would hold legitimate batches of those wallets in ATTENTION, so this is kept as a hardening item.
+- **Duplicate EIP-5792 ids.** A reload inside a request's validity hands the same request (the same EIP-5792 id) back to the same browser. Protection against a wallet that does not dedupe ids rests on that id, as for every wallet batch before this build.
 
 ## 12. Rollback and migration
 

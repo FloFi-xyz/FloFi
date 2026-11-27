@@ -3295,7 +3295,7 @@
                           "pattern": "^0x[0-9a-fA-F]{40}$",
                           "minLength": 42,
                           "maxLength": 42,
-                          "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a precompile address (0x…01 to 0x…ff).",
+                          "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).",
                           "type": "string"
                         },
                         "amount": {
@@ -4168,7 +4168,7 @@
                                     "pattern": "^0x[0-9a-fA-F]{40}$",
                                     "minLength": 42,
                                     "maxLength": 42,
-                                    "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a precompile address (0x…01 to 0x…ff).",
+                                    "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).",
                                     "type": "string"
                                   },
                                   "amount": {

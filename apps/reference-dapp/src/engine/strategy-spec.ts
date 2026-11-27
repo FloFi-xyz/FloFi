@@ -140,7 +140,7 @@ export const BATCH_PAYMENT_NETWORK_IDS = ['robinhood', 'base', 'arbitrum-one', '
 const BatchPaymentLine = Type.Object({
   recipient: EvmAddress('Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. ' +
     'EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped ' +
-    'letter is refused, never corrected). Never the zero address or a precompile address (0x…01 to 0x…ff).'),
+    'letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).'),
   amount: Decimal('This recipient\'s exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).'),
 }, strict);
 const BatchPayment = Type.Object({

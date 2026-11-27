@@ -119,6 +119,9 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'stepCount when it holds a Batch Payment; for a plan_strategy result, its stepCount). WORKFLOW_STEP_COUNT_MISMATCH means the strategy that arrived has ' +
   'another number of steps: compose again with every step, in the person\'s order, and never split a Batch Payment into transfers. `readiness` says ' +
   'what a result establishes: a valid or reviewed strategy is not authorized and not necessarily executable. ' +
+  'Index spaces: `strategy.bindings` name strategy steps (a Batch Payment is one step); `executionPlan.bindings`, an authorization plan\'s `bindings` and ' +
+  '`workflowRun.steps` name execution legs (a Batch Payment has one leg per payment, all executed in one atomic wallet request): never copy one into the other; ' +
+  '`batchPayments` maps each Batch Payment to its leg range. ' +
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02)
   'Several payments of one asset on one EVM mainnet (base, arbitrum-one, ethereum, robinhood) are ONE batch_payment step: 2 to 8 recipients, each ' +
   'with the exact amount the person stated, in their order (the same amount for each only when they asked for equal amounts). Never split it into ' +

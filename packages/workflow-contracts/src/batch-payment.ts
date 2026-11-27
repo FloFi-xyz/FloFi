@@ -38,7 +38,8 @@ const CHAIN = /^eip155:[1-9][0-9]{0,18}$/, ADDRESS = /^0x[0-9a-f]{40}$/;
  * The zero address and the precompile range (0x…00 to 0x…ff: ecrecover, sha256, …, and the addresses EVM chains reserve for their own precompiles).
  * Nobody holds a key for them, so a payment there is lost; they are refused like the zero address, never paid.
  */
-const RESERVED = /^0x0{38}[0-9a-f]{2}$/;
+// Final security review: the reserved system range is 0x…000 to 0x…fff (precompiles, including P256VERIFY at 0x…0100 on Ethereum, Base and Arbitrum).
+const RESERVED = /^0x0{37}[0-9a-f]{3}$/;
 const UNITS = /^[1-9][0-9]{0,77}$/, OFFICIAL_ID = /^0x[0-9a-f]{64}$/, MAX_UINT256 = (1n << 256n) - 1n;
 function fail(code: string): never { throw new Error(code); }
 const slot = (index: number) => String(index + 1).padStart(2, '0');

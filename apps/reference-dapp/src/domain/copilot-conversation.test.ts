@@ -205,6 +205,12 @@ describe('Batch Payment from the chat', () => {
       expect(reply.text).toContain(`Your message pairs: 1. 1 USDC → ${A}; 2. 1000 USDC → ${B}.`);
       expect(reply.text).toContain(`The interpretation read: 1. ${sends[0]!.amount} USDC → ${sends[0]!.recipient}; 2. ${sends[1]!.amount} USDC → ${sends[1]!.recipient}.`);
     }
+    // Final security review: an address written outside every "<amount> <asset> to <address>" clause is never left out silently.
+    for (const stray of [`pay 25 USDC to ${A}, ${B} and 50 USDC to ${C} on Base`, `Send 25 USDC to ${A} and 50 USDC to ${B} ${C} on Base`]) {
+      const session = new CopilotSession([]);
+      const reply = session.say(stray, intent.composition([base('25', A), base('50', stray.includes(`${B} and`) ? C : B)]))!;
+      expect(reply.kind, stray).toBe('CLARIFICATION'); expect(reply.command).toBeUndefined(); expect(session.pending).toBeNull();
+    }
     // A dropped recipient: three payments written, two (or one) read.
     const three = `Send 25 USDC to ${A}, 50 USDC to ${B} and 75 USDC to ${C} on Base`;
     for (const model of [intent.composition([base('25', A), base('50', B)]), intent.composition([base('25', A), base('75', C)]), intent.action(base('25', A))]) {

@@ -207,7 +207,7 @@ export function batchPaymentDraftTotal(input: BatchPaymentInput): string | null 
   }
   return asset.native ? formatEth(total) : formatAssetAmount(total.toString(), asset.decimals);
 }
-const RESERVED_RECIPIENT = /^0x0{38}[0-9a-f]{2}$/;
+const RESERVED_RECIPIENT = /^0x0{37}[0-9a-f]{3}$/;
 /**
  * FE-BATCH-10: which fields of each row are not valid yet (for `aria-invalid`): a recipient that is missing, not a valid (checksummed) address, a
  * reserved address or repeated in another row; an amount that is missing or not a valid amount of the resolved asset (unknown while no asset

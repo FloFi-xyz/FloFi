@@ -187,7 +187,9 @@ export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: 
    */
   readonly onlyIfDeclineVerified?: boolean } = {}): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  const { verified, unanswered } = await verifiedDeclinesOf(deps, run);
+  // A Batch Payment's recorded refusal closes as "not sent" on the owner's ordinary End only; History's Delete keeps its own, narrower rule (a
+  // rejection fact), which its database purge (0033) also checks.
+  const { verified, unanswered } = await verifiedDeclinesOf(deps, run, { refusals: !options.onlyIfDeclineVerified });
   if (options.onlyIfDeclineVerified && (unanswered === 0 || verified.size !== unanswered)) refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
   return deps.store.cancel(run.runId, run.version, code, deps.now(), { verifiedDeclines: verified, onlyIfDeclineVerified: options.onlyIfDeclineVerified === true });
 }
@@ -209,8 +211,10 @@ export async function recordWalletDecline(deps: WorkflowRunDeps, run: RunRecord,
  * ended with its outcome unknown, exactly as before.
  */
 const DECLINE_PROOF_RETRY_MS = 60_000;
+/** Decline-proof failures that a later read can never turn into a proof for the same preparation (the owner moved, or the range only grows). */
+const PERMANENT_REWRITE_PROOF_FAILURES: ReadonlySet<string> = new Set(['DECLINE_PROOF_OWNER_TRANSACTED', 'DECLINE_PROOF_OWNER_ACTIVITY', 'DECLINE_PROOF_RANGE_TOO_WIDE']);
 const recentUnproven = new Map<string, number>();
-async function verifiedDeclinesOf(deps: WorkflowRunDeps, run: RunRecord): Promise<{ readonly verified: ReadonlyMap<number, VerifiedDecline>; readonly unanswered: number }> {
+async function verifiedDeclinesOf(deps: WorkflowRunDeps, run: RunRecord, options: { readonly refusals?: boolean } = {}): Promise<{ readonly verified: ReadonlyMap<number, VerifiedDecline>; readonly unanswered: number }> {
   const verified = new Map<number, VerifiedDecline>();
   if (run.mode !== 'USER_FUNDED') return { verified, unanswered: 0 };
   const groups = (await deps.store.groups(run.runId)).filter(g => g.state === 'PREPARED' && walletBatchUnanswered(g));
@@ -225,7 +229,7 @@ async function verifiedDeclinesOf(deps: WorkflowRunDeps, run: RunRecord): Promis
     // refusal is, like a rejection, closed as not sent once the same chain proof holds (never "may have executed" when the chain proves otherwise).
     const answered = (e: { readonly detail?: Readonly<Record<string, unknown>> | null }) => e.detail?.requestId === requestId && e.detail?.preparedAt === preparedAt;
     if (of('GROUP_PREPARED_AGAIN').length || !(of('GROUP_WALLET_DECLINED').some(answered)
-      || g.code === WALLET_BATCH_REFUSAL_RECORDED && holdsBatchPayment(run, g) && of('GROUP_WALLET_REFUSAL_REPORTED').some(answered))) continue;
+      || options.refusals === true && g.code === WALLET_BATCH_REFUSAL_RECORDED && holdsBatchPayment(run, g) && of('GROUP_WALLET_REFUSAL_REPORTED').some(answered))) continue;
     const settledAt = new Date(new Date(g.validUntil).getTime() + WALLET_BATCH_SETTLE_MS);
     // Security review: one chain proof per preparation per minute and process; a repeat within it is simply not proven (nothing changes).
     const key = `${run.runId}:${g.groupIndex}:${preparedAt}`, last = recentUnproven.get(key), now = deps.now().getTime();
@@ -652,7 +656,9 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
       if (recentUnproven.size >= 1_000) recentUnproven.clear();
       recentUnproven.set(key, now.getTime());
       deps.log('workflow_run.batch_payment_rewrite_unproven', { runId: run.runId, group: groupIndex, reason: proof.reason });
-      refuse('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
+      // Final review: an owner transaction or token activity since the preparation, or a range too wide to scan, only ever gets worse: that request
+      // can never be proven unsent, so it is refused for good (the owner ends the run and starts a new Review), never "try again".
+      refuse(PERMANENT_REWRITE_PROOF_FAILURES.has(proof.reason) ? 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE' : 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
     }
   }
   // Final review (P3): a FloFi Wallet owner-step group's expired Circle preparation is expired, its steps given back and the group planned again in

@@ -176,7 +176,7 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment run (Pos
       const run = await ownedRun(h.runs, approval.approvalId, wallets);
       const group = (await h.store.groups(run.runId))[0]!;
       h.d.advance(group.validUntil!.getTime() + 5 * 60_000 - h.d.now().getTime());
-      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, first.handout)).rejects.toThrow('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, first.handout)).rejects.toThrow('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE');
       expect([A, B, C].map(r => base.control.tokenBalance(USDC, r))).toEqual([25_000_000n, 50_000_000n, 75_000_000n]);
       expect(base.control.sends()).toBe(0);
     } finally { await t.drop(); }

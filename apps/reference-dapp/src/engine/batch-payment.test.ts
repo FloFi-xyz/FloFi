@@ -87,7 +87,9 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment composit
     for (const reserved of ['0x' + '0'.repeat(38) + '02', '0x' + '0'.repeat(40), '0x' + '0'.repeat(38) + 'ff'])
       expect(refusal({ ...BATCH, recipients: [{ recipient: reserved, amount: '1' }, { recipient: B, amount: '1' }] }), reserved).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
     // The first address past the precompile range is an ordinary payee.
-    expect(refusal({ ...BATCH, recipients: [{ recipient: '0x' + '0'.repeat(37) + '100', amount: '1' }, { recipient: B, amount: '1' }] })).toBe('OK');
+    // P256VERIFY lives at 0x…0100: still reserved; the first ordinary address is 0x…1000.
+    expect(refusal({ ...BATCH, recipients: [{ recipient: '0x' + '0'.repeat(37) + '100', amount: '1' }, { recipient: B, amount: '1' }] })).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+    expect(refusal({ ...BATCH, recipients: [{ recipient: '0x' + '0'.repeat(36) + '1000', amount: '1' }, { recipient: B, amount: '1' }] })).toBe('OK');
     // An ETH payment above the network's per-payment maximum (uint256 on mainnets: no USD cap) is named as such (never "enter a positive amount").
     expect(refusal({ ...BATCH, asset: 'ETH', recipients: [{ recipient: A, amount: '1' + '0'.repeat(60) }, { recipient: B, amount: '0.001' }] })).toBe('STRATEGY_SCHEMA_INVALID');
     expect(checkBatchPaymentDraft({ network: 'Base', asset: 'ETH', payments: [{ recipient: A, amount: '1' + '0'.repeat(60) }, { recipient: B, amount: '0.001' }] }).code)

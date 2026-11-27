@@ -46,11 +46,12 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment node', (
     expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: A, amount: '1' }, { recipient: A, amount: '2' }] })).toThrow('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
     expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: '0x' + '0'.repeat(40), amount: '1' }, { recipient: B, amount: '2' }] })).toThrow('BATCH_PAYMENT_RECIPIENT_INVALID');
     expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: '0x' + 'A'.repeat(40), amount: '1' }, { recipient: B, amount: '2' }] })).toThrow('BATCH_PAYMENT_RECIPIENT_INVALID');
-    // DEV-BP-5: the precompile range 0x…01..0x…ff is never a payee (nobody holds its key); the first address past it is an ordinary recipient.
+    // DEV-BP-5 (widened in the final security review to 0x…fff, which holds P256VERIFY at 0x…0100): the reserved range is never a payee (nobody holds its
+    // key); the first address past it is an ordinary recipient.
     for (const reserved of ['01', '02', '09', '0a', '7f', 'ff'])
       expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: '0x' + '0'.repeat(38) + reserved, amount: '1' }, { recipient: B, amount: '2' }] }), reserved)
         .toThrow('BATCH_PAYMENT_RECIPIENT_INVALID');
-    expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: '0x' + '0'.repeat(37) + '100', amount: '1' }, { recipient: B, amount: '2' }] })).not.toThrow();
+    expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: '0x' + '0'.repeat(36) + '1000', amount: '1' }, { recipient: B, amount: '2' }] })).not.toThrow();
     for (const amount of ['0', '01', '1.5', '-1', ''])
       expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: A, amount }, { recipient: B, amount: '2' }] }), amount).toThrow('BATCH_PAYMENT_AMOUNT_INVALID');
     expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: A, amount: '1' }] })).toThrow('BATCH_PAYMENT_TOO_FEW_RECIPIENTS');
@@ -59,6 +60,10 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment node', (
     expect(() => createBatchPaymentNode('n', { ...fields, payments: many })).toThrow('BATCH_PAYMENT_TOO_MANY_RECIPIENTS');
     expect(() => createBatchPaymentNode('n', { ...fields, payments: many.slice(0, BATCH_PAYMENT_MAX_RECIPIENTS) })).not.toThrow();
     expect(() => createBatchPaymentNode('n', { ...fields, chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' })).toThrow('BATCH_PAYMENT_FIELDS_INVALID');
+    // The reserved system range 0x…000–0x…fff holds precompiles (P256VERIFY at 0x…0100): nobody holds a key there, so funds would be lost.
+    for (const reserved of ['0x' + '0'.repeat(38) + '02', '0x' + '0'.repeat(37) + '100', '0x' + '0'.repeat(37) + 'fff'])
+      expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: reserved, amount: '1' }, { recipient: B, amount: '2' }] }), reserved).toThrow('BATCH_PAYMENT_RECIPIENT_INVALID');
+    expect(() => createBatchPaymentNode('n', { ...fields, payments: [{ recipient: '0x' + '0'.repeat(36) + '1000', amount: '1' }, { recipient: B, amount: '2' }] })).not.toThrow();
     // An official id names an issuer-registered asset (a Robinhood Chain Stock Token): never carried by a Batch Payment, whichever channel wrote the IR.
     expect(() => createBatchPaymentNode('n', { ...fields, chain: 'eip155:4663', asset: { ...USDC, decimals: 18, officialId: '0x' + 'ab'.repeat(32) } })).toThrow('BATCH_PAYMENT_ASSET_UNSUPPORTED');
   });

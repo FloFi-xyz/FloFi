@@ -1832,10 +1832,14 @@ function newestWrittenPayments(state: CopilotConversation): readonly WrittenPaym
  * settled only by the person's own answer to FloFi's question about it: a later reply that is just one of its readings, taken in order, one answer
  * per ambiguous payment. `unsettled` is the first payment still read more than one way (FloFi asks about it, never choosing a reading), or null.
  */
-function settledPayments(state: CopilotConversation): { readonly written: readonly WrittenPayment[]; readonly unsettled: WrittenPayment | null } {
+function settledPayments(state: CopilotConversation): { readonly written: readonly WrittenPayment[]; readonly unsettled: WrittenPayment | null; readonly stray: boolean } {
   let at = state.segment.length - 1;
   while (at >= 0 && !writtenPayments(state.segment[at]!).length) at -= 1;
-  if (at < 0) return { written: [], unsettled: null };
+  if (at < 0) return { written: [], unsettled: null, stray: false };
+  // Final security review: every 0x address the paying turn writes must be a paired payment's recipient. An address outside any
+  // "<amount> <asset> to <address>" clause ("25 USDC to 0xA, 0xB and 50 USDC to 0xC") is never left out silently: FloFi asks.
+  const recipients = new Set(writtenPayments(state.segment[at]!).map(clause => clause.recipient.toLowerCase()));
+  const stray = [...state.segment[at]!.matchAll(/(?<![0-9A-Za-z])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => !recipients.has(match[0].toLowerCase()));
   const answers = state.segment.slice(at + 1).map(bareAmount);
   let next = 0, unsettled: WrittenPayment | null = null;
   const written = writtenPayments(state.segment[at]!).map(clause => {
@@ -1845,7 +1849,7 @@ function settledPayments(state: CopilotConversation): { readonly written: readon
     next = found + 1;
     return { ...clause, readings: [answers[found]!] };
   });
-  return { written, unsettled };
+  return { written, unsettled, stray };
 }
 /**
  * Chat review H2: the model's sends are exactly the payments the person paired in their own words: as many sends as written clauses, and send i is
@@ -1969,9 +1973,9 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     // Chat review H2: each send must be a payment the person paired in their own words (amount, asset and recipient together, in their order);
     // otherwise FloFi lists both readings and asks, never choosing which amount goes to which recipient.
     // Chat review C1: a written amount with several readings ("1.000") is asked about first; a send never pairs with a reading FloFi chose.
-    const { written, unsettled } = settledPayments(state);
+    const { written, unsettled, stray } = settledPayments(state);
     if (unsettled) return ambiguousPayment(state, m, language, written, unsettled);
-    if (!paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends);
+    if (stray || !paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends);
     const duplicate = duplicateRecipient(batch.sends);
     if (duplicate) return refused(state, m, BATCH_PAYMENT_COPY[language].duplicate(duplicate));
     if (batch.refusal) return failedWith(state, m, copilotRejection(batch.refusal, language).message, batch.refusal);

@@ -241,9 +241,9 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
       'Nada foi assinado nem enviado.' }],
   // Review M6: an invalid recipient or amount names what each payment needs (the generic INVALID family would only say "some details are invalid").
   [/^BATCH_PAYMENT_RECIPIENT_INVALID$/, { EN: 'Every recipient of a Batch Payment must be a valid 0x wallet address: a mixed-case address must match its checksum, ' +
-      'and a reserved system address (0x…00 to 0x…ff) is never a recipient. FloFi never corrects an address. Nothing was signed or sent. Check each address.',
+      'and a reserved system address (0x…000 to 0x…fff) is never a recipient. FloFi never corrects an address. Nothing was signed or sent. Check each address.',
     PT: 'Cada destinatário de um Pagamento em lote precisa ser um endereço de carteira 0x válido: um endereço com maiúsculas e minúsculas precisa corresponder ao ' +
-      'seu checksum, e um endereço reservado do sistema (0x…00 a 0x…ff) nunca é destinatário. O FloFi nunca corrige um endereço. Nada foi assinado nem enviado. ' +
+      'seu checksum, e um endereço reservado do sistema (0x…000 a 0x…fff) nunca é destinatário. O FloFi nunca corrige um endereço. Nada foi assinado nem enviado. ' +
       'Confira cada endereço.' }],
   [/^BATCH_PAYMENT_AMOUNT_INVALID$/, { EN: 'Every recipient of a Batch Payment needs a positive amount. Nothing was signed or sent. Check each amount.',
     PT: 'Cada destinatário de um Pagamento em lote precisa de um valor positivo. Nada foi assinado nem enviado. Confira cada valor.' }],
