@@ -4,9 +4,6 @@
  * simulation record as the flow runtime's simulation observer (`server/simulation-observer.ts`), in the very function that runs the
  * action, so a successful /app simulation can earn a boarding pass. The flow runtime never imports the campaign, its accounts or its
  * requests; MCP, channels and the Developer API call the runtime directly and record nothing.
- * BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): the same observer also binds the simulated run to the applied one-step approval it is
- * exactly the run of (`server/approval-run-binder.ts`), so the Admin can attribute it to the approval's channel. The two run independently: one
- * failing, rejecting or hanging never affects the other, and neither can change the simulation (`notifySimulation` bounds both).
  */
 import { observeSimulations } from '../server/simulation-observer';
 import { cloudFlow as runtimeFlow, flowRuntimeKind } from '../server/flow-runtime';
@@ -16,12 +13,9 @@ import { readDeveloperConfig } from '../developer/config';
 import { issuesWalletRequest } from '../workflow-runs/external-step';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
-// The record (with the account and request code it needs) and the approval run binder load on the first successful hosted simulation, never
-// when an action module is merely imported (tests and tools import these modules outside a Next.js request).
-observeSimulations(async (call, env) => { await Promise.allSettled([
-  import('../flight/simulation-evidence').then(module => module.recordFlightSimulation(call, env)),
-  import('../server/approval-run-binder').then(module => module.bindApprovalRunOfRequest(call, env)),
-]); });
+// The record (with the account and request code it needs) loads on the first successful hosted simulation, never when an action module
+// is merely imported (tests and tools import these modules outside a Next.js request).
+observeSimulations(async (call, env) => (await import('../flight/simulation-evidence')).recordFlightSimulation(call, env));
 if (!(globalThis as Record<symbol, unknown>)[REGISTERED]) {
   (globalThis as Record<symbol, unknown>)[REGISTERED] = true;
   // A fixed, content-free line, so a deployment's runtime logs show the observer is in place.

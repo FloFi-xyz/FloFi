@@ -98,10 +98,6 @@
       "path": "apps/reference-dapp/src/admin/analytics/channels.pg.test.ts",
       "stage": "postgres"
     },
-    "app.server.approval-run-binder": {
-      "path": "apps/reference-dapp/src/server/approval-run-binder.test.ts",
-      "stage": "unit"
-    },
     "app.admin.flight": {
       "path": "apps/reference-dapp/src/admin/flight.test.ts",
       "stage": "unit"
@@ -2406,7 +2402,6 @@
     "app.server.native-signing.review",
     "app.channels.core.native-start",
     "app.admin.analytics.channels",
-    "app.server.approval-run-binder",
     "action-registry.solana-batch-payment",
     "reference-linter.batch-payment-solana",
     "reference-compiler.solana-batch-payment",
@@ -2942,13 +2937,12 @@
         "app.backend.single-step-runs-migrate.pg",
         "app.backend.workflow-run-purge-migrate.pg",
         "app.admin.analytics.channels",
-        "app.admin.analytics.channels.pg",
-        "app.server.approval-run-binder"
+        "app.admin.analytics.channels.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
         "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence. Automatic provider adapters are verified against recorded response shapes from current provider references, not live provider accounts; provider entitlements and project attribution require operator evidence at activation.",
-        "Completed executions by channel (KAN-25) are verified against seeded handoff, workflow-run and run records, not production data. Runs without a server-written handoff binding stay Unknown origin (all history before the approval run binder, and Web runs until FLOFI_ADMIN_WEB_ATTRIBUTION_FROM is set); Web Chat and the Editor are not separable; after the cutover a FloFi Web count relies on approval handoffs and their run bindings being retained (a purge of handoffs, or a full 16-run list, would make an approval run read as FloFi Web)."
+        "Completed executions by channel (KAN-25) are verified against seeded handoff, workflow-run and run records, not production data. Origins come only from server-written records, never from time or the absence of a record: FloFi Web counts Editor workflow runs (and one-step runs an Editor approval recorded), and Web Chat and the Editor are not separable. One-step runs started directly in the app have no origin record and are Unknown origin. A one-step run started from an approval keeps its channel only while that approval's recorded run bindings exist (run_ids is written only when a requester reads shared status or by native signing; an approval records at most 16 runs and approvals may be removed by retention); otherwise it is Unknown origin. Earlier history without records is Unknown origin; there is no historical backfill."
       ]
     },
     {
@@ -5674,8 +5668,7 @@
         "app.flight.email.templates",
         "app.backend.flight-admin.pg",
         "app.flight.board-access-http",
-        "app.flight.recovery.pg",
-        "app.server.approval-run-binder"
+        "app.flight.recovery.pg"
       ],
       "gaps": [
         "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
@@ -8187,7 +8180,6 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/server/allowance-observation.ts",
-        "apps/reference-dapp/src/server/approval-run-binder.ts",
         "apps/reference-dapp/src/server/approval-surface.ts",
         "apps/reference-dapp/src/server/arbitrum-fees.ts",
         "apps/reference-dapp/src/server/authoring-catalogs.ts",
@@ -8232,9 +8224,7 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "app.server.build-estimate-latency",
-        "app.server.approval-run-binder",
-        "app.admin.analytics.channels.pg"
+        "app.server.build-estimate-latency"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",

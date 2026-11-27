@@ -25,7 +25,6 @@ strict output schema, grounding and every later Simulate/Review/signature step a
 | `FLOFI_ADMIN` | `enabled` (anything else: `/admin` answers 404) |
 | `FLOFI_ADMIN_SESSION_SECRET` | `openssl rand -hex 32`, **dedicated**: 32–512 characters, refused if equal to any other secret FloFi reads (`FLOFI_SESSION_SECRET`, `API_AUTH_TOKEN`, channel, automation, developer, MCP, webhook, provider, object-store or cron secrets, `OPENAI_API_KEY`) |
 | `DATABASE_ADMIN_URL` | Dedicated pooled login on the same Neon database as platform state. Hosted admin reports `ADMIN_STORE_NOT_CONFIGURED` when missing. |
-| `FLOFI_ADMIN_WEB_ATTRIBUTION_FROM` | optional: a UTC instant (`2026-12-01T00:00:00Z`) at or after the deployment of the approval run binder; from then on a single-flow run no approval names is counted as FloFi Web in *Completed executions by channel* (unset or invalid: Unknown origin) |
 | `FLOFI_COPILOT_RUNTIME_CONFIG` | optional break-glass: `disabled` ignores stored Copilot settings and uses `OPENAI_COPILOT_*` only |
 
 Never `NEXT_PUBLIC_*`. Rotating `FLOFI_ADMIN_SESSION_SECRET` signs every administrator out (sessions are also server-side rows).

@@ -19,10 +19,11 @@ function channelNotes(data: Counts, environment: AnalyticsEnvironment, language:
     copy('Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; ' +
       'simulations, quotes, approval requests, retries and individual steps are never counted.'),
     copy('An execution belongs to the period it started in.'),
-    copy('FloFi Web combines Web Chat and the Editor: no record says which of the two started a run.'),
+    copy('FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor: no record says which of the two started a run.'),
+    copy('One-step runs started directly in the app have no origin record and are shown as Unknown origin.'),
+    copy("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at " +
+      'most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.'),
     copy('Executions without a recorded origin, including earlier history, are shown as Unknown origin.'),
-    data.cutover ? copy('Direct FloFi Web runs are attributed from {0}; earlier ones are shown as Unknown origin.', time(data.cutover.toISOString()))
-      : copy('Direct FloFi Web runs are shown as Unknown origin until web attribution is enabled.'),
     ...tally.automation ? [copy('{0} completed executions requested by automation rules are not attributed to a channel.', count(tally.automation))] : [],
     ...data.unrecognizedEnvironment ? [copy('{0} completed executions have no recognized environment and are not counted.', count(data.unrecognizedEnvironment))] : [],
     ...data.coverage.truncated && data.coverage.coveredFrom ? [copy('This period holds more runs than one view reads: single-flow executions are counted only ' +

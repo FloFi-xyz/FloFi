@@ -97,14 +97,14 @@ const portuguese: Readonly<Record<string, string>> = {
   "Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; simulations, quotes, approval requests, retries and individual steps are never counted.":
     "Cada contagem é uma execução única de fluxo concluída e conciliada. Um Pagamento em lote conta uma vez, qualquer que seja o número de destinatários; simulações, cotações, pedidos de aprovação, novas tentativas e etapas individuais nunca são contados.",
   "An execution belongs to the period it started in.": "Cada execução pertence ao período em que foi iniciada.",
-  "FloFi Web combines Web Chat and the Editor: no record says which of the two started a run.":
-    "FloFi Web reúne o Chat na web e o Editor: nenhum registro indica qual dos dois iniciou a execução.",
+  "FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor: no record says which of the two started a run.":
+    "FloFi Web conta as execuções de fluxos iniciadas no Editor e reúne o Chat na web e o Editor: nenhum registro indica qual dos dois iniciou a execução.",
+  "One-step runs started directly in the app have no origin record and are shown as Unknown origin.":
+    "Execuções de uma etapa iniciadas diretamente no app não têm registro de origem e aparecem como Origem desconhecida.",
+  "A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.":
+    "Uma execução de uma etapa iniciada a partir de uma aprovação mantém seu canal somente enquanto existir o registro dessa execução na aprovação: uma aprovação registra no máximo 16 execuções, e aprovações podem ser removidas pela retenção. Caso contrário, ela aparece como Origem desconhecida.",
   "Executions without a recorded origin, including earlier history, are shown as Unknown origin.":
     "Execuções sem origem registrada, inclusive o histórico anterior, aparecem como Origem desconhecida.",
-  "Direct FloFi Web runs are attributed from {0}; earlier ones are shown as Unknown origin.":
-    "Execuções diretas no FloFi Web são atribuídas a partir de {0}; as anteriores aparecem como Origem desconhecida.",
-  "Direct FloFi Web runs are shown as Unknown origin until web attribution is enabled.":
-    "Execuções diretas no FloFi Web aparecem como Origem desconhecida até que a atribuição web seja ativada.",
   "{0} completed executions requested by automation rules are not attributed to a channel.":
     "{0} execuções concluídas solicitadas por regras de automação não são atribuídas a um canal.",
   "{0} completed executions have no recognized environment and are not counted.":

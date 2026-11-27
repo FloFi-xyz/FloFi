@@ -16,9 +16,9 @@ const isWorkflow = (value: unknown): value is Workflow => {
 };
 /**
  * The run of a simulation: the record id (`simulate`), or the catalog swap's execution id (`prepare`) — only once the owner's own
- * preflight is in it (`quote.ownerReview`), never a bare quote. Also read by `server/approval-run-binder.ts` (the same run, by the same rule).
+ * preflight is in it (`quote.ownerReview`), never a bare quote.
  */
-export const runIdOf = (method: string, value: unknown): string | null => {
+const runIdOf = (method: string, value: unknown): string | null => {
   const v = value as { id?: unknown; runId?: unknown; quote?: { executionId?: unknown; ownerReview?: unknown } } | null;
   if (!v || typeof v !== 'object') return null;
   const id = method === 'prepare' ? (v.quote?.ownerReview ? v.quote.executionId : null) : typeof v.id === 'string' ? v.id : v.runId;

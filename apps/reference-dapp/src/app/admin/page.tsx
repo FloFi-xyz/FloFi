@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ACTION_KINDS, ACTION_LABELS } from '../../admin/analytics/actions';
-import { channelPeriod, loadChannelCounts, webAttributionFrom } from '../../admin/analytics/channels';
+import { channelPeriod, loadChannelCounts } from '../../admin/analytics/channels';
 import { ENVIRONMENT_LABELS, type NetworkInfo } from '../../admin/analytics/networks';
 import { param, withParams, workflowView, type AnalyticsParams } from '../../admin/analytics/view';
 import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/workflows';
@@ -93,7 +93,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
   const [{ language }, view, health, copilot, finance, channels] = await Promise.all([requestLanguage(), workflowView(page.host, params, page.now, shared),
     healthReport(process.env, page.host, page.now, fetch, shared).catch(() => null), copilotSettingsView(process.env, page.host).catch(() => null),
     readFinopsReport(page.host, finopsPeriod(page.now, {}).period, page.now).catch(() => null),
-    loadChannelCounts(page.host, { period: channelsPeriod, cutover: webAttributionFrom(process.env) })]);
+    loadChannelCounts(page.host, { period: channelsPeriod })]);
   const { copy, count } = finopsCopy(language);
   const glance = <Glance health={health} copilot={copilot} language={language}/>;
   const financial = <FinanceSummary report={finance} language={language}/>;

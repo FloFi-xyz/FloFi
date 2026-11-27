@@ -16,15 +16,17 @@
  * the Admin.
  *
  * Where a count comes from: only trusted, server-written, persisted records — the approval handoff (`mcp_handoffs`) a workflow run was started
- * from (`workflow_runs.handoff_id`, immutable), or the handoffs whose `run_ids` (written server-side by `bindRuns`) name a run of the execution.
- * The requester kind and client id of a handoff are immutable (migrations 0005/0006). A self-declared `client_name` is never read, and no
- * wallet address, amount or timestamp proximity is ever used to infer an origin. An execution no record attributes stays UNKNOWN; one that two
- * records attribute to different channels is UNKNOWN too (never counted twice). An unbound single-flow execution is a direct FloFi Web run
- * only once web attribution is enabled (`FLOFI_ADMIN_WEB_ATTRIBUTION_FROM`): from then on every approval-originated single flow simulated on
- * FloFi's signing page is bound to its approval at simulation (`server/approval-run-binder.ts`; native signing binds its own run).
- * Known limits of that rule: a binding exists only while its handoff row does (handoffs are meant to be purged after
- * 30 days, `HandoffStore.purge`), and a handoff holds at most 16 runs (`bindRuns` leaves a full list unchanged): a run of such an approval
- * would read as a FloFi Web run.
+ * from (`workflow_runs.handoff_id`, immutable), or the handoffs whose `run_ids` name a run of the execution. `run_ids` is written server-side
+ * by `HandoffStore.bindRuns` only (`platform/approvals.ts` sharedRunsRead, when a requester reads the status the claimant shares, or an
+ * automation reads its own approval; and native signing, `server/native-signing/service.ts`); this module only reads it. The requester kind and client id of a handoff are immutable
+ * (migrations 0005/0006). A self-declared `client_name` is never read, and no wallet address, amount, timestamp or absence of a record is ever
+ * used to infer an origin. An execution no record attributes stays UNKNOWN, always; one that two records attribute to different channels is
+ * UNKNOWN too (never counted twice). FloFi Web is therefore counted only from positive records: workflow runs whose handoff is an
+ * EDITOR_SESSION, and single flows an EDITOR_SESSION handoff names.
+ * Known limits: a single flow started directly in the app has no origin record (UNKNOWN). A single flow started from an approval keeps the
+ * approval's channel only while that approval's binding of the run exists: an approval records a run only when one of those two writers bound
+ * it, holds at most 16 runs (`bindRuns` leaves a full list unchanged), and may be removed by retention (`HandoffStore.purge`). Otherwise, and
+ * for earlier history without records, the execution is UNKNOWN.
  */
 import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import type { AdminHost } from '../host.ts';
@@ -68,15 +70,6 @@ export function channelOf(requesterKind: string, clientId: string): Origin {
   }
 }
 
-/** `FLOFI_ADMIN_WEB_ATTRIBUTION_FROM`: a strict ISO-8601 UTC instant (`YYYY-MM-DDTHH:MM:SS[.sss]Z`). Anything else: no cutover (null). */
-export function webAttributionFrom(env: Readonly<Record<string, string | undefined>>): Date | null {
-  const raw = env.FLOFI_ADMIN_WEB_ATTRIBUTION_FROM;
-  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/.test(raw)) return null;
-  const at = new Date(raw);
-  // Date accepts out-of-range fields (2026-02-30 → March 2): only an instant that reads back exactly as written is one.
-  return !Number.isNaN(at.getTime()) && at.toISOString() === (raw.length === 20 ? raw.replace('Z', '.000Z') : raw) ? at : null;
-}
-
 export const CHANNEL_PERIODS = ['today', '7d', '30d', 'all'] as const;
 export type ChannelPeriodId = (typeof CHANNEL_PERIODS)[number];
 export const CHANNEL_PERIOD_LABELS: Readonly<Record<ChannelPeriodId, string>> = { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days', all: 'All time' };
@@ -95,19 +88,12 @@ export type WorkflowRunGroup = { readonly runKind: string; readonly requesterKin
   readonly count: number };
 /** A handoff's binding to runs (`run_ids`), with the facts that decide its origin. */
 export type RunBinding = { readonly requesterKind: string; readonly clientId: string; readonly runIds: readonly string[] };
-/** A completed single-flow execution: every run that belongs to it, and the workflow ids and flows they ran under. */
-export type CompletedExecution = { readonly environment: AnalyticsEnvironment | null; readonly createdAt: Date; readonly runIds: readonly string[];
-  readonly workflowIds: readonly string[]; readonly flows: readonly string[] };
+/** A completed single-flow execution: every run that belongs to it, and the workflow ids they ran under. */
+export type CompletedExecution = { readonly environment: AnalyticsEnvironment | null; readonly runIds: readonly string[]; readonly workflowIds: readonly string[] };
 export type ChannelTally = { readonly counts: Readonly<Record<Channel, number>>; readonly total: number; readonly automation: number };
 
 /** A handoff's network environment as an Admin environment. A workflow run on any other (MOCK, LOCAL_FORK…) is counted nowhere. */
 const WORKFLOW_RUN_ENVIRONMENT: Readonly<Record<string, AnalyticsEnvironment>> = { MAINNET: 'MAINNET', PUBLIC_TESTNET: 'TESTNET' };
-/**
- * Flows whose runs the approval run binder never binds at simulation (`server/approval-run-binder.ts`: the Pix payment flow simulates a payment
- * request, not the approval's workflow, and keeps its own binding contract). An unbound run of one stays UNKNOWN after the cutover too: it may
- * be an approval's run that no record names.
- */
-export const UNBOUND_AT_SIMULATION_FLOWS: ReadonlySet<string> = new Set(['pix-payment']);
 /** Live developer steps run under the workflow id `wfr_<run>-step-<n>` (`workflow-runs/external-step.ts`): steps of a workflow run. */
 const isWorkflowRunStepWorkflow = (workflowId: string) => workflowId.startsWith('wfr_');
 
@@ -121,17 +107,13 @@ export function completedExecutions(executions: readonly Execution[], runs: read
       if (run && COMPOSITION_FLOWS.has(run.flow)) for (const action of run.fact?.actions ?? []) for (const step of action.runs ?? []) ids.add(step);
     }
     const workflowIds = [...new Set([...ids].map(id => byId.get(id)?.workflowId ?? e.workflowId))];
-    const flows = [...new Set([e.flow, ...[...ids].flatMap(id => byId.get(id)?.flow ?? [])])];
-    return { environment: e.environment, createdAt: e.createdAt, runIds: [...ids], workflowIds, flows };
+    return { environment: e.environment, runIds: [...ids], workflowIds };
   });
 }
 
-/**
- * The tally (pure). `steps`: run ids a workflow run's OWNER_RUN step names. `cutover`: from when an unbound single flow is a direct FloFi Web
- * run (null: never, it stays UNKNOWN).
- */
+/** The tally (pure). `steps`: run ids a workflow run's OWNER_RUN step names. An execution no binding names is UNKNOWN, whenever it ran. */
 export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRunGroup[]; readonly executions: readonly CompletedExecution[];
-  readonly steps: ReadonlySet<string>; readonly bindings: readonly RunBinding[]; readonly cutover: Date | null }):
+  readonly steps: ReadonlySet<string>; readonly bindings: readonly RunBinding[] }):
   { readonly byEnvironment: Readonly<Record<AnalyticsEnvironment, ChannelTally>>; readonly unrecognizedEnvironment: number } {
   const tallies = Object.fromEntries(ENVIRONMENTS.map(env => [env, { counts: Object.fromEntries(CHANNELS.map(c => [c, 0])) as Record<Channel, number>, automation: 0 }]));
   let unrecognizedEnvironment = 0;
@@ -152,8 +134,7 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
   for (const e of input.executions) {
     if (e.runIds.some(id => input.steps.has(id)) || e.workflowIds.some(isWorkflowRunStepWorkflow)) continue;
     const origins = new Set(e.runIds.flatMap(id => [...bound.get(id) ?? []]));
-    const web = input.cutover !== null && e.createdAt.getTime() >= input.cutover.getTime() && !e.flows.some(flow => UNBOUND_AT_SIMULATION_FLOWS.has(flow));
-    const origin: Origin = origins.size > 1 ? 'UNKNOWN' : origins.size === 1 ? [...origins][0]! : web ? 'FLOFI_WEB' : 'UNKNOWN';
+    const origin: Origin = origins.size === 1 ? [...origins][0]! : 'UNKNOWN';
     add(e.environment, origin, 1);
   }
   const byEnvironment = Object.fromEntries(ENVIRONMENTS.map(env => { const t = tallies[env]!;
@@ -162,7 +143,7 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
 }
 
 export type ChannelCounts = {
-  readonly period: ChannelPeriod; readonly cutover: Date | null;
+  readonly period: ChannelPeriod;
   readonly byEnvironment: Readonly<Record<AnalyticsEnvironment, ChannelTally>>;
   /** Completed executions of no recognized environment (a workflow run of another network environment, a run of unknown provenance). */
   readonly unrecognizedEnvironment: number;
@@ -208,14 +189,14 @@ async function runBindings(tx: Queryable, tenantId: string, ids: readonly string
       ARRAY(SELECT r FROM unnest(run_ids) AS r WHERE r = ANY($2::text[])) AS run_ids
     FROM mcp_handoffs WHERE tenant_id = $1 AND created_at < $3::timestamptz + interval '1 hour' AND cardinality(run_ids) > 0 AND run_ids && $2::text[]
     LIMIT $4`, [tenantId, ids, before, BINDING_LIMIT + 1]);
-  // Never a partial attribution: a binding left unread could name another channel (or make an unbound run look like a FloFi Web run).
+  // Never a partial attribution: a binding left unread could name another channel.
   if (rows.length > BINDING_LIMIT) throw new Error('ADMIN_CHANNEL_BINDINGS_TRUNCATED');
   return rows.map(row => ({ requesterKind: row.requester_kind, clientId: row.client_id, runIds: row.run_ids }));
 }
 
 /** One period's completed executions by channel, per environment. Any read failure is the closed code; nothing is estimated. */
-export async function loadChannelCounts(host: AdminHost, options: { readonly period: ChannelPeriod; readonly cutover: Date | null }): Promise<ChannelCountsResult> {
-  const { period, cutover } = options;
+export async function loadChannelCounts(host: AdminHost, options: { readonly period: ChannelPeriod }): Promise<ChannelCountsResult> {
+  const { period } = options;
   try {
     const [read, workflowRuns] = await Promise.all([loadRuns(host.db, host.tenantId, period), completedWorkflowRuns(host, period)]);
     const all = executionsOf(read.runs), executions = completedExecutions(all, read.runs);
@@ -223,7 +204,7 @@ export async function loadChannelCounts(host: AdminHost, options: { readonly per
     const { steps, bindings } = ids.length ? await bounded(host, async tx => ({ steps: await workflowRunSteps(tx, host.tenantId, ids),
       bindings: await runBindings(tx, host.tenantId, ids, period.to) })) : { steps: new Set<string>(), bindings: [] };
     const compositionsWithoutRecord = Object.fromEntries(ENVIRONMENTS.map(env => [env, all.filter(e => e.environment === env && COMPOSITION_FLOWS.has(e.flow) && !e.actions).length]));
-    return { ok: true, value: { period, cutover, ...foldChannels({ workflowRuns: workflowRuns.groups, executions, steps, bindings, cutover }), coverage: read.coverage,
+    return { ok: true, value: { period, ...foldChannels({ workflowRuns: workflowRuns.groups, executions, steps, bindings }), coverage: read.coverage,
       workflowRunsTruncated: workflowRuns.truncated, compositionsWithoutRecord: compositionsWithoutRecord as Record<AnalyticsEnvironment, number> } };
   } catch { return { ok: false, code: 'ADMIN_CHANNEL_COUNTS_UNAVAILABLE' }; }
 }

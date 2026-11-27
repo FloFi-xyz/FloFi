@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): the channel of a completed execution comes only from trusted, immutable records
- * (requester kind and OAuth client id, never a self-declared name), unattributable executions stay UNKNOWN, folding never counts an execution
- * twice, periods are UTC, the section renders in English and Portuguese, and it is reachable only behind the Admin page gate.
+ * (requester kind and OAuth client id, never a self-declared name), unattributable executions stay UNKNOWN whenever they ran (never FloFi Web
+ * by time or by the absence of a record), folding never counts an execution twice, periods are UTC, the section renders in English and
+ * Portuguese, and it is reachable only behind the Admin page gate.
  */
 import { randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -20,7 +21,7 @@ vi.mock('next/headers', () => ({ headers: async () => new Headers({ host: 'flofi
   cookies: async () => ({ get: (name: string) => name === 'flofi_admin_session' && request.token ? { value: request.token } : undefined }) }));
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NOT_FOUND'); }, redirect: (path: string) => { throw new Error(path); } }));
 vi.mock('./channels.ts', async original => ({ ...await original<typeof import('./channels.ts')>(), loadChannelCounts: vi.fn(async () => { throw new Error('UNREACHABLE'); }) }));
-const { CHANNELS, channelOf, channelPeriod, completedExecutions, foldChannels, loadChannelCounts, webAttributionFrom } = await import('./channels.ts');
+const { CHANNELS, channelOf, channelPeriod, completedExecutions, foldChannels, loadChannelCounts } = await import('./channels.ts');
 type ChannelCounts = import('./channels.ts').ChannelCounts;
 const { ChannelCounts: Section } = await import('../../components/admin/channel-counts');
 
@@ -56,14 +57,6 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
     for (const kind of ['', 'MCP', 'mcp_account', 'SOMETHING_NEW']) expect(channelOf(kind, 'https://chatgpt.com/oauth/abc123/client.json')).toBe('UNKNOWN');
   });
 
-  it('reads the web attribution cutover only as a strict UTC instant', () => {
-    expect(webAttributionFrom({ FLOFI_ADMIN_WEB_ATTRIBUTION_FROM: '2026-12-01T00:00:00Z' })).toEqual(new Date('2026-12-01T00:00:00.000Z'));
-    expect(webAttributionFrom({ FLOFI_ADMIN_WEB_ATTRIBUTION_FROM: '2026-12-01T08:30:15.250Z' })).toEqual(new Date('2026-12-01T08:30:15.250Z'));
-    for (const value of [undefined, '', ' 2026-12-01T00:00:00Z', '2026-12-01', '2026-12-01T00:00Z', '2026-12-01T00:00:00+00:00', '2026-12-01T00:00:00.5Z',
-      '2026-02-30T00:00:00Z', '2026-13-01T00:00:00Z', '2026-12-01T24:00:00Z', 'yesterday', '1764547200000'])
-      expect(webAttributionFrom({ FLOFI_ADMIN_WEB_ATTRIBUTION_FROM: value }), String(value)).toBeNull();
-  });
-
   it('periods: Today from UTC midnight, 7 and 30 days back, All time from the epoch; anything else is the last 30 days', () => {
     const now = new Date('2026-11-20T10:15:00.000Z');
     expect(channelPeriod('today', now)).toEqual({ id: 'today', from: new Date('2026-11-20T00:00:00.000Z'), to: now, invalid: false });
@@ -94,15 +87,13 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
     // A binding of any run of an execution (here the recovery and the composition's step) attributes the one execution.
     const bindings = [{ requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/x', runIds: ['root-r'] },
       { requesterKind: 'CHANNEL_CONVERSATION', clientId: 'telegram:123456789', runIds: ['comp-step'] }];
-    const folded = foldChannels({ workflowRuns: [], executions: completed, steps: new Set(), bindings, cutover: null });
+    const folded = foldChannels({ workflowRuns: [], executions: completed, steps: new Set(), bindings });
     expect(folded.byEnvironment.MAINNET).toEqual({ counts: { ...NONE, CLAUDE_MCP: 1, UNKNOWN: 1 }, total: 2, automation: 0 });
     expect(folded.byEnvironment.TESTNET).toEqual({ counts: { ...NONE, TELEGRAM: 1 }, total: 1, automation: 0 });
   });
 
   it('counts workflow runs and single flows once, by their records, and keeps unattributable ones UNKNOWN', () => {
-    const at = (iso: string) => new Date(iso), cutover = at('2026-11-15T00:00:00Z');
-    const single = (id: string, createdAt = at('2026-11-18T00:00:00Z'), workflowId = `wf-${id}`, environment: 'MAINNET' | 'TESTNET' | null = 'MAINNET', flow = 'base-swap') =>
-      ({ environment, createdAt, runIds: [id], workflowIds: [workflowId], flows: [flow] });
+    const single = (id: string, workflowId = `wf-${id}`, environment: 'MAINNET' | 'TESTNET' | null = 'MAINNET') => ({ environment, runIds: [id], workflowIds: [workflowId] });
     const folded = foldChannels({
       workflowRuns: [
         { runKind: 'EDITOR_SESSION', requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', networkEnvironment: 'MAINNET', count: 3 },
@@ -113,28 +104,47 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
         { runKind: 'EDITOR_SESSION', requesterKind: 'MCP_ACCOUNT', clientId: 'https://chatgpt.com/oauth/a/client.json', networkEnvironment: 'MAINNET', count: 1 },
         { runKind: 'EDITOR_SESSION', requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', networkEnvironment: 'MOCK', count: 2 },
       ],
-      executions: [single('step-run'), single('dev-step', undefined, 'wfr_abcdefghijklmnopqrstuvwxyz-step-0'), single('bound'), single('twice'), single('conflict'),
-        single('before', at('2026-11-14T23:59:59.999Z')), single('after', cutover), single('auto'), single('testnet', undefined, undefined, 'TESTNET'),
-        single('nowhere', undefined, undefined, null),
-        // A Pix payment is never bound at simulation: unbound, it stays UNKNOWN even after the cutover.
-        single('pix', undefined, undefined, 'MAINNET', 'pix-payment')],
+      executions: [single('step-run'), single('dev-step', 'wfr_abcdefghijklmnopqrstuvwxyz-step-0'), single('bound'), single('twice'), single('conflict'),
+        single('unbound'), single('editor-bound'), single('auto'), single('testnet', undefined, 'TESTNET'), single('nowhere', undefined, null)],
       steps: new Set(['step-run']),
       bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/x', runIds: ['bound'] },
         { requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/x', runIds: ['twice'] }, { requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/y', runIds: ['twice'] },
         { requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/x', runIds: ['conflict'] }, { requesterKind: 'DEVELOPER_PROJECT', clientId: 'prj_x', runIds: ['conflict'] },
-        { requesterKind: 'AUTOMATION_RULE', clientId: 'flofi-automations', runIds: ['auto'] }],
-      cutover,
+        { requesterKind: 'AUTOMATION_RULE', clientId: 'flofi-automations', runIds: ['auto'] },
+        // A one-step run an Editor approval names is a FloFi Web run: a positive record, like an Editor workflow run.
+        { requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', runIds: ['editor-bound'] }],
     });
-    expect(folded.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 4, CHATGPT_MCP: 2, CLAUDE_MCP: 2, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 1, UNKNOWN: 4 },
-      total: 13, automation: 5 });
-    expect(folded.byEnvironment.TESTNET).toEqual({ counts: { ...NONE, FLOFI_WEB: 1, DEVELOPER_API: 1 }, total: 2, automation: 0 });
+    // FloFi Web: the 3 Editor workflow runs and the Editor-bound one-step run. Unknown: the run whose requester disagrees with its handoff, the
+    // conflicting binding and the unbound single flow (never FloFi Web by absence of a record).
+    expect(folded.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 4, CHATGPT_MCP: 2, CLAUDE_MCP: 2, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
+      total: 12, automation: 5 });
+    expect(folded.byEnvironment.TESTNET).toEqual({ counts: { ...NONE, DEVELOPER_API: 1, UNKNOWN: 1 }, total: 2, automation: 0 });
     expect(folded.unrecognizedEnvironment).toBe(3);
+  });
+
+  it('an execution no record names is Unknown origin whenever it ran; a bound one-step run keeps its channel; an Editor workflow run is FloFi Web', () => {
+    // Unbound single flows of every age and flow (direct app runs, Pix payments, approval runs whose binding is gone): never FloFi Web.
+    const runs = [run({ runId: 'old', createdAt: new Date('2019-01-01T00:00:00Z'), updatedAt: new Date('2019-01-01T00:05:00Z') }),
+      run({ runId: 'recent', createdAt: new Date('2026-11-20T09:59:00Z'), updatedAt: new Date('2026-11-20T09:59:30Z') }),
+      run({ runId: 'future-dated', createdAt: new Date('2030-01-01T00:00:00Z'), updatedAt: new Date('2030-01-01T00:01:00Z') }),
+      run({ runId: 'pix', flow: 'pix-payment', status: 'PAYMENT_SETTLED' }), run({ runId: 'solana', flow: 'solana-transfer' }),
+      run({ runId: 'mcp-one-step', createdAt: new Date('2026-11-19T12:00:00Z') })];
+    const executions = completedExecutions(executionsOf(runs), runs);
+    expect(executions.map(e => e.runIds)).toEqual([['old'], ['recent'], ['future-dated'], ['pix'], ['solana'], ['mcp-one-step']]);
+    const none = foldChannels({ workflowRuns: [], executions, steps: new Set(), bindings: [] });
+    expect(none.byEnvironment.MAINNET).toEqual({ counts: { ...NONE, UNKNOWN: 6 }, total: 6, automation: 0 });
+    // A one-step run an MCP approval bound keeps that channel, and an Editor workflow run is FloFi Web (the PostgreSQL suite proves that a
+    // Batch Payment of 8 recipients is one such run, counted once).
+    const folded = foldChannels({ executions, steps: new Set(),
+      bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'https://chatgpt.com/oauth/a/client.json', runIds: ['mcp-one-step'] }],
+      workflowRuns: [{ runKind: 'EDITOR_SESSION', requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', networkEnvironment: 'MAINNET', count: 1 }] });
+    expect(folded.byEnvironment.MAINNET).toEqual({ counts: { ...NONE, FLOFI_WEB: 1, CHATGPT_MCP: 1, UNKNOWN: 5 }, total: 7, automation: 0 });
   });
 });
 
 const counts = (over: Partial<ChannelCounts> = {}): ChannelCounts => {
   const empty = { counts: NONE, total: 0, automation: 0 };
-  return { period: channelPeriod('30d', new Date('2026-11-20T10:00:00Z')), cutover: null, byEnvironment: { MAINNET: { counts: { ...NONE, FLOFI_WEB: 2, CHATGPT_MCP: 1 }, total: 3, automation: 1 },
+  return { period: channelPeriod('30d', new Date('2026-11-20T10:00:00Z')), byEnvironment: { MAINNET: { counts: { ...NONE, FLOFI_WEB: 2, CHATGPT_MCP: 1 }, total: 3, automation: 1 },
     TESTNET: empty, MOCKED: empty }, unrecognizedEnvironment: 0, coverage: FULL_COVERAGE, workflowRunsTruncated: false, compositionsWithoutRecord: { MAINNET: 0, TESTNET: 0, MOCKED: 0 }, ...over };
 };
 const render = (result: Parameters<typeof Section>[0]['result'], language: 'EN' | 'PT' = 'EN', environment: 'MAINNET' | 'TESTNET' = 'MAINNET', channels = '30d') =>
@@ -153,10 +163,14 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel section', () 
     expect([...html.matchAll(/<td class="num">(?:<strong>)?([^<]+)</g)].map(m => m[1])).toEqual(['2', '1', '0', '0', '0', '0', '0', '3']);
     expect(html).toContain('<th scope="col">Channel</th>');
     expect(body).toContain('A Batch Payment counts once');
-    expect(body).toContain('FloFi Web combines Web Chat and the Editor');
-    expect(body).toContain('Direct FloFi Web runs are shown as Unknown origin until web attribution is enabled.');
+    expect(body).toContain('FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor');
+    expect(body).toContain('One-step runs started directly in the app have no origin record and are shown as Unknown origin.');
+    expect(body.replaceAll('&#x27;', "'")).toContain("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at most "
+      + '16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.');
+    expect(body).toContain('Executions without a recorded origin, including earlier history, are shown as Unknown origin.');
     expect(body).toContain('1 completed executions requested by automation rules are not attributed to a channel.');
-    expect(text(render({ ok: true, value: counts({ cutover: new Date('2026-11-01T00:00:00Z') }) }))).toContain('Direct FloFi Web runs are attributed from 2026-11-01 00:00 UTC');
+    // No time-based web attribution is configured or described.
+    expect(body).not.toMatch(/attributed from|web attribution|cutover/i);
   });
 
   it('says what it leaves out: an empty period, a partial read, a failure and an unrecognized period', () => {
@@ -174,16 +188,19 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel section', () 
   });
 
   it('is translated to Portuguese through the Admin copy', () => {
-    const value = counts({ cutover: new Date('2026-11-01T00:00:00Z'), unrecognizedEnvironment: 2, workflowRunsTruncated: true,
+    const value = counts({ unrecognizedEnvironment: 2, workflowRunsTruncated: true,
       coverage: { truncated: true, runsInRange: 30_000, coveredFrom: new Date('2026-11-10T00:00:00Z') }, compositionsWithoutRecord: { MAINNET: 1, TESTNET: 0, MOCKED: 0 } });
     const pt = text(render({ ok: true, value }, 'PT', 'MAINNET', 'nope')) + text(render({ ok: false, code: 'ADMIN_CHANNEL_COUNTS_UNAVAILABLE' }, 'PT'))
       + text(render({ ok: true, value: counts() }, 'PT', 'TESTNET'));
     for (const phrase of ['Execuções concluídas por canal', 'Canal', 'Origem desconhecida', 'Cliente MCP não identificado', 'API para desenvolvedores', 'Total', 'Hoje',
       'Últimos 7 dias', 'Últimos 30 dias', 'Todo o período', 'Pagamento em lote conta uma vez', 'Pelo menos 3', 'Nenhuma execução concluída neste período.',
+      'FloFi Web conta as execuções de fluxos iniciadas no Editor', 'iniciadas diretamente no app não têm registro de origem',
+      'uma aprovação registra no máximo 16 execuções, e aprovações podem ser removidas pela retenção',
       'As contagens de execuções concluídas estão indisponíveis.', 'O período solicitado não foi reconhecido'])
       expect(pt).toContain(phrase);
     // No English sentence of the section is left untranslated.
-    for (const english of ['Completed executions', 'Unknown origin', 'Each count', 'An execution belongs', 'combines Web Chat', 'without a recorded origin', 'Direct FloFi Web',
+    for (const english of ['Completed executions', 'Unknown origin', 'Each count', 'An execution belongs', 'combines Web Chat', 'without a recorded origin', 'started directly',
+      'started from an approval', 'removed by retention',
       'automation rules', 'no recognized environment', 'lower bound', 'not indexed', 'No completed', 'unavailable', 'not recognized', 'Last 30 days', 'All time', 'Period'])
       expect(pt).not.toContain(english);
   });

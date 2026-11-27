@@ -3,22 +3,19 @@
  * BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-25): completed executions by channel against PostgreSQL, on controlled fixtures with exact
  * expected counts — workflow runs of every requester kind (a Batch Payment-shaped 8-step run counted once), owner-signed step runs and live
  * developer step runs counted only through their workflow run, recoveries and retries folded into one execution, bound single flows attributed
- * to their approval's channel, unbound ones before and after the web attribution cutover, conflicting bindings, automations, environments and
- * period boundaries. Then the approval run binder: it binds only the exact approved run of the verified claimant.
+ * to their approval's channel, unbound ones Unknown origin whatever their time, conflicting bindings, automations, environments and period
+ * boundaries. Then FloFi Web only from positive records, an 8-recipient Batch Payment counted once, and a binding that keeps its channel only
+ * while its approval exists.
  */
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { templateWorkflow, type Workflow } from '../../domain/initial-workflow';
-import { semanticWorkflowHash } from '../../engine/strategy-engine';
-import { bindSimulatedRun, type RunBinderDeps } from '../../server/approval-run-binder.ts';
 import { channelPeriod, loadChannelCounts, type ChannelCounts } from './channels.ts';
 
 const NOW = new Date('2026-11-20T10:00:00.000Z'), MIDNIGHT = new Date('2026-11-20T00:00:00.000Z'), DAY = 86_400_000;
 const ago = (days: number) => new Date(NOW.getTime() - days * DAY);
-const CUTOVER = ago(5);
 const HASH = '0x' + 'a'.repeat(64), OWNER = '0x' + 'ab'.repeat(20);
 const CHATGPT = 'https://chatgpt.com/oauth/fixture/client.json', CLAUDE = 'https://claude.ai/oauth/mcp-oauth-client-metadata', DCR = 'flofi_dcr_fixtureclient';
 let t: TestDatabase, db: Database, seq = 0;
@@ -46,28 +43,27 @@ async function grantFor(clientId: string) {
   return grant;
 }
 type Kind = 'MCP_ACCOUNT' | 'DEVELOPER_PROJECT' | 'CHANNEL_CONVERSATION' | 'AUTOMATION_RULE' | 'EDITOR_SESSION';
-type HandoffSeed = { kind: Kind; clientId: string; environment?: string | undefined; plan?: Record<string, unknown>; status?: 'APPLIED' | 'CLAIMED'; runIds?: string[];
-  createdAt?: Date; workflowHash?: string; claimed?: { namespace: 'eip155' | 'solana'; address: string } };
+type HandoffSeed = { kind: Kind; clientId: string; environment?: string | undefined; plan?: Record<string, unknown>; runIds?: string[]; createdAt?: Date };
 /** An approval handoff, inserted as the stores write it (the client name is deliberately misleading: it must never matter). */
 async function handoff(seed: HandoffSeed): Promise<string> {
-  const id = 'apr_' + tag(), createdAt = seed.createdAt ?? ago(2), workflowHash = seed.workflowHash ?? HASH, claimed = seed.claimed ?? { namespace: 'eip155', address: OWNER };
+  const id = 'apr_' + tag(), createdAt = seed.createdAt ?? ago(2);
   let requesterId: string | null = null, context: Record<string, unknown> = {}, grant: string | null = null;
   if (seed.kind === 'MCP_ACCOUNT') grant = await grantFor(seed.clientId);
   else if (seed.kind === 'DEVELOPER_PROJECT') {
     const project = 'prj_' + tag(), strategy = 'str_' + tag();
     await db.query(`INSERT INTO developer_projects (tenant_id, project_id, display_name) VALUES ('default', $1, 'Fixture')`, [project]);
     await db.query(`INSERT INTO developer_strategies (tenant_id, strategy_id, project_id, environment, strategy, workflow_hash, engine_version, funds_class,
-      network_environment, plan) VALUES ('default', $1, $2, 'production', '{}', $3, 'fixture', 'REAL_FUNDS', 'MAINNET', '{}')`, [strategy, project, workflowHash]);
+      network_environment, plan) VALUES ('default', $1, $2, 'production', '{}', $3, 'fixture', 'REAL_FUNDS', 'MAINNET', '{}')`, [strategy, project, HASH]);
     requesterId = `${project}.production`; context = { strategyId: strategy };
   } else requesterId = `${seed.kind.toLowerCase().replace('_', '-')}-${tag()}`;
-  const environment = seed.environment ?? 'MAINNET', status = seed.status ?? 'APPLIED';
+  const environment = seed.environment ?? 'MAINNET';
   await db.query(`INSERT INTO mcp_handoffs (tenant_id, handoff_id, requester_kind, requester_id, requester_context, account_id, grant_id, client_id, client_name,
       secret_digest, strategy, workflow_hash, engine_version, network_environment, funds_class, plan, status, claimed_namespace, claimed_address, claimed_at,
       claim_expires_at, applied_at, run_ids, expires_at, created_at)
-    VALUES ('default', $1, $2, $3, $4, $5, $6, $7, 'ChatGPT', $8, '{}', $9, 'fixture', $10, $11, $12, $13, $14, $15, $16, $16, $17, $18, $19, $16)`,
-  [id, seed.kind, requesterId, context, seed.kind === 'MCP_ACCOUNT' ? accountId : null, grant, seed.clientId, randomBytes(32), workflowHash, environment,
-    environment === 'MAINNET' ? 'REAL_FUNDS' : 'TEST_FUNDS', seed.plan ?? { kind: 'SINGLE_FLOW', flow: 'base-swap' }, status, claimed.namespace, claimed.address,
-    createdAt, status === 'APPLIED' ? createdAt : null, seed.runIds ?? [], new Date(createdAt.getTime() + DAY)]);
+    VALUES ('default', $1, $2, $3, $4, $5, $6, $7, 'ChatGPT', $8, '{}', $9, 'fixture', $10, $11, $12, 'APPLIED', 'eip155', $13, $14, $14, $14, $15, $16, $14)`,
+  [id, seed.kind, requesterId, context, seed.kind === 'MCP_ACCOUNT' ? accountId : null, grant, seed.clientId, randomBytes(32), HASH, environment,
+    environment === 'MAINNET' ? 'REAL_FUNDS' : 'TEST_FUNDS', seed.plan ?? { kind: 'SINGLE_FLOW', flow: 'base-swap' }, OWNER, createdAt, seed.runIds ?? [],
+    new Date(createdAt.getTime() + DAY)]);
   return id;
 }
 type StepSeed = { state: string; kind?: 'OWNER_RUN' | 'USER_FUNDED_GROUP' | 'DELEGATED_STEP'; executionId?: string };
@@ -110,8 +106,8 @@ async function run(runId: string, seed: RunSeed = {}): Promise<string> {
   return runId;
 }
 
-const counts = async (period: 'today' | '7d' | '30d' | 'all', cutover: Date | null = CUTOVER, tenantId = 'default'): Promise<ChannelCounts> => {
-  const result = await loadChannelCounts({ db, tenantId }, { period: channelPeriod(period, NOW), cutover });
+const counts = async (period: 'today' | '7d' | '30d' | 'all', tenantId = 'default'): Promise<ChannelCounts> => {
+  const result = await loadChannelCounts({ db, tenantId }, { period: channelPeriod(period, NOW) });
   if (!result.ok) throw new Error(result.code);
   return result.value;
 };
@@ -119,7 +115,7 @@ const zero = { FLOFI_WEB: 0, CHATGPT_MCP: 0, CLAUDE_MCP: 0, TELEGRAM: 0, DEVELOP
 
 describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions by channel (PostgreSQL)', () => {
   it('counts each completed and reconciled run once, by the channel its trusted records name', async () => {
-    expect((await counts('all', CUTOVER, 'empty-tenant')).byEnvironment.MAINNET).toEqual({ counts: zero, total: 0, automation: 0 });
+    expect((await counts('all', 'empty-tenant')).byEnvironment.MAINNET).toEqual({ counts: zero, total: 0, automation: 0 });
 
     // Workflow runs, one per requester kind; a Batch Payment-shaped run of 8 steps (one wallet group each) is ONE run.
     await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor' });
@@ -163,9 +159,9 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions 
     await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, runIds: ['sf-same'] });
     await handoff({ kind: 'MCP_ACCOUNT', clientId: 'https://chatgpt.com/oauth/other/client.json', runIds: ['sf-same'] });
     await handoff({ kind: 'AUTOMATION_RULE', clientId: 'flofi-automations', runIds: [await run('sf-auto')] });
-    // Unbound single flows: before and after the web attribution cutover.
-    await run('sf-web-before', { createdAt: ago(10) });
-    await run('sf-web-after', { createdAt: ago(3) });
+    // Unbound single flows (no record names them): Unknown origin, however old or recent.
+    await run('sf-unbound-old', { createdAt: ago(10) });
+    await run('sf-unbound-recent', { createdAt: ago(3) });
     await run('sf-testnet', { provenance: 'PUBLIC_TESTNET' });
     // Never completed: failed, uncertain, still observed, simulated only.
     await run('sf-failed', { status: 'REVERTED', attempts: [{ state: 'REVERTED', hash: true }] });
@@ -173,67 +169,40 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions 
     await run('sf-observing', { status: 'RECONCILED', needsObservation: true });
     await run('sf-simulated', { status: 'SIMULATED' });
 
+    // FloFi Web: the five Editor workflow runs of the period (two-step, 8-step, one-step, today's and yesterday's), never an unbound single flow.
+    // Unknown origin: the conflicting binding and both unbound single flows.
     const month = await counts('30d');
-    expect(month.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 6, CHATGPT_MCP: 3, CLAUDE_MCP: 2, TELEGRAM: 2, DEVELOPER_API: 1, MCP_UNIDENTIFIED: 1, UNKNOWN: 2 },
+    expect(month.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 5, CHATGPT_MCP: 3, CLAUDE_MCP: 2, TELEGRAM: 2, DEVELOPER_API: 1, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
       total: 17, automation: 2 });
-    expect(month.byEnvironment.TESTNET).toEqual({ counts: { ...zero, FLOFI_WEB: 2 }, total: 2, automation: 0 });
+    expect(month.byEnvironment.TESTNET).toEqual({ counts: { ...zero, FLOFI_WEB: 1, UNKNOWN: 1 }, total: 2, automation: 0 });
     expect(month.byEnvironment.MOCKED).toEqual({ counts: zero, total: 0, automation: 0 });
     expect(month).toMatchObject({ unrecognizedEnvironment: 1, workflowRunsTruncated: false, coverage: { truncated: false } });
     expect(JSON.stringify(month)).not.toMatch(/0x[0-9a-f]{40}|apr_|wfr_|mcpacct_|grt_|chatgpt\.com|claude\.ai|sf-|own-/);
 
-    // Without a cutover, an unbound single flow is never called a FloFi Web run.
-    const unattributed = await counts('30d', null);
-    expect(unattributed.byEnvironment.MAINNET.counts).toMatchObject({ FLOFI_WEB: 5, UNKNOWN: 3 });
-    expect(unattributed.byEnvironment.TESTNET.counts).toMatchObject({ FLOFI_WEB: 1, UNKNOWN: 1 });
     // Periods: an execution belongs to the period it started in; Today starts at UTC midnight (inclusive).
     expect((await counts('today')).byEnvironment.MAINNET).toEqual({ counts: { ...zero, FLOFI_WEB: 1 }, total: 1, automation: 0 });
-    expect((await counts('7d')).byEnvironment.MAINNET.counts).toMatchObject({ FLOFI_WEB: 6, UNKNOWN: 1 });
-    expect((await counts('all')).byEnvironment.MAINNET).toMatchObject({ counts: { FLOFI_WEB: 7, UNKNOWN: 2 }, total: 18 });
+    expect((await counts('7d')).byEnvironment.MAINNET.counts).toMatchObject({ FLOFI_WEB: 5, UNKNOWN: 2 });
+    expect((await counts('all')).byEnvironment.MAINNET).toMatchObject({ counts: { FLOFI_WEB: 6, UNKNOWN: 3 }, total: 18 });
   });
 
-  it('binds a simulated run only to the applied one-step approval it is exactly the run of, for the verified claimant', async () => {
-    const workflow: Workflow = { ...templateWorkflow(), workflowId: 'wf-bind', revision: 2 };
-    const hash = semanticWorkflowHash(workflow), other = '0x' + 'cd'.repeat(20);
-    const target = await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: hash, createdAt: ago(1) });
-    const decoys = [await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: '0x' + 'e'.repeat(64), createdAt: ago(1) }),
-      await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: hash, createdAt: ago(1), plan: { kind: 'SEQUENTIAL', flow: null } }),
-      await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: hash, createdAt: ago(1), plan: { kind: 'SINGLE_FLOW', flow: 'arbitrum-swap' } }),
-      await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: hash, createdAt: ago(1), status: 'CLAIMED' }),
-      await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: hash, createdAt: ago(1), claimed: { namespace: 'eip155', address: other } }),
-      await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, workflowHash: hash, createdAt: ago(31) })];
-    const runIds = async (id: string) => (await db.query<{ run_ids: string[] }>(`SELECT run_ids FROM mcp_handoffs WHERE handoff_id = $1`, [id])).rows[0]!.run_ids;
-    let hosts = 0;
-    const deps = (wallet: string | null): RunBinderDeps => ({ now: NOW, verifiedWallet: async () => wallet, host: async () => { hosts++; return { db, tenantId: 'default' }; } });
-    const call = (runId: string, overrides: Partial<{ flow: string; method: string; owner: string; workflow: unknown }> = {}) => ({ flow: overrides.flow ?? 'base-swap',
-      method: overrides.method ?? 'simulate', args: [overrides.workflow ?? workflow, overrides.owner ?? OWNER.toUpperCase().replace('0X', '0x')], value: { id: runId } });
-
-    // No verified session, another verified wallet, or a call naming another owner than the session: nothing is read or written.
-    expect(await bindSimulatedRun(call('bind-1'), deps(null))).toBe('NO_SESSION');
-    expect(await bindSimulatedRun(call('bind-1'), deps(other))).toBe('NO_SESSION');
-    expect(await bindSimulatedRun(call('bind-1', { owner: other }), deps(OWNER))).toBe('NO_SESSION');
-    expect(hosts).toBe(0);
-    // An edited workflow, another flow or another method is not this proposal's run.
-    expect(await bindSimulatedRun(call('bind-1', { workflow: { ...workflow, revision: 3 } }), deps(OWNER))).toBe('NO_MATCH');
-    expect(await bindSimulatedRun(call('bind-1', { flow: 'ethereum-swap' }), deps(OWNER))).toBe('NO_MATCH');
-    expect(await bindSimulatedRun(call('bind-1', { method: 'review' }), deps(OWNER))).toBe('NOT_APPLICABLE');
-    expect(await runIds(target)).toEqual([]);
-    // The exact run of the verified claimant: bound to that approval only.
-    expect(await bindSimulatedRun(call('bind-1'), deps(OWNER))).toBe('BOUND');
-    expect(await runIds(target)).toEqual(['bind-1']);
-    for (const decoy of decoys) expect(await runIds(decoy)).toEqual([]);
-    // Bound once: a repeated observation changes nothing.
-    expect(await bindSimulatedRun(call('bind-1'), deps(OWNER))).toBe('NO_MATCH');
-    expect(await runIds(target)).toEqual(['bind-1']);
-    // A full run list is left unchanged and reported (content-free) as the limit.
-    const full = await handoff({ kind: 'MCP_ACCOUNT', clientId: CLAUDE, workflowHash: hash, createdAt: ago(1), runIds: Array.from({ length: 16 }, (_, i) => `full-${i}`) });
-    expect(await bindSimulatedRun(call('bind-2'), deps(OWNER))).toBe('RUN_LIMIT');
-    expect(await runIds(full)).toHaveLength(16);
-    expect(await runIds(target)).toEqual(['bind-1', 'bind-2']);
-
-    // Once bound, the completed run is counted for the approval's channel, not as a FloFi Web run.
-    const before = (await counts('7d')).byEnvironment.MAINNET.counts;
-    await run('bind-1', { createdAt: ago(0.5) });
-    const after = (await counts('7d')).byEnvironment.MAINNET.counts;
-    expect(after).toEqual({ ...before, CHATGPT_MCP: before.CHATGPT_MCP + 1 });
+  it('counts FloFi Web only from positive records, a Batch Payment once, and a bound one-step run only while its approval exists', async () => {
+    const before = (await counts('all')).byEnvironment.MAINNET;
+    // Unbound one-step executions, very old and a minute old: Unknown origin, whatever their time.
+    await run('one-step-unbound-old', { createdAt: ago(400) });
+    await run('one-step-unbound-new', { createdAt: new Date(NOW.getTime() - 60_000) });
+    // An Editor workflow run is FloFi Web; an 8-recipient Batch Payment (eight legs, one wallet group) is ONE completed run, counted once.
+    await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', steps: [{ state: 'RECONCILED' }], createdAt: ago(1) });
+    await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', steps: Array.from({ length: 8 }, () => ({ state: 'RECONCILED' })), createdAt: ago(1) });
+    // A one-step run an Editor approval recorded is FloFi Web; one an MCP approval recorded keeps that approval's channel.
+    await handoff({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', createdAt: ago(1), runIds: [await run('one-step-editor', { createdAt: ago(0.9) })] });
+    await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, createdAt: ago(1), runIds: [await run('one-step-mcp', { createdAt: ago(0.9) })] });
+    // A one-step run whose approval was removed (retention) has no record left: Unknown origin.
+    const removed = await handoff({ kind: 'MCP_ACCOUNT', clientId: CLAUDE, createdAt: ago(1), runIds: [await run('one-step-removed', { createdAt: ago(0.9) })] });
+    const recorded = (await counts('all')).byEnvironment.MAINNET;
+    expect(recorded).toEqual({ counts: { ...before.counts, FLOFI_WEB: before.counts.FLOFI_WEB + 3, CHATGPT_MCP: before.counts.CHATGPT_MCP + 1,
+      CLAUDE_MCP: before.counts.CLAUDE_MCP + 1, UNKNOWN: before.counts.UNKNOWN + 2 }, total: before.total + 7, automation: before.automation });
+    await db.query(`DELETE FROM mcp_handoffs WHERE tenant_id = 'default' AND handoff_id = $1`, [removed]);
+    expect((await counts('all')).byEnvironment.MAINNET).toEqual({ ...recorded, counts: { ...recorded.counts, CLAUDE_MCP: recorded.counts.CLAUDE_MCP - 1,
+      UNKNOWN: recorded.counts.UNKNOWN + 1 } });
   });
 });
