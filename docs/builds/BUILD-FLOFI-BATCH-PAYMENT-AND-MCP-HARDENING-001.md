@@ -169,11 +169,7 @@ Only these surfaces change:
 The landing page, dashboard, chat, navigation, other cards, headers, footers, login, wallet connect, the Simulate/Review/Execute patterns,
 the workflow lifecycle and the fee model are unchanged.
 
-**Baselines.** Two committed screenshots show the Build page's docked tool row and therefore must change: `e2e/visual-shell.spec.ts`
-`build.png` and `e2e/swap-authoring.spec.ts` `chat-committed.png`. The only intended difference is the added "Batch Payment" tool after
-"Send". Renders from this container differ from the committed baselines in font rasterization on every page (including unchanged ones), so
-they are not committed. The CI's candidate renders are the source, per `docs/engineering/CI.md` §5. See [§8](#8-test-results) for their
-status.
+**Baselines.** Five committed screenshots show the Editor's docked tool row and change: `visual-shell` `build.png`, `simulate.png` and `execute.png`, and `swap-authoring` `chat-committed.png` and `review-blocked.png`. They were taken from CircleCI's candidate renders of run `b01e5481` (shard 2, `default-product-1`), per `docs/engineering/CI.md` §5. Local renders were not used, because their fonts differ. A pixel diff against the previous baselines puts every changed pixel in one box, the tool row (x 259–829, y 189–213). The only change is the added "Batch Payment" tool after "Send" and the shift of the tools after it. No other screenshot baseline changed.
 
 ## 5. Files
 
