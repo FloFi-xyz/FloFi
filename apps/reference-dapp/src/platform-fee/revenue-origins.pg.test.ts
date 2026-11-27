@@ -248,4 +248,3 @@ describe('platform fee ledger (schema 37)', () => {
     expect(await count('SELECT count(*)::int AS n FROM platform_fee_ledger WHERE workflow_run_id = $1', [completed])).toBe(1);
   });
 });
-

@@ -175,4 +175,3 @@ describe('certificate 0037_execution_origins_platform_fees', () => {
     expect(await migrate(t.db, [...chain, m37])).toEqual([37]);
   });
 });
-
