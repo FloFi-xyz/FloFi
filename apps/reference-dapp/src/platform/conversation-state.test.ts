@@ -178,8 +178,8 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
   it('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review M6): an invalid recipient or amount says what each payment needs; every batch refusal has its own text', () => {
     const generic = userFacingError('STRATEGY_SCHEMA_INVALID'), fallback = userFacingError('SOMETHING_ELSE'), rateLimit = userFacingError('MCP_SIMULATION_RATE_LIMITED');
     const recipient = userFacingError('BATCH_PAYMENT_RECIPIENT_INVALID'), amount = userFacingError('BATCH_PAYMENT_AMOUNT_INVALID');
-    expect(recipient.EN).toMatch(/valid 0x wallet address: a mixed-case address must match its checksum, and a reserved system address \(0x…00 to 0x…ff\) is never a recipient\..*Nothing was signed or sent/);
-    expect(recipient.PT).toMatch(/endereço de carteira 0x válido: um endereço com maiúsculas e minúsculas precisa corresponder ao seu checksum, e um endereço reservado do sistema \(0x…00 a 0x…ff\) nunca é destinatário\..*Nada foi assinado nem enviado/);
+    expect(recipient.EN).toMatch(/valid 0x wallet address: a mixed-case address must match its checksum, and a reserved system address \(0x…000 to 0x…fff\) is never a recipient\..*Nothing was signed or sent/);
+    expect(recipient.PT).toMatch(/endereço de carteira 0x válido: um endereço com maiúsculas e minúsculas precisa corresponder ao seu checksum, e um endereço reservado do sistema \(0x…000 a 0x…fff\) nunca é destinatário\..*Nada foi assinado nem enviado/);
     expect(amount.EN).toMatch(/^Every recipient of a Batch Payment needs a positive amount\. Nothing was signed or sent\./);
     expect(amount.PT).toMatch(/^Cada destinatário de um Pagamento em lote precisa de um valor positivo\. Nada foi assinado nem enviado\./);
     const codes = ['BATCH_PAYMENT_RECIPIENT_INVALID', 'BATCH_PAYMENT_AMOUNT_INVALID', 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', 'BATCH_PAYMENT_TOO_MANY_RECIPIENTS',

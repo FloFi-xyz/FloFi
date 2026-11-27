@@ -247,7 +247,7 @@ All runs are local, in this build's container: Node 24.21.0, pnpm 11.22.0, the v
 
 | Gate | Result |
 |---|---|
-| `pnpm check` (typecheck, lint, build, schema drift, unit tests) | **Pass.** 829 files and 10,588 tests passed. 2 files are skipped (live or fork suites that need external services, the same as the baseline) |
+| `pnpm check` (typecheck, lint, build, schema drift, unit tests) | **Pass.** 829 files and 10,588 tests passed on `50c3128`. After the final pass, every suite also passed on the delivered revision (one stale range assertion was updated). 2 files are skipped (live or fork suites that need external services, the same as the baseline) |
 | `pnpm test:postgres` (local PostgreSQL 16.15) | 154 of 156 files and 1,061 of 1,067 tests passed. **6 failures need PostgreSQL ≥ 17/18:** `backend/database-privileges.pg.test.ts` (5: `unrecognized privilege type "MAINTAIN"`) and `packages/cloud-runtime/test/forward-compatibility.pg.test.ts` (1: the NOT NULL constraint catalog). CI uses `postgres:18.6`. This build changes neither those files nor any migration. **Not run here on PostgreSQL 18; left to CI** |
 | Batch Payment PostgreSQL suite (`workflow-runs/batch-payment-run.pg.test.ts`) | Pass: one atomic batch reconciled with exact amounts; confirm mode and non-atomic wallets refused; refusal never continued and closed as not sent; halted batch not resumable; split wallet execution UNMATCHED; re-prepare needs a chain proof; unprovable re-prepare is OWNER_DECIDES; report bound per group |
 | Browser `canvas-workflow-ux` (with `batch-payment-card.spec.ts`) | Pass, 13/13 (4 Batch Payment card tests) |
