@@ -18,7 +18,7 @@
  *
  * Delegated executions (automations) are separate records and are reported in the Automations section, never added here.
  */
-import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { ACTION_KINDS, type ActionKind, type FactAction } from './actions.ts';
 import { attemptSubmitted, classifyRun, COMPOSITION_FLOWS, executed, RATE_OUTCOMES, type AttemptFact, type ExecutionOutcome, type RunClassification } from './classify.ts';
 import { environmentOf, ENVIRONMENTS, networkInfo, type AnalyticsEnvironment, type NetworkInfo } from './networks.ts';
@@ -102,7 +102,8 @@ const MAY_HAVE_STARTED = `(r.has_evidence OR r.flow = ANY($4::text[]) OR r.recov
     WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id AND a.state NOT IN ('PREPARED', 'CANCELLED')))`;
 const COMPOSITIONS = [...COMPOSITION_FLOWS];
 
-export async function loadRuns(db: Database, tenantId: string, range: { readonly from: Date; readonly to: Date }, limit = ANALYTICS_ROW_LIMIT):
+/** `db` may be a transaction (the channel counts read under their statement timeout); every caller passing the pool reads exactly as before. */
+export async function loadRuns(db: Queryable, tenantId: string, range: { readonly from: Date; readonly to: Date }, limit = ANALYTICS_ROW_LIMIT):
   Promise<{ readonly runs: LoadedRun[]; readonly idle: readonly IdleRuns[]; readonly truncated: boolean; readonly coverage: Coverage }> {
   const { rows } = await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND ${UPDATED_SINCE} AND r.created_at >= $2 AND r.created_at < $3 AND ${MAY_HAVE_STARTED}
     ORDER BY r.created_at DESC, r.run_id DESC LIMIT $5`, [tenantId, range.from, range.to, COMPOSITIONS, limit + 1]);
@@ -139,7 +140,7 @@ export async function loadRuns(db: Database, tenantId: string, range: { readonly
   return { runs, idle, truncated, coverage: { truncated, runsInRange, coveredFrom } };
 }
 /** Runs by id (no range), e.g. the runs an approval handoff links to. */
-export async function loadRunsById(db: Database, tenantId: string, ids: readonly string[]): Promise<LoadedRun[]> {
+export async function loadRunsById(db: Queryable, tenantId: string, ids: readonly string[]): Promise<LoadedRun[]> {
   if (!ids.length) return [];
   return (await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND r.run_id = ANY($2::text[])`, [tenantId, ids.slice(0, 5_000)])).rows.map(loaded);
 }

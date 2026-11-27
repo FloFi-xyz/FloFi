@@ -24,6 +24,7 @@ function channelNotes(data: Counts, environment: AnalyticsEnvironment, language:
     copy("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at " +
       'most 16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.'),
     copy('Executions without a recorded origin, including earlier history, are shown as Unknown origin.'),
+    copy('Executions from other channels, such as WhatsApp, are shown as Unknown origin.'),
     ...tally.automation ? [copy('{0} completed executions requested by automation rules are not attributed to a channel.', count(tally.automation))] : [],
     ...data.unrecognizedEnvironment ? [copy('{0} completed executions have no recognized environment and are not counted.', count(data.unrecognizedEnvironment))] : [],
     ...data.coverage.truncated && data.coverage.coveredFrom ? [copy('This period holds more runs than one view reads: single-flow executions are counted only ' +

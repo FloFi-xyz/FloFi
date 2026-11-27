@@ -105,6 +105,8 @@ const portuguese: Readonly<Record<string, string>> = {
     "Uma execução de uma etapa iniciada a partir de uma aprovação mantém seu canal somente enquanto existir o registro dessa execução na aprovação: uma aprovação registra no máximo 16 execuções, e aprovações podem ser removidas pela retenção. Caso contrário, ela aparece como Origem desconhecida.",
   "Executions without a recorded origin, including earlier history, are shown as Unknown origin.":
     "Execuções sem origem registrada, inclusive o histórico anterior, aparecem como Origem desconhecida.",
+  "Executions from other channels, such as WhatsApp, are shown as Unknown origin.":
+    "Execuções de outros canais, como o WhatsApp, aparecem como Origem desconhecida.",
   "{0} completed executions requested by automation rules are not attributed to a channel.":
     "{0} execuções concluídas solicitadas por regras de automação não são atribuídas a um canal.",
   "{0} completed executions have no recognized environment and are not counted.":

@@ -5,7 +5,8 @@
  * developer step runs counted only through their workflow run, recoveries and retries folded into one execution, bound single flows attributed
  * to their approval's channel, unbound ones Unknown origin whatever their time, conflicting bindings, automations, environments and period
  * boundaries. Then FloFi Web only from positive records, an 8-recipient Batch Payment counted once, and a binding that keeps its channel only
- * while its approval exists.
+ * while its approval exists. Then workflow runs whose steps carry MOCKED evidence (a harness deployment) counted under Mocked, as their one-step
+ * runs are, never under their approval's Mainnet.
  */
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -66,7 +67,7 @@ async function handoff(seed: HandoffSeed): Promise<string> {
     new Date(createdAt.getTime() + DAY)]);
   return id;
 }
-type StepSeed = { state: string; kind?: 'OWNER_RUN' | 'USER_FUNDED_GROUP' | 'DELEGATED_STEP'; executionId?: string };
+type StepSeed = { state: string; kind?: 'OWNER_RUN' | 'USER_FUNDED_GROUP' | 'DELEGATED_STEP'; executionId?: string; environment?: string };
 /** A workflow run as the runner leaves it (inserted directly in its final state: the transition triggers only guard updates). */
 async function workflowRun(seed: { kind: Kind; clientId: string; environment?: string; state?: string; steps?: StepSeed[]; createdAt?: Date;
   mode?: string }): Promise<string> {
@@ -80,7 +81,7 @@ async function workflowRun(seed: { kind: Kind; clientId: string; environment?: s
   [id, h, seed.kind, ref, OWNER, HASH, steps.length, seed.mode ?? 'USER_FUNDED', state, state === 'COMPLETED' ? createdAt : null, new Date(createdAt.getTime() + DAY), createdAt]);
   for (const [index, step] of steps.entries()) {
     const outcome = step.state === 'RECONCILED' || step.executionId ? { kind: step.kind ?? 'USER_FUNDED_GROUP', executionId: step.executionId ?? `${id}:g0`,
-      evidence: { outcome: 'RECONCILED' } } : null;
+      evidence: { outcome: 'RECONCILED', ...step.environment ? { environment: step.environment } : {} } } : null;
     await db.query(`INSERT INTO workflow_run_steps (tenant_id, run_id, step_index, state, flow, strategy, workflow_hash, outcome)
       VALUES ('default', $1, $2, $3, 'base-swap', '{}', $4, $5)`, [id, index, step.state, HASH, outcome]);
   }
@@ -193,7 +194,8 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions 
     // An Editor workflow run is FloFi Web; an 8-recipient Batch Payment (eight legs, one wallet group) is ONE completed run, counted once.
     await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', steps: [{ state: 'RECONCILED' }], createdAt: ago(1) });
     await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', steps: Array.from({ length: 8 }, () => ({ state: 'RECONCILED' })), createdAt: ago(1) });
-    // A one-step run an Editor approval recorded is FloFi Web; one an MCP approval recorded keeps that approval's channel.
+    // The rule for a one-step run an Editor approval recorded: FloFi Web. This fixture is seeded directly; no current code records one (Editor
+    // approvals are SEQUENTIAL, and run_ids is written only for single-flow plans). One an MCP approval recorded keeps that approval's channel.
     await handoff({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', createdAt: ago(1), runIds: [await run('one-step-editor', { createdAt: ago(0.9) })] });
     await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, createdAt: ago(1), runIds: [await run('one-step-mcp', { createdAt: ago(0.9) })] });
     // A one-step run whose approval was removed (retention) has no record left: Unknown origin.
@@ -204,5 +206,28 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions 
     await db.query(`DELETE FROM mcp_handoffs WHERE tenant_id = 'default' AND handoff_id = $1`, [removed]);
     expect((await counts('all')).byEnvironment.MAINNET).toEqual({ ...recorded, counts: { ...recorded.counts, CLAUDE_MCP: recorded.counts.CLAUDE_MCP - 1,
       UNKNOWN: recorded.counts.UNKNOWN + 1 } });
+  });
+
+  it('counts a workflow run whose steps carry MOCKED evidence under Mocked, as its one-step runs are, never under its approval\'s Mainnet', async () => {
+    const before = await counts('all');
+    expect(before.byEnvironment.MOCKED).toEqual({ counts: zero, total: 0, automation: 0 });
+    // A harness deployment (`*_HARNESS=MOCKED_LOOPBACK_ONLY`): an MCP confirm-each-step run on a Mainnet approval whose owner-signed steps
+    // reconciled with MOCKED evidence (their own runs have MOCKED provenance and are counted only through the workflow run).
+    await run('mock-own-1', { provenance: 'MOCKED' }); await run('mock-own-2', { provenance: 'MOCKED' });
+    await workflowRun({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, mode: 'CONFIRM_EACH_STEP', steps: [
+      { state: 'RECONCILED', kind: 'OWNER_RUN', executionId: 'mock-own-1', environment: 'MOCKED' },
+      { state: 'RECONCILED', kind: 'OWNER_RUN', executionId: 'mock-own-2', environment: 'MOCKED' }] });
+    // An Editor run whose delegated step had MOCKED provenance, next to a step with public evidence: one MOCKED step makes the run Mocked.
+    await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', steps: [{ state: 'RECONCILED', environment: 'PUBLIC_UNVERIFIED' },
+      { state: 'RECONCILED', kind: 'DELEGATED_STEP', executionId: 'dex_fixture', environment: 'MOCKED' }] });
+    // A one-step harness run an MCP approval bound: Mocked, by its own provenance.
+    await handoff({ kind: 'MCP_ACCOUNT', clientId: CHATGPT, runIds: [await run('mock-one-step', { provenance: 'MOCKED' })] });
+    // A run whose steps carry only public evidence stays under its approval's Mainnet.
+    await workflowRun({ kind: 'EDITOR_SESSION', clientId: 'flofi-editor', steps: [{ state: 'RECONCILED', environment: 'PUBLIC_UNVERIFIED' }] });
+    const after = await counts('all'), mainnet = before.byEnvironment.MAINNET;
+    expect(after.byEnvironment.MAINNET).toEqual({ ...mainnet, counts: { ...mainnet.counts, FLOFI_WEB: mainnet.counts.FLOFI_WEB + 1 }, total: mainnet.total + 1 });
+    expect(after.byEnvironment.MOCKED).toEqual({ counts: { ...zero, FLOFI_WEB: 1, CHATGPT_MCP: 2 }, total: 3, automation: 0 });
+    expect(after.byEnvironment.TESTNET).toEqual(before.byEnvironment.TESTNET);
+    expect(after.unrecognizedEnvironment).toBe(before.unrecognizedEnvironment);
   });
 });

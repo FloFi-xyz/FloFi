@@ -111,11 +111,12 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
         { requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/x', runIds: ['twice'] }, { requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/y', runIds: ['twice'] },
         { requesterKind: 'MCP_ACCOUNT', clientId: 'https://claude.ai/oauth/x', runIds: ['conflict'] }, { requesterKind: 'DEVELOPER_PROJECT', clientId: 'prj_x', runIds: ['conflict'] },
         { requesterKind: 'AUTOMATION_RULE', clientId: 'flofi-automations', runIds: ['auto'] },
-        // A one-step run an Editor approval names is a FloFi Web run: a positive record, like an Editor workflow run.
+        // The rule for a one-step run an Editor approval names (FloFi Web, a positive record). No current code records one: Editor approvals are
+        // SEQUENTIAL, and run_ids is written only for single-flow plans.
         { requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', runIds: ['editor-bound'] }],
     });
-    // FloFi Web: the 3 Editor workflow runs and the Editor-bound one-step run. Unknown: the run whose requester disagrees with its handoff, the
-    // conflicting binding and the unbound single flow (never FloFi Web by absence of a record).
+    // FloFi Web: the 3 Editor workflow runs and the Editor-bound one-step run of the rule above. Unknown: the run whose requester disagrees with its
+    // handoff, the conflicting binding and the unbound single flow (never FloFi Web by absence of a record).
     expect(folded.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 4, CHATGPT_MCP: 2, CLAUDE_MCP: 2, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
       total: 12, automation: 5 });
     expect(folded.byEnvironment.TESTNET).toEqual({ counts: { ...NONE, DEVELOPER_API: 1, UNKNOWN: 1 }, total: 2, automation: 0 });
@@ -139,6 +140,36 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
       bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'https://chatgpt.com/oauth/a/client.json', runIds: ['mcp-one-step'] }],
       workflowRuns: [{ runKind: 'EDITOR_SESSION', requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', networkEnvironment: 'MAINNET', count: 1 }] });
     expect(folded.byEnvironment.MAINNET).toEqual({ counts: { ...NONE, FLOFI_WEB: 1, CHATGPT_MCP: 1, UNKNOWN: 5 }, total: 7, automation: 0 });
+  });
+
+  it('a workflow run whose steps carry MOCKED evidence is counted under Mocked, whatever network environment its approval names', () => {
+    const folded = foldChannels({ executions: [], steps: new Set(), bindings: [], workflowRuns: [
+      { runKind: 'MCP_ACCOUNT', requesterKind: 'MCP_ACCOUNT', clientId: 'https://chatgpt.com/oauth/a/client.json', networkEnvironment: 'MAINNET', mocked: true, count: 2 },
+      { runKind: 'EDITOR_SESSION', requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', networkEnvironment: 'PUBLIC_TESTNET', mocked: true, count: 1 },
+      { runKind: 'EDITOR_SESSION', requesterKind: 'EDITOR_SESSION', clientId: 'flofi-editor', networkEnvironment: 'MAINNET', mocked: false, count: 1 }] });
+    expect(folded.byEnvironment.MAINNET).toEqual({ counts: { ...NONE, FLOFI_WEB: 1 }, total: 1, automation: 0 });
+    expect(folded.byEnvironment.MOCKED).toEqual({ counts: { ...NONE, FLOFI_WEB: 1, CHATGPT_MCP: 2 }, total: 3, automation: 0 });
+    expect(folded.byEnvironment.TESTNET.total).toBe(0);
+  });
+
+  it('runs every read under the 4 s statement timeout, the run loader included, and never on the pool directly', async () => {
+    const { loadChannelCounts: load } = await vi.importActual<typeof import('./channels.ts')>('./channels.ts');
+    const direct: string[] = [], bounded: string[] = [], empty = { rows: [], rowCount: 0 };
+    const db = { close: async () => undefined, query: async (sql: string) => { direct.push(sql); return empty; },
+      transaction: async <T,>(work: (tx: { query: (sql: string) => Promise<typeof empty> }) => Promise<T>) => {
+        let first: string | null = null;
+        return work({ query: async (sql: string) => {
+          first ??= sql;
+          if (first !== "SET LOCAL statement_timeout = '4000'") throw new Error('UNBOUNDED_TRANSACTION');
+          if (sql !== first) bounded.push(sql);
+          return empty;
+        } });
+      } };
+    const result = await load({ db: db as never, tenantId: 'tenant-review' }, { period: channelPeriod('all', new Date('2026-11-20T10:00:00Z')) });
+    expect(result.ok).toBe(true);
+    expect(direct).toEqual([]);
+    expect(bounded.some(sql => /FROM execution_runs/.test(sql))).toBe(true);
+    expect(bounded.some(sql => /FROM workflow_runs/.test(sql))).toBe(true);
   });
 });
 
@@ -168,6 +199,7 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel section', () 
     expect(body.replaceAll('&#x27;', "'")).toContain("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at most "
       + '16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.');
     expect(body).toContain('Executions without a recorded origin, including earlier history, are shown as Unknown origin.');
+    expect(body).toContain('Executions from other channels, such as WhatsApp, are shown as Unknown origin.');
     expect(body).toContain('1 completed executions requested by automation rules are not attributed to a channel.');
     // No time-based web attribution is configured or described.
     expect(body).not.toMatch(/attributed from|web attribution|cutover/i);
@@ -196,11 +228,11 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel section', () 
       'Últimos 7 dias', 'Últimos 30 dias', 'Todo o período', 'Pagamento em lote conta uma vez', 'Pelo menos 3', 'Nenhuma execução concluída neste período.',
       'FloFi Web conta as execuções de fluxos iniciadas no Editor', 'iniciadas diretamente no app não têm registro de origem',
       'uma aprovação registra no máximo 16 execuções, e aprovações podem ser removidas pela retenção',
-      'As contagens de execuções concluídas estão indisponíveis.', 'O período solicitado não foi reconhecido'])
+      'Execuções de outros canais, como o WhatsApp, aparecem como Origem desconhecida.', 'As contagens de execuções concluídas estão indisponíveis.', 'O período solicitado não foi reconhecido'])
       expect(pt).toContain(phrase);
     // No English sentence of the section is left untranslated.
     for (const english of ['Completed executions', 'Unknown origin', 'Each count', 'An execution belongs', 'combines Web Chat', 'without a recorded origin', 'started directly',
-      'started from an approval', 'removed by retention',
+      'started from an approval', 'removed by retention', 'other channels',
       'automation rules', 'no recognized environment', 'lower bound', 'not indexed', 'No completed', 'unavailable', 'not recognized', 'Last 30 days', 'All time', 'Period'])
       expect(pt).not.toContain(english);
   });

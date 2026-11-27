@@ -22,7 +22,8 @@
  * (migrations 0005/0006). A self-declared `client_name` is never read, and no wallet address, amount, timestamp or absence of a record is ever
  * used to infer an origin. An execution no record attributes stays UNKNOWN, always; one that two records attribute to different channels is
  * UNKNOWN too (never counted twice). FloFi Web is therefore counted only from positive records: workflow runs whose handoff is an
- * EDITOR_SESSION, and single flows an EDITOR_SESSION handoff names.
+ * EDITOR_SESSION. A single flow an EDITOR_SESSION handoff names would be FloFi Web too, but no current code records one: Editor handoffs are
+ * SEQUENTIAL (`editor/approval.ts`), and both `run_ids` writers bind runs only to a single-flow plan.
  * Known limits: a single flow started directly in the app has no origin record (UNKNOWN). A single flow started from an approval keeps the
  * approval's channel only while that approval's binding of the run exists: an approval records a run only when one of those two writers bound
  * it, holds at most 16 runs (`bindRuns` leaves a full list unchanged), and may be removed by retention (`HandoffStore.purge`). Otherwise, and
@@ -83,16 +84,20 @@ export function channelPeriod(value: string | undefined, now: Date): ChannelPeri
   return { id, from: new Date(from), to: now, invalid: value !== undefined && id !== value };
 }
 
-/** Completed workflow runs, grouped by what decides their origin and environment. */
+/**
+ * Completed workflow runs, grouped by what decides their origin and environment. `mocked`: a step's outcome evidence is MOCKED (a flow in the
+ * loopback harness, `OWNER_RUN`; a delegated step of MOCKED provenance, `DELEGATED_STEP`): the run is counted under Mocked, as its one-step runs
+ * are, whatever network environment its handoff names.
+ */
 export type WorkflowRunGroup = { readonly runKind: string; readonly requesterKind: string; readonly clientId: string; readonly networkEnvironment: string;
-  readonly count: number };
+  readonly mocked?: boolean; readonly count: number };
 /** A handoff's binding to runs (`run_ids`), with the facts that decide its origin. */
 export type RunBinding = { readonly requesterKind: string; readonly clientId: string; readonly runIds: readonly string[] };
 /** A completed single-flow execution: every run that belongs to it, and the workflow ids they ran under. */
 export type CompletedExecution = { readonly environment: AnalyticsEnvironment | null; readonly runIds: readonly string[]; readonly workflowIds: readonly string[] };
 export type ChannelTally = { readonly counts: Readonly<Record<Channel, number>>; readonly total: number; readonly automation: number };
 
-/** A handoff's network environment as an Admin environment. A workflow run on any other (MOCK, LOCAL_FORK…) is counted nowhere. */
+/** A handoff's network environment as an Admin environment. A workflow run on any other (MOCK, LOCAL_FORK…) is counted nowhere, unless it is `mocked`. */
 const WORKFLOW_RUN_ENVIRONMENT: Readonly<Record<string, AnalyticsEnvironment>> = { MAINNET: 'MAINNET', PUBLIC_TESTNET: 'TESTNET' };
 /** Live developer steps run under the workflow id `wfr_<run>-step-<n>` (`workflow-runs/external-step.ts`): steps of a workflow run. */
 const isWorkflowRunStepWorkflow = (workflowId: string) => workflowId.startsWith('wfr_');
@@ -124,7 +129,7 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
   for (const group of input.workflowRuns) {
     // The run copies its handoff's requester (0015, immutable on both): a disagreement is not a trusted origin.
     const origin = group.runKind === group.requesterKind ? channelOf(group.requesterKind, group.clientId) : 'UNKNOWN';
-    add(WORKFLOW_RUN_ENVIRONMENT[group.networkEnvironment] ?? null, origin, group.count);
+    add(group.mocked ? 'MOCKED' : WORKFLOW_RUN_ENVIRONMENT[group.networkEnvironment] ?? null, origin, group.count);
   }
   const bound = new Map<string, Set<Origin>>();
   for (const binding of input.bindings) {
@@ -167,15 +172,18 @@ const bounded = <T>(host: AdminHost, work: (tx: Queryable) => Promise<T>) => hos
  * FinOps cohort (`finops/report.ts`); groups are few (requester kind × client id × environment), at most GROUP_LIMIT are read.
  */
 async function completedWorkflowRuns(host: AdminHost, period: ChannelPeriod): Promise<{ groups: WorkflowRunGroup[]; truncated: boolean }> {
-  const { rows } = await bounded(host, tx => tx.query<{ run_kind: string; requester_kind: string; client_id: string; network_environment: string; n: number }>(`
-    SELECT r.requester_kind AS run_kind, h.requester_kind, h.client_id, h.network_environment, count(*)::int AS n
+  const { rows } = await bounded(host, tx => tx.query<{ run_kind: string; requester_kind: string; client_id: string; network_environment: string; mocked: boolean;
+    n: number }>(`
+    SELECT r.requester_kind AS run_kind, h.requester_kind, h.client_id, h.network_environment,
+      EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id AND s.outcome->'evidence'->>'environment' = 'MOCKED') AS mocked,
+      count(*)::int AS n
     FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
     WHERE r.tenant_id = $1 AND r.state = 'COMPLETED' AND r.completed_at IS NOT NULL AND r.created_at >= $2 AND r.created_at < $3
       AND NOT EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id AND s.state NOT IN ('RECONCILED', 'SKIPPED'))
       AND EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id AND s.state = 'RECONCILED')
-    GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC, 1, 2, 3, 4 LIMIT $4`, [host.tenantId, period.from, period.to, GROUP_LIMIT + 1]));
+    GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC, 1, 2, 3, 4, 5 LIMIT $4`, [host.tenantId, period.from, period.to, GROUP_LIMIT + 1]));
   return { groups: rows.slice(0, GROUP_LIMIT).map(row => ({ runKind: row.run_kind, requesterKind: row.requester_kind, clientId: row.client_id,
-    networkEnvironment: row.network_environment, count: row.n })), truncated: rows.length > GROUP_LIMIT };
+    networkEnvironment: row.network_environment, mocked: row.mocked, count: row.n })), truncated: rows.length > GROUP_LIMIT };
 }
 /** The run ids among `ids` that a workflow run's owner-signed step names as its execution (whatever that run's state). */
 async function workflowRunSteps(tx: Queryable, tenantId: string, ids: readonly string[]): Promise<Set<string>> {
@@ -183,7 +191,10 @@ async function workflowRunSteps(tx: Queryable, tenantId: string, ids: readonly s
     WHERE s.tenant_id = $1 AND s.outcome->>'kind' = 'OWNER_RUN' AND s.outcome->>'executionId' = ANY($2::text[])`, [tenantId, ids]);
   return new Set(rows.map(row => row.id));
 }
-/** The handoffs that bound any of `ids` (handoffs are created before their runs, so `before` bounds the read on the tenant's created_at index). */
+/**
+ * The handoffs that bound any of `ids`, at most BINDING_LIMIT (more refuses the read). `before` is the period's end, which is always now: with its
+ * hour of clock slack it excludes no stored handoff, so it does not narrow the read; the 4 s statement timeout of `bounded` is what bounds it.
+ */
 async function runBindings(tx: Queryable, tenantId: string, ids: readonly string[], before: Date): Promise<RunBinding[]> {
   const { rows } = await tx.query<{ requester_kind: string; client_id: string; run_ids: string[] }>(`SELECT requester_kind, client_id,
       ARRAY(SELECT r FROM unnest(run_ids) AS r WHERE r = ANY($2::text[])) AS run_ids
@@ -198,7 +209,8 @@ async function runBindings(tx: Queryable, tenantId: string, ids: readonly string
 export async function loadChannelCounts(host: AdminHost, options: { readonly period: ChannelPeriod }): Promise<ChannelCountsResult> {
   const { period } = options;
   try {
-    const [read, workflowRuns] = await Promise.all([loadRuns(host.db, host.tenantId, period), completedWorkflowRuns(host, period)]);
+    // The run loader reads under the same 4 s statement timeout as every other read here (All time included).
+    const [read, workflowRuns] = await Promise.all([bounded(host, tx => loadRuns(tx, host.tenantId, period)), completedWorkflowRuns(host, period)]);
     const all = executionsOf(read.runs), executions = completedExecutions(all, read.runs);
     const ids = [...new Set(executions.flatMap(e => e.runIds))];
     const { steps, bindings } = ids.length ? await bounded(host, async tx => ({ steps: await workflowRunSteps(tx, host.tenantId, ids),
