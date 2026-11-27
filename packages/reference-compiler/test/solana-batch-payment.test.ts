@@ -4,8 +4,18 @@
  * from the deterministic in-memory cluster (`createMockedSolanaTransferChain`) and mocked wallets; nothing reaches a public network, nothing is
  * evidence of public execution.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createSolanaBatchPaymentNode, SOLANA_BATCH_PAYMENT_RESERVED_RECIPIENTS, type SemanticWorkflow, type SolanaBatchPaymentFields } from '@defi-workflow-engine/workflow-contracts';
+
+/**
+ * The contracts' reader as is, unless a test replaces its answer for one call (to reach the compiler's own defence-in-depth checks behind it, which a
+ * valid declaration never reaches). Every other test reads declarations through the real reader.
+ */
+const reader = vi.hoisted(() => ({ fields: null as null | SolanaBatchPaymentFields }));
+vi.mock('@defi-workflow-engine/workflow-contracts', async importOriginal => {
+  const real = await importOriginal<typeof import('@defi-workflow-engine/workflow-contracts')>();
+  return { ...real, readSolanaBatchPaymentNode: (node: Parameters<typeof real.readSolanaBatchPaymentNode>[0]) => reader.fields ?? real.readSolanaBatchPaymentNode(node) };
+});
 import { SOLANA_MAINNET_TOKENS, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { compileMessageV0, decompileMessageV0, findProgramAddress, fromBase64, parseMessageV0, parseTransaction, serializeMessageV0, serializeTransaction, sha256Hex, toBase64,
   type SolanaInstruction } from '../src/solana.js';
@@ -505,5 +515,114 @@ describe('KAN-20 static bounds refuse before any simulation', () => {
     expect(solanaBatchPaymentStaticBounds({ legs: legs(9), token: spl }, { recipients: recipients(9) }, small).instructionTraceBound).toBe(64);
     expect(() => solanaBatchPaymentStaticBounds({ legs: legs(10), token: spl }, { recipients: recipients(10) }, small)).toThrow('SOLANA_BATCH_PAYMENT_INSTRUCTION_TRACE_TOO_LONG');
     expect(() => solanaBatchPaymentStaticBounds({ legs: legs(2), token: null }, { recipients: recipients(3) }, small)).toThrow('SOLANA_BATCH_PAYMENT_MANIFEST_MISMATCH');
+  });
+});
+
+describe('KAN-20 refusals the simulation itself raises (rent, fee, exact deltas) and the exact SPL worst-case boundary', () => {
+  /** The mocked cluster's RPC with one method's answer changed (an RPC or simulator that disagrees with the reviewed facts). */
+  const wrapped = (rpc: SolanaRpc, method: string, change: (value: unknown, params: readonly unknown[], call: number) => unknown): SolanaRpc => {
+    let calls = 0;
+    return async (m, params) => { const value = await rpc(m, params); return m === method ? change(value, params, ++calls) : value; };
+  };
+  /** A simulation whose watched account `index` is changed: its lamports by `lamports`, a token account's amount by `amount`. */
+  const simulated = (rpc: SolanaRpc, index: number, delta: { lamports?: bigint; amount?: bigint }) => wrapped(rpc, 'simulateTransaction', value => {
+    const v = JSON.parse(JSON.stringify(value)) as { value: { accounts: { lamports: number; data: [string, string] }[] } };
+    const account = v.value.accounts[index]!;
+    if (delta.lamports) account.lamports = Number(BigInt(account.lamports) + delta.lamports);
+    if (delta.amount) {
+      const data = fromBase64(account.data[0], 4096), view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      view.setBigUint64(64, view.getBigUint64(64, true) + delta.amount, true);
+      account.data = [toBase64(data), 'base64'];
+    }
+    return v;
+  });
+
+  it('ACCOUNT_RENT_MISMATCH: a created token account whose deposit is not the rent of its size, or a rent the RPC cannot give, names the recipient', async () => {
+    const { chain, owner, wallets } = setup(3);
+    chain.fundToken(owner.owner, USDC.mint, 50_000_000n);
+    chain.fundToken(wallets[0]!, USDC.mint, 0n);
+    const batch = workflow(lines(wallets, () => '1000000'), SPL_USDC);
+    // The first 165-byte rent answer prices the pre-simulation bound; the second is the simulated account's own size, asked once per size.
+    const off = await rejection(simulateSolanaBatchPayment(batch, owner.owner, wrapped(chain.rpc, 'getMinimumBalanceForRentExemption',
+      (v, params, call) => Number(params[0]) === 165 && call > 2 ? Number(v) + 1 : v), NOW));
+    expect([off.message, off.cause]).toEqual(['SOLANA_BATCH_PAYMENT_ACCOUNT_RENT_MISMATCH', { recipient: 1 }]);
+    const none = await rejection(simulateSolanaBatchPayment(batch, owner.owner, wrapped(chain.rpc, 'getMinimumBalanceForRentExemption',
+      (v, params, call) => Number(params[0]) === 165 && call > 2 ? 0 : v), NOW));
+    expect([none.message, none.cause]).toEqual(['SOLANA_BATCH_PAYMENT_ACCOUNT_RENT_MISMATCH', { recipient: 0 }]);
+    await expect(simulateSolanaBatchPayment(batch, owner.owner, chain.rpc, NOW)).resolves.toMatchObject({ accountCreationLamports: String(2n * MOCKED_RENT.token) });
+  });
+
+  it('FEE_UNAVAILABLE: the cluster cannot price the exact message (an unusable blockhash), so nothing is reviewed', async () => {
+    const { chain, owner, wallets } = setup(2);
+    for (const value of [null, 0, -1, 1.5]) {
+      const error = await rejection(simulateSolanaBatchPayment(workflow(lines(wallets)), owner.owner,
+        wrapped(chain.rpc, 'getFeeForMessage', v => ({ ...(v as Record<string, unknown>), value })), NOW));
+      expect(error.message, String(value)).toBe('SOLANA_BATCH_PAYMENT_FEE_UNAVAILABLE');
+    }
+  });
+
+  it('SIMULATED_TRANSFER_MISMATCH: any simulated delta other than exactly reviewed (a recipient, the owner, the source, a destination, a recipient wallet)', async () => {
+    const sol = setup(3);
+    sol.wallets.forEach(w => sol.chain.fundWallet(w, 5_000_000n));
+    const solBatch = workflow(lines(sol.wallets));
+    // Watched: [owner, recipient 0..N-1] for SOL; then [source, destination 0..N-1] for SPL.
+    const recipient = await rejection(simulateSolanaBatchPayment(solBatch, sol.owner.owner, simulated(sol.chain.rpc, 2, { lamports: -1n }), NOW));
+    expect([recipient.message, recipient.cause]).toEqual(['SOLANA_BATCH_PAYMENT_SIMULATED_TRANSFER_MISMATCH', { recipient: 1 }]);
+    const ownerDebit = await rejection(simulateSolanaBatchPayment(solBatch, sol.owner.owner, simulated(sol.chain.rpc, 0, { lamports: -1n }), NOW));
+    expect(ownerDebit.message).toBe('SOLANA_BATCH_PAYMENT_SIMULATED_TRANSFER_MISMATCH');
+    expect(ownerDebit.cause).toMatchObject({ account: 'OWNER' });
+    const spl = setup(3);
+    spl.chain.fundToken(spl.owner.owner, USDC.mint, 50_000_000n);
+    spl.wallets.forEach(w => spl.chain.fundWallet(w, 5_000_000n));
+    const splBatch = workflow(lines(spl.wallets, () => '1000000'), SPL_USDC), n = 3;
+    const cases: [string, number, { lamports?: bigint; amount?: bigint }, Record<string, unknown>][] = [
+      ['the source paid one unit less', 1 + n, { amount: 1n }, { account: 'SOURCE' }],
+      ['a destination received one unit less', 2 + n + 2, { amount: -1n }, { recipient: 2 }],
+      ['a recipient wallet\'s SOL moved', 1 + 1, { lamports: 1n }, { recipient: 1, account: 'WALLET' }],
+      ['the owner paid more SOL than the created deposits and the fee', 0, { lamports: -1n }, { account: 'OWNER' }]];
+    for (const [label, index, delta, cause] of cases) {
+      const error = await rejection(simulateSolanaBatchPayment(splBatch, spl.owner.owner, simulated(spl.chain.rpc, index, delta), NOW));
+      expect(error.message, label).toBe('SOLANA_BATCH_PAYMENT_SIMULATED_TRANSFER_MISMATCH');
+      expect(error.cause, label).toMatchObject(cause);
+    }
+    await expect(simulateSolanaBatchPayment(splBatch, spl.owner.owner, spl.chain.rpc, NOW)).resolves.toBeTruthy();
+  });
+
+  it('DUPLICATE_RECIPIENT: refused by the declaration first, and by the compiler\'s own check behind it (with the recipient index)', async () => {
+    const { owner, wallets } = setup(3);
+    const duplicate = [...lines(wallets.slice(0, 2)), { recipient: wallets[0]!, amount: '5' }];
+    // A declaration can never carry it: the contracts refuse the node (exact string comparison, never merged).
+    expect(() => createSolanaBatchPaymentNode('node-002', { chain: CHAIN, asset: { kind: 'NATIVE' }, payments: duplicate })).toThrow('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
+    // Defence in depth: should the reader ever let it through, the compiler refuses it on the canonical keys.
+    reader.fields = { chain: CHAIN, asset: { kind: 'NATIVE' }, payments: duplicate };
+    try {
+      const error = syncRejection(() => solanaBatchPaymentIntent(workflow(lines(wallets)), owner.owner));
+      expect([error.message, error.cause]).toEqual(['SOLANA_BATCH_PAYMENT_DUPLICATE_RECIPIENT', { recipient: 2 }]);
+    } finally { reader.fields = null; }
+    expect(solanaBatchPaymentIntent(workflow(lines(wallets)), owner.owner).legs).toHaveLength(3);
+  });
+
+  it('SPL exact worst-case boundary: the owner\'s SOL must cover the fee, a deposit for EVERY recipient (even existing ATAs) and its reserve, to the lamport', async () => {
+    const { chain, owner, wallets } = setup(3);
+    chain.fundToken(owner.owner, USDC.mint, 50_000_000n);
+    // Two ATAs exist, one is missing: only one deposit is charged now, yet each may be recreated before execution.
+    chain.fundToken(wallets[0]!, USDC.mint, 0n); chain.fundToken(wallets[2]!, USDC.mint, 0n);
+    const batch = workflow(lines(wallets, () => '1000000'), SPL_USDC);
+    const priced = await simulateSolanaBatchPayment(batch, owner.owner, chain.rpc, NOW);
+    expect(priced.accountCreationLamports).toBe(String(MOCKED_RENT.token));
+    const fee = BigInt(priced.estimatedFeeLamports), deposits = 3n * MOCKED_RENT.token, required = fee + deposits + MOCKED_RENT.system;
+    expect(priced.requiredLamports).toBe(required.toString());
+    chain.fundWallet(owner.owner, required - 1n);
+    const short = await rejection(simulateSolanaBatchPayment(batch, owner.owner, chain.rpc, NOW));
+    expect(short.message).toBe('SOLANA_BATCH_PAYMENT_INSUFFICIENT_SOL');
+    expect(short.cause).toEqual({ unit: 'lamports', balance: (required - 1n).toString(), fee: fee.toString(), deposits: deposits.toString(), maxFee: (fee + deposits).toString(),
+      nativeSpend: '0', reserve: String(MOCKED_RENT.system), required: required.toString(), shortfall: '1', exact: true });
+    chain.fundWallet(owner.owner, required);
+    const exact = await simulateSolanaBatchPayment(batch, owner.owner, chain.rpc, NOW);
+    expect(exact).toMatchObject({ requiredLamports: required.toString(), maximumAccountCreationLamports: deposits.toString(), accountCreationLamports: String(MOCKED_RENT.token) });
+    // Exactly enough is enough: it lands, and the owner keeps at least its reserve plus the deposits it did not need.
+    await chain.rpc('sendTransaction', [verifySignedSolanaBatchPayment(exact, owner.sign(exact.unsignedTransaction)).transaction, { encoding: 'base64' }]);
+    expect(chain.lamports(owner.owner)).toBe(required - fee - MOCKED_RENT.token);
+    expect(chain.lamports(owner.owner)).toBeGreaterThanOrEqual(MOCKED_RENT.system);
   });
 });

@@ -116,6 +116,8 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'batch-payment-base': 'pay 25 USDC to 0x1234567890abcdef1234567890abcdef12345678 and 50 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Base',
       'batch-payment-arbitrum': 'pay 5 USDC to 0x1234567890abcdef1234567890abcdef12345678, 10 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Arbitrum One',
       'batch-payment-ethereum': 'batch pay 5 USDC to 0x1234567890abcdef1234567890abcdef12345678 and 10 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Ethereum',
+      // KAN-20: the Solana Batch Payment example, recipients exactly as written (base58 is case-sensitive).
+      'batch-payment-solana': 'pay 1 USDC to CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH and 2 USDC to 92yJ8DJi8fbWhAjeK39QZWR1skhE39MzE4etRiWMzntw on Solana',
     };
     expect(Object.keys(sentences).sort()).toEqual(STRATEGY_EXAMPLES.map(e => e.id).sort());
     for (const example of STRATEGY_EXAMPLES) {

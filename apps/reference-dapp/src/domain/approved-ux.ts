@@ -70,19 +70,32 @@ export function nativeBalance(wei: string, decimals = 18): string {
 export type FeeShortfallView = { readonly network: string; readonly symbol: string; readonly owner: string; readonly balance: string; readonly fee: string;
   readonly sends: string | null; readonly required: string; readonly missing: string;
   /** ADR-0010: why paying the fee in USDC through Circle was not available for this request (closed codes; absent: not considered). */
-  readonly alternatives?: readonly string[] };
+  readonly alternatives?: readonly string[];
+  /**
+   * KAN-20 (a Solana Batch Payment, lamports): the token-account deposits `fee` includes at most, and the SOL the owner's wallet keeps as Solana's
+   * minimum balance (part of `required`); each only when the evidence carries it and it is not zero. Absent on EVM.
+   */
+  readonly deposits?: string; readonly reserve?: string };
 const NATIVE: Readonly<Record<string, { readonly network: string; readonly symbol: string }>> = Object.freeze({
   'eip155:1': { network: 'Ethereum', symbol: 'ETH' }, 'eip155:8453': { network: 'Base', symbol: 'ETH' }, 'eip155:42161': { network: 'Arbitrum One', symbol: 'ETH' },
   'eip155:4663': { network: 'Robinhood Chain', symbol: 'ETH' } });
+/** KAN-20: the one network whose fee evidence is in lamports (a Solana Batch Payment on Solana mainnet-beta: SOL, 9 decimals). */
+const LAMPORTS: Readonly<Record<string, { readonly network: string; readonly symbol: string }>> = Object.freeze({
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': { network: 'Solana', symbol: 'SOL' } });
 /** The blocker panel's three numbers from the server's own evidence; null when the evidence names a network FloFi does not label. */
 export function feeShortfallView(evidence: NativeFeeShortfall | null | undefined): FeeShortfallView | null {
-  const native = evidence ? NATIVE[evidence.chainId] : undefined;
-  if (!evidence || !native || evidence.unit !== 'wei') return null;
-  const sends = /^[1-9][0-9]{0,77}$/.test(evidence.nativeSpend) ? nativeAmount(evidence.nativeSpend) : null;
+  // EVM evidence is in wei on an EVM network FloFi labels; KAN-20 lamports only on Solana mainnet (9 decimals). Any other pairing is not shown.
+  const native = !evidence ? undefined : evidence.unit === 'wei' ? NATIVE[evidence.chainId] : evidence.unit === 'lamports' ? LAMPORTS[evidence.chainId] : undefined;
+  if (!evidence || !native) return null;
+  const decimals = evidence.unit === 'lamports' ? 9 : 18;
+  const positive = (value: unknown): value is string => typeof value === 'string' && /^[1-9][0-9]{0,77}$/.test(value);
+  const sends = positive(evidence.nativeSpend) ? nativeAmount(evidence.nativeSpend, decimals) : null;
   const alternatives = Array.isArray(evidence.unavailable) ? evidence.unavailable.filter(u => u && u.mechanism === 'CIRCLE_USDC_PAYMASTER' && typeof u.code === 'string')
     .map(u => u.code) : [];
-  return { ...native, owner: evidence.owner, balance: nativeBalance(evidence.balance), fee: nativeAmount(evidence.maxFee), sends, required: nativeAmount(evidence.required),
-    missing: nativeAmount(evidence.shortfall), ...alternatives.length ? { alternatives } : {} };
+  const solana = evidence.unit === 'lamports' ? { ...positive(evidence.deposits) ? { deposits: nativeAmount(evidence.deposits, decimals) } : {},
+    ...positive(evidence.reserve) ? { reserve: nativeAmount(evidence.reserve, decimals) } : {} } : {};
+  return { ...native, owner: evidence.owner, balance: nativeBalance(evidence.balance, decimals), fee: nativeAmount(evidence.maxFee, decimals), sends,
+    required: nativeAmount(evidence.required, decimals), missing: nativeAmount(evidence.shortfall, decimals), ...alternatives.length ? { alternatives } : {}, ...solana };
 }
 
 /**
@@ -202,3 +215,32 @@ export function flightRefusalPlacement(input: { readonly applies: boolean; reado
 
 /** Board 16: a network as people read it, without the chain id the technical label carries ("Base (8453)" → "Base"). */
 export const withoutChainId = (label: string): string => label.replace(/ \((?:\d+|0x[0-9a-fA-F]+)\)$/, '');
+
+/**
+ * KAN-20: a Solana Batch Payment's refusals in plain words, shared by the Editor's run (`EXECUTION_REFUSAL`) and /approve (`CLAIM_TEXT`), so each
+ * has one translation: the core's refusal families (one transaction too large to carry every payment, a recipient that is not an ordinary
+ * wallet, the paying wallet as a recipient, too little SOL or token balance, a new account below Solana's minimum, a signed transaction that is
+ * not the reviewed one), FloFi Wallet (which cannot sign it), and C.4's earlier request: still able to land for a short time (retryable: try again
+ * in a minute), or landed outside FloFi (never asked again). Each says nothing was signed or sent, or what may have happened.
+ */
+const TOO_LARGE = 'This Batch Payment does not fit in one Solana transaction, so FloFi does not split it. Nothing was signed or sent. Pay fewer recipients.';
+const NOT_A_WALLET = 'A recipient of this Batch Payment is not an ordinary Solana wallet (a program, a token account or a program address). Nothing was signed or sent. Use the recipient\'s wallet address.';
+const NOT_REVIEWED = 'The transaction your wallet signed is not exactly the one FloFi reviewed, so nothing was sent. Review again.';
+export const SOLANA_BATCH_REFUSAL: Readonly<Record<string, string>> = Object.freeze({
+  SOLANA_BATCH_PAYMENT_TRANSACTION_TOO_LARGE: TOO_LARGE, SOLANA_BATCH_PAYMENT_TOO_MANY_ACCOUNTS: TOO_LARGE, SOLANA_BATCH_PAYMENT_INSTRUCTION_TRACE_TOO_LONG: TOO_LARGE,
+  SOLANA_BATCH_PAYMENT_COMPUTE_LIMIT_EXCEEDED: TOO_LARGE,
+  SOLANA_BATCH_PAYMENT_RECIPIENT_RESERVED: NOT_A_WALLET, SOLANA_BATCH_PAYMENT_RECIPIENT_OFF_CURVE: NOT_A_WALLET, SOLANA_BATCH_PAYMENT_RECIPIENT_NOT_WALLET: NOT_A_WALLET,
+  SOLANA_BATCH_PAYMENT_RECIPIENT_IS_TOKEN_ACCOUNT: NOT_A_WALLET, SOLANA_BATCH_PAYMENT_DESTINATION_OWNER_MISMATCH: NOT_A_WALLET,
+  SOLANA_BATCH_PAYMENT_RECIPIENT_IS_SENDER: 'A recipient of this Batch Payment is the wallet that pays it. Nothing was signed or sent.',
+  SOLANA_BATCH_PAYMENT_INSUFFICIENT_SOL: 'Your wallet does not hold enough SOL for this Batch Payment: SOL pays the network fee and a deposit for each recipient who needs a token account (and the payments themselves when they are in SOL). Nothing was signed or sent. Add SOL and review again.',
+  SOLANA_BATCH_PAYMENT_INSUFFICIENT_TOKEN_BALANCE: 'Your wallet does not hold the whole total of this Batch Payment in one token account. Nothing was signed or sent.',
+  SOLANA_BATCH_PAYMENT_AMOUNT_BELOW_RENT_EXEMPT: 'A SOL payment to a wallet that does not exist on Solana yet must be at least the minimum balance Solana requires for a new account. Nothing was signed or sent.',
+  SOLANA_BATCH_PAYMENT_TRANSACTION_CHANGED: NOT_REVIEWED, SOLANA_BATCH_PAYMENT_ANSWER_MISMATCH: NOT_REVIEWED, SOLANA_BATCH_PAYMENT_MANIFEST_MISMATCH: NOT_REVIEWED,
+  FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED: 'FloFi Wallet cannot sign a Solana Batch Payment yet. Connect Phantom or Solflare to sign it. Nothing was signed or sent.',
+  // C.4 (H1): retryable — the Editor treats it as transient, never as a Review refusal: FloFi asks the wallet again only once it can no longer land.
+  SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE: 'Nothing was sent. The request FloFi prepared earlier for this Batch Payment can still land on Solana for a short time; FloFi asks your wallet again only once it can no longer land. Try again in a minute.',
+  // C.4 (H3): the run is halted for good; the existing UNPROVEN / UNPROVABLE words are unchanged (platform/conversation-state.ts).
+  BATCH_PAYMENT_EARLIER_REQUEST_LANDED: 'A transaction you signed earlier for this Batch Payment landed on Solana outside FloFi, so FloFi will not ask your wallet again (that would pay every recipient twice). Check your wallet\'s activity, then end the run.',
+});
+/** KAN-20: any other refusal of a Solana Batch Payment's preparation (a `SOLANA_BATCH_PAYMENT_*` code), with its code. */
+export const SOLANA_BATCH_FALLBACK = 'FloFi could not prepare this Solana Batch Payment ({0}). Nothing was signed or sent.';

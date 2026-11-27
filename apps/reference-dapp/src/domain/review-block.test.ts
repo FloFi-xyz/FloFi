@@ -61,3 +61,34 @@ describe('board 06: what the owner is authorizing, in plain words', () => {
       .toEqual({ key: '{0}', parameters: ['0.001454 ETH'], full: null });
   });
 });
+
+// KAN-20: a Solana Batch Payment prepared by the Review — its fee ceiling in SOL with the token-account deposits it includes at most, one wallet request,
+// and no token permission (the owner's wallet signs the transfers themselves). EVM Reviews carry no `feeNote` (unchanged).
+describe('KAN-20: the Review block of a Solana Batch Payment', () => {
+  const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', OWNER = '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2';
+  const recipients = ['CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH', '92yJ8DJi8fbWhAjeK39QZWR1skhE39MzE4etRiWMzntw'];
+  const usdc = (units: string) => ({ asset: `${SOLANA}/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, units, decimals: 6, symbol: 'USDC', text: `${Number(units) / 1e6} USDC` });
+  const batch = (maximumAccountCreationLamports: string) => ({ atomic: true as const, asset: { symbol: 'USDC', decimals: 6 }, total: '3000000', estimatedFeeLamports: '5000',
+    accountCreationLamports: '0', maximumAccountCreationLamports, maximumNetworkCostLamports: String(5000n + BigInt(maximumAccountCreationLamports)),
+    requiredLamports: '6000000', transactionBytes: 530 });
+  const solanaReview = (deposits: string) => swapBridgeReview({ owner: OWNER, stepCount: 2,
+    groups: [{ index: 0, chain: SOLANA, network: 'Solana', strategy: 'SOLANA_SIGN_ALL', steps: [0, 1], signing: 'UPFRONT', interactions: 1, setup: [], downgrades: [],
+      calls: null, approvals: null, fee: null, healthFactorAfter: null, solanaBatch: batch(deposits) }],
+    steps: recipients.map((recipient, index) => ({ index, action: 'transfer', network: 'Solana', chain: SOLANA, provider: null, spend: usdc(String((index + 1) * 1_000_000)),
+      basis: 'EXACT' as const, boundTo: null, expected: null, minimum: null, recipient })),
+    counts: { walletPrompts: 1, atLeast: false, signatures: 1, transactions: 1, batchedCalls: 0, networkSwitches: 0, oneTimeSetup: [] } });
+  it('the fee ceiling in SOL (fee + deposits at most), the deposits note, recipients verbatim, one request and no token permission', () => {
+    const view = reviewBlockView(solanaReview('4078560'));
+    expect(view.fee).toEqual({ key: '{0}', parameters: ['0.00408356 SOL'], full: null });
+    expect(view.feeNote).toEqual({ key: 'Includes up to {0} in deposits for recipients who need a token account.', parameters: ['0.00407856 SOL'], full: null });
+    expect(view.steps.map(step => step.parameters[1])).toEqual(recipients);
+    expect(view.permissions).toEqual([{ key: 'No new token permission', parameters: [], full: null }]);
+    expect(view.walletRequests).toEqual({ key: '{0}', parameters: ['1'], full: null });
+  });
+  it('no deposit to pay: the network fee alone and no note; an EVM Review has no note at all', () => {
+    const view = reviewBlockView(solanaReview('0'));
+    expect(view.fee).toEqual({ key: '{0}', parameters: ['0.000005 SOL'], full: null });
+    expect(view.feeNote).toBeNull();
+    expect(reviewBlockView(swapBridgeReview())).not.toHaveProperty('feeNote');
+  });
+});

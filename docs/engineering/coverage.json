@@ -2193,6 +2193,46 @@
     "reference-reconciler.solana-batch-payment": {
       "path": "packages/reference-reconciler/test/solana-batch-payment.test.ts",
       "stage": "unit"
+    },
+    "app.user-funded.groups-solana-batch": {
+      "path": "apps/reference-dapp/src/user-funded/groups-solana-batch.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.solana-batch-payment-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/solana-batch-payment-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.editor.editor-solana-batch-run.pg": {
+      "path": "apps/reference-dapp/src/editor/editor-solana-batch-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.editor.workflow-execution-solana-batch": {
+      "path": "apps/reference-dapp/src/editor/workflow-execution-solana-batch.test.ts",
+      "stage": "unit"
+    },
+    "app.components.editor-workflow-run-solana-batch": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.solana-batch.test.ts",
+      "stage": "unit"
+    },
+    "app.components.editor-workflow-run-solana-batch-panel": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.solana-batch-panel.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.editor-workflow-run-mixed-namespace": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.mixed-namespace.test.ts",
+      "stage": "unit"
+    },
+    "app.platform.native-signing": {
+      "path": "apps/reference-dapp/src/platform/native-signing.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.copilot-batch-payment-solana": {
+      "path": "apps/reference-dapp/src/domain/copilot-batch-payment-solana.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.core.batch-payment-status-solana": {
+      "path": "apps/reference-dapp/src/channels/core/batch-payment-status-solana.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2405,7 +2445,11 @@
     "action-registry.solana-batch-payment",
     "reference-linter.batch-payment-solana",
     "reference-compiler.solana-batch-payment",
-    "reference-reconciler.solana-batch-payment"
+    "reference-reconciler.solana-batch-payment",
+    "app.user-funded.groups-solana-batch",
+    "app.editor.workflow-execution-solana-batch",
+    "app.components.editor-workflow-run-solana-batch",
+    "app.platform.native-signing"
   ],
   "modules": [
     {
@@ -3955,7 +3999,8 @@
         "app.channels.core.batch-payment-status",
         "app.channels.core.conversation-batch-payment",
         "app.channels.core.copy",
-        "app.channels.core.status-batch-payment-owner-decides"
+        "app.channels.core.status-batch-payment-owner-decides",
+        "app.channels.core.batch-payment-status-solana"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -4483,7 +4528,10 @@
         "app.components.batch-payment-card",
         "app.components.batch-payment-fields",
         "app.components.batch-payment-run-action",
-        "app.components.batch-payment-run-blocked"
+        "app.components.batch-payment-run-blocked",
+        "app.components.editor-workflow-run-solana-batch",
+        "app.components.editor-workflow-run-solana-batch-panel",
+        "app.components.editor-workflow-run-mixed-namespace"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -5143,7 +5191,8 @@
         "app.domain.intelligence.beta-critical-recovery",
         "app.domain.approval-notice",
         "app.domain.run-outcome-amounts",
-        "app.mcp.platform-help-cancel"
+        "app.mcp.platform-help-cancel",
+        "app.domain.copilot-batch-payment-solana"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -5353,7 +5402,9 @@
         "app.server.solana-transfer-service",
         "app.workflow-runs.batch-payment-run.pg",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.workflow-runs.solana-batch-payment-run.pg",
+        "app.domain.copilot-batch-payment-solana"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -5552,7 +5603,9 @@
         "app.editor.single-card-review",
         "app.editor.single-card-strategy",
         "app.e2e.editor-single-card",
-        "app.editor.batch-payment-canvas"
+        "app.editor.batch-payment-canvas",
+        "app.editor.editor-solana-batch-run.pg",
+        "app.editor.workflow-execution-solana-batch"
       ],
       "gaps": [
         "The browser suite certifies the Editor's \"Run workflow\" on loopback with a passive wallet up to the pending EDITOR_SESSION approval on /approve; the claim by an account wallet and the run to completion are certified on disposable PostgreSQL with MOCKED owner flow runs (editor-run.pg), never as a public execution.",
@@ -5824,7 +5877,8 @@
         "apps/reference-dapp/src/i18n/pt-global-precision.ts",
         "apps/reference-dapp/src/i18n/pt-beta-ux-intelligence.ts",
         "apps/reference-dapp/src/i18n/pt-channel-execution-parity.ts",
-        "apps/reference-dapp/src/i18n/pt-batch-payment.ts"
+        "apps/reference-dapp/src/i18n/pt-batch-payment.ts",
+        "apps/reference-dapp/src/i18n/pt-solana-batch-payment.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -6195,7 +6249,8 @@
         "app.editor.single-card-run.pg",
         "app.editor.single-card-strategy",
         "app.server.native-signing.pg",
-        "app.platform.batch-payment-capabilities"
+        "app.platform.batch-payment-capabilities",
+        "app.platform.native-signing"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -8827,7 +8882,11 @@
         "app.components.editor-workflow-run-single-card",
         "app.e2e.editor-single-card",
         "app.user-funded.decline-proof",
-        "app.user-funded.evm-reconcile"
+        "app.user-funded.evm-reconcile",
+        "app.user-funded.groups-solana-batch",
+        "app.workflow-runs.solana-batch-payment-run.pg",
+        "app.editor.editor-solana-batch-run.pg",
+        "app.components.editor-workflow-run-solana-batch"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
@@ -9252,7 +9311,8 @@
         "apps/reference-dapp/src/workflow-runs/state-machine.ts",
         "apps/reference-dapp/src/workflow-runs/run-step-phase.ts",
         "apps/reference-dapp/src/workflow-runs/user-funded-pass.ts",
-        "apps/reference-dapp/src/workflow-runs/worker.ts"
+        "apps/reference-dapp/src/workflow-runs/worker.ts",
+        "apps/reference-dapp/src/workflow-runs/testdata/evm-batch-plans.fed320e.json"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -9274,7 +9334,8 @@
         "app.editor.single-card-run.pg",
         "app.editor.single-card-strategy",
         "app.engine.batch-payment",
-        "app.workflow-runs.batch-payment-run.pg"
+        "app.workflow-runs.batch-payment-run.pg",
+        "app.workflow-runs.solana-batch-payment-run.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -9563,7 +9624,8 @@
         "app.server.native-signing.pg",
         "app.server.native-signing.review",
         "app.server.native-signing.deeplink.nacl-box",
-        "app.server.native-signing.deeplink.protocol"
+        "app.server.native-signing.deeplink.protocol",
+        "app.platform.native-signing"
       ],
       "gaps": [
         "The Phantom/Solflare deeplink tests use a test wallet that speaks the documented protocol with real NaCl encryption on a MOCKED Solana flow; they do not certify the wallet apps, universal-link handling on iOS/Android, in-app browsers or a real signature on mainnet.",
@@ -9653,6 +9715,8 @@
     "app.server.native-signing.pg",
     "app.mcp.native-signing.pg",
     "app.channels.telegram.native-signing.pg",
-    "app.admin.analytics.channels.pg"
+    "app.admin.analytics.channels.pg",
+    "app.workflow-runs.solana-batch-payment-run.pg",
+    "app.editor.editor-solana-batch-run.pg"
   ]
 }

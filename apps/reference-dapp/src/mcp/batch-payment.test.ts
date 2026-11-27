@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): Batch Payment over the real MCP gateway (ChatGPT / Claude), in the public mainnet scope. One
- * strategy step with its exact recipients and amounts; its legs and its batch are reported; discovery offers it on the four EVM mainnets only; a
- * preview needs the owner's wallet (the atomic batch is simulated at the signing surface); MCP has no signing authority.
+ * strategy step with its exact recipients and amounts; its legs and its batch are reported; discovery offers it on the four EVM mainnets and (KAN-20)
+ * Solana; a preview needs the owner's wallet (the atomic batch is simulated at the signing surface); MCP has no signing authority.
  */
 import { describe, expect, it } from 'vitest';
 import { composeWorkflow } from '../engine/strategy-engine';
@@ -20,6 +20,10 @@ const SWAP = { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset:
 /** `n` distinct ordinary recipients (0x0101…01, 0x0202…02, …), 1 USDC each. */
 const payees = (n: number) => Array.from({ length: n }, (_, i) => ({ recipient: '0x' + (i + 1).toString(16).padStart(2, '0').repeat(20), amount: '1' }));
 const STRATEGY_TOOLS = ['compose_strategy', 'validate_strategy', 'review_strategy', 'explain_strategy'] as const;
+/** KAN-20: the owner's acceptance example: three Solana wallets (seed-derived, on curve; never paid), 0.01 + 0.02 + 0.03 SOL. */
+const SOL_A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', SOL_B = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty', SOL_C = '8WcnkMD1aZFGDppfnerV37Fob9W1ij3yHkCL3LWgVKiG';
+const SOLANA_BATCH = { action: 'batch_payment', network: 'solana', asset: 'SOL',
+  recipients: [{ recipient: SOL_A, amount: '0.01' }, { recipient: SOL_B, amount: '0.02' }, { recipient: SOL_C, amount: '0.03' }] };
 
 describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment over MCP', () => {
   it('composes ONE Batch Payment: the canonical strategy keeps the exact recipients; its three legs and its batch are reported; one step was asked for', async () => {
@@ -35,7 +39,7 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment over MCP
     expect((await client.callTool('validate_strategy', { strategy: out.strategy, workflowHash: out.workflowHash })).output).toMatchObject({ ok: true, valid: true, stepCount: 3 });
   });
 
-  it('refuses a duplicate recipient and Solana explicitly; never merges, drops or reroutes a payment', async () => {
+  it('refuses a duplicate recipient and 0x recipients on Solana explicitly; never merges, drops or reroutes a payment', async () => {
     const client = session({ env, token: alice.token });
     const dup = await client.callTool('compose_strategy', { strategy: { ...BATCH, recipients: [{ recipient: A, amount: '1' }, { recipient: A, amount: '2' }] } });
     expect(dup.output).toMatchObject({ ok: false, code: 'BATCH_PAYMENT_DUPLICATE_RECIPIENT' });
@@ -44,15 +48,48 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment over MCP
     expect(solana.isError).toBe(true);
   });
 
-  it('discovery: batch_payment on Base, Arbitrum One, Ethereum and Robinhood Chain, never Solana; the strategy cannot be previewed without the owner wallet', async () => {
+  it('KAN-20: composes ONE Solana Batch Payment: recipients exactly as written, three legs, total 0.06 SOL, the engine\'s own hash', async () => {
+    const client = session({ env, token: alice.token });
+    const out = (await client.callTool('compose_strategy', { strategy: SOLANA_BATCH, expectedStepCount: 1 })).output as Record<string, unknown> & {
+      workflowSteps: { action: string; strategy: { network: string; asset: string; recipient: string; amount: string } }[]; batchPayments: unknown[]; nextSteps: string[] };
+    expect(out).toMatchObject({ ok: true, strategy: { version: 2, steps: [{ action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: SOLANA_BATCH.recipients }] },
+      stepCount: 3, authority: expect.stringMatching(/^NONE/) });
+    expect(out.workflowSteps.map(s => [s.action, s.strategy.network, s.strategy.asset, s.strategy.amount, s.strategy.recipient])).toEqual([
+      ['transfer', 'solana', 'SOL', '0.01', SOL_A], ['transfer', 'solana', 'SOL', '0.02', SOL_B], ['transfer', 'solana', 'SOL', '0.03', SOL_C]]);
+    expect(out.batchPayments).toEqual([{ step: 0, legs: [0, 2], network: 'solana', asset: 'SOL', recipients: 3, total: '0.06', execution: 'ATOMIC_ONLY' }]);
+    const engine = composeWorkflow(SOLANA_BATCH);
+    expect(engine.ok && engine.workflowHash).toBe(out.workflowHash);
+    expect((await client.callTool('validate_strategy', { strategy: out.strategy, workflowHash: out.workflowHash })).output).toMatchObject({ ok: true, valid: true, stepCount: 3 });
+    // A Solana-only workflow gets the Solana execution note, never the EVM smart-account wording.
+    const notes = (await client.callTool('review_strategy', { strategy: out.strategy, workflowHash: out.workflowHash })).output.nextSteps as string[];
+    expect(notes.join('\n')).toMatch(/A Solana Batch Payment runs only as ONE Solana transaction signed by the owner's own wallet \(Phantom or Solflare\)/);
+    expect(notes.join('\n')).not.toMatch(/smart-account/);
+    // Letter case is part of a base58 key: two spellings are two recipients; an exact repeat is refused, never merged.
+    const variant = '2CErLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb';
+    expect((await client.callTool('compose_strategy', { strategy: { ...SOLANA_BATCH, recipients: [{ recipient: SOL_A, amount: '1' }, { recipient: variant, amount: '2' }] } })).output)
+      .toMatchObject({ ok: true, batchPayments: [{ recipients: 2, total: '3' }] });
+    expect((await client.callTool('compose_strategy', { strategy: { ...SOLANA_BATCH, recipients: [{ recipient: SOL_A, amount: '1' }, { recipient: SOL_A, amount: '2' }] } })).output)
+      .toMatchObject({ ok: false, code: 'BATCH_PAYMENT_DUPLICATE_RECIPIENT' });
+    expect(MCP_INSTRUCTIONS).toMatch(/or solana for SOL, USDC or USDT\) are ONE batch_payment step/);
+    expect(MCP_INSTRUCTIONS).not.toMatch(/Solana batch payments are not available/);
+  });
+
+  it('discovery: batch_payment on Base, Arbitrum One, Ethereum, Robinhood Chain and (KAN-20) Solana; the strategy cannot be previewed without the owner wallet', async () => {
     const client = session({ env, token: alice.token });
     const networks = (await client.callTool('get_supported_networks', {})).output.networks as { id: string; actions: string[] }[];
-    expect(networks.filter(n => n.actions.includes('batch_payment')).map(n => n.id).sort()).toEqual(['arbitrum-one', 'base', 'ethereum', 'robinhood']);
+    expect(networks.filter(n => n.actions.includes('batch_payment')).map(n => n.id).sort()).toEqual(['arbitrum-one', 'base', 'ethereum', 'robinhood', 'solana']);
     const assets = (await client.callTool('get_supported_assets', { network: 'base' })).output.assets as { symbol: string; actions: string[] }[];
     expect(assets.find(a => a.symbol === 'USDC')!.actions).toContain('batch_payment');
+    // KAN-20: on Solana exactly SOL, USDC and USDT are paid in batches (the verified transfer registry).
+    const solana = (await client.callTool('get_supported_assets', { network: 'solana' })).output.assets as { symbol: string; actions: string[] }[];
+    expect(solana.filter(a => a.actions.includes('batch_payment')).map(a => a.symbol).sort()).toEqual(['SOL', 'USDC', 'USDT']);
     const composed = (await client.callTool('compose_strategy', { strategy: BATCH })).output;
     const preview = (await client.callTool('simulate_strategy', { strategy: composed.strategy, workflowHash: composed.workflowHash, simulationSubject: A })).output;
     expect(preview).toMatchObject({ ok: true, kind: 'WORKFLOW_PREVIEW', authorizable: false, status: 'INCOMPLETE' });
+    const solanaComposed = (await client.callTool('compose_strategy', { strategy: SOLANA_BATCH })).output;
+    const solanaPreview = (await client.callTool('simulate_strategy', { strategy: solanaComposed.strategy, workflowHash: solanaComposed.workflowHash,
+      simulationSubject: SOL_A })).output;
+    expect(solanaPreview).toMatchObject({ ok: true, kind: 'WORKFLOW_PREVIEW', authorizable: false, status: 'INCOMPLETE' });
   });
 
   // ── Review findings MCP-1 … MCP-6 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -221,7 +258,8 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment over MCP
     const reserved = await client.callTool('compose_strategy', { strategy: { ...BATCH, recipients: [{ recipient: '0x' + '0'.repeat(38) + '02', amount: '1' }, { recipient: B, amount: '2' }] } });
     expect(reserved.output).toMatchObject({ ok: false, code: 'BATCH_PAYMENT_RECIPIENT_INVALID' });
     const capabilities = (await client.callTool('get_capabilities', { action: 'batch_payment' })).output.capabilities as { example: { recipients: { recipient: string }[] } }[];
-    expect(capabilities.length).toBe(4);
+    // KAN-20: the four EVM mainnets and Solana; every example pays ordinary wallets (base58 keys never match a 0x precompile).
+    expect(capabilities.length).toBe(5);
     for (const row of capabilities) for (const line of row.example.recipients) expect(line.recipient).not.toMatch(/^0x0{38}/);
   });
 });

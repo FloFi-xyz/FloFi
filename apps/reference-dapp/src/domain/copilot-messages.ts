@@ -36,9 +36,9 @@ const PT_COMPOSITION = () => activeNetworkScope() === 'PUBLIC_MAINNET' ? 'O FloF
  * `rejection` entry, each language's sentence is chosen by `copilotCopy(language)`, not looked up in the product catalog.
  */
 const BATCH_PAYMENT_AVAILABILITY_EN = 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, Ethereum and Robinhood Chain '
-  + '(never Stock Tokens, never Solana in this version).';
+  + '(never Stock Tokens), and for SOL, USDC and USDT on Solana.';
 const BATCH_PAYMENT_AVAILABILITY_PT = 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain '
-  + '(nunca Stock Tokens, nunca Solana nesta versão).';
+  + '(nunca Stock Tokens), e para SOL, USDC e USDT na Solana.';
 const BATCH_PAYMENT_REJECTION_EN = {
   BATCH_PAYMENT_DUPLICATE_RECIPIENT: 'A recipient appears more than once. A Batch Payment pays each recipient once, and FloFi never merges or drops a payment: '
     + 'give that recipient one amount.',
@@ -55,6 +55,12 @@ const BATCH_PAYMENT_REJECTION_EN = {
     + 'FloFi accepts. Nothing was dropped. Pay fewer recipients or split it into two workflows.',
   BATCH_PAYMENT_ASSET_MIXED: 'A Batch Payment pays every recipient in one asset, and this request names more than one. FloFi never splits it into separate '
     + 'transfers by itself: write one Batch Payment per asset.',
+  // KAN-20: the Solana-only authoring refusals (the EVM sentences above are unchanged).
+  BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID: 'A recipient is not a Solana wallet address FloFi can pay: it must be a base58 address written exactly as given (letter case '
+    + 'matters), and a 0x address is not a Solana address. FloFi never corrects an address. Copy it again from its source.',
+  BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED: 'A recipient is a Solana program, system account or token mint, which cannot receive a payment. Use the recipient\'s wallet address.',
+  BATCH_PAYMENT_RECIPIENT_IS_SENDER: 'A recipient is the Solana wallet you are paying from. Remove it: a Batch Payment never pays your own wallet.',
+  BATCH_PAYMENT_TOTAL_OUT_OF_RANGE: 'The amounts of this Batch Payment are larger than Solana can carry.',
 };
 const BATCH_PAYMENT_REJECTION_PT: typeof BATCH_PAYMENT_REJECTION_EN = {
   BATCH_PAYMENT_DUPLICATE_RECIPIENT: 'Um destinatário aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez, e o FloFi nunca junta nem descarta '
@@ -74,6 +80,13 @@ const BATCH_PAYMENT_REJECTION_PT: typeof BATCH_PAYMENT_REJECTION_EN = {
     + 'aceita. Nada foi descartado. Pague menos destinatários ou divida em dois fluxos.',
   BATCH_PAYMENT_ASSET_MIXED: 'Um Pagamento em lote paga todos os destinatários em um único ativo, e este pedido cita mais de um. O FloFi nunca o divide em '
     + 'transferências separadas por conta própria: faça um Pagamento em lote por ativo.',
+  BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID: 'Um destinatário não é um endereço de carteira Solana que o FloFi possa pagar: ele precisa ser um endereço base58 escrito '
+    + 'exatamente como foi dado (maiúsculas e minúsculas fazem diferença), e um endereço 0x não é um endereço Solana. O FloFi nunca corrige um endereço. '
+    + 'Copie-o de novo da origem.',
+  BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED: 'Um destinatário é um programa, uma conta de sistema ou um mint de token da Solana, que não pode receber pagamento. Use o '
+    + 'endereço da carteira do destinatário.',
+  BATCH_PAYMENT_RECIPIENT_IS_SENDER: 'Um destinatário é a carteira Solana da qual você está pagando. Remova-o: um pagamento em lote nunca paga a sua própria carteira.',
+  BATCH_PAYMENT_TOTAL_OUT_OF_RANGE: 'Os valores deste pagamento em lote são maiores do que a Solana comporta.',
 };
 
 /**

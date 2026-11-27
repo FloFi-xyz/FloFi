@@ -64,7 +64,7 @@ import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace, executeActionPlacement } from './execute-workspace';
 import { EditorRunAction } from './editor-run-action';
-import { EditorWorkflowRunPanel, EditorWorkflowRunPrimaryAction, EditorWorkflowSimulateAction, batchPaymentRunBlocked, useEditorWorkflowRun } from './editor-workflow-run';
+import { EditorWorkflowRunPanel, EditorWorkflowRunPrimaryAction, EditorWorkflowSimulateAction, batchPaymentRunBlocked, executedRunOwner, solanaBatchWorkflow, useEditorWorkflowRun } from './editor-workflow-run';
 // Client-safe (FE-BATCH-02/03): never `editor/workflow-strategy`, which reaches server-only modules (`app-shell-client-safety.test.tsx`).
 import { canvasRunOrder, loneCardRunVerdict } from '../domain/batch-run-record';
 import { batchPaymentDraftTotal } from '../domain/batch-payment-authoring';
@@ -628,7 +628,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const accountIssue = accountIssueIn(language === 'PT' ? 'PT' : 'EN');
   const canReadAcrossEvmNetworks = networkTarget?.ecosystem === 'evm' && (simulationSource.kind === 'universal' ||
     simulationSource.kind === 'public' && publicTestnet.catalogAvailable(requiredSigningChain ?? ''));
-  const networkAction = signer && requiredSigningChain && networkTarget && reviewBinding.wallet.chain !== requiredSigningChain &&
+  // KAN-20: a lone Solana Batch Payment card is reviewed and authorized only through the whole-workflow path, with the owner's Solana wallet on
+  // Solana mainnet (it asks for that wallet itself): never a per-card "Switch to" action.
+  const loneSolanaBatch = !sequence && solanaBatchWorkflow(state.workflow);
+  const networkAction = !loneSolanaBatch && signer && requiredSigningChain && networkTarget && reviewBinding.wallet.chain !== requiredSigningChain &&
     (!canReadAcrossEvmNetworks || authorization.key && !reviewBinding.wallet.changed) ? {
     label: tr('Switch to {0}', networkTarget.label), labelIn: (shown: 'EN' | 'PT') => translate(shown, 'Switch to {0}', networkTarget.label), network: networkTarget.label, disabled: Boolean(simulationSource.state.busy || approvalGate || accountIssue),
     request: () => void walletConnection.switchNetwork(requiredSigningChain),
@@ -674,7 +677,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): ONE Batch Payment card has no per-card flow: it always runs as the shared workflow run of its
   // payments (one atomic group), exactly like a multi-step sequence.
   const batchPaymentRun = !sequence && soleAction.length === 1 && isBatchPaymentNode(soleAction[0]!);
-  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account, single: singleCardRun,
+  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
+    // KAN-20: a Solana Batch Payment is reviewed and signed with the Solana wallet connected on Solana mainnet (Phantom or Solflare), as reported.
+    solanaAccount: solanaSession?.chain === 'solana:mainnet' ? solanaSession.account.address : null, single: singleCardRun,
     enabled: (Boolean(sequence) || singleCardRun || batchPaymentRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
   // A single card goes back to its own flow when its Review is not one grouped interaction, refuses the batch, or could not answer at all
   // (`singleCardFallsBack`); a started run of it always stays here.
@@ -729,7 +734,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   useEffect(() => {
     // The wallet that executed it is the run's own (its group's fee payer: the run's bound EVM wallet), never whatever is connected now.
     if (groupedSingleDone && groupedSingleRun) recordExecutedAction({ received: groupedSingleDelivered, runKey: groupedSingleRun.approvalId, kind: 'workflow-run',
-      owner: groupedSingleRun.groups[0]?.feePayer?.toLowerCase() ?? null });
+      owner: executedRunOwner(groupedSingleRun.groups[0]?.feePayer) });
   }, [groupedSingleDone, groupedSingleDelivered, groupedSingleRun?.approvalId, recordExecutedAction]);
   // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
   // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own

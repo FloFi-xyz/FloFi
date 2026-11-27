@@ -47,7 +47,7 @@ export type StepDetail =
       readonly tokenB: string; readonly fee: number; readonly management: ConcentratedLiquidityManagement }
   /** BUILD-BASE-001: a transfer (native ETH, or a catalog token on a catalog network) to the connected owner or an explicit recipient. */
   | { readonly type: 'TRANSFER'; readonly input: RobinhoodTransferInput }
-  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several recipients, one asset, one EVM mainnet). */
+  /** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment (several recipients, one asset, one mainnet; KAN-20: EVM or Solana). */
   | { readonly type: 'BATCH_PAYMENT'; readonly input: BatchPaymentInput; readonly total: string }
   | { readonly type: 'LENDING_COMPOSITION'; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP'; readonly input: LendingInput }
   | { readonly type: 'TEMPLATE'; readonly template: string }

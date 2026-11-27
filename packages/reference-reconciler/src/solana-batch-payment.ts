@@ -12,8 +12,9 @@
  * Malformed RPC data (not an object, wrong encodings, unsafe numbers) throws `SOLANA_RPC_INVALID`: an RPC problem is not a chain fact.
  */
 import { SOLANA_BATCH_PAYMENT } from '@defi-workflow-engine/action-registry';
-import { base58Encode, fromBase64, parseMessageV0, parseTransaction, solanaRpcU64, verifyEd25519, verifySolanaWalletGuard, type MessageV0,
-  type SolanaBatchPaymentReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { base58Encode, fromBase64, parseMessageV0, parseTransaction, solanaRpcU64, verifyEd25519, verifySignedSolanaBatchPayment, verifySolanaWalletGuard, type MessageV0,
+  type SolanaBatchPaymentReview, type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { KORA_RECOVERY_FETCHES, KORA_RECOVERY_MAX_FETCHES, KORA_RECOVERY_PAGE, KORA_RECOVERY_PAGES } from './kora.js';
 
 export type SolanaBatchExpected = { readonly chain: string; readonly owner: string; readonly reviewedMessage: string; readonly estimatedFeeLamports: string;
   readonly asset: { readonly mint: string | null; readonly decimals: number; readonly programId: string | null }; readonly sourceAccount: string | null;
@@ -137,4 +138,89 @@ export function reconcileSolanaBatchTransaction(expected: SolanaBatchExpected, s
     if (error instanceof Divergence) return { verdict: 'DIVERGENT', code: error.message, fee, walletGuard, legs: [] };
     throw error;
   }
+}
+
+/**
+ * KAN-20 C.4 (H3): whether an EARLIER preparation of a batch group landed on chain, read-only. FloFi never held that preparation's signed bytes (the
+ * owner's wallet only signs), so only the owner's history can prove that no owner-signed copy of its message reached the chain before its blockhash
+ * expired. Called once the finalized height is past `lastValidBlockHeight` (nothing can land any more). The window and chunk algorithm is exactly
+ * `recoverKoraTransaction`'s: the owner's history (`getSignaturesForAddress`, newest first, paged with `before`) back to `sinceSlot` (the Review's
+ * slot: the transaction cannot be older), fetched oldest first in chunks, each chunk only while its oldest entry is not in a block past the expiry.
+ *
+ *   FOUND       an entry is the reviewed message signed by the owner (exact bytes, or them plus only verified Lighthouse assertions); `failed` when it
+ *               landed with an error (an atomic batch that failed paid no recipient). A copy that succeeded is always reported over one that failed: two
+ *               signed variants of one message (a wallet guard differs per prompt) can both land, so a failed copy decides only once the whole window
+ *               was read and no copy succeeded
+ *   ABSENT      the scan provably covered the whole window and no entry is it
+ *   UNKNOWN     not decided now (an RPC failure, a malformed answer); asked again later
+ *   INCOMPLETE  the owner's history in the window is more than a scan reads, with the blockhash provably expired: scanning can never decide it
+ * Nothing here sends, signs or re-creates anything.
+ */
+export type LandedSolanaBatchPreparation = { readonly state: 'FOUND'; readonly signature: string; readonly failed: boolean } | { readonly state: 'ABSENT' }
+  | { readonly state: 'UNKNOWN' } | { readonly state: 'INCOMPLETE' };
+export type LandedSolanaBatchQuery = { readonly owner: string; readonly message: string; readonly sinceSlot: number; readonly lastValidBlockHeight: number };
+type HistoryEntry = { readonly signature: string; readonly slot: number };
+const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+const plain = (v: unknown): Record<string, unknown> | null => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+
+export async function findLandedSolanaBatchPreparation(rpc: SolanaRpc, query: LandedSolanaBatchQuery): Promise<LandedSolanaBatchPreparation> {
+  const { owner, message, sinceSlot, lastValidBlockHeight: bound } = query;
+  // FloFi's own frozen artifact: without a usable window nothing is decided.
+  if (!Number.isSafeInteger(sinceSlot) || sinceSlot < 0 || !Number.isSafeInteger(bound) || bound < 0 || typeof message !== 'string') return { state: 'UNKNOWN' };
+  // 1. The window's entries: the owner's history from its newest entry back to the Review's slot, page by page.
+  const window: HistoryEntry[] = [];
+  let before: string | null = null, complete = false, last = Number.MAX_SAFE_INTEGER;
+  for (let page = 0; page < KORA_RECOVERY_PAGES && !complete; page++) {
+    let listed: unknown;
+    try { listed = await rpc('getSignaturesForAddress', [owner, { limit: KORA_RECOVERY_PAGE, commitment: 'confirmed', ...before ? { before } : {} }]); }
+    catch { return { state: 'UNKNOWN' }; }
+    if (!Array.isArray(listed) || listed.length > KORA_RECOVERY_PAGE) return { state: 'UNKNOWN' };
+    for (const item of listed) {
+      const e = plain(item);
+      // Newest first, as the RPC lists them: an entry out of order (or malformed) decides nothing.
+      if (!e || typeof e.signature !== 'string' || !SIGNATURE.test(e.signature) || !Number.isSafeInteger(e.slot) || (e.slot as number) > last) return { state: 'UNKNOWN' };
+      last = e.slot as number;
+      if (last < sinceSlot) { complete = true; break; }
+      window.push({ signature: e.signature, slot: last });
+    }
+    if (listed.length < KORA_RECOVERY_PAGE) complete = true;
+    before = window.at(-1)?.signature ?? null;
+  }
+  /** Undecidable by this scan: INCOMPLETE once the blockhash provably expired (nothing can land any more), else UNKNOWN (asked again later). */
+  const undecided = async (): Promise<LandedSolanaBatchPreparation> => {
+    let finalized: unknown;
+    try { finalized = await rpc('getBlockHeight', [{ commitment: 'finalized' }]); } catch { return { state: 'UNKNOWN' }; }
+    return Number.isSafeInteger(finalized) && (finalized as number) > bound ? { state: 'INCOMPLETE' } : { state: 'UNKNOWN' };
+  };
+  if (!complete) return undecided();
+  let failedCopy: string | null = null;
+  const absent = (): LandedSolanaBatchPreparation => failedCopy ? { state: 'FOUND', signature: failedCopy, failed: true } : { state: 'ABSENT' };
+  // 2. Oldest first (the earlier request would have been sent right after its Review), chunk by chunk: a chunk is fetched only while its oldest
+  // entry is not provably past the blockhash's expiry (block heights never decrease with the slot, so it decides for every later entry).
+  const oldestFirst = window.reverse();
+  for (let start = 0; start < oldestFirst.length; start += KORA_RECOVERY_FETCHES) {
+    if (start > 0) {
+      let block: unknown;
+      try { block = await rpc('getBlock', [oldestFirst[start]!.slot, { commitment: 'confirmed', encoding: 'json', transactionDetails: 'none', rewards: false,
+        maxSupportedTransactionVersion: 0 }]); } catch { return { state: 'UNKNOWN' }; }
+      const height = plain(block)?.blockHeight;
+      if (!Number.isSafeInteger(height)) return { state: 'UNKNOWN' };
+      if ((height as number) > bound) return absent();
+      if (start >= KORA_RECOVERY_MAX_FETCHES) return undecided();
+    }
+    for (const entry of oldestFirst.slice(start, start + KORA_RECOVERY_FETCHES)) {
+      let value: unknown;
+      try { value = await rpc('getTransaction', [entry.signature, { encoding: 'base64', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }]); }
+      catch { return { state: 'UNKNOWN' }; }
+      const tx = plain(value), meta = plain(tx?.meta), wire = tx && Array.isArray(tx.transaction) && tx.transaction[1] === 'base64' ? tx.transaction[0] : null;
+      // A listed confirmed signature the RPC cannot return, or returns malformed, decides nothing.
+      if (!tx || !meta || !('err' in meta) || typeof wire !== 'string') return { state: 'UNKNOWN' };
+      let signed: ReturnType<typeof verifySignedSolanaBatchPayment>;
+      try { signed = verifySignedSolanaBatchPayment({ message, owner }, wire); } catch { continue; }
+      if (signed.signature !== entry.signature) return { state: 'UNKNOWN' };
+      if (meta.err === null) return { state: 'FOUND', signature: entry.signature, failed: false };
+      failedCopy ??= entry.signature;
+    }
+  }
+  return absent();
 }

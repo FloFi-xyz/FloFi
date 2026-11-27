@@ -16,7 +16,9 @@ const CASES: readonly (readonly [string, string])[] = [
   [`batch pay 1 USDC to ${A} and 0.002 ETH to ${B} on Base`, 'BATCH_PAYMENT_ASSET_MIXED'],
   [`pay 0 ETH to ${A} and 0.002 ETH to ${B} on Base`, 'BATCH_PAYMENT_AMOUNT_INVALID'],
   [`pay 1.1234567 USDC to ${A} and 2 USDC to ${B} on Base`, 'BATCH_PAYMENT_AMOUNT_TOO_PRECISE'],
-  [`batch pay 1 SOL to ${SOL_A} and 2 SOL to ${SOL_B} on Solana`, 'BATCH_PAYMENT_NETWORK_UNSUPPORTED'],
+  // KAN-20: Solana mainnet pays batches now (a positive case below); Solana Devnet stays refused, and a name is never resolved to a Solana address.
+  [`batch pay 1 SOL to ${SOL_A} and 2 SOL to ${SOL_B} on Solana Devnet`, 'BATCH_PAYMENT_NETWORK_UNSUPPORTED'],
+  [`pay 1 SOL to my wallet and 2 SOL to ${SOL_B} on Solana`, 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID'],
 ];
 
 /** A channel turn whose interpreter fails the test if it is ever called. */
@@ -39,6 +41,16 @@ describe('chat review C2: a `pay` refusal in a channel', () => {
       }
     });
   }
+
+  it('KAN-20: an exact Solana pay list is PROPOSED_EXACT from the grammar alone (the interpreter is never called), recipients verbatim', async () => {
+    for (const language of ['EN', 'PT'] as const) {
+      const text = language === 'EN' ? `Send 0.01 SOL to ${SOL_A} and 0.02 SOL to ${SOL_B}` : `envie 0.01 SOL para ${SOL_A} e 0.02 SOL para ${SOL_B} na Solana`;
+      const { decided, calls } = await turn(text, { ...freshState(language), greeted: true });
+      expect(calls, text).toBe(0);
+      expect(decided, text).toMatchObject({ action: 'PROPOSE', outcome: 'PROPOSED_EXACT', aiInterpreted: false, command: { type: 'ADD_BATCH_PAYMENT',
+        input: { network: 'Solana', asset: 'SOL', payments: [{ recipient: SOL_A, amount: '0.01' }, { recipient: SOL_B, amount: '0.02' }] } } });
+    }
+  });
 
   it('keeps the pending proposal exactly as it was (nothing is committed)', async () => {
     const proposed = await turn(`pay 1 USDC to ${A} and 2 USDC to ${B} on Base`, { ...freshState('EN'), greeted: true });

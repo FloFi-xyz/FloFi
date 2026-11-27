@@ -4,6 +4,8 @@
  * strategy each group uses for the owner's actual wallets, what waits for a cross-chain delivery, and the honest interaction count.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { requirementOf, type WorkflowRequirement } from '../delegation/steps.ts';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { evmStepBuildable } from '../user-funded/evm-calls.ts';
@@ -196,5 +198,108 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
     expect(plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }).groups[0]!.downgrades).toContain('WALLET_CAPABILITIES_ASSUMED');
     expect(planExecutionGroups(req({ version: 2, steps: [SWAP_BASE, SEND_BASE] }), { ...ALL, enabled: false, code: 'USER_FUNDED_NOT_ENABLED' })).toEqual({ ok: false,
       code: 'USER_FUNDED_NOT_ENABLED' });
+  });
+});
+
+describe('KAN-20: a Solana Batch Payment is ONE sign-all group of exactly its legs (one atomic transaction), never split', () => {
+  const PAYEES = ['7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2', '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', 'GHtXQBsoZHVnNFa9YevAzFr17DJjgHXk3ycTKD5xD3Zi'];
+  const SOL_BATCH = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: PAYEES.map((recipient, i) => ({ recipient, amount: `0.0${i + 1}` })) };
+  const USDC_BATCH = { ...SOL_BATCH, asset: 'USDC', recipients: PAYEES.map((recipient, i) => ({ recipient, amount: String(i + 1) })) };
+  const OTHER = { ...SOL_SEND, recipient: 'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr' };
+  const refused = (input: unknown, wallets?: WalletProfile, facts = ALL) => planExecutionGroups(req(input), facts, wallets, buildable(facts));
+
+  it('alone: one SOLANA_SIGN_ALL group of exactly the legs, signed upfront in one prompt (single)', () => {
+    for (const batch of [SOL_BATCH, USDC_BATCH]) {
+      const p = plan(batch, METAMASK);
+      expect(p.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.signing, g.interactions, g.downgrades])).toEqual([['SOLANA_SIGN_ALL', 0, 2, 'UPFRONT', 1, []]]);
+      expect(p.groups[0]!.steps.map(s => [s.index, s.action, s.amount])).toEqual([[0, 'transfer', 'EXACT'], [1, 'transfer', 'EXACT'], [2, 'transfer', 'EXACT']]);
+      expect(p.interactions).toEqual({ upfront: 1, whenDue: 0, perNamespace: { solana: 1 }, networkSwitches: 0, oneTimeSetup: [], single: true, atLeast: false });
+    }
+  });
+
+  it('an unbound Solana step before or after it is a group of its own (one more prompt): the batch group is always exactly the batch', () => {
+    const before = plan({ version: 2, steps: [OTHER, SOL_BATCH] }, METAMASK);
+    expect(before.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.signing])).toEqual([['SOLANA_SIGN_ALL', 0, 0, 'UPFRONT'], ['SOLANA_SIGN_ALL', 1, 3, 'WHEN_DUE']]);
+    const after = plan({ version: 2, steps: [SOL_BATCH, OTHER] }, METAMASK);
+    expect(after.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.signing])).toEqual([['SOLANA_SIGN_ALL', 0, 2, 'UPFRONT'], ['SOLANA_SIGN_ALL', 3, 3, 'WHEN_DUE']]);
+    // Without a batch, two Solana transfers still share one sign-all prompt (unchanged).
+    expect(plan({ version: 2, steps: [OTHER, SOL_SEND] }, METAMASK).groups.map(g => [g.strategy, g.stepFrom, g.stepTo])).toEqual([['SOLANA_SIGN_ALL', 0, 1]]);
+  });
+
+  it('Jupiter swap -> batch, bound: two groups; the batch spends the reconciled swap output, signed when due', () => {
+    const p = plan({ version: 2, steps: [SOL_SWAP, SOL_BATCH], bindings: [{ step: 1, amountFrom: 0 }] }, METAMASK);
+    expect(p.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.signing, g.downgrades])).toEqual([['SOLANA_SIGN_ALL', 0, 0, 'UPFRONT', []],
+      ['SOLANA_SIGN_ALL', 1, 3, 'WHEN_DUE', ['SOLANA_GROUP_STEP_DEPENDENT']]]);
+    expect(p.groups[1]!.steps.map(s => [s.amount, s.boundTo])).toEqual([['RECONCILED_ACTUAL', 0], ['RECONCILED_ACTUAL', 0], ['RECONCILED_ACTUAL', 0]]);
+  });
+
+  it('Universal bridge -> batch: the batch group waits for the delivery and is signed when due, with the delivered amount', () => {
+    const bridge = { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'solana', asset: 'USDC', amount: '10' };
+    const p = plan({ version: 2, steps: [bridge, USDC_BATCH], bindings: [{ step: 1, amountFrom: 0 }] }, METAMASK);
+    expect(p.groups.map(g => [g.chain, g.strategy, g.stepFrom, g.stepTo, g.signing, g.awaitsDelivery])).toEqual([['eip155:8453', 'EVM_OWNER_STEP', 0, 0, 'WHEN_DUE', null],
+      ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'SOLANA_SIGN_ALL', 1, 3, 'WHEN_DUE', 0]]);
+    expect(p.groups[1]!.steps.every(s => s.amount === 'RECONCILED_ACTUAL' && s.boundTo === 0)).toBe(true);
+  });
+
+  it('FloFi Wallet, a disabled chain, or no Solana wallet that signs: BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE with the reason, never owner steps', () => {
+    const flofi = { ...METAMASK, solana: { wallet: 'FLOFI_WALLET' as const, signMultiple: false, nonceAccounts: 0 } };
+    expect(refused(SOL_BATCH, flofi)).toEqual({ ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', because: ['FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED'] });
+    // Even a FloFi Wallet profile that claims to sign several transactions: it has no signing binding for a workflow run's Solana group.
+    expect(refused(SOL_BATCH, { ...flofi, solana: { ...flofi.solana, signMultiple: true } }))
+      .toEqual({ ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', because: ['FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED'] });
+    expect(refused(SOL_BATCH, METAMASK, { ...ALL, chains: ALL.chains.filter(c => !c.startsWith('solana:')) }))
+      .toEqual({ ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', because: ['USER_FUNDED_CHAIN_DISABLED'] });
+    for (const solana of [undefined, { wallet: 'WALLET_STANDARD' as const, signMultiple: false, nonceAccounts: 0 }])
+      expect(refused(USDC_BATCH, { eip155: METAMASK.eip155!, ...solana ? { solana } : {} }))
+        .toEqual({ ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', because: ['SOLANA_MULTI_SIGN_UNSUPPORTED'] });
+    // A non-batch Solana group of FloFi Wallet keeps its owner steps and code (unchanged).
+    expect(plan({ version: 2, steps: [SOL_SWAP, SOL_SEND] }, flofi).groups.map(g => [g.strategy, g.downgrades])).toEqual([['SOLANA_OWNER_STEP', ['SOLANA_MULTI_SIGN_UNSUPPORTED']]]);
+  });
+
+  it('compositions (design 5): Swap/Withdraw -> Bridge -> Batch, Bridge -> Batch, Jupiter -> Batch, Batch alone at 8: the batch is always ONE group of its legs', () => {
+    const payees = Array.from({ length: 8 }, () => createMockedSolanaWallet().owner);
+    const usdc = (n: number) => ({ action: 'batch_payment', network: 'solana', asset: 'USDC', recipients: payees.slice(0, n).map((recipient, i) => ({ recipient, amount: String(i + 1) })) });
+    const swap = { action: 'swap', network: 'base', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.01' };
+    const withdraw = { action: 'withdraw', network: 'base', asset: 'USDC', amount: '10' };
+    const bridge = { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'solana', asset: 'USDC', amount: '10' };
+    const shape = (input: unknown) => plan(input, METAMASK).groups.map(g => [g.chain, g.strategy, g.stepFrom, g.stepTo, g.signing, g.awaitsDelivery]);
+    const SOL = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+    // An EVM producer, the bridge (an owner step), then the batch: signed when the delivery reconciled, at most 6 recipients (the 8-step budget).
+    for (const producer of [swap, withdraw])
+      expect(shape({ version: 2, steps: [producer, bridge, usdc(6)], bindings: [{ step: 1, amountFrom: 0 }, { step: 2, amountFrom: 1 }] })).toEqual([
+        ['eip155:8453', 'EVM_WALLET_BATCH', 0, 0, 'UPFRONT', null], ['eip155:8453', 'EVM_OWNER_STEP', 1, 1, 'WHEN_DUE', null], [SOL, 'SOLANA_SIGN_ALL', 2, 7, 'WHEN_DUE', 1]]);
+    expect(shape({ version: 2, steps: [bridge, usdc(7)], bindings: [{ step: 1, amountFrom: 0 }] })).toEqual([['eip155:8453', 'EVM_OWNER_STEP', 0, 0, 'WHEN_DUE', null],
+      [SOL, 'SOLANA_SIGN_ALL', 1, 7, 'WHEN_DUE', 0]]);
+    expect(shape({ version: 2, steps: [{ ...SOL_SWAP, inputAsset: 'SOL', outputAsset: 'USDC', amount: '1' }, usdc(7)], bindings: [{ step: 1, amountFrom: 0 }] })).toEqual([
+      [SOL, 'SOLANA_SIGN_ALL', 0, 0, 'UPFRONT', null],
+      [SOL, 'SOLANA_SIGN_ALL', 1, 7, 'WHEN_DUE', null]]);
+    expect(shape(usdc(8))).toEqual([[SOL, 'SOLANA_SIGN_ALL', 0, 7, 'UPFRONT', null]]);
+    // Beyond the step budget, or a batch as a producer: refused when composed, never split or trimmed.
+    const composed = (input: unknown) => { const c = composeWorkflow(input); return c.ok ? 'OK' : c.code; };
+    expect(composed({ version: 2, steps: [swap, bridge, usdc(7)], bindings: [{ step: 1, amountFrom: 0 }, { step: 2, amountFrom: 1 }] })).toBe('BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET');
+    expect(composed({ version: 2, steps: [bridge, usdc(8)], bindings: [{ step: 1, amountFrom: 0 }] })).toBe('BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET');
+    expect(composed({ version: 2, steps: [usdc(2), { ...SOL_SEND, asset: 'USDC', amount: '1' }], bindings: [{ step: 1, amountFrom: 0 }] })).toBe('WORKFLOW_BINDING_PRODUCER_UNSUPPORTED');
+  });
+
+  it('every EVM Batch Payment plan deep-equals the fed320e planner (Robinhood, Base, Arbitrum, Ethereum; supported / ready / unsupported / unknown / FloFi / assumed)', () => {
+    // Produced by the planner at fed320e (before KAN-20) for exactly these inputs, and compared with this planner when it was recorded.
+    const baseline = JSON.parse(readFileSync(new URL('./testdata/evm-batch-plans.fed320e.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    const payees = ['0x' + 'a1'.repeat(20), '0x' + 'b2'.repeat(20), '0x' + 'c3'.repeat(20)];
+    const nets = [['robinhood', 'eip155:4663', 'USDG'], ['base', 'eip155:8453', 'USDC'], ['arbitrum-one', 'eip155:42161', 'USDC'], ['ethereum', 'eip155:1', 'USDC']] as const;
+    const plans: Record<string, unknown> = {};
+    for (const [net, chain, asset] of nets) {
+      const batch = { action: 'batch_payment', network: net, asset, recipients: payees.map((recipient, i) => ({ recipient, amount: String(i + 1) })) };
+      const inputs: Record<string, unknown> = { batch, ...net === 'base' ? { swapThenBatch: { version: 2, steps: [{ action: 'swap', network: 'base', inputAsset: 'WETH',
+        outputAsset: 'USDC', amount: '0.01' }, batch], bindings: [{ step: 1, amountFrom: 0 }] } } : {} };
+      for (const [label, input] of Object.entries(inputs))
+        for (const atomic of ['supported', 'ready', 'unsupported', 'unknown', 'flofi', 'assumed'] as const) for (const tokenGas of [false, true]) {
+          const facts: UserFundedFacts = tokenGas ? { ...ALL, tokenGasChains: [chain] } : ALL;
+          const wallets: WalletProfile | undefined = atomic === 'assumed' ? undefined : atomic === 'flofi' ? { eip155: { wallet: 'FLOFI_WALLET', atomic: {}, typedData: true } }
+            : { eip155: { wallet: 'INJECTED', atomic: atomic === 'unknown' ? {} : { [chain]: atomic }, typedData: true } };
+          plans[`${net}|${label}|${atomic}|${tokenGas ? 'tokenGas' : 'native'}`] = JSON.parse(JSON.stringify(planExecutionGroups(req(input), facts, wallets, buildable(facts))));
+        }
+    }
+    expect(Object.keys(plans)).toHaveLength(60);
+    expect(plans).toEqual(baseline);
   });
 });

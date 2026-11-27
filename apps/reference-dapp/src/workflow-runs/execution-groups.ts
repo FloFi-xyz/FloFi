@@ -152,9 +152,11 @@ export const defaultBuildable = (s: StepRequirement): boolean => USER_FUNDED_BUI
 /**
  * Consecutive same-chain buildable steps form one candidate group; a bridge closes its group; any other step stands alone. `dependent`: the
  * group was cut from the previous one ONLY because its first step spends an output of that group (a Solana step; see below).
+ * KAN-20: a Solana Batch Payment (an `atomic` leg range on Solana) is its own group, cut exactly at its legs: it is prepared as ONE transaction of
+ * exactly those legs. EVM steps never meet this cut, so every EVM plan is unchanged.
  */
 function partition(steps: readonly StepRequirement[], buildable: (s: StepRequirement) => boolean,
-  bindings: WorkflowRequirement['bindings']): { readonly members: StepRequirement[]; readonly dependent: boolean }[] {
+  bindings: WorkflowRequirement['bindings'], atomic: NonNullable<WorkflowRequirement['atomic']> = []): { readonly members: StepRequirement[]; readonly dependent: boolean }[] {
   const out: { members: StepRequirement[]; dependent: boolean }[] = [];
   let current: StepRequirement[] = [], dependent = false;
   const close = () => { if (current.length) out.push({ members: current, dependent }); current = []; dependent = false; };
@@ -163,12 +165,14 @@ function partition(steps: readonly StepRequirement[], buildable: (s: StepRequire
     // Solana: every transaction of a sign-all group is simulated before the owner signs, so a step that spends the output of an earlier step
     // of the same group (not yet on chain) starts a group of its own. EVM groups keep it: the batch enforces the producer's signed minimum.
     const dependsInside = step.namespace === 'solana' && bindings.some(b => b.step === step.index && current.some(c => c.index === b.amountFrom));
+    const batchStart = step.namespace === 'solana' && atomic.some(a => a.from === step.index);
+    const batchEnd = step.namespace === 'solana' && atomic.some(a => a.to === step.index);
     const sameChainBuildable = last !== undefined && buildable(step) && buildable(last) && last.chain === step.chain && last.action !== 'bridge';
-    const joinable = sameChainBuildable && !dependsInside;
+    const joinable = sameChainBuildable && !dependsInside && !batchStart;
     if (!joinable) close();
     current.push(step);
     if (sameChainBuildable && dependsInside) dependent = true;
-    if (!buildable(step) || step.action === 'bridge') close();
+    if (!buildable(step) || step.action === 'bridge' || batchEnd) close();
   }
   close();
   return out;
@@ -203,7 +207,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
   const bindingOf = (index: number) => requirement.bindings.find(b => b.step === index) ?? null;
   const groups: ExecutionGroup[] = [];
   let stepCursor = 0;
-  for (const { members, dependent } of partition(requirement.steps, buildable, requirement.bindings)) {
+  for (const { members, dependent } of partition(requirement.steps, buildable, requirement.bindings, requirement.atomic ?? [])) {
     const first = members[0]!, chain = first.chain, namespace = namespaceOfChain(chain);
     if (first.index !== stepCursor) return { ok: false, code: 'WORKFLOW_GROUP_ORDER_INVALID' };
     stepCursor = members.at(-1)!.index + 1;
@@ -247,14 +251,18 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       if (strategy === 'EVM_WALLET_BATCH' && atomic === 'ready') setup.push('EVM_SMART_ACCOUNT_UPGRADE');
     } else {
       const sol = profile.solana;
-      const canSignAll = chainEnabled && allBuildable && sol?.signMultiple === true;
+      // KAN-20: a Solana Batch Payment group (exactly its legs) is ONE transaction signed through a Wallet Standard wallet (Phantom, Solflare). FloFi
+      // Wallet has no signing binding for a workflow run's Solana group: it is refused for it, never offered one prompt per leg.
+      const solanaBatch = (requirement.atomic ?? []).some(a => a.from === first.index && a.to === members.at(-1)!.index);
+      const flofiBatch = solanaBatch && sol?.wallet === 'FLOFI_WALLET';
+      const canSignAll = chainEnabled && allBuildable && sol?.signMultiple === true && !flofiBatch;
       // Durable nonces (SOLANA_DURABLE_NONCE) are not offered in this build (ADR-0008): FloFi's Solana builders need the input balance to
       // simulate the exact message, which a post-delivery group does not have yet. Such a group is signed when due (one more interaction).
       if (awaitsDelivery !== null) {
         if (canSignAll) downgrades.push('SOLANA_DURABLE_NONCE_NOT_OFFERED');
         strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP'; signing = 'WHEN_DUE';
       } else strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP';
-      if (chainEnabled && allBuildable && !canSignAll) downgrades.push('SOLANA_MULTI_SIGN_UNSUPPORTED');
+      if (chainEnabled && allBuildable && !canSignAll) downgrades.push(flofiBatch ? 'FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED' : 'SOLANA_MULTI_SIGN_UNSUPPORTED');
       // A sign-all group cut from the previous one because its first step spends an output of that group (not on chain when the owner signs, so
       // it could not be simulated): signed when that output landed, one more wallet prompt. Owner steps prompt per step anyway: nothing is added.
       if (dependent && strategy === 'SOLANA_SIGN_ALL') downgrades.push('SOLANA_GROUP_STEP_DEPENDENT');
@@ -293,9 +301,12 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment executes only as ONE atomic authorization of the owner's own wallet: all of its legs in
   // one group that is an EIP-5792 atomic wallet batch or the owner's own smart-account operation. Anything else (the wallet reports no atomic batch,
   // a leg FloFi cannot batch, the chain not enabled for user-funded groups) refuses the payment here; it is never split into owner steps.
+  // KAN-20: on Solana, a sign-all group that is EXACTLY the batch's legs (prepared as one atomic transaction); the EVM rule is unchanged.
   for (const set of requirement.atomic ?? []) {
     const group = groups.find(g => g.stepFrom <= set.from && set.to <= g.stepTo);
-    if (!group || (group.strategy !== 'EVM_WALLET_BATCH' && group.strategy !== 'EVM_USER_OPERATION'))
+    const atomicGroup = group && (group.namespace === 'solana' ? group.strategy === 'SOLANA_SIGN_ALL' && group.stepFrom === set.from && group.stepTo === set.to
+      : group.strategy === 'EVM_WALLET_BATCH' || group.strategy === 'EVM_USER_OPERATION');
+    if (!atomicGroup)
       return { ok: false, code: 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE', ...group?.downgrades.length ? { because: group.downgrades.filter(d => d !== 'WALLET_CAPABILITIES_ASSUMED') } : {} };
   }
   return { ok: true, groups, interactions: summarize(groups) };

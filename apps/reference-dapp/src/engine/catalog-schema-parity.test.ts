@@ -9,15 +9,17 @@ import { STRATEGY_EXAMPLES } from './strategy-examples';
  * schema accepted every directed bridge pair with Solana while `get_supported_networks` and `get_capabilities` listed none of them, and nothing
  * failed when either side drifted.
  */
-type Branch = { properties?: Record<string, { const?: unknown; anyOf?: { const?: unknown }[] }> };
+type Branch = { properties?: Record<string, { const?: unknown; anyOf?: { const?: unknown }[] }>; anyOf?: Branch[] };
 const schema = JSON.parse(JSON.stringify(PublicStrategyInputSchema)) as { anyOf: Branch[] };
 const constsOf = (field?: { const?: unknown; anyOf?: { const?: unknown }[] }) =>
   field ? field.anyOf ? field.anyOf.map(item => item.const).filter((v): v is string => typeof v === 'string') : typeof field.const === 'string' ? [field.const] : [] : [];
+// KAN-20: an action's branch may be a union of objects (the EVM and the Solana Batch Payment): every member's networks are accepted.
+const members = (item: Branch): Branch[] => item.anyOf ? item.anyOf.flatMap(members) : [item];
 function schemaNetworks(action: string): { source: string[]; destination: string[] } {
-  const branch = schema.anyOf.find(item => item.properties?.action?.const === action);
-  if (!branch?.properties) return { source: [], destination: [] };
-  const p = branch.properties;
-  return { source: constsOf(p.network ?? p.sourceNetwork).sort(), destination: constsOf(p.destinationNetwork).sort() };
+  const branches = schema.anyOf.flatMap(members).filter(item => item.properties?.action?.const === action);
+  if (!branches.length) return { source: [], destination: [] };
+  const all = (pick: (p: NonNullable<Branch['properties']>) => string[]) => [...new Set(branches.flatMap(b => pick(b.properties!)))].sort();
+  return { source: all(p => constsOf(p.network ?? p.sourceNetwork)), destination: all(p => constsOf(p.destinationNetwork)) };
 }
 
 describe('P0-D: the public strategy contract and discovery advertise the same networks for every action', () => {

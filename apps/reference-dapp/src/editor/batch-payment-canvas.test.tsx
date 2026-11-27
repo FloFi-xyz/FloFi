@@ -11,8 +11,8 @@ import { BATCH_PAYMENT_ACTION } from '@defi-workflow-engine/workflow-contracts';
 import { editorReducer, initialEditor } from '../domain/editor';
 import type { Command } from '../domain/commands';
 import { composerSummary } from '../domain/composer-presentation';
-import { BATCH_PAYMENT_NETWORKS, UNRESOLVED_BATCH_ASSET, batchDraftWithSavedAsset, batchPaymentAssetChoices, batchPaymentChain, batchPaymentDraftTotal, batchPaymentNetworkChange,
-  checkBatchPaymentDraft, defaultBatchPaymentDraft, savedBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
+import { BATCH_PAYMENT_EVM_NETWORKS, BATCH_PAYMENT_NETWORKS, UNRESOLVED_BATCH_ASSET, batchDraftWithSavedAsset, batchPaymentAssetChoices, batchPaymentAssetOptions, batchPaymentChain,
+  batchPaymentDraftTotal, batchPaymentNetworkChange, checkBatchPaymentDraft, defaultBatchPaymentDraft, savedBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
 import { composeWorkflow, dappReviewContext } from '../engine/strategy-engine';
 import { BatchPaymentFields, type BatchPaymentCardData } from '../components/batch-payment-fields';
 import { canvasWorkflowOfStrategy, editorWorkflowStrategy, singleCardRunRecord } from './workflow-strategy';
@@ -221,5 +221,114 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment run: rev
       expect(legs).toEqual(converted.composition.batches!.map(batch => batch.to - batch.from + 1));
       expect(legs.reduce((sum, n) => sum + n, 0)).toBe(converted.stepCount);
     }
+  });
+});
+
+/**
+ * BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-20, WS02 surfaces 9.1 / 9.2 item 1): Solana in the SAME Batch Payment card. Only the Network select
+ * gains `Solana` (after the EVM networks, in their unchanged order) with SOL / USDC / USDT; a Solana row takes base58 recipients exactly as typed (letter
+ * case is part of the key: never lower-cased, never corrected) and says Solana's own problems. A, B and C are seed-derived wallet keys on the curve;
+ * A_CASE is another on-curve spelling of A; A_OFF an off-curve one. Nothing here signs, simulates or sends.
+ */
+describe('KAN-20 Solana in the Batch Payment card', () => {
+  const SA = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', SB = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty', SC = '8WcnkMD1aZFGDppfnerV37Fob9W1ij3yHkCL3LWgVKiG';
+  const A_CASE = '2CErLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', A_OFF = '2cERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb';
+  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const SOL_INPUT = { network: 'Solana', asset: 'SOL', payments: [{ recipient: SA, amount: '0.01' }, { recipient: SB, amount: '0.02' }, { recipient: SC, amount: '0.03' }] } as BatchPaymentInput;
+  const SOL_STRATEGY = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: SOL_INPUT.payments.map(p => ({ recipient: p.recipient, amount: p.amount })) };
+  const solanaDraft = (payments: BatchPaymentInput['payments'], asset = 'SOL') => ({ network: 'Solana', asset, payments }) as BatchPaymentInput;
+
+  it('Solana is the last network, after the EVM networks in their unchanged order; it pays exactly SOL, USDC and USDT', () => {
+    expect(BATCH_PAYMENT_NETWORKS.at(-1)).toBe('Solana');
+    expect(BATCH_PAYMENT_NETWORKS.slice(0, -1)).toEqual(BATCH_PAYMENT_EVM_NETWORKS);
+    expect([...BATCH_PAYMENT_EVM_NETWORKS].sort()).toEqual(['Arbitrum One', 'Base', 'Ethereum', 'Robinhood Chain']);
+    expect(batchPaymentAssetOptions('Solana')).toEqual(['SOL', 'USDC', 'USDT']);
+    // Never an asset Solana does not pay (no catalog loads for it), whatever the draft held.
+    expect(batchPaymentAssetChoices('Solana', 'WETH')).toEqual(['SOL', 'USDC', 'USDT']);
+    expect(batchPaymentChain('Solana')).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+    expect(batchPaymentChain('Solana Devnet')).toBeNull();
+    // Base USDC → Solana keeps USDC (same symbol, same 6 decimals); ETH is cleared, never carried over.
+    const base = { network: 'Base', asset: 'USDC', payments: [{ recipient: A, amount: '1' }, { recipient: B, amount: '2' }] } as BatchPaymentInput;
+    expect(batchPaymentNetworkChange(base, 'Solana')).toMatchObject({ network: 'Solana', asset: 'USDC', payments: base.payments });
+    expect(batchPaymentNetworkChange({ ...base, asset: 'ETH' }, 'Solana')).toMatchObject({ network: 'Solana', asset: '' });
+    // A new card still starts on Base / USDC.
+    expect(defaultBatchPaymentDraft()).toMatchObject({ network: 'Base', asset: 'USDC' });
+  });
+
+  it('checks a Solana draft exactly: total 0.06 SOL, every Solana problem on its own row, a self-send only where the owner is known', () => {
+    expect(checkBatchPaymentDraft(SOL_INPUT)).toMatchObject({ valid: true, total: '0.06', problem: null, count: 3 });
+    expect(batchPaymentDraftTotal(SOL_INPUT)).toBe('0.06');
+    const cases: readonly (readonly [BatchPaymentInput, string, readonly boolean[]])[] = [
+      [solanaDraft([{ recipient: '0x' + 'a1'.repeat(20), amount: '1' }, { recipient: SB, amount: '2' }]), 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID', [true, false]],
+      [solanaDraft([{ recipient: SA, amount: '1' }, { recipient: A_OFF, amount: '2' }]), 'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID', [false, true]],
+      [solanaDraft([{ recipient: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', amount: '1' }, { recipient: SB, amount: '2' }]), 'BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED', [true, false]],
+      [solanaDraft([{ recipient: SA, amount: '1' }, { recipient: USDC_MINT, amount: '2' }], 'USDC'), 'BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED', [false, true]],
+      [solanaDraft([{ recipient: SA, amount: '1' }, { recipient: SA, amount: '2' }]), 'BATCH_PAYMENT_DUPLICATE_RECIPIENT', [true, true]],
+    ];
+    for (const [draft, code, recipients] of cases) {
+      const check = checkBatchPaymentDraft(draft);
+      expect(check, code).toMatchObject({ valid: false, code });
+      expect(check.rows!.map(row => row.recipient), code).toEqual(recipients);
+    }
+    // Letter case is part of the key: A and its case variant are two valid recipients.
+    expect(checkBatchPaymentDraft(solanaDraft([{ recipient: SA, amount: '1' }, { recipient: A_CASE, amount: '2' }]))).toMatchObject({ valid: true, total: '3' });
+    // Seven decimals is not a USDC amount (never rounded); nine is a SOL amount.
+    expect(checkBatchPaymentDraft(solanaDraft([{ recipient: SA, amount: '1.0000001' }, { recipient: SB, amount: '2' }], 'USDC')))
+      .toMatchObject({ valid: false, code: 'BATCH_PAYMENT_AMOUNT_TOO_PRECISE', rows: [{ recipient: false, amount: true }, { recipient: false, amount: false }] });
+    expect(checkBatchPaymentDraft(solanaDraft([{ recipient: SA, amount: '0.000000001' }, { recipient: SB, amount: '2' }]))).toMatchObject({ valid: true, total: '2.000000001' });
+    // The connected Solana wallet is never a recipient (the card knows it; the owner-free IR does not).
+    const self = checkBatchPaymentDraft(SOL_INPUT, { solanaOwner: SB });
+    expect(self).toMatchObject({ valid: false, code: 'BATCH_PAYMENT_RECIPIENT_IS_SENDER', total: '0.06',
+      problem: 'A recipient is the Solana wallet you are paying from. Remove it: a Batch Payment never pays your own wallet.' });
+    expect(self.rows!.map(row => row.recipient)).toEqual([false, true, false]);
+    expect(checkBatchPaymentDraft(SOL_INPUT, { solanaOwner: A_CASE })).toMatchObject({ valid: true });
+    // An EVM draft ignores the Solana owner (the same result object).
+    expect(checkBatchPaymentDraft(INPUT as BatchPaymentInput, { solanaOwner: SA })).toEqual(checkBatchPaymentDraft(INPUT as BatchPaymentInput));
+    // An unsupported Solana asset (a mint, Devnet's token, another symbol) is never offered and never applied.
+    for (const asset of [USDC_MINT, 'devUSDC', 'BONK']) expect(checkBatchPaymentDraft({ ...SOL_INPUT, asset }).code, asset).toBe('BATCH_PAYMENT_ASSET_UNSUPPORTED');
+  });
+
+  it('a Solana Batch Payment opens as ONE card, reads back to the same hash, and its run is its three payments; recipients stay verbatim', () => {
+    const opened = canvasWorkflowOfStrategy(SOL_STRATEGY);
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) return;
+    const nodes = opened.workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+    expect(nodes.map(node => [node.actionType, node.adapterConstraints.adapters[0]!.id])).toEqual([[BATCH_PAYMENT_ACTION, 'solana.batch-payment']]);
+    const engine = composeWorkflow(SOL_STRATEGY);
+    expect(engine.ok && engine.workflowHash).toBe(opened.workflowHash);
+    const card = authored(SOL_INPUT), converted = editorWorkflowStrategy(card);
+    expect(converted.ok).toBe(true);
+    if (!converted.ok) return;
+    expect(converted.workflowHash).toBe(opened.workflowHash);
+    expect(converted.stepCount).toBe(3);
+    expect(converted.strategy).toMatchObject({ version: 2, steps: [{ action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: SOL_STRATEGY.recipients }] });
+    const node = card.nodes.find(n => n.actionType === BATCH_PAYMENT_ACTION)!;
+    expect(composerSummary(card, node, dappReviewContext())).toMatchObject({ action: 'Batch Payment', provider: 'Wallet batch', amount: '0.06 SOL', detail: '3 recipients',
+      chain: expect.stringContaining('Solana') });
+    expect(savedBatchPayment(node)!.input).toEqual(SOL_INPUT);
+    // A completed lone Solana run of this card records the base58 owner exactly (never lower-cased).
+    const owner = 'DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy';
+    expect(singleCardRunRecord({ state: 'COMPLETED', stepCount: 3, workflowHash: converted.workflowHash, groups: [{ feePayer: owner }],
+      steps: [0, 1, 2].map(() => ({ state: 'RECONCILED', outcome: { received: [] } })) }, card)).toMatchObject({ verdict: 'RECONCILED', owner });
+  });
+
+  it('a Solana row shows the Solana placeholder, never lets a mobile keyboard change a letter, and marks only the bad row; EVM rows are unchanged', () => {
+    const typed = [{ recipient: SA, amount: '0.01' }, { recipient: A_OFF, amount: '0.02' }];
+    const markup = html(fields({ network: 'Solana', asset: 'SOL', assets: ['SOL', 'USDC', 'USDT'], rows: typed, check: checkBatchPaymentDraft(solanaDraft(typed)),
+      recipientPlaceholder: 'Solana address', recipientCaseSensitive: true }));
+    expect(markup).toContain('<option value="Solana" selected="">Solana</option>');
+    expect(markup.match(/placeholder="Solana address"/g)).toHaveLength(2);
+    expect(markup).not.toContain('placeholder="0x…"');
+    expect(markup.match(/autoCapitalize="none" autoCorrect="off"/gi)).toHaveLength(2);
+    expect(markup).toContain(`value="${SA}"`);
+    const problemId = /<span id="([^"]+)" class="composer-amount-error" role="alert">Enter a valid Solana wallet address for every recipient \(base58, exactly as written: letter case matters\)\.<\/span>/.exec(markup)?.[1];
+    expect(problemId).toBeTruthy();
+    expect(markup).toMatch(new RegExp(`aria-label="Recipient 2 address"[^>]*aria-invalid="true" aria-describedby="${problemId}"`));
+    expect(markup).not.toMatch(/aria-label="Recipient 1 address"[^>]*aria-invalid/);
+    expect(markup).toContain('Total: 0.03 SOL');
+    // EVM rows: no Solana attribute at all, the 0x placeholder as before.
+    const evm = html(fields({}));
+    expect(evm).toContain('placeholder="0x…"');
+    expect(evm).not.toMatch(/autocapitalize|autocorrect|Solana address/i);
   });
 });

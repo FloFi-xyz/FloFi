@@ -22,7 +22,6 @@ export const portugueseBatchPayment: Readonly<Record<string, string>> = {
   'An address appears more than once. Remove the repeated recipient: payments are never merged.':
     'Um endereço aparece mais de uma vez. Remova o destinatário repetido: os pagamentos nunca são somados.',
   'Enter a positive amount for every recipient.': 'Informe um valor positivo para cada destinatário.',
-  'Batch Payment is available on Base, Arbitrum One, Ethereum and Robinhood Chain.': 'O pagamento em lote está disponível na Base, Arbitrum One, Ethereum e Robinhood Chain.',
   'Choose an asset available for Batch Payment on this network.': 'Escolha um ativo disponível para pagamento em lote nesta rede.',
   'Check the recipients and amounts.': 'Confira os destinatários e os valores.',
   // Shown when another card is still being configured (existing Canvas feedback, now also on the Batch Payment path); it had no PT entry.
@@ -41,4 +40,13 @@ export const portugueseBatchPayment: Readonly<Record<string, string>> = {
   'This Batch Payment cannot be simulated right now. Nothing was signed or sent.': 'Este pagamento em lote não pode ser simulado agora. Nada foi assinado nem enviado.',
   'This Batch Payment runs only as one atomic approval in your wallet (every payment, or none), and that is not available here. Nothing was signed or sent.':
     'Este pagamento em lote só é executado como uma única aprovação atômica na sua carteira (todos os pagamentos, ou nenhum), e isso não está disponível aqui. Nada foi assinado nem enviado.',
+  // BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-20): Solana in the same card (its availability sentence replaces the EVM-only one).
+  'Enter a valid Solana wallet address for every recipient (base58, exactly as written: letter case matters).':
+    'Informe um endereço de carteira Solana válido para cada destinatário (base58, exatamente como foi escrito: maiúsculas e minúsculas fazem diferença).',
+  'A recipient is a Solana program, system account or token mint, which cannot receive a payment. Use the recipient\'s wallet address.':
+    'Um destinatário é um programa, uma conta de sistema ou um mint de token da Solana, que não pode receber pagamento. Use o endereço da carteira do destinatário.',
+  'A recipient is the Solana wallet you are paying from. Remove it: a Batch Payment never pays your own wallet.':
+    'Um destinatário é a carteira Solana da qual você está pagando. Remova-o: um pagamento em lote nunca paga a sua própria carteira.',
+  'The amounts of this Batch Payment are larger than Solana can carry.': 'Os valores deste pagamento em lote são maiores do que a Solana comporta.',
+  'Batch Payment is available on Base, Arbitrum One, Ethereum, Robinhood Chain and Solana.': 'O pagamento em lote está disponível na Base, Arbitrum One, Ethereum, Robinhood Chain e Solana.',
 };

@@ -225,6 +225,33 @@
       "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
+      "id": "batch-payment-solana",
+      "action": "batch_payment",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "solana.batch-payment"
+      ],
+      "flow": "workflow-run",
+      "webRuntime": "per group",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
       "id": "transfer-solana-devnet",
       "action": "transfer",
       "network": "solana-devnet",

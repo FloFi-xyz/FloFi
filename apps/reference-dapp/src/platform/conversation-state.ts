@@ -258,9 +258,9 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
     PT: 'A etapa anterior entregou menos do que os pagamentos precisam, então nenhum pagamento foi feito: o FloFi nunca reduz o valor de um destinatário. Revise o fluxo ' +
       'de novo com valores que caibam.' }],
   [/^BATCH_PAYMENT_(?:NETWORK|ASSET|TOKEN|RECIPIENT)_UNSUPPORTED$/, { EN: 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, ' +
-      'Ethereum and Robinhood Chain (never Stock Tokens, never Solana in this version).',
-    PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens, nunca Solana ' +
-      'nesta versão).' }],
+      'Ethereum and Robinhood Chain (never Stock Tokens), and for SOL, USDC and USDT on Solana.',
+    PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens), e para SOL, ' +
+      'USDC e USDT na Solana.' }],
   [/^BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM$/, { EN: 'An ETH amount in this Batch Payment is above the per-payment maximum FloFi sends on this network. Nothing was signed or sent. '
       + 'Lower the amount or split the payment.',
     PT: 'Um valor em ETH neste Pagamento em lote está acima do máximo por pagamento que o FloFi envia nesta rede. Nada foi assinado nem enviado. Diminua o valor ou '
@@ -276,6 +276,57 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
       + 'an ETH batch), so it will not ask your wallet again. Check your wallet’s activity first, then end the run and start a new Review.',
     PT: 'O FloFi não consegue provar pela rede que o pedido anterior deste Pagamento em lote nunca executou (por exemplo, um lote em ETH), então não vai pedir '
       + 'de novo à sua carteira. Confira primeiro a atividade da sua carteira; depois encerre a execução e comece uma nova Revisão.' }],
+  // KAN-20 (WS02 C.4): a Solana Batch Payment's earlier preparation (unsigned by FloFi, but owner-signable until its blockhash expires) is settled from the
+  // chain before FloFi asks the wallet again. While it can still land, FloFi waits (retryable); once it landed outside FloFi, the run stops for good.
+  [/^SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE$/, { EN: 'Nothing was sent. The request FloFi prepared earlier for this Batch Payment can still land on Solana for a ' +
+      'short time; FloFi asks your wallet again only once it can no longer land. Try again in a minute.',
+    PT: 'Nada foi enviado. O pedido que o FloFi preparou antes para este Pagamento em lote ainda pode ser executado na Solana por pouco tempo; o FloFi só pede de novo ' +
+      'à sua carteira quando ele não puder mais ser executado. Tente de novo em um minuto.' }],
+  [/^BATCH_PAYMENT_EARLIER_REQUEST_LANDED$/, { EN: 'A transaction you signed earlier for this Batch Payment landed on Solana outside FloFi, so FloFi will not ask your ' +
+      'wallet again (that would pay every recipient twice). Check your wallet\u2019s activity, then end the run.',
+    PT: 'Uma transação que você assinou antes para este Pagamento em lote foi executada na Solana fora do FloFi, então o FloFi não vai pedir de novo à sua carteira (isso ' +
+      'pagaria cada destinatário duas vezes). Confira a atividade da sua carteira e depois encerre a execução.' }],
+  // KAN-20: the Solana-only authoring refusals (the EVM recipient sentence above is unchanged) and the Solana Batch Payment core's refusal families, each
+  // before the generic families that would word them as "too many requests", "invalid details" or "not available".
+  [/^BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID$/, { EN: 'A recipient is not a Solana wallet address FloFi can pay: it must be a base58 address written exactly as given ' +
+      '(letter case matters), and a 0x address is not a Solana address. FloFi never corrects an address. Copy it again from its source.',
+    PT: 'Um destinatário não é um endereço de carteira Solana que o FloFi possa pagar: ele precisa ser um endereço base58 escrito exatamente como foi dado (maiúsculas e ' +
+      'minúsculas fazem diferença), e um endereço 0x não é um endereço Solana. O FloFi nunca corrige um endereço. Copie-o de novo da origem.' }],
+  [/^BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED$/, { EN: 'A recipient is a Solana program, system account or token mint, which cannot receive a payment. Use the ' +
+      'recipient\'s wallet address. Nothing was signed or sent.',
+    PT: 'Um destinatário é um programa, uma conta de sistema ou um mint de token da Solana, que não pode receber pagamento. Use o endereço da carteira do destinatário. ' +
+      'Nada foi assinado nem enviado.' }],
+  [/^(?:SOLANA_)?BATCH_PAYMENT_RECIPIENT_IS_SENDER$/, { EN: 'A recipient is the Solana wallet you are paying from. Remove it: a Batch Payment never pays your own ' +
+      'wallet. Nothing was signed or sent.',
+    PT: 'Um destinatário é a carteira Solana da qual você está pagando. Remova-o: um pagamento em lote nunca paga a sua própria carteira. Nada foi assinado nem enviado.' }],
+  [/^BATCH_PAYMENT_TOTAL_OUT_OF_RANGE$/, { EN: 'The amounts of this Batch Payment are larger than Solana can carry. Nothing was signed or sent.',
+    PT: 'Os valores deste pagamento em lote são maiores do que a Solana comporta. Nada foi assinado nem enviado.' }],
+  [/^SOLANA_BATCH_PAYMENT_(?:TRANSACTION_TOO_LARGE|TOO_MANY_ACCOUNTS|INSTRUCTION_TRACE_TOO_LONG|COMPUTE_LIMIT_EXCEEDED)$/, { EN: 'This Batch Payment does not fit in one ' +
+      'Solana transaction, so FloFi does not split it. Nothing was signed or sent. Pay fewer recipients.',
+    PT: 'Este Pagamento em lote não cabe em uma única transação Solana, então o FloFi não o divide. Nada foi assinado nem enviado. Pague menos destinatários.' }],
+  [/^SOLANA_BATCH_PAYMENT_(?:RECIPIENT_(?:RESERVED|OFF_CURVE|NOT_WALLET|IS_TOKEN_ACCOUNT)|DESTINATION_OWNER_MISMATCH)$/, { EN: 'A recipient of this Batch Payment is not ' +
+      'an ordinary Solana wallet (a program, a token account or a program address). Nothing was signed or sent. Use the recipient\'s wallet address.',
+    PT: 'Um destinatário deste Pagamento em lote não é uma carteira Solana comum (um programa, uma conta de token ou um endereço de programa). Nada foi assinado nem ' +
+      'enviado. Use o endereço da carteira do destinatário.' }],
+  [/^SOLANA_BATCH_PAYMENT_INSUFFICIENT_SOL$/, { EN: 'Your wallet does not hold enough SOL for this Batch Payment: SOL pays the network fee and a deposit for each ' +
+      'recipient who needs a token account (and the payments themselves when they are in SOL). Nothing was signed or sent. Add SOL and review again.',
+    PT: 'Sua carteira não tem SOL suficiente para este Pagamento em lote: o SOL paga a taxa de rede e um depósito para cada destinatário que precisa de uma conta de ' +
+      'token (e os próprios pagamentos, quando são em SOL). Nada foi assinado nem enviado. Adicione SOL e revise de novo.' }],
+  [/^SOLANA_BATCH_PAYMENT_INSUFFICIENT_TOKEN_BALANCE$/, { EN: 'Your wallet does not hold the whole total of this Batch Payment in one token account. Nothing was ' +
+      'signed or sent.',
+    PT: 'Sua carteira não tem o total inteiro deste Pagamento em lote em uma única conta de token. Nada foi assinado nem enviado.' }],
+  [/^SOLANA_BATCH_PAYMENT_AMOUNT_BELOW_RENT_EXEMPT$/, { EN: 'A SOL payment to a wallet that does not exist on Solana yet must be at least the minimum balance Solana ' +
+      'requires for a new account. Nothing was signed or sent.',
+    PT: 'Um pagamento em SOL para uma carteira que ainda não existe na Solana precisa ser de pelo menos o saldo mínimo que a Solana exige para uma conta nova. Nada foi ' +
+      'assinado nem enviado.' }],
+  [/^SOLANA_BATCH_PAYMENT_(?:TRANSACTION_CHANGED|ANSWER_MISMATCH|MANIFEST_MISMATCH)$/, { EN: 'The transaction your wallet signed is not exactly the one FloFi reviewed, ' +
+      'so nothing was sent. Review again.',
+    PT: 'A transação que a sua carteira assinou não é exatamente a que o FloFi revisou, então nada foi enviado. Revise de novo.' }],
+  [/^FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED$/, { EN: 'FloFi Wallet cannot sign a Solana Batch Payment yet. Connect Phantom or Solflare to sign it. Nothing was ' +
+      'signed or sent.',
+    PT: 'A FloFi Wallet ainda não assina um pagamento em lote na Solana. Conecte a Phantom ou a Solflare para assinar. Nada foi assinado nem enviado.' }],
+  [/^SOLANA_BATCH_PAYMENT_[A-Z_]+$/, { EN: 'FloFi could not prepare this Solana Batch Payment. Nothing was signed or sent.',
+    PT: 'O FloFi não conseguiu preparar este Pagamento em lote na Solana. Nada foi assinado nem enviado.' }],
   [/^WALLET_BATCH_PARTIALLY_EXECUTED$/, { EN: 'Your wallet sent this batch as several transactions and only some of them succeeded, so part of it executed. FloFi records '
       + 'it for review and never sends it again; check each transaction before doing anything else.',
     PT: 'Sua carteira enviou este lote como várias transações e só algumas deram certo, então parte dele foi executada. O FloFi registra isso para revisão e nunca o '

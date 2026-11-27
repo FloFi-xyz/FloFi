@@ -151,3 +151,80 @@ test('the chat\'s batch sentence authors ONE Batch Payment card; Portuguese name
   await expect(card.getByRole('form', { name: 'Destinatários do pagamento em lote' }).locator('.batch-payment-summary')).toHaveText('2 destinatários · Total: informe todos os valores');
   networkGuard.assertClean();
 });
+
+/**
+ * BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-20, WS02 surfaces 9.4): Solana in the SAME Batch Payment card (the normal Editor, passive EVM wallet;
+ * nothing is simulated, signed or sent). Only the Network select gains Solana, with exactly SOL / USDC / USDT; Solana rows take base58 recipients exactly
+ * as typed (letter case is part of the key) and say Solana's own problems; Apply authors ONE canonical Solana batch node; the chat's exact Solana pay list
+ * authors the same ONE card. SOL_A, SOL_B and SOL_C are seed-derived wallet keys (on the curve; never paid). No screenshot assertion.
+ */
+const SOL_A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', SOL_B = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty', SOL_C = '8WcnkMD1aZFGDppfnerV37Fob9W1ij3yHkCL3LWgVKiG';
+test('KAN-20: Solana in the Batch Payment card: SOL / USDC / USDT, base58 recipients exactly as typed, the exact total, ONE canonical step (also from the chat)', async ({ page, networkGuard }) => {
+  await page.setViewportSize({ width: 1536, height: 1080 });
+  await open(page);
+  await page.getByRole('button', { name: 'Add batch payment', exact: true }).click();
+  const form = cards(page).last().getByRole('form', { name: 'Batch Payment recipients' });
+  const network = form.getByRole('combobox', { name: 'Network' }), asset = form.getByRole('combobox', { name: 'Asset' });
+  // Solana is the last network, after the EVM networks; a new card still starts on Base / USDC.
+  await expect(network).toHaveValue('Base');
+  await expect(network.locator('option').last()).toHaveText('Solana');
+  await network.selectOption('Solana');
+  // USDC is offered on Solana too (same symbol, 6 decimals): kept. The choices are exactly the verified Solana assets.
+  await expect(asset).toHaveValue('USDC');
+  await expect(asset.locator('option')).toHaveText(['SOL', 'USDC', 'USDT']);
+  await asset.selectOption('SOL');
+  await expect(form.getByRole('textbox', { name: 'Recipient 1 address' })).toHaveAttribute('placeholder', 'Solana address');
+  await expect(form.getByRole('textbox', { name: 'Recipient 1 address' })).toHaveAttribute('autocapitalize', 'none');
+  // A 0x address is not a Solana address.
+  await form.getByRole('textbox', { name: 'Recipient 1 address' }).fill(A);
+  await form.getByRole('textbox', { name: 'Recipient 1 amount (SOL)' }).fill('0.01');
+  await form.getByRole('textbox', { name: 'Recipient 2 address' }).fill(SOL_B);
+  await form.getByRole('textbox', { name: 'Recipient 2 amount (SOL)' }).fill('0.02');
+  await expect(form.getByRole('alert')).toHaveText('Enter a valid Solana wallet address for every recipient (base58, exactly as written: letter case matters).');
+  await expect(form.getByRole('textbox', { name: 'Recipient 1 address' })).toHaveAttribute('aria-invalid', 'true');
+  await expect(form.getByRole('textbox', { name: 'Recipient 2 address' })).not.toHaveAttribute('aria-invalid', 'true');
+  // The same wallet twice is named, never merged.
+  await form.getByRole('textbox', { name: 'Recipient 1 address' }).fill(SOL_B);
+  await expect(form.getByRole('alert')).toHaveText('An address appears more than once. Remove the repeated recipient: payments are never merged.');
+  await expect(form.getByRole('button', { name: 'Apply batch payment', exact: true })).toBeDisabled();
+  // The owner's example: 0.01 + 0.02 + 0.03 SOL.
+  await form.getByRole('textbox', { name: 'Recipient 1 address' }).fill(SOL_A);
+  await form.getByRole('button', { name: 'Add recipient', exact: true }).click();
+  await form.getByRole('textbox', { name: 'Recipient 3 address' }).fill(SOL_C);
+  await form.getByRole('textbox', { name: 'Recipient 3 amount (SOL)' }).fill('0.03');
+  await expect(form.getByRole('alert')).toHaveCount(0);
+  await expect(form.locator('.batch-payment-summary')).toHaveText('3 recipients · Total: 0.06 SOL');
+  await form.getByRole('button', { name: 'Apply batch payment', exact: true }).click();
+  await expect(cards(page)).toHaveCount(1);
+  const [node] = await financial(page);
+  expect(node!.actionType).toBe('asset.transfer.batch');
+  expect(node!.chainId).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+  expect(node!.adapterConstraints.adapters.map(adapter => adapter.id)).toEqual(['solana.batch-payment']);
+  // Byte-identical to the typed text: never trimmed inside, never lower-cased.
+  expect(node!.inputs.filter(input => input.kind === 'ACCOUNT').map(input => (input.value as { address: string }).address)).toEqual([SOL_A, SOL_B, SOL_C]);
+  expect(node!.inputs.filter(input => input.kind === 'QUANTITY').map(input => (input.value as { amount: string }).amount)).toEqual(['10000000', '20000000', '30000000']);
+  await expect(cards(page).first().locator('.batch-payment-summary')).toHaveText('3 recipients · Total: 0.06 SOL');
+  await assertPassiveWallet(page);
+
+  // The chat's exact Solana pay list authors the same ONE card (the same declaration).
+  await cards(page).first().locator('.composer-action-name').click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(cards(page)).toHaveCount(0);
+  await sendChatCommand(page, `send 0.01 SOL to ${SOL_A}, 0.02 SOL to ${SOL_B} and 0.03 SOL to ${SOL_C}`);
+  await expect(cards(page)).toHaveCount(1);
+  const [chat] = await financial(page);
+  expect({ ...chat!, nodeId: node!.nodeId, dependencies: [] }).toEqual({ ...node!, dependencies: [] });
+  await expect(cards(page).first().locator('.batch-payment-summary')).toHaveText('3 recipients · Total: 0.06 SOL');
+  // Portuguese names it "Pagamento em lote", and says the Solana problem in Portuguese.
+  await chooseLanguage(page.context(), 'PT');
+  await page.reload();
+  await page.getByRole('button', { name: 'Adicionar pagamento em lote', exact: true }).click();
+  const pt = cards(page).last();
+  await expect(pt.locator('.composer-action-name')).toHaveText('Pagamento em lote');
+  const ptForm = pt.getByRole('form', { name: 'Destinatários do pagamento em lote' });
+  await ptForm.getByRole('combobox', { name: 'Rede' }).selectOption('Solana');
+  await expect(ptForm.getByRole('textbox', { name: 'Endereço do destinatário 1' })).toHaveAttribute('placeholder', 'Endereço Solana');
+  await ptForm.getByRole('textbox', { name: 'Endereço do destinatário 1' }).fill(A);
+  await expect(ptForm.getByRole('alert')).toHaveText('Informe um endereço de carteira Solana válido para cada destinatário (base58, exatamente como foi escrito: maiúsculas e minúsculas fazem diferença).');
+  networkGuard.assertClean();
+});

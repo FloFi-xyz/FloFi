@@ -29,7 +29,8 @@ import { networkIdentity } from '../domain/network-registry';
 import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
 import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
-import { batchRecipientValid, createAuthoredBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
+import { BATCH_PAYMENT_SOLANA_NETWORK, batchRecipientValid, createAuthoredBatchPayment, type BatchPaymentInput } from '../domain/batch-payment-authoring';
+import { RECIPIENT_FORMATS } from '../domain/recipient-address';
 import { solanaTransferProfileFor } from '../domain/solana-transfer-authoring';
 import { solanaTransferAsset } from '@defi-workflow-engine/action-registry';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
@@ -201,6 +202,22 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
         ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
     case 'batch_payment': {
+      // KAN-20: a Solana batch keeps every base58 recipient VERBATIM (letter case is part of the key; never lower-cased), each one a wallet key on the
+      // Ed25519 curve; a recipient named twice (exactly) is refused, never merged. Its asset is already one of SOL, USDC, USDT (the schema's enum).
+      if (spec.network === 'solana') {
+        const recipients = spec.recipients.map(line => {
+          if (RECIPIENT_FORMATS.solana!.normalize(line.recipient) === null) throw new Error('BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID');
+          return { recipient: line.recipient, amount: line.amount };
+        });
+        if (new Set(recipients.map(line => line.recipient)).size !== recipients.length) throw new Error('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
+        notes.push(`Batch Payment of ${recipients.length} recipients on Solana: it runs only as ONE Solana transaction signed by your own wallet (every payment ` +
+          'settles, or none does); a wallet or deployment that cannot do that refuses it instead of splitting it into separate transfers.',
+          spec.asset === 'SOL' ? 'Network fees are paid in SOL by your own wallet on top of the total; if your SOL cannot cover every payment and the fees, the whole ' +
+            'batch is refused before anything is sent.'
+            : `Network fees, and a deposit for each recipient who does not hold ${spec.asset} yet, are paid in SOL by your own wallet on top of the total; if your ` +
+            'SOL cannot cover them, the whole batch is refused before anything is sent.');
+        return { notes, strategy: { version: 1, action: 'batch_payment', network: 'solana', asset: spec.asset, recipients } };
+      }
       // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: recipients lower-cased, in the person's order; a recipient named twice is refused (never merged).
       const recipients = spec.recipients.map(line => {
         if (!batchRecipientValid(line.recipient)) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
@@ -304,7 +321,7 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       return { command: { ...base, type: 'AUTHOR_LENDING', input }, check: () => createAuthoredLending('lending-preview', 1, input) };
     }
     case 'batch_payment': {
-      const network = catalogNetworkName(spec.network) ?? refuse('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
+      const network = spec.network === 'solana' ? BATCH_PAYMENT_SOLANA_NETWORK : catalogNetworkName(spec.network) ?? refuse('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
       const input: BatchPaymentInput = { network: network as BatchPaymentInput['network'], asset: spec.asset,
         payments: spec.recipients.map(line => ({ recipient: line.recipient, amount: line.amount })) };
       return { command: { ...base, type: 'ADD_BATCH_PAYMENT', input }, check: () => createAuthoredBatchPayment('node-preview', input) };

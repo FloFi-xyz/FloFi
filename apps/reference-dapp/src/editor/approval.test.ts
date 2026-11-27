@@ -79,6 +79,16 @@ describe('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 Editor requester kind', 
     expect(await broken(handoffOf(), evm('0x' + 'ab'.repeat(20)))).toEqual({ ok: false, code: 'ACCOUNTS_UNAVAILABLE' });
   });
 
+  it('KAN-20 (surfaces 9.2 item 8): a Solana Batch Payment run is claimed only by the account\'s own Solana wallet, compared exactly', async () => {
+    // A and A' are both valid, on-curve Solana keys that differ only in letter case: two different wallets.
+    const A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', A2 = '2CErLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb';
+    const policy = editorClaimPolicy(async accountId => accountId === ACCOUNT ? [{ namespace: 'solana', address: A }] : []);
+    expect(await policy(handoffOf(), { namespace: 'solana', address: A })).toEqual({ ok: true });
+    expect(await policy(handoffOf(), { namespace: 'solana', address: A2 })).toEqual({ ok: false, code: 'EDITOR_WALLET_NOT_IN_ACCOUNT' });
+    // Never matched across namespaces.
+    expect(await policy(handoffOf(), evm(A))).toEqual({ ok: false, code: 'EDITOR_WALLET_NOT_IN_ACCOUNT' });
+  });
+
   it('contributes the Editor profile to /approve only when enabled: its policy, claim rule and the browser\'s own account as viewer', async () => {
     expect(editorApprovalContributor({})).toBeNull();
     const config = readEditorRunConfig(ENABLED);

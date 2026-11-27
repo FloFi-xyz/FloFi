@@ -183,7 +183,9 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
     expect(amount.EN).toMatch(/^Every recipient of a Batch Payment needs a positive amount\. Nothing was signed or sent\./);
     expect(amount.PT).toMatch(/^Cada destinatário de um Pagamento em lote precisa de um valor positivo\. Nada foi assinado nem enviado\./);
     const codes = ['BATCH_PAYMENT_RECIPIENT_INVALID', 'BATCH_PAYMENT_AMOUNT_INVALID', 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', 'BATCH_PAYMENT_TOO_MANY_RECIPIENTS',
-      'BATCH_PAYMENT_TOO_FEW_RECIPIENTS', 'BATCH_PAYMENT_ASSET_MIXED'];
+      'BATCH_PAYMENT_TOO_FEW_RECIPIENTS', 'BATCH_PAYMENT_ASSET_MIXED',
+      // KAN-20: the Solana-only authoring codes (the EVM recipient text above is unchanged).
+      'BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID', 'BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED', 'BATCH_PAYMENT_RECIPIENT_IS_SENDER', 'BATCH_PAYMENT_TOTAL_OUT_OF_RANGE'];
     for (const language of ['EN', 'PT'] as const) {
       const texts = codes.map(code => userFacingError(code)[language]);
       // Each code its own family: no two share a text, and none is the generic invalid-details, rate-limit or fallback text.
@@ -193,6 +195,49 @@ describe('BUILD-FLOFI-UNIVERSAL-CHANNELS-001 conversational lifecycle', () => {
         expect(text, `${language} ${codes[i]}`).not.toContain(codes[i]);
       }
     }
+  });
+
+  it('KAN-20: the Solana Batch Payment refusals say what happened in EN and PT, each before the generic families', () => {
+    const generic = new Set(['STRATEGY_SCHEMA_INVALID', 'SOMETHING_ELSE', 'MCP_SIMULATION_RATE_LIMITED', 'NETWORK_NOT_SUPPORTED', 'USER_FUNDED_PREPARED_EXPIRED']
+      .flatMap(code => [userFacingError(code).EN, userFacingError(code).PT]));
+    const expected: Record<string, readonly [RegExp, RegExp]> = {
+      BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID: [/^A recipient is not a Solana wallet address FloFi can pay: it must be a base58 address written exactly as given \(letter case matters\), and a 0x address is not a Solana address\. FloFi never corrects an address\./,
+        /^Um destinatário não é um endereço de carteira Solana que o FloFi possa pagar: .*maiúsculas e minúsculas fazem diferença.*O FloFi nunca corrige um endereço\./],
+      BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED: [/Solana program, system account or token mint.*Nothing was signed or sent\.$/, /programa, uma conta de sistema ou um mint de token.*Nada foi assinado nem enviado\.$/],
+      BATCH_PAYMENT_RECIPIENT_IS_SENDER: [/the Solana wallet you are paying from.*Nothing was signed or sent\.$/, /carteira Solana da qual você está pagando.*Nada foi assinado nem enviado\.$/],
+      SOLANA_BATCH_PAYMENT_RECIPIENT_IS_SENDER: [/the Solana wallet you are paying from/, /carteira Solana da qual você está pagando/],
+      BATCH_PAYMENT_TOTAL_OUT_OF_RANGE: [/larger than Solana can carry\. Nothing was signed or sent\.$/, /maiores do que a Solana comporta\. Nada foi assinado nem enviado\.$/],
+      SOLANA_BATCH_PAYMENT_TOO_MANY_ACCOUNTS: [/does not fit in one Solana transaction, so FloFi does not split it\. Nothing was signed or sent\. Pay fewer recipients\./,
+        /não cabe em uma única transação Solana, então o FloFi não o divide/],
+      SOLANA_BATCH_PAYMENT_TRANSACTION_TOO_LARGE: [/does not fit in one Solana transaction/, /não cabe em uma única transação Solana/],
+      SOLANA_BATCH_PAYMENT_COMPUTE_LIMIT_EXCEEDED: [/does not fit in one Solana transaction/, /não cabe em uma única transação Solana/],
+      SOLANA_BATCH_PAYMENT_RECIPIENT_OFF_CURVE: [/not an ordinary Solana wallet/, /não é uma carteira Solana comum/],
+      SOLANA_BATCH_PAYMENT_INSUFFICIENT_SOL: [/does not hold enough SOL for this Batch Payment.*Add SOL and review again\./, /não tem SOL suficiente.*Adicione SOL e revise de novo\./],
+      SOLANA_BATCH_PAYMENT_INSUFFICIENT_TOKEN_BALANCE: [/whole total of this Batch Payment in one token account/, /total inteiro deste Pagamento em lote em uma única conta de token/],
+      SOLANA_BATCH_PAYMENT_AMOUNT_BELOW_RENT_EXEMPT: [/at least the minimum balance Solana requires for a new account/, /saldo mínimo que a Solana exige para uma conta nova/],
+      SOLANA_BATCH_PAYMENT_TRANSACTION_CHANGED: [/not exactly the one FloFi reviewed, so nothing was sent\. Review again\./, /não é exatamente a que o FloFi revisou/],
+      SOLANA_BATCH_PAYMENT_ANSWER_MISMATCH: [/not exactly the one FloFi reviewed/, /não é exatamente a que o FloFi revisou/],
+      FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED: [/^FloFi Wallet cannot sign a Solana Batch Payment yet\. Connect Phantom or Solflare to sign it\./, /^A FloFi Wallet ainda não assina um pagamento em lote na Solana/],
+      SOLANA_BATCH_PAYMENT_DECLARATION_INVALID: [/^FloFi could not prepare this Solana Batch Payment\. Nothing was signed or sent\.$/, /^O FloFi não conseguiu preparar este Pagamento em lote na Solana\./],
+      // WS02 C.4: the earlier preparation of a Solana batch is settled from the chain before the wallet is asked again.
+      SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE: [/^Nothing was sent\. The request FloFi prepared earlier for this Batch Payment can still land on Solana for a short time; FloFi asks your wallet again only once it can no longer land\. Try again in a minute\.$/,
+        /^Nada foi enviado\. O pedido que o FloFi preparou antes para este Pagamento em lote ainda pode ser executado na Solana por pouco tempo; .*Tente de novo em um minuto\.$/],
+      BATCH_PAYMENT_EARLIER_REQUEST_LANDED: [/^A transaction you signed earlier for this Batch Payment landed on Solana outside FloFi, so FloFi will not ask your wallet again \(that would pay every recipient twice\)\. Check your wallet.s activity, then end the run\.$/,
+        /^Uma transação que você assinou antes para este Pagamento em lote foi executada na Solana fora do FloFi.*\(isso pagaria cada destinatário duas vezes\)/],
+    };
+    for (const [code, [en, pt]] of Object.entries(expected)) {
+      const plain = userFacingError(code);
+      expect(plain.EN, code).toMatch(en);
+      expect(plain.PT, code).toMatch(pt);
+      expect(generic.has(plain.EN) || generic.has(plain.PT), code).toBe(false);
+      expect(`${plain.EN}\n${plain.PT}`, code).not.toContain(code);
+    }
+    // UNPROVEN and UNPROVABLE keep their existing copy (never the LIVE or LANDED sentence); the availability sentence names Solana for SOL, USDC and USDT.
+    expect(userFacingError('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN').EN).toMatch(/^FloFi cannot yet prove from the chain that the earlier request of this Batch Payment never executed/);
+    expect(userFacingError('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE').EN).toMatch(/\(for example, an ETH batch\)/);
+    expect(userFacingError('BATCH_PAYMENT_NETWORK_UNSUPPORTED')).toEqual({ EN: 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, Ethereum and ' +
+      'Robinhood Chain (never Stock Tokens), and for SOL, USDC and USDT on Solana.', PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, ' +
+      'Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens), e para SOL, USDC e USDT na Solana.' });
   });
 
   it('final and completed are consistent for every state', () => {

@@ -10,6 +10,11 @@ const EXAMPLE_ACCOUNT = '0x0000000000000000000000000000000000000001';
 /** BUILD-SOLANA-TRANSFER-UX-001: a valid Ed25519 wallet key (sha256("flofi-example-recipient") seed) used only to compose; never simulated. */
 const EXAMPLE_SOLANA_RECIPIENT = 'CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH';
 /**
+ * KAN-20: two distinct Solana wallet keys used only to compose a Solana Batch Payment; never simulated or paid. The second is the Ed25519 public key of
+ * the seed sha256("flofi-example-batch-recipient-1"), the same derivation as `EXAMPLE_SOLANA_RECIPIENT` (on the curve).
+ */
+const EXAMPLE_SOLANA_PAYEES = [EXAMPLE_SOLANA_RECIPIENT, '92yJ8DJi8fbWhAjeK39QZWR1skhE39MzE4etRiWMzntw'] as const;
+/**
  * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: two distinct illustrative recipients used only to compose a Batch Payment; never simulated or paid. Ordinary
  * lower-case addresses outside the precompile range (0x…01..0x…ff, which a Batch Payment refuses as a payee: nobody holds their keys).
  */
@@ -25,6 +30,8 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'swap-solana', strategy: { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '1', slippageBps: 50 } },
   { id: 'swap-solana-devnet', strategy: { action: 'swap', network: 'solana-devnet', inputAsset: 'devUSDC', outputAsset: 'SOL', amount: '1', slippageBps: 50 } },
   { id: 'transfer-solana', strategy: { action: 'transfer', network: 'solana', asset: 'USDC', amount: '1', recipient: EXAMPLE_SOLANA_RECIPIENT } },
+  { id: 'batch-payment-solana', strategy: { action: 'batch_payment', network: 'solana', asset: 'USDC',
+    recipients: [{ recipient: EXAMPLE_SOLANA_PAYEES[0], amount: '1' }, { recipient: EXAMPLE_SOLANA_PAYEES[1], amount: '2' }] } },
   { id: 'transfer-solana-devnet', strategy: { action: 'transfer', network: 'solana-devnet', asset: 'SOL', amount: '0.01', recipient: EXAMPLE_SOLANA_RECIPIENT } },
   { id: 'transfer-ethereum-sepolia', strategy: { action: 'transfer', network: 'ethereum-sepolia', asset: 'ETH', amount: '0.000001' } },
   { id: 'transfer-robinhood-testnet', strategy: { action: 'transfer', network: 'robinhood-testnet', asset: 'ETH', amount: '0.000001' } },

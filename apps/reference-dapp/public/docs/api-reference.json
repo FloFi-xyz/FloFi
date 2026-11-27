@@ -3224,90 +3224,167 @@
                 }
               },
               {
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "action",
-                  "network",
-                  "asset",
-                  "recipients"
-                ],
-                "properties": {
-                  "version": {
-                    "description": "Strategy contract version. Omit or 1.",
-                    "const": 1,
-                    "type": "number"
-                  },
-                  "action": {
-                    "const": "batch_payment",
-                    "type": "string"
-                  },
-                  "network": {
-                    "description": "The EVM mainnet of this same-network batch (real funds). Solana is not available for batch payments.",
-                    "anyOf": [
-                      {
-                        "const": "robinhood",
+                "description": "One Batch Payment: one source wallet, one network, one asset, 2 to 8 recipients, executed only as one atomic authorization of the owner's own wallet.",
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "action",
+                      "network",
+                      "asset",
+                      "recipients"
+                    ],
+                    "properties": {
+                      "version": {
+                        "description": "Strategy contract version. Omit or 1.",
+                        "const": 1,
+                        "type": "number"
+                      },
+                      "action": {
+                        "const": "batch_payment",
                         "type": "string"
                       },
-                      {
-                        "const": "base",
-                        "type": "string"
+                      "network": {
+                        "description": "The EVM mainnet of this same-network batch (real funds). For Solana, use network \"solana\".",
+                        "anyOf": [
+                          {
+                            "const": "robinhood",
+                            "type": "string"
+                          },
+                          {
+                            "const": "base",
+                            "type": "string"
+                          },
+                          {
+                            "const": "arbitrum-one",
+                            "type": "string"
+                          },
+                          {
+                            "const": "ethereum",
+                            "type": "string"
+                          }
+                        ]
                       },
-                      {
-                        "const": "arbitrum-one",
-                        "type": "string"
+                      "asset": {
+                        "description": "Native ETH, or a symbol or whole name of the network's validated official catalog (Stock Tokens are not paid in batches). Every recipient receives this one asset.",
+                        "anyOf": [
+                          {
+                            "const": "ETH",
+                            "type": "string"
+                          },
+                          {
+                            "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                            "maxLength": 160,
+                            "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                            "type": "string"
+                          }
+                        ]
                       },
-                      {
-                        "const": "ethereum",
-                        "type": "string"
+                      "recipients": {
+                        "minItems": 2,
+                        "maxItems": 8,
+                        "description": "Ordered payments, each one recipient and its amount. Two to eight; each recipient counts as one step of the workflow's 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient the person asked for: more than eight is refused; the person decides which to remove.",
+                        "type": "array",
+                        "items": {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "recipient",
+                            "amount"
+                          ],
+                          "properties": {
+                            "recipient": {
+                              "pattern": "^0x[0-9a-fA-F]{40}$",
+                              "minLength": 42,
+                              "maxLength": 42,
+                              "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).",
+                              "type": "string"
+                            },
+                            "amount": {
+                              "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                              "maxLength": 48,
+                              "description": "This recipient's exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).",
+                              "type": "string"
+                            }
+                          }
+                        }
                       }
-                    ]
+                    }
                   },
-                  "asset": {
-                    "description": "Native ETH, or a symbol or whole name of the network's validated official catalog (Stock Tokens are not paid in batches). Every recipient receives this one asset.",
-                    "anyOf": [
-                      {
-                        "const": "ETH",
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "action",
+                      "network",
+                      "asset",
+                      "recipients"
+                    ],
+                    "properties": {
+                      "version": {
+                        "description": "Strategy contract version. Omit or 1.",
+                        "const": 1,
+                        "type": "number"
+                      },
+                      "action": {
+                        "const": "batch_payment",
                         "type": "string"
                       },
-                      {
-                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
-                        "maxLength": 160,
-                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                      "network": {
+                        "description": "Solana mainnet-beta (real funds).",
+                        "const": "solana",
                         "type": "string"
-                      }
-                    ]
-                  },
-                  "recipients": {
-                    "minItems": 2,
-                    "maxItems": 8,
-                    "description": "Ordered payments, each one recipient and its amount. Two to eight; each recipient counts as one step of the workflow's 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient the person asked for: more than eight is refused; the person decides which to remove.",
-                    "type": "array",
-                    "items": {
-                      "additionalProperties": false,
-                      "type": "object",
-                      "required": [
-                        "recipient",
-                        "amount"
-                      ],
-                      "properties": {
-                        "recipient": {
-                          "pattern": "^0x[0-9a-fA-F]{40}$",
-                          "minLength": 42,
-                          "maxLength": 42,
-                          "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).",
-                          "type": "string"
-                        },
-                        "amount": {
-                          "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                          "maxLength": 48,
-                          "description": "This recipient's exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).",
-                          "type": "string"
+                      },
+                      "asset": {
+                        "description": "SOL, or USDC or USDT (SPL Token). Every recipient receives this one asset; no other Solana token is paid in a batch.",
+                        "anyOf": [
+                          {
+                            "const": "SOL",
+                            "type": "string"
+                          },
+                          {
+                            "const": "USDC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "USDT",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "recipients": {
+                        "minItems": 2,
+                        "maxItems": 8,
+                        "description": "Ordered payments, each one recipient and its amount. Two to eight; each recipient counts as one step of the workflow's 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient the person asked for: more than eight is refused; the person decides which to remove.",
+                        "type": "array",
+                        "items": {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "recipient",
+                            "amount"
+                          ],
+                          "properties": {
+                            "recipient": {
+                              "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                              "minLength": 32,
+                              "maxLength": 44,
+                              "description": "Recipient Solana wallet address (base58), exactly as the person gave it: letter case matters, never change, shorten or lower-case it. Never invent, guess or substitute one; each recipient at most once. Never the paying wallet itself, a program, a sysvar or a token mint.",
+                              "type": "string"
+                            },
+                            "amount": {
+                              "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                              "maxLength": 48,
+                              "description": "This recipient's exact amount, as a decimal string, at most 9 decimals for SOL and 6 for USDC or USDT (the same amount for each recipient only when the person asked for equal amounts).",
+                              "type": "string"
+                            }
+                          }
                         }
                       }
                     }
                   }
-                }
+                ]
               },
               {
                 "additionalProperties": false,
@@ -4097,90 +4174,167 @@
                           }
                         },
                         {
-                          "additionalProperties": false,
-                          "type": "object",
-                          "required": [
-                            "action",
-                            "network",
-                            "asset",
-                            "recipients"
-                          ],
-                          "properties": {
-                            "version": {
-                              "description": "Strategy contract version. Omit or 1.",
-                              "const": 1,
-                              "type": "number"
-                            },
-                            "action": {
-                              "const": "batch_payment",
-                              "type": "string"
-                            },
-                            "network": {
-                              "description": "The EVM mainnet of this same-network batch (real funds). Solana is not available for batch payments.",
-                              "anyOf": [
-                                {
-                                  "const": "robinhood",
+                          "description": "One Batch Payment: one source wallet, one network, one asset, 2 to 8 recipients, executed only as one atomic authorization of the owner's own wallet.",
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "network",
+                                "asset",
+                                "recipients"
+                              ],
+                              "properties": {
+                                "version": {
+                                  "description": "Strategy contract version. Omit or 1.",
+                                  "const": 1,
+                                  "type": "number"
+                                },
+                                "action": {
+                                  "const": "batch_payment",
                                   "type": "string"
                                 },
-                                {
-                                  "const": "base",
-                                  "type": "string"
+                                "network": {
+                                  "description": "The EVM mainnet of this same-network batch (real funds). For Solana, use network \"solana\".",
+                                  "anyOf": [
+                                    {
+                                      "const": "robinhood",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "base",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "arbitrum-one",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "ethereum",
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
-                                {
-                                  "const": "arbitrum-one",
-                                  "type": "string"
+                                "asset": {
+                                  "description": "Native ETH, or a symbol or whole name of the network's validated official catalog (Stock Tokens are not paid in batches). Every recipient receives this one asset.",
+                                  "anyOf": [
+                                    {
+                                      "const": "ETH",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                      "maxLength": 160,
+                                      "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
-                                {
-                                  "const": "ethereum",
-                                  "type": "string"
+                                "recipients": {
+                                  "minItems": 2,
+                                  "maxItems": 8,
+                                  "description": "Ordered payments, each one recipient and its amount. Two to eight; each recipient counts as one step of the workflow's 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient the person asked for: more than eight is refused; the person decides which to remove.",
+                                  "type": "array",
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "type": "object",
+                                    "required": [
+                                      "recipient",
+                                      "amount"
+                                    ],
+                                    "properties": {
+                                      "recipient": {
+                                        "pattern": "^0x[0-9a-fA-F]{40}$",
+                                        "minLength": 42,
+                                        "maxLength": 42,
+                                        "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).",
+                                        "type": "string"
+                                      },
+                                      "amount": {
+                                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                                        "maxLength": 48,
+                                        "description": "This recipient's exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).",
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
                                 }
-                              ]
+                              }
                             },
-                            "asset": {
-                              "description": "Native ETH, or a symbol or whole name of the network's validated official catalog (Stock Tokens are not paid in batches). Every recipient receives this one asset.",
-                              "anyOf": [
-                                {
-                                  "const": "ETH",
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "network",
+                                "asset",
+                                "recipients"
+                              ],
+                              "properties": {
+                                "version": {
+                                  "description": "Strategy contract version. Omit or 1.",
+                                  "const": 1,
+                                  "type": "number"
+                                },
+                                "action": {
+                                  "const": "batch_payment",
                                   "type": "string"
                                 },
-                                {
-                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
-                                  "maxLength": 160,
-                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                "network": {
+                                  "description": "Solana mainnet-beta (real funds).",
+                                  "const": "solana",
                                   "type": "string"
-                                }
-                              ]
-                            },
-                            "recipients": {
-                              "minItems": 2,
-                              "maxItems": 8,
-                              "description": "Ordered payments, each one recipient and its amount. Two to eight; each recipient counts as one step of the workflow's 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient the person asked for: more than eight is refused; the person decides which to remove.",
-                              "type": "array",
-                              "items": {
-                                "additionalProperties": false,
-                                "type": "object",
-                                "required": [
-                                  "recipient",
-                                  "amount"
-                                ],
-                                "properties": {
-                                  "recipient": {
-                                    "pattern": "^0x[0-9a-fA-F]{40}$",
-                                    "minLength": 42,
-                                    "maxLength": 42,
-                                    "description": "Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped letter is refused, never corrected). Never the zero address or a reserved system address (0x…001 to 0x…fff, which holds precompiles).",
-                                    "type": "string"
-                                  },
-                                  "amount": {
-                                    "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                    "maxLength": 48,
-                                    "description": "This recipient's exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).",
-                                    "type": "string"
+                                },
+                                "asset": {
+                                  "description": "SOL, or USDC or USDT (SPL Token). Every recipient receives this one asset; no other Solana token is paid in a batch.",
+                                  "anyOf": [
+                                    {
+                                      "const": "SOL",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "USDC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "USDT",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "recipients": {
+                                  "minItems": 2,
+                                  "maxItems": 8,
+                                  "description": "Ordered payments, each one recipient and its amount. Two to eight; each recipient counts as one step of the workflow's 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient the person asked for: more than eight is refused; the person decides which to remove.",
+                                  "type": "array",
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "type": "object",
+                                    "required": [
+                                      "recipient",
+                                      "amount"
+                                    ],
+                                    "properties": {
+                                      "recipient": {
+                                        "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                                        "minLength": 32,
+                                        "maxLength": 44,
+                                        "description": "Recipient Solana wallet address (base58), exactly as the person gave it: letter case matters, never change, shorten or lower-case it. Never invent, guess or substitute one; each recipient at most once. Never the paying wallet itself, a program, a sysvar or a token mint.",
+                                        "type": "string"
+                                      },
+                                      "amount": {
+                                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                                        "maxLength": 48,
+                                        "description": "This recipient's exact amount, as a decimal string, at most 9 decimals for SOL and 6 for USDC or USDT (the same amount for each recipient only when the person asked for equal amounts).",
+                                        "type": "string"
+                                      }
+                                    }
                                   }
                                 }
                               }
                             }
-                          }
+                          ]
                         }
                       ]
                     }

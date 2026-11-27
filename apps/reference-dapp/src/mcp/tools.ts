@@ -123,13 +123,15 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   '`workflowRun.steps` name execution legs (a Batch Payment has one leg per payment, all executed in one atomic wallet request): never copy one into the other; ' +
   '`batchPayments` maps each Batch Payment to its leg range. ' +
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02)
-  'Several payments of one asset on one EVM mainnet (base, arbitrum-one, ethereum, robinhood) are ONE batch_payment step: 2 to 8 recipients, each ' +
+  'Several payments of one asset on one mainnet (base, arbitrum-one, ethereum, robinhood; or solana for SOL, USDC or USDT) are ONE batch_payment step: 2 to 8 recipients, each ' +
   'with the exact amount the person stated, in their order (the same amount for each only when they asked for equal amounts). Never split it into ' +
-  'transfers, never invent, drop, merge, reorder or shorten a recipient, and ask when a recipient or an amount is missing. More than ' +
+  'transfers, never invent, drop, merge, reorder or shorten a recipient, and ask when a recipient or an amount is missing. On Solana a recipient is a ' +
+  'base58 wallet address kept exactly as written (letter case matters: never change or lower-case it), never the paying wallet, a program or a token mint. More than ' +
   `${BATCH_PAYMENT_MAX_RECIPIENTS} recipients is refused (BATCH_PAYMENT_TOO_MANY_RECIPIENTS): tell the person and ask which to remove, never send fewer. ` +
   'Each recipient counts as one step of the 8-step budget: a result\'s stepCount counts these payments (its legs), and `batchPayments` names each ' +
   'batch as the one step it is. It executes only as one atomic authorization of the owner\'s own wallet (every payment, or none), never step by ' +
-  'step; a wallet or deployment that cannot do that refuses it (BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE). Solana batch payments are not available. ' +
+  'step; a wallet or deployment that cannot do that refuses it (BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE). On Solana the batch is one transaction the ' +
+  'owner signs in Phantom or Solflare on the FloFi approval page. ' +
   'When a result carries `display` lines, show those amounts verbatim in the person\'s language; never re-round or convert those amounts yourself.';
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
 export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
@@ -424,6 +426,13 @@ const executionMode = (w: { readonly steps: readonly unknown[] }, batches: reado
 const BATCH_EXECUTION_NOTE = 'A Batch Payment runs only as ONE atomic authorization of the owner\'s own wallet (an atomic wallet batch or their own smart-account ' +
   'operation): every payment settles, or none does. It is never confirmed payment by payment and never split into separate transfers; the owner\'s wallet ' +
   'pays every fee. Any other step runs in order, each group after the previous one reconciled.';
+/** KAN-20: the same rule for a Solana Batch Payment: one owner-signed Solana transaction. */
+const SOLANA_BATCH_EXECUTION_NOTE = 'A Solana Batch Payment runs only as ONE Solana transaction signed by the owner\'s own wallet (Phantom or Solflare): every ' +
+  'payment settles, or none does. It is never confirmed payment by payment and never split into separate transfers; the owner\'s wallet pays the network fee ' +
+  'and any token-account deposit in SOL. Any other step runs in order, each group after the previous one reconciled.';
+/** The execution notes of a workflow's batches: the EVM note for an EVM batch, the Solana note for a Solana batch (EVM-only results keep their text). */
+const batchExecutionNotes = (batches: readonly { readonly network: string }[]) => [...batches.some(b => b.network !== 'solana') ? [BATCH_EXECUTION_NOTE] : [],
+  ...batches.some(b => b.network === 'solana') ? [SOLANA_BATCH_EXECUTION_NOTE] : []];
 /** A workflow with a Batch Payment AND other steps: confirm-each-step is never offered for it (the batch is atomic-only), so its other steps run in
  *  the owner's user-funded groups, one group after the previous one reconciled. */
 const BATCH_MIXED_NOTE = 'The other steps of this workflow run in user-funded groups: the owner\'s own wallet authorizes each group of same-network steps once and ' +
@@ -706,7 +715,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   register('compose_strategy', 'Compose strategy', 'Deterministically turn structured intent into FloFi\'s canonical Semantic Workflow IR (revision 1), using the same ' +
     'authoring rules as the FloFi app. Unsupported or ambiguous input is refused with a code, never guessed. Keep `strategy` (normalized) and `workflowHash` for ' +
     'validate/simulate/review. The model must not invent addresses: use only values the user gave. A multi-step workflow is `{version: 2, steps: [...]}` ' +
-    '(several payments of one asset on one EVM mainnet are ONE `batch_payment` step, reported with its legs in `workflowSteps` and in `batchPayments`) ' +
+    '(several payments of one asset on one mainnet are ONE `batch_payment` step, reported with its legs in `workflowSteps` and in `batchPayments`) ' +
     '(one step is the same as version 1); each step keeps its own IR and hash. A bridge whose destination asset differs (`outputAsset`, e.g. ETH → USDC) ' +
     'is one Universal Bridge step, never a swap plus a bridge.', Schemas.compose, pure, args => {
     const w = composeWorkflowOrRefuse(args.strategy, undefined, scope), visual = workflowVisualModel(w);
@@ -729,7 +738,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         'step\'s review): it reports how many authorizations each mode needs. Each step runs only after the previous one reconciled.',
         'review_strategy or simulate_strategy only if the person asks for findings or a read-only quote first (optional)']
         : ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview',
-          ...batches.length ? [BATCH_EXECUTION_NOTE, ...executionMode(w, batches) === 'STEP_BY_STEP' ? [BATCH_MIXED_NOTE] : []] : []] };
+          ...batches.length ? [...batchExecutionNotes(batches), ...executionMode(w, batches) === 'STEP_BY_STEP' ? [BATCH_MIXED_NOTE] : []] : []] };
   });
 
   register('plan_strategy', 'Plan strategy from a goal', 'FloFi\'s goal planner (the same one its own chat uses): from an outcome the user described — the asset and ' +
@@ -791,7 +800,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         summary: reviewed.summary, executionPlan: { kind: plan.kind, reason: plan.reason, mode: executionMode(w, batches) }, workflowSteps: reviewed.steps,
         conversationState: authoringState('REVIEWED', reviewed.summary.block),
         readiness: readiness({ review: reviewReadiness(reviewed.steps.flatMap(step => step.findings)) }),
-        nextSteps: batches.length ? [BATCH_EXECUTION_NOTE, ...executionMode(w, batches) === 'STEP_BY_STEP' ? [BATCH_MIXED_NOTE] : []] : ['Steps run in order, each after the previous step reconciled. Confirm each step: every step gets a ' +
+        nextSteps: batches.length ? [...batchExecutionNotes(batches), ...executionMode(w, batches) === 'STEP_BY_STEP' ? [BATCH_MIXED_NOTE] : []] : ['Steps run in order, each after the previous step reconciled. Confirm each step: every step gets a ' +
           'fresh simulation and the owner\'s Review and wallet confirmation before it runs. User-funded groups (where request_user_approval reports them available): ' +
           'the owner\'s own wallet authorizes each group of same-network steps once and pays every fee.'] };
     }
@@ -823,7 +832,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
         notes: 'batchPayments' in preview ? ['A Batch Payment is never previewed one payment at a time: its payments are NOT_COMPLETED here ' +
           '(SIMULATION_REQUIRES_OWNER_BROWSER). FloFi simulates the whole batch, every payment and its fees together, with the owner\'s own wallet at its ' +
-          'signing surface before the wallet is asked to authorize it.', BATCH_EXECUTION_NOTE,
+          'signing surface before the wallet is asked to authorize it.', ...batchExecutionNotes(batchPaymentViews(workflow)),
           'Any other step uses its provider preview; dependent balances arrive only after earlier steps reconcile, and an awaiting step is explicitly incomplete.']
           : ['Each step uses the corresponding provider preview. A market quote leaves wallet simulation incomplete.',
           'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',

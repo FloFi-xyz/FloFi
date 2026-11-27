@@ -30,9 +30,9 @@ vi.mock('../app/approve-action', () => {
     reviewWorkflowRunAuthorization: never, startWorkflowRunHandoff: never, workflowRunStatusHandoff: never,
     prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorize, reportUserFundedBatch: server.report, startUserFundedWorkflowRun: server.start };
 });
-const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn(), profile: vi.fn(), accounts: vi.fn() }));
+const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn(), profile: vi.fn(), accounts: vi.fn(), signSolana: vi.fn() }));
 vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: browser.profile,
-  revokeUserOperation: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
+  revokeUserOperation: vi.fn(), signSolanaGroup: browser.signSolana, signUserOperation: vi.fn(), isCirclePaid: () => false }));
 vi.mock('../wallet/evm-discovery', () => {
   const provider = { request: async ({ method }: { method: string }) => method === 'eth_accounts' ? browser.accounts() : null };
   return { chosenEvmProvider: () => provider, injected: () => provider };
@@ -316,5 +316,35 @@ describe('B2: capabilities are read for the wallet\'s selected account', () => {
     expect(await click(claim(choosing), 'Authorize in groups')).toEqual({ proposal: PROPOSAL, error: null });
     expect(browser.profile).toHaveBeenCalledWith(OWNER.toLowerCase(), ['eip155:8453'], false);
     expect(server.start).toHaveBeenCalledWith(APPROVAL, {});
+  });
+});
+
+// KAN-20 (WS02 evaluation A.7, T5): /approve signs a Solana Batch Payment group as ONE transaction (the fallback channels use; native signing stays
+// single-flow only). No EVM batch is sent, nothing else is asked of the wallet, and the group says it is one atomic transaction.
+describe('T5: a Solana Batch Payment group on /approve is ONE transaction, signed once', () => {
+  const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', SOL_OWNER = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', UNSIGNED = 'AQIDBA', SIGNED = 'BQYHCA';
+  const solanaBatch = { atomic: true as const, asset: { symbol: 'SOL', decimals: 9 }, total: '30000000', estimatedFeeLamports: '5000', accountCreationLamports: '0',
+    maximumAccountCreationLamports: '0', maximumNetworkCostLamports: '5000', requiredLamports: '30895880', transactionBytes: 318 };
+  const solanaGroup = (patch: Partial<Group> = {}) => group({ chain: SOLANA, strategy: 'SOLANA_SIGN_ALL', batchId: null, feePayer: SOL_OWNER, ...patch });
+  it('signSolanaGroup is called once with exactly [unsignedTransaction], then the group is authorized as SOLANA_SIGN_ALL with that one signed transaction', async () => {
+    server.prepare.mockResolvedValue({ ok: true, value: { feePayer: SOL_OWNER, prepared: { kind: 'SOLANA_SIGN_ALL', owner: SOL_OWNER, atomic: true,
+      transactions: [{ kind: 'BATCH_PAYMENT', stepIndex: 0, unsignedTransaction: UNSIGNED, legs: [{ stepIndex: 0 }, { stepIndex: 1 }] }] } } });
+    browser.signSolana.mockResolvedValue([SIGNED]);
+    expect(await click(claim({ groups: [solanaGroup({ state: 'PLANNED' })] }), AUTHORIZE)).toEqual({ proposal: { authorized: true }, error: null });
+    expect(browser.signSolana).toHaveBeenCalledExactlyOnceWith(SOL_OWNER, [UNSIGNED]);
+    expect(server.authorize).toHaveBeenCalledExactlyOnceWith(APPROVAL, 0, { kind: 'SOLANA_SIGN_ALL', transactions: [SIGNED] });
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(attempts()).toEqual({});
+  });
+  it('a prepared batch group reads "One Solana signing request for one atomic transaction" with its fee in SOL; any other group keeps its words', () => {
+    const text = (node: ReactNode): string => typeof node === 'string' || typeof node === 'number' ? String(node) : Array.isArray(node) ? node.map(text).join('')
+      : node && typeof node === 'object' && 'props' in node ? text((node as ReactElement<{ children?: ReactNode }>).props.children) : '';
+    const shown = (g: Group) => text(WorkflowRunPanel({ claim: claim({ groups: [g] }), approvalId: APPROVAL, secret: null, onProposal: vi.fn(), onError: vi.fn() }) as ReactElement);
+    const batch = shown(solanaGroup({ solanaBatch, maxFee: { amount: '5000', unit: 'lamports', estimated: true } as Group['maxFee'] }));
+    expect(batch).toContain('One Solana signing request for one atomic transaction');
+    expect(batch).toContain('about 0.000005 SOL in network fees; your wallet pays it in SOL');
+    expect(batch).not.toContain('One Solana signing request for every transaction');
+    expect(shown(solanaGroup())).toContain('One Solana signing request for every transaction');
+    expect(shown(group())).not.toContain('atomic transaction');
   });
 });

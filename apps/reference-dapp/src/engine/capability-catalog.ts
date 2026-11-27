@@ -9,7 +9,7 @@
  *    evidence is the registry's ceiling (often none). Deployment enablement is added by the caller from the runtime.
  */
 import { ETHEREUM_BASE_ASSETS, ARBITRUM_BASE_ASSETS, AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, resolveNodeCapability, ROBINHOOD_BASE_ASSETS, BASE_BASE_ASSETS,
-  resolveWorkflowCapability, SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, SOLANA_TRANSFER_PROFILES, UNISWAP_LIQUIDITY_PROFILES,
+  resolveWorkflowCapability, SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, SOLANA_MAINNET_TRANSFER, SOLANA_TRANSFER_PROFILES, UNISWAP_LIQUIDITY_PROFILES,
   NATIVE_TRANSFER_PROFILES, ORCA_LIQUIDITY_PROFILES, ROBINHOOD_TESTNET_TRANSFER,
   type CapabilityDimension, type EvidenceMaturity, type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -73,6 +73,9 @@ function assetEntries(): Entry[] {
   // address with its decimals and token program, and verified on chain.
   for (const profile of SOLANA_TRANSFER_PROFILES) for (const a of profile.assets)
     out.push({ chain: profile.chain, symbol: a.symbol, address: a.mint, decimals: a.decimals, action: 'transfer', source: `solana-transfer:${profile.network}` });
+  // KAN-20: a Solana Batch Payment pays exactly the verified mainnet transfer assets (SOL, USDC, USDT); never Devnet, never another mint.
+  for (const a of SOLANA_MAINNET_TRANSFER.assets)
+    out.push({ chain: SOLANA_MAINNET_TRANSFER.chain, symbol: a.symbol, address: a.mint, decimals: a.decimals, action: 'batch_payment', source: 'solana-batch-payment:Solana' });
   for (const profile of ORCA_LIQUIDITY_PROFILES) for (const t of [profile.token0, profile.token1])
     out.push({ chain: profile.chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'add_liquidity', source: `orca-whirlpools-liquidity:${profile.network}` });
   for (const profile of NATIVE_TRANSFER_PROFILES)

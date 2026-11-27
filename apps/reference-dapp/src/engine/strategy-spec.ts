@@ -131,12 +131,15 @@ const Transfer = Type.Object({
   tokenProgram: Type.Optional(enumOf(['spl-token', 'token-2022'] as const, 'Solana SPL mint transfers only: the token program (verified on chain).')),
 }, strict);
 /**
- * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): one Batch Payment: one source wallet, one EVM mainnet, one asset, 2..8 recipients each with its
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (WS02): one Batch Payment: one source wallet, one mainnet (EVM, or Solana for SOL, USDC and USDT; KAN-20), one asset, 2..8 recipients each with its
  * own exact amount. It is ONE operation (one step of a workflow) whose ordered manifest the workflow hash binds; FloFi executes it only as one atomic
  * authorization of the owner's own wallet (every payment settles, or none does), and refuses it where that is not available. Each recipient counts
  * as one step of the workflow's 8-step budget.
  */
 export const BATCH_PAYMENT_NETWORK_IDS = ['robinhood', 'base', 'arbitrum-one', 'ethereum'] as const;
+const BATCH_PAYMENT_RECIPIENTS_DESCRIPTION = 'Ordered payments, each one recipient and its amount. Two to eight; ' +
+  'each recipient counts as one step of the workflow\'s 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient ' +
+  'the person asked for: more than eight is refused; the person decides which to remove.';
 const BatchPaymentLine = Type.Object({
   recipient: EvmAddress('Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. ' +
     'EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped ' +
@@ -145,16 +148,32 @@ const BatchPaymentLine = Type.Object({
 }, strict);
 const BatchPayment = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('batch_payment'),
-  network: enumOf(BATCH_PAYMENT_NETWORK_IDS, 'The EVM mainnet of this same-network batch (real funds). Solana is not available for batch payments.'),
+  network: enumOf(BATCH_PAYMENT_NETWORK_IDS, 'The EVM mainnet of this same-network batch (real funds). For Solana, use network "solana".'),
   asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'Native ETH, or a symbol or whole name of the network\'s validated official catalog ' +
     '(Stock Tokens are not paid in batches). Every recipient receives this one asset.' }),
-  recipients: Type.Array(BatchPaymentLine, { minItems: 2, maxItems: 8, description: 'Ordered payments, each one recipient and its amount. Two to eight; ' +
-    'each recipient counts as one step of the workflow\'s 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient ' +
-    'the person asked for: more than eight is refused; the person decides which to remove.' }),
+  recipients: Type.Array(BatchPaymentLine, { minItems: 2, maxItems: 8, description: BATCH_PAYMENT_RECIPIENTS_DESCRIPTION }),
 }, strict);
+/**
+ * KAN-20: a Solana mainnet-beta Batch Payment of SOL, USDC or USDT (the verified Solana transfer registry): ONE atomic transaction the owner's own
+ * wallet signs. Recipients are base58 wallet keys kept exactly as given (letter case is part of the key).
+ */
+export const SOLANA_BATCH_PAYMENT_ASSET_IDS = ['SOL', 'USDC', 'USDT'] as const;
+const SolanaBatchPaymentLine = Type.Object({
+  recipient: SolanaAddress('Recipient Solana wallet address (base58), exactly as the person gave it: letter case matters, never change, shorten or lower-case it. ' +
+    'Never invent, guess or substitute one; each recipient at most once. Never the paying wallet itself, a program, a sysvar or a token mint.'),
+  amount: Decimal('This recipient\'s exact amount, as a decimal string, at most 9 decimals for SOL and 6 for USDC or USDT (the same amount for each recipient only when the person asked for equal amounts).'),
+}, strict);
+const SolanaBatchPayment = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('batch_payment'),
+  network: Type.Literal('solana', { description: 'Solana mainnet-beta (real funds).' }),
+  asset: enumOf(SOLANA_BATCH_PAYMENT_ASSET_IDS, 'SOL, or USDC or USDT (SPL Token). Every recipient receives this one asset; no other Solana token is paid in a batch.'),
+  recipients: Type.Array(SolanaBatchPaymentLine, { minItems: 2, maxItems: 8, description: BATCH_PAYMENT_RECIPIENTS_DESCRIPTION }),
+}, strict);
+const BatchPayments = Type.Union([BatchPayment, SolanaBatchPayment], { description: 'One Batch Payment: one source wallet, one network, one asset, 2 to 8 recipients, ' +
+  'executed only as one atomic authorization of the owner\'s own wallet.' });
 const BRANCHES = Object.freeze({ bridge: Bridge, swap: Swap, supply: Lending('supply', 'Account credited with the supplied position.'),
   borrow: Lending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: Lending('repay', 'Account whose debt is repaid (onBehalfOf).'),
-  withdraw: Withdraw, add_liquidity: Liquidity, lending_composition: LendingComposition, transfer: Transfer, batch_payment: BatchPayment }) satisfies Readonly<Record<StrategyAction, TSchema>>;
+  withdraw: Withdraw, add_liquidity: Liquidity, lending_composition: LendingComposition, transfer: Transfer, batch_payment: BatchPayments }) satisfies Readonly<Record<StrategyAction, TSchema>>;
 export const StrategySpecSchema = Type.Union(Object.values(BRANCHES), { description: 'A FloFi strategy: structured intent only. FloFi maps it to registered profiles.' });
 export type StrategySpec = Static<typeof StrategySpecSchema>;
 
@@ -249,14 +268,17 @@ const PublicTransfer = Type.Object({
 }, strict);
 const PUBLIC_BRANCHES = Object.freeze({ bridge: PublicBridge, swap: PublicSwap, supply: PublicLending('supply', 'Account credited with the supplied position.'),
   borrow: PublicLending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: PublicLending('repay', 'Account whose debt is repaid (onBehalfOf).'),
-  withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer, batch_payment: BatchPayment });
+  withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer, batch_payment: BatchPayments });
 /**
  * BUILD-FLOFI-INTELLIGENCE-001: the fields a strategy of `action` must carry, read from the canonical schema branch (the public contract when the
  * action is public, else the engineering one) — the Capability API's "required parameters" are never a separate hand-written list.
  */
 export function strategyRequiredFields(action: StrategyAction): readonly string[] {
   const branch = (PUBLIC_BRANCHES as Readonly<Record<string, TSchema>>)[action] ?? BRANCHES[action];
-  return Object.freeze(((branch as { required?: readonly string[] }).required ?? []).filter(field => field !== 'action' && field !== 'version'));
+  // KAN-20: a branch that is a union of objects (the EVM and the Solana Batch Payment) requires what every member requires.
+  const members = (branch as { anyOf?: readonly { required?: readonly string[] }[] }).anyOf ?? [branch as { required?: readonly string[] }];
+  const required = members.map(member => member.required ?? []).reduce((all, next) => all.filter(field => next.includes(field)));
+  return Object.freeze(required.filter(field => field !== 'action' && field !== 'version'));
 }
 export const PublicStrategyWorkflowSchema = Type.Object({
   version: Type.Literal(2, { description: 'Step-list workflow contract.' }),

@@ -5,6 +5,8 @@ import { composeStrategy } from '../engine/strategy-engine';
 import { networkIdentity } from './network-registry';
 import { initialWorkflow, type Workflow } from './initial-workflow';
 import { recoveredRunAttaches, selectOwnerRuntime, type HeldRun, type OwnerRuntimeKind, type OwnerRuntimeSignals } from './runtime-selection';
+import { SEQUENCE_RUNTIMES, stepProjection } from './workflow-sequence';
+import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 
 const none: HeldRun = { recovered: false, workflow: null };
 const quiet = (baseReferenceServed = false, recoveryShell = true): OwnerRuntimeSignals => ({ recoveryShell, solanaTransfer: none, transfer: none, lending: none,
@@ -94,5 +96,33 @@ describe('BUILD-FLOFI-UNIVERSAL-E2E-001 owner-wallet runtime selection', () => {
     expect(recoveredRunAttaches({ ...initialWorkflow(), revision: 1 }, held)).toBe(false);
     expect(recoveredRunAttaches(initialWorkflow(), { recovered: false, workflow: run })).toBe(false);
     expect(recoveredRunAttaches(initialWorkflow(), { recovered: true, workflow: null })).toBe(false);
+  });
+});
+
+/**
+ * KAN-20 (WS02 evaluation T8, section B): a mixed EVM → Solana workflow with a Solana Batch Payment keeps the Editor's per-step path (the preexisting
+ * EVM-only whole-workflow predicate of PR #251), where the batch step has no per-card runtime: its own projection selects none (so the sequence issue
+ * blocks it; it runs through /approve instead), while the bridge step keeps its runtime. A batch is never handed to a single-transfer runtime.
+ */
+describe('KAN-20: a Solana Batch Payment step of a mixed workflow has no per-step runtime', () => {
+  const SA = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', SB = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty';
+  // SOL, so the batch is not funded by the bridge's USDC delivery (an unbound mixed workflow: the Canvas reads it back to the same strategy).
+  const BATCH = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: [{ recipient: SA, amount: '0.01' }, { recipient: SB, amount: '0.02' }] };
+  const BRIDGE = STRATEGY_EXAMPLES.find(example => example.id === 'bridge-base-solana')!.strategy;
+  it('the batch step selects no runtime and is not a sequence runtime; the bridge step is', () => {
+    const opened = canvasWorkflowOfStrategy({ version: 2, steps: [BRIDGE, BATCH] });
+    if (!opened.ok) throw new Error(opened.code);
+    const mixed = opened.workflow as Workflow;
+    const batch = mixed.nodes.find(n => n.actionType === 'asset.transfer.batch')!, bridge = mixed.nodes.find(n => !n.actionType.startsWith('mock-') && n !== batch)!;
+    expect(batch.adapterConstraints.adapters.map(a => a.id)).toEqual(['solana.batch-payment']);
+    expect(networks(mixed).sort()).toEqual(['eip155:8453', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+    const batchKind = selectOwnerRuntime(stepProjection(mixed, batch as Parameters<typeof stepProjection>[1]), quiet()).kind;
+    expect(batchKind).toBeNull();
+    expect(SEQUENCE_RUNTIMES).not.toContain(batchKind);
+    const bridgeKind = selectOwnerRuntime(stepProjection(mixed, bridge as Parameters<typeof stepProjection>[1]), quiet()).kind;
+    expect(bridgeKind).toBe('universal');
+    expect(SEQUENCE_RUNTIMES).toContain(bridgeKind);
+    // A lone Solana batch card is the same: no per-card runtime (only the whole-workflow run executes it, atomically).
+    expect(selectOwnerRuntime(workflowOf('batch-payment-solana'), quiet(true)).kind).toBeNull();
   });
 });

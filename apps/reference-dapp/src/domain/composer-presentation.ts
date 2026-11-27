@@ -60,6 +60,8 @@ const providerLabels: Record<string, string> = {
   'flofi.router': 'Cross-chain Router', 'flofi.router.universal': 'Universal Router', 'cow-protocol': 'CoW Protocol',
   'solana.system-transfer': 'System Program', 'solana.spl-transfer': 'SPL Token',
   'evm.native-transfer': 'Wallet send', 'evm.token-transfer': 'Token transfer', 'evm.batch-payment': 'Wallet batch',
+  // KAN-20: the Solana Batch Payment is the same card: one wallet, one atomic transaction.
+  'solana.batch-payment': 'Wallet batch',
 };
 /** What a Canvas card, the Simulate panel, the Review and the chat say about one step (display only). */
 export type ComposerSummary = { action: string; provider: string; chain: string; amount: string; detail: string | undefined; bridgePair: string | undefined; linked: boolean;

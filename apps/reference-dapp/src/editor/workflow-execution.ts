@@ -19,7 +19,7 @@ import type { NetworkId } from '../engine/strategy-spec';
 import { userFundedPreferred } from '../workflow-runs/authorization-plan.ts';
 import { userFundedBuildable } from '../workflow-runs/service.ts';
 import { planExecutionGroups, summarize, type ExecutionGroup, type GroupStrategy, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
-import { prepareGroup, type NativeFeeShortfall, type UserFundedDeps } from '../user-funded/groups.ts';
+import { prepareGroup, solanaBatchView, type NativeFeeShortfall, type SolanaBatchGroupView, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { BatchSimulation } from '../user-funded/batch-simulation.ts';
 import type { EvmGroupCalls, UserCall } from '../user-funded/evm-calls.ts';
 import { amountOf, plannedSteps, type ReviewAmount } from '../user-funded/planned.ts';
@@ -27,6 +27,7 @@ import { circleFactsOf, circleGasPayment } from '../user-funded/circle-gas.ts';
 import type { GasPayment } from '../gas-abstraction/mechanism.ts';
 import { nativeLaterWarnings, type NativeLaterWarning } from '../gas-abstraction/native-later.ts';
 import { editorWorkflowStrategy } from './workflow-strategy.ts';
+import { SOLANA_OWNER } from './authorize-binding.ts';
 
 export type { ReviewAmount };
 export type ReviewStep = {
@@ -58,6 +59,12 @@ export type ReviewGroup = {
    * owner's USDC (at most `maxFee`), in two wallet signatures (a permit, then the operation). `fee` is then null (no native fee is paid).
    */
   readonly gasPayment?: Extract<GasPayment, { mechanism: 'CIRCLE_USDC_PAYMASTER' }> | null;
+  /**
+   * KAN-20: a Solana Batch Payment group prepared by this Review (read-only simulation): ONE atomic transaction of every leg, its asset and total,
+   * the network fee, the token-account deposits it charges now and at most, what the owner's SOL must cover, and its size. Absent for every other
+   * group (every EVM Review is unchanged).
+   */
+  readonly solanaBatch?: SolanaBatchGroupView;
 };
 export type ReviewCounts = {
   /** Wallet prompts the owner answers (one per group interaction); `atLeast` when a step's own flow may ask once more (e.g. a token approval). */
@@ -110,7 +117,7 @@ const recipientOf = (strategy: { readonly recipient?: unknown }, owner: string |
   typeof strategy.recipient === 'string' && strategy.recipient ? (/^0x[0-9a-fA-F]{40}$/.test(strategy.recipient) ? strategy.recipient.toLowerCase() : strategy.recipient) : owner;
 const PROVIDERS: Readonly<Record<string, string>> = { 'uniswap.v3': 'Uniswap V3', 'aave-v3': 'Aave V3', 'jupiter.swap-v2': 'Jupiter' };
 function counts(groups: readonly ExecutionGroup[], prepared: ReadonlyMap<number, number>, networkSwitches: number, oneTimeSetup: readonly string[],
-  tokenGas: ReadonlySet<number> = new Set()): ReviewCounts {
+  tokenGas: ReadonlySet<number> = new Set(), solanaBatches: ReadonlySet<number> = new Set()): ReviewCounts {
   let walletPrompts = 0, signatures = 0, transactions = 0, batchedCalls = 0, atLeast = false;
   for (const g of groups) {
     const steps = g.stepTo - g.stepFrom + 1;
@@ -122,10 +129,25 @@ function counts(groups: readonly ExecutionGroup[], prepared: ReadonlyMap<number,
       if (g.tokenGas) atLeast = true;
       // Before preparation a batch is counted as its steps' exact calls without approvals (a minimum: approvals are added only where needed).
       batchedCalls += prepared.get(g.index) ?? steps;
-    } else if (g.strategy === 'SOLANA_SIGN_ALL' || g.strategy === 'SOLANA_DURABLE_NONCE') { signatures += steps; transactions += steps; }
+    // KAN-20: a Solana Batch Payment group is ONE transaction (one signature) for all of its legs.
+    } else if (g.strategy === 'SOLANA_SIGN_ALL' && solanaBatches.has(g.index)) { signatures += 1; transactions += 1; }
+    else if (g.strategy === 'SOLANA_SIGN_ALL' || g.strategy === 'SOLANA_DURABLE_NONCE') { signatures += steps; transactions += steps; }
     else { signatures += steps; transactions += steps; atLeast = true; }
   }
   return { walletPrompts, atLeast, signatures, transactions, batchedCalls, networkSwitches, oneTimeSetup };
+}
+
+/** KAN-20: Solana mainnet-beta, the only cluster a Solana Batch Payment runs on (`SOLANA_MAINNET_TRANSFER.chain`). */
+const SOLANA_MAINNET = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+/**
+ * KAN-20: whether a composed workflow is one the Editor runs in place with the owner's SOLANA wallet: every step is a leg of a Solana Batch Payment
+ * on Solana mainnet (a lone Batch Payment card, or Batch Payment cards only). Anything else on Solana keeps its own per-step path, and a workflow
+ * that mixes EVM and Solana steps is not run in place (it runs through /approve, as before).
+ */
+export function solanaBatchOnly(composition: { readonly batches?: readonly { readonly network: string; readonly from: number; readonly to: number }[] },
+  steps: readonly { readonly index: number; readonly chain: string }[]): boolean {
+  const batches = (composition.batches ?? []).filter(b => b.network === 'solana');
+  return steps.length > 0 && batches.length > 0 && steps.every(s => s.chain === SOLANA_MAINNET && batches.some(b => b.from <= s.index && s.index <= b.to));
 }
 
 /**
@@ -146,8 +168,10 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
    * allowance is short), simulation and counts are exactly a multi-step group's.
    */
   readonly singleStep?: boolean }): Promise<ReviewResult> {
-  const owner = input.owner.toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
+  // KAN-20: a Solana owner (base58) is kept exactly as given (letter case matters); an EVM owner is lower-cased exactly as before.
+  const solana = typeof input.owner === 'string' && SOLANA_OWNER.test(input.owner);
+  const owner = solana ? input.owner : input.owner.toLowerCase();
+  if (!solana && !/^0x[0-9a-f]{40}$/.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
   if (!input.facts.enabled || !input.deps) return { ok: false, code: input.facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
   const converted = editorWorkflowStrategy(input.workflow, { singleStep: input.singleStep === true });
   if (!converted.ok) return converted;
@@ -155,14 +179,23 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   if (!composed.ok) return { ok: false, code: composed.code };
   const req = requirementOf(composed);
   if (!req.ok) return { ok: false, code: req.code };
+  // KAN-20: the Editor reviews with a Solana wallet only a workflow of Solana Batch Payments on Solana mainnet; such a workflow is never reviewed for
+  // an EVM wallet (its one transaction is signed and paid by the owner's Solana wallet). Every other workflow is reviewed exactly as before.
+  const solanaBatchScope = solanaBatchOnly(composed, req.value.steps);
+  if (solana && !solanaBatchScope) return { ok: false, code: 'EDITOR_WORKFLOW_SOLANA_BATCH_ONLY' };
+  if (!solana && solanaBatchScope) return { ok: false, code: 'SOLANA_WALLET_REQUIRED' };
   const closed = new Map<number, string>();
   if (input.stepRefusal) for (const step of req.value.steps) {
     if (step.action !== 'bridge') continue;
     const code = await input.stepRefusal(composed.steps[step.index]!, step.index);
     if (code) closed.set(step.index, code);
   }
-  const buildable = userFundedBuildable(input.facts, owner);
+  const buildable = userFundedBuildable(input.facts, solana ? null : owner);
   const plan = planExecutionGroups(req.value, input.facts, input.profile, st => closed.has(st.index) ? 'USER_FUNDED_BRIDGE_FLOW_CLOSED' : buildable(st));
+  // KAN-20: FloFi Wallet has no signing binding for a Solana Batch Payment's one transaction: said as such (Phantom or Solflare sign it), never as a
+  // generic "atomic execution unavailable".
+  if (!plan.ok && solana && plan.code === 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE' && plan.because?.includes('FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED'))
+    return { ok: false, code: 'FLOFI_WALLET_SOLANA_BATCH_PAYMENT_UNSUPPORTED' };
   if (!plan.ok) return { ok: false, code: plan.code };
   // Grouping is offered under the run's own rule (`userFundedPreferred`, which its claim applies too: otherwise the claim starts confirming each
   // step, and the grouped Authorize could not start): never more wallet interactions than confirming each step, whose step count is only a lower
@@ -172,6 +205,9 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   // A Circle-paid group is still one grouped interaction for the run's rule (its permit is part of that group's authorization).
   const allGrouped = everyGroupBatched && userFundedPreferred(plan.groups, plan.interactions, req.value.steps.length);
   const preparedCalls = new Map<number, number>(), tokenGas = new Set<number>(), decided = new Set<number>();
+  /** KAN-20: the groups that are exactly a Solana Batch Payment's legs (one atomic transaction each). */
+  const solanaBatches = new Set(plan.groups.filter(g => g.namespace === 'solana' && g.strategy === 'SOLANA_SIGN_ALL'
+    && (req.value.atomic ?? []).some(a => a.from === g.stepFrom && a.to === g.stepTo)).map(g => g.index));
   /** Review B1/LQ1: who pays each prepared group's fee, as this Review found it (USDC through Circle, or the owner's own native coin). */
   const feePayers = new Map<number, 'TOKEN' | 'NATIVE'>();
   let validUntil: string | null = null, refusal: EditorExecutionReview['refusal'] = null;
@@ -179,7 +215,7 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   const planned = new Map<number, Pick<ReviewStep, 'spend' | 'expected' | 'minimum'>>();
   for (const g of plan.groups) {
     let calls: ReviewGroup['calls'] = null, approvals: number | null = null, fee: ReviewGroup['fee'] = null, healthFactorAfter: string | null = null;
-    let gasPayment: ReviewGroup['gasPayment'] = null;
+    let gasPayment: ReviewGroup['gasPayment'] = null, solanaBatch: SolanaBatchGroupView | null = null;
     // Only the first group is due now: it is prepared exactly as the run will prepare it. A later group is quoted when it becomes due.
     if (g.index === 0 && g.strategy === 'EVM_WALLET_BATCH') {
       const wallet = input.profile.eip155?.wallet;
@@ -208,11 +244,22 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
         healthFactorAfter = p.simulation ? Object.values(p.simulation.healthFactorAfter)[0] ?? null : null;
         for (const [index, values] of plannedSteps(req.value, p.group)) planned.set(index, values);
       }
+    } else if (solana && g.index === 0 && solanaBatches.has(g.index)) {
+      // KAN-20: a Solana Batch Payment due now is prepared exactly as the run will prepare it, read-only: its ONE transaction simulated with every leg
+      // (compute, exact deltas, token-account deposits, the owner's SOL), never Kora, never split. Nothing is handed to a wallet or stored.
+      const r = await prepareGroup(input.deps, composed, req.value, { runId: 'editor-review', groupIndex: 0, strategy: g.strategy, chain: g.chain, feePayer: owner,
+        stepFrom: g.stepFrom, stepTo: g.stepTo, preview: true });
+      if (!r.ok) refusal = { code: r.code, step: r.stepIndex ?? null, ...r.evidence ? { evidence: r.evidence } : {} };
+      else {
+        solanaBatch = solanaBatchView(r.value.prepared);
+        if (!solanaBatch) refusal = { code: 'SOLANA_BATCH_PAYMENT_GROUP_INVALID', step: g.stepFrom };
+        else { validUntil = r.value.validUntil.toISOString(); decided.add(g.index); feePayers.set(g.index, 'NATIVE'); }
+      }
     }
     // A Circle-paid group asks the wallet twice (permit, then operation): never counted as one interaction.
     groups.push({ index: g.index, chain: g.chain, network: NETWORKS[req.value.steps[g.stepFrom]!.network].label, strategy: g.strategy, steps: [g.stepFrom, g.stepTo],
       signing: g.signing, interactions: tokenGas.has(g.index) ? Math.max(2, g.interactions) : g.interactions, setup: g.setup, downgrades: g.downgrades, calls, approvals, fee,
-      healthFactorAfter, ...gasPayment ? { gasPayment } : {} });
+      healthFactorAfter, ...gasPayment ? { gasPayment } : {}, ...solanaBatch ? { solanaBatch } : {} });
   }
   // ADR-0010: the interaction summary of the plan as it will actually be asked (a Circle-paid group counts its two signatures). Review C5: a group
   // the Review prepared is counted exactly (native: one; Circle: two); a later one whose fee Circle may pay keeps the plan's "at least".
@@ -236,7 +283,8 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   const circleOnApproval = mode === 'STEP_BY_STEP' && input.profile.eip155?.wallet === 'FLOFI_WALLET'
     && plan.groups.some(g => g.strategy === 'EVM_OWNER_STEP' && g.tokenGas === 'CIRCLE_USDC_PAYMASTER');
   return { ok: true, value: { workflowHash: converted.workflowHash, stepCount: req.value.steps.length, owner, reviewedAt: input.now.toISOString(), validUntil, mode, groups, steps,
-    counts: counts(planGroups, preparedCalls, interactions.networkSwitches, interactions.oneTimeSetup, tokenGas),
+    // KAN-20: only a Review for a Solana owner (Solana Batch Payments alone) counts a batch group as one transaction; every other Review as before.
+    counts: counts(planGroups, preparedCalls, interactions.networkSwitches, interactions.oneTimeSetup, tokenGas, solana ? solanaBatches : undefined),
     // USER_FUNDED_NOT_FEWER_INTERACTIONS is no longer emitted: groups that are all grouped interactions never need more prompts than their steps.
     reasons: [...new Set(plan.groups.flatMap(g => g.downgrades))].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
     refusal,

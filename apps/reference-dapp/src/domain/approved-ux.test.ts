@@ -46,6 +46,23 @@ describe('fee shortfall projection (board 07): the server numbers, never underst
     expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: sending })?.parameters).toEqual(['Base', 'ETH', '0x90f5…d303', '0.00012', '0.000300001', '0.00118001', '0.001']);
     expect(feeShortfallView({ ...evidence, chainId: 'eip155:999' })).toBeNull(); expect(feeShortfallView(null)).toBeNull();
   });
+  // KAN-20 (surfaces 9.2 item 13): a Solana Batch Payment's shortfall in lamports, as SOL (9 decimals), with its deposits and the owner's reserve.
+  it('KAN-20: lamports evidence on Solana mainnet reads as SOL, the balance rounded DOWN and every requirement UP; wei evidence is unchanged', () => {
+    const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', OWNER = '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2';
+    const lamports: NativeFeeShortfall = { kind: 'NATIVE_FEE_SHORTFALL', chainId: SOLANA, owner: OWNER, unit: 'lamports', balance: '1000000999',
+      maxFee: '6124481', nativeSpend: '60000000', required: '67015361', shortfall: '1', deposits: '6119280', reserve: '890880' };
+    expect(feeShortfallView(lamports)).toEqual({ network: 'Solana', symbol: 'SOL', owner: OWNER, balance: '1', fee: '0.00612449', sends: '0.06', required: '0.0670154',
+      missing: '0.000000001', deposits: '0.00611928', reserve: '0.00089088' });
+    // An SPL batch sends no SOL itself, and a deposit or reserve of zero is not a row.
+    expect(feeShortfallView({ ...lamports, nativeSpend: '0', deposits: '0', reserve: '0' })).toEqual({ network: 'Solana', symbol: 'SOL', owner: OWNER, balance: '1',
+      fee: '0.00612449', sends: null, required: '0.0670154', missing: '0.000000001' });
+    expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: lamports })?.parameters).toEqual(['Solana', 'SOL', '7Np41o…T4K2', '1', '0.00612449', '0.000000001', '0.06']);
+    // Lamports only on Solana mainnet, wei only on an EVM network FloFi labels: any other pairing shows no numbers.
+    expect(feeShortfallView({ ...lamports, chainId: 'eip155:8453' })).toBeNull();
+    expect(feeShortfallView({ ...lamports, unit: 'wei' })).toBeNull();
+    expect(feeShortfallView({ ...lamports, chainId: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1' })).toBeNull();
+    expect(feeShortfallView({ ...evidence, deposits: '1', reserve: '1' })).toEqual(feeShortfallView(evidence));
+  });
 });
 
 describe('the assistant explains the active blocker (board 07)', () => {

@@ -52,8 +52,9 @@ import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } fro
 import { copilotNetworksFor, lendingOffers } from './authoring-capabilities';
 import { followOnSelection, type CryptoAction } from './crypto-action-picker';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
-import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
-import { TRANSFER_NETWORKS, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, BATCH_PAYMENT_SOLANA_NETWORK, batchPaymentChain, createAuthoredBatchPayment,
+  type BatchPaymentInput } from './batch-payment-authoring';
+import type { RobinhoodTransferInput } from './robinhood-transfer-authoring';
 import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
 import { lendingProfileOfReserve } from './supply-authoring';
 import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
@@ -1810,13 +1811,20 @@ function batchPaymentOf(steps: readonly Command[], baseRevision: number): BatchC
     refusal = code;
   }
   return { command: { type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision, input }, sends: sends as RobinhoodTransferInput[],
-    chain: TRANSFER_NETWORKS[input.network]!.chain, refusal };
+    chain: batchPaymentChain(input.network)!, refusal };
 }
+/**
+ * KAN-20: two recipients are the same key: a 0x address in any case (EIP-55 case is a checksum, not part of the key), a base58 Solana key exactly
+ * (letter case IS part of the key: two spellings are two different wallets).
+ */
+const sameRecipient = (chain: string, a: string, b: string) => chain.startsWith('solana:') ? a === b : a.toLowerCase() === b.toLowerCase();
+/** The comparison key of a written recipient: a 0x address lower-cased, anything else (a base58 key) exactly as written. */
+const recipientKey = (recipient: string) => recipient.startsWith('0x') ? recipient.toLowerCase() : recipient;
 /** The first recipient a batch names twice (as the person wrote it), or null: a duplicate is refused, never merged. */
 function duplicateRecipient(sends: readonly RobinhoodTransferInput[]): string | null {
   const seen = new Set<string>();
   for (const send of sends) {
-    const key = send.recipient.toLowerCase();
+    const key = send.network === BATCH_PAYMENT_SOLANA_NETWORK ? send.recipient : send.recipient.toLowerCase();
     if (seen.has(key)) return send.recipient;
     seen.add(key);
   }
@@ -1838,8 +1846,10 @@ function settledPayments(state: CopilotConversation): { readonly written: readon
   if (at < 0) return { written: [], unsettled: null, stray: false };
   // Final security review: every 0x address the paying turn writes must be a paired payment's recipient. An address outside any
   // "<amount> <asset> to <address>" clause ("25 USDC to 0xA, 0xB and 50 USDC to 0xC") is never left out silently: FloFi asks.
-  const recipients = new Set(writtenPayments(state.segment[at]!).map(clause => clause.recipient.toLowerCase()));
-  const stray = [...state.segment[at]!.matchAll(/(?<![0-9A-Za-z])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => !recipients.has(match[0].toLowerCase()));
+  // KAN-20: the same for every base58 Solana address, compared exactly (letter case is part of the key).
+  const recipients = new Set(writtenPayments(state.segment[at]!).map(clause => recipientKey(clause.recipient)));
+  const stray = [...state.segment[at]!.matchAll(/(?<![0-9A-Za-z])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => !recipients.has(match[0].toLowerCase()))
+    || [...state.segment[at]!.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => !recipients.has(match[0]));
   const answers = state.segment.slice(at + 1).map(bareAmount);
   let next = 0, unsettled: WrittenPayment | null = null;
   const written = writtenPayments(state.segment[at]!).map(clause => {
@@ -1863,7 +1873,7 @@ function paymentsPaired(sends: readonly RobinhoodTransferInput[], written: reado
     let symbol = clause.asset;
     try { symbol = authoringAssetSymbol(chain, clause.asset); } catch { /* compared as written */ }
     return clause.readings.length === 1 && clause.readings[0] === canonicalDecimal(send.amount) && symbol.toUpperCase() === send.asset.toUpperCase()
-      && clause.recipient.toLowerCase() === send.recipient.toLowerCase();
+      && sameRecipient(chain, clause.recipient, send.recipient);
   });
 }
 const paymentLine = (index: number, amount: string, asset: string, recipient: string) => `${index + 1}. ${amount} ${asset} → ${recipient}`;
@@ -1873,25 +1883,32 @@ const BATCH_PAYMENT_COPY = {
     intro: (n: number, network: string) => `One Batch Payment on ${network} to ${n} recipients:`,
     atomic: 'It runs only as one atomic authorization of your wallet: every payment settles, or none does. Review every recipient before you authorize.',
     duplicate: (address: string) => `${address} appears more than once. A Batch Payment pays each recipient once and FloFi never merges or drops a payment: say the one amount for that recipient.`,
-    unpaired: (written: readonly string[], read: readonly string[]) => 'FloFi did not prepare these payments: the interpretation did not match each amount to its '
+    unpaired: (written: readonly string[], read: readonly string[], example = 'send 25 USDC to 0x… and 50 USDC to 0x… on Base') => 'FloFi did not prepare these payments: the interpretation did not match each amount to its '
       + 'recipient exactly as your message pairs them, and FloFi never pairs an amount with a recipient by itself. '
       + `Your message pairs: ${written.length ? `${written.join('; ')}.` : 'no payment written as “<amount> <token> to <address>”.'} The interpretation read: ${read.join('; ')}. `
-      + 'Write each payment as “<amount> <token> to <address>”, for example “send 25 USDC to 0x… and 50 USDC to 0x… on Base”.' },
+      + `Write each payment as “<amount> <token> to <address>”, for example “${example}”.`,
+    solanaExample: 'send 0.01 SOL to <Solana address> and 0.02 SOL to <Solana address>' },
   PT: { pairs: (written: readonly string[]) => `Sua mensagem associa: ${written.join('; ')}.`,
     sentence: (n: number, asset: string, network: string) => `pagamento em lote de ${asset} para ${n} destinatários na ${network}`,
     intro: (n: number, network: string) => `Um Pagamento em lote na ${network} para ${n} destinatários:`,
     atomic: 'Ele só executa como uma autorização atômica da sua carteira: todos os pagamentos são liquidados, ou nenhum. Revise cada destinatário antes de autorizar.',
     duplicate: (address: string) => `${address} aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez e a FloFi nunca junta nem descarta um pagamento: diga o valor único desse destinatário.`,
-    unpaired: (written: readonly string[], read: readonly string[]) => 'O FloFi não preparou estes pagamentos: a interpretação não associou cada valor ao seu '
+    unpaired: (written: readonly string[], read: readonly string[], example = 'envie 25 USDC para 0x… e 50 USDC para 0x… na Base') => 'O FloFi não preparou estes pagamentos: a interpretação não associou cada valor ao seu '
       + 'destinatário exatamente como a sua mensagem os associa, e o FloFi nunca associa um valor a um destinatário por conta própria. '
       + `Sua mensagem associa: ${written.length ? `${written.join('; ')}.` : 'nenhum pagamento escrito como “<valor> <token> para <endereço>”.'} A interpretação leu: ${read.join('; ')}. `
-      + 'Escreva cada pagamento como “<valor> <token> para <endereço>”, por exemplo “envie 25 USDC para 0x… e 50 USDC para 0x… na Base”.' },
+      + `Escreva cada pagamento como “<valor> <token> para <endereço>”, por exemplo “${example}”.`,
+    solanaExample: 'envie 0.01 SOL para <endereço Solana> e 0.02 SOL para <endereço Solana>' },
 } as const;
-/** Chat review H2: FloFi's question when the sends are not exactly the payments the person paired (it lists both, and never chooses). */
+/**
+ * Chat review H2: FloFi's question when the sends are not exactly the payments the person paired (it lists both, and never chooses). KAN-20: a Solana
+ * batch (`chain`), or a message whose written payments all name Solana addresses, gets the Solana example.
+ */
 function unpairedPayments(state: CopilotConversation, m: CopilotCopy, language: CopilotLanguage, written: readonly WrittenPayment[],
-  read: readonly { readonly amount: string | null; readonly asset: string | null; readonly recipient: string | null }[]): Result {
-  return question(state, m, BATCH_PAYMENT_COPY[language].unpaired(written.map((clause, index) => paymentLine(index, clause.written, clause.asset, clause.recipient)),
-    read.map((send, index) => paymentLine(index, send.amount ?? '…', send.asset ?? '…', send.recipient ?? '…'))), [], null);
+  read: readonly { readonly amount: string | null; readonly asset: string | null; readonly recipient: string | null }[], chain: string | null = null): Result {
+  const copy = BATCH_PAYMENT_COPY[language];
+  const solana = chain ? chain.startsWith('solana:') : written.length > 0 && written.every(clause => !clause.recipient.startsWith('0x'));
+  return question(state, m, copy.unpaired(written.map((clause, index) => paymentLine(index, clause.written, clause.asset, clause.recipient)),
+    read.map((send, index) => paymentLine(index, send.amount ?? '…', send.asset ?? '…', send.recipient ?? '…')), solana ? copy.solanaExample : undefined), [], null);
 }
 /**
  * Chat review C1: FloFi's amount-ambiguity question for a payment whose written amount has several exact readings: the payments as the message pairs
@@ -1966,7 +1983,7 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
     steps.push(outcome.command); sentences.push(outcome.sentence); stepNotes.push(...outcome.notes); workflow = next.workflow;
   }
-  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: several sends of one asset on one EVM mainnet, each to its own explicit recipient, are ONE Batch
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: several sends of one asset on one mainnet (KAN-20: EVM or Solana), each to its own explicit recipient, are ONE Batch
   // Payment (every recipient and amount exactly as planned and grounded above, in the person's order), never separate transfer cards.
   const batch = !plan && !bound.size ? batchPaymentOf(steps, env.workflow.revision) : null;
   if (batch) {
@@ -1975,7 +1992,7 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     // Chat review C1: a written amount with several readings ("1.000") is asked about first; a send never pairs with a reading FloFi chose.
     const { written, unsettled, stray } = settledPayments(state);
     if (unsettled) return ambiguousPayment(state, m, language, written, unsettled);
-    if (stray || !paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends);
+    if (stray || !paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends, batch.chain);
     const duplicate = duplicateRecipient(batch.sends);
     if (duplicate) return refused(state, m, BATCH_PAYMENT_COPY[language].duplicate(duplicate));
     if (batch.refusal) return failedWith(state, m, copilotRejection(batch.refusal, language).message, batch.refusal);

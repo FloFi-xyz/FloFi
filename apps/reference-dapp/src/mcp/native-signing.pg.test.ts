@@ -16,7 +16,7 @@ import { session } from './gateway.test-harness.ts';
 import { oauthClient, oauthEnv, signIn } from './oauth/oauth-test-harness.ts';
 import { createPgOAuthStore } from './oauth/pg-store.ts';
 import { stateOf } from './oauth/state.ts';
-import { embeddedMcpRuntime } from './runtime.ts';
+import { embeddedMcpRuntime, type McpRuntime } from './runtime.ts';
 import type { McpNativeSigning } from './tools.ts';
 
 let t: TestDatabase;
@@ -93,5 +93,42 @@ describe('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: MCP panel native wallet signin
       expect((await client.callTool('start_wallet_session', { approvalId, wallet: 'solflare' })).output).toMatchObject({ code: 'NATIVE_SIGNING_ALREADY_SENT' });
       expect(chain.state.sent).toHaveLength(1);
     } finally { await runtime.close(); }
+  });
+});
+
+/**
+ * KAN-20 (WS02 evaluation A.5 / T3): a Solana Batch Payment is never offered native signing. It is planned SEQUENTIAL (one user-funded SOLANA_SIGN_ALL group,
+ * no SINGLE_FLOW flow), so request_user_approval returns the approval link and no `nativeSigning`, and start_wallet_session is refused before the native
+ * service is ever reached. A MOCKED runtime with Solana user-funded groups enabled; every execution path throws, nothing is sent.
+ */
+describe('KAN-20: a Solana Batch Payment keeps the /approve link over MCP', () => {
+  it('request_user_approval: SEQUENTIAL, an approval link, no nativeSigning; start_wallet_session refused; nothing sent', async () => {
+    const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+    const A = '2CERLkG39Jq8zc8FaVkmHjkpsptwQVFMwzvWQgdtmCzb', B = 'C4o8DvwfiPWCQPPH4AfDLBtG7vbCixVKYdwj1S4pDrty';
+    const BATCH = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: [{ recipient: A, amount: '0.01' }, { recipient: B, amount: '0.02' }] };
+    const env = { FLOFI_MCP: 'enabled', ...oauthEnv({ FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana' }) };
+    const calls: string[] = [];
+    const never = async (): Promise<never> => { calls.push('EXECUTION_PATH'); throw new Error('NEVER'); };
+    const runtime = { kind: 'embedded', mode: async () => 'live', info: async () => ({ executionEnabled: true }), preview: never, run: never, journal: never, evidence: never,
+      sequences: async () => ({ enabled: true, delegation: null, userFunded: { enabled: true, code: null, chains: [SOLANA], bundlerChains: [], solanaNonceAccounts: false, bridgeRoutes: [] } }),
+    } as unknown as McpRuntime;
+    const refusing = async (): Promise<never> => { calls.push('NATIVE_SERVICE'); throw new Error('NATIVE_SERVICE_REACHED'); };
+    const native: McpNativeSigning = { start: refusing, confirm: refusing, reopen: refusing, latest: refusing };
+    const tokens = await signIn(oauthClient({ env, store: createPgOAuthStore(t.db, 'default') }), { scope: 'flofi.strategy flofi.approval flofi.runs' });
+    const client = session({ env, token: tokens.access_token, runtime, state: stateOf({ db: t.db, tenantId: 'default' }), native });
+    const composed = (await client.callTool('compose_strategy', { strategy: BATCH, expectedStepCount: 1 })).output as { strategy: unknown; workflowHash: string };
+    const requested = await client.callTool('request_user_approval', { strategy: composed.strategy, workflowHash: composed.workflowHash, expectedStepCount: 1 });
+    expect(requested.isError ?? false).toBe(false);
+    const out = requested.output as Record<string, unknown> & { approvalId: string; approvalUrl: string };
+    expect(out).toMatchObject({ ok: true, status: 'PENDING', executionPlan: 'SEQUENTIAL', authority: 'NONE',
+      batchPayments: [{ network: 'solana', asset: 'SOL', recipients: 2, total: '0.03', execution: 'ATOMIC_ONLY' }] });
+    expect(out.approvalUrl).toEqual(expect.stringContaining('/approve'));
+    expect(out).not.toHaveProperty('nativeSigning');
+    const refused = await client.callTool('start_wallet_session', { approvalId: out.approvalId, wallet: 'phantom' });
+    expect(refused.isError).toBe(true);
+    expect(refused.output).toMatchObject({ ok: false, code: 'NATIVE_SIGNING_NOT_AVAILABLE_FOR_THIS_OPERATION' });
+    // The progress read never opens a native session for it either.
+    expect((await client.callTool('get_execution_progress', { approvalId: out.approvalId })).output).not.toHaveProperty('walletSigning');
+    expect(calls).toEqual([]);
   });
 });
