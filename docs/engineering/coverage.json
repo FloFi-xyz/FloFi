@@ -2181,6 +2181,22 @@
     "app.user-funded.evm-reconcile": {
       "path": "apps/reference-dapp/src/user-funded/evm-reconcile.test.ts",
       "stage": "unit"
+    },
+    "action-registry.solana-batch-payment": {
+      "path": "packages/action-registry/test/solana-batch-payment.test.ts",
+      "stage": "unit"
+    },
+    "reference-linter.batch-payment-solana": {
+      "path": "packages/reference-linter/test/batch-payment-solana.test.ts",
+      "stage": "unit"
+    },
+    "reference-compiler.solana-batch-payment": {
+      "path": "packages/reference-compiler/test/solana-batch-payment.test.ts",
+      "stage": "unit"
+    },
+    "reference-reconciler.solana-batch-payment": {
+      "path": "packages/reference-reconciler/test/solana-batch-payment.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2390,7 +2406,11 @@
     "app.server.native-signing.review",
     "app.channels.core.native-start",
     "app.admin.analytics.channels",
-    "app.server.approval-run-binder"
+    "app.server.approval-run-binder",
+    "action-registry.solana-batch-payment",
+    "reference-linter.batch-payment-solana",
+    "reference-compiler.solana-batch-payment",
+    "reference-reconciler.solana-batch-payment"
   ],
   "modules": [
     {
@@ -2786,13 +2806,15 @@
       "sharedFinancialCore": true,
       "sources": [
         "packages/action-registry/src/native-transfer.ts",
-        "packages/action-registry/src/solana-transfer.ts"
+        "packages/action-registry/src/solana-transfer.ts",
+        "packages/action-registry/src/solana-batch-payment.ts"
       ],
       "suites": [
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "action-registry.solana-batch-payment"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -6842,14 +6864,16 @@
       "sources": [
         "packages/reference-compiler/src/native-transfer.ts",
         "packages/reference-compiler/src/solana-transfer-mock.ts",
-        "packages/reference-compiler/src/solana-transfer.ts"
+        "packages/reference-compiler/src/solana-transfer.ts",
+        "packages/reference-compiler/src/solana-batch-payment.ts"
       ],
       "suites": [
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
         "workflow-contracts.native-transfer",
-        "app.server.smart-account-transfer"
+        "app.server.smart-account-transfer",
+        "reference-compiler.solana-batch-payment"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -7352,7 +7376,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "reference-linter.batch-payment-solana"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -7400,7 +7425,8 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.batch-payment",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "reference-linter.batch-payment-solana"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -7556,14 +7582,16 @@
       "sources": [
         "packages/reference-reconciler/src/native-transfer.ts",
         "packages/reference-reconciler/src/robinhood-transfer-verifier.ts",
-        "packages/reference-reconciler/src/solana-transfer.ts"
+        "packages/reference-reconciler/src/solana-transfer.ts",
+        "packages/reference-reconciler/src/solana-batch-payment.ts"
       ],
       "suites": [
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
         "workflow-contracts.native-transfer",
-        "app.server.smart-account-transfer"
+        "app.server.smart-account-transfer",
+        "reference-reconciler.solana-batch-payment"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -8839,7 +8867,7 @@
         "app.components.user-funded-browser"
       ],
       "gaps": [
-        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md §3.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
+        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md \u00a73.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
       ]
     },
     {
@@ -9112,7 +9140,9 @@
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
         "workflow-contracts.batch-payment",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "reference-compiler.solana-batch-payment",
+        "reference-reconciler.solana-batch-payment"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."

@@ -14,7 +14,8 @@
  */
 import { SAFE_ACCOUNT_EXTENSIONS, SAFE_MINT_EXTENSIONS, TOKEN_2022_EXTENSIONS, solanaTransferAsset, solanaTransferProfile, type SolanaTransferProfile } from '@defi-workflow-engine/action-registry';
 import { isSolanaTransferNode, readSolanaTransferNode, TRANSFER_ACTION, SOLANA_SYSTEM_TRANSFER_ADAPTER, SOLANA_TOKEN_TRANSFER_ADAPTER, type SemanticWorkflow,
-  type SolanaTransferFields, type ArtifactSet, type SimulationBundle, type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
+  type SolanaTransferFields, type SolanaTransferToken, type ArtifactSet, type SimulationBundle, type AuthorizationPolicy, type StrategyManifest,
+  type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 import { associatedTokenAddress, base58Encode, compileMessageV0, fromBase64, readU64, serializeMessageV0, serializeTransaction, sha256Hex, solanaAddress,
   solanaKeyOnCurve, toBase64, u64Bytes, type SolanaInstruction } from './solana.js';
 import { assertMessageRoundTrip, readSolanaAccounts, rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapArtifactHash,
@@ -157,6 +158,74 @@ export function solanaTransferInstructions(intent: SolanaTransferIntent, token: 
 const allInstructions = (intent: SolanaTransferIntent, token: SolanaTransferTokenFacts | null, units: number, price = intent.profile.computeUnitPriceMicroLamports) =>
   [setComputeUnitLimit(units), ...setComputeUnitPrice(price), ...solanaTransferInstructions(intent, token)];
 
+/**
+ * The owner's source token account for `amount` of the token: the canonical ATA when it covers the amount, else the single sufficient account of
+ * this owner and mint (by address order). Several accounts are never combined. KAN-20: shared with the Solana Batch Payment (for its total).
+ */
+export async function selectSolanaTransferSource(rpc: SolanaRpc, profile: SolanaTransferProfile, owner: string, token: SolanaTransferToken, programId: string,
+  amount: bigint): Promise<string> {
+  let source = associatedTokenAddress(owner, token.mint, programId, profile.programs.associatedToken);
+  const initial = (await readSolanaAccounts(rpc, [source, token.mint])).accounts;
+  const canonical = initial[0], mint = initial[1];
+  if (!mint) fail('MINT_NOT_FOUND');
+  if (mint!.owner !== programId) fail('TOKEN_PROGRAM_MISMATCH');
+  if (!canonical || canonical.owner === programId && decodeSplTokenAccount(canonical.data, token.program === 'token-2022').amount < amount) {
+    const listed = solanaRecord(await rpc('getTokenAccountsByOwner', [owner, { mint: token.mint }, { encoding: 'base64', commitment: 'confirmed' }]), `${X}_RPC_INVALID`);
+    if (!Array.isArray(listed.value)) fail('RPC_INVALID');
+    const candidates = (listed.value as unknown[]).map(value => {
+      const item = solanaRecord(value, `${X}_RPC_INVALID`), account = decodeRpcAccount(item.account);
+      if (!account || account.owner !== programId) fail('TOKEN_ACCOUNT_MISMATCH');
+      const decoded = decodeSplTokenAccount(account!.data, token.program === 'token-2022');
+      if (decoded.owner !== owner || decoded.mint !== token.mint) fail('TOKEN_ACCOUNT_MISMATCH');
+      return { address: solanaAddress(item.pubkey), decoded };
+    }).filter(candidate => candidate.decoded.state === 1 && candidate.decoded.amount >= amount).sort((a, b) => a.address.localeCompare(b.address));
+    if (!candidates.length) fail('INSUFFICIENT_TOKEN_BALANCE');
+    source = candidates[0]!.address;
+  }
+  return source;
+}
+/** A recipient must be absent or an ordinary System wallet: never a token account, a program or an account holding data. */
+export function assertSolanaTransferRecipientAccount(profile: SolanaTransferProfile, account: RawSolanaAccount): void {
+  if (!account) return;
+  const P = profile.programs;
+  if (account.owner === P.token || account.owner === P.token2022) fail('RECIPIENT_IS_TOKEN_ACCOUNT');
+  if (account.owner !== P.system || account.data.length) fail('RECIPIENT_NOT_WALLET');
+}
+/** The token's mint as the chain reports it: owned by the token program, initialized, with the declared decimals and only reviewed extensions. */
+export function readSolanaTransferMintAccount(programId: string, token: SolanaTransferToken, account: RawSolanaAccount): DecodedMint {
+  if (!account) fail('MINT_NOT_FOUND');
+  if (account!.owner !== programId) fail('TOKEN_PROGRAM_MISMATCH');
+  const mint = decodeSplMint(account!.data, token.program === 'token-2022');
+  if (!mint.initialized) fail('MINT_INVALID');
+  if (mint.decimals !== token.decimals) fail('MINT_DECIMALS_MISMATCH');
+  assertSafeMintExtensions(mint.extensions);
+  return mint;
+}
+/** The chosen source token account, re-read with the other facts: the owner's, of this mint, initialized, not frozen, covering `amount`. */
+export function readSolanaTransferSourceAccount(programId: string, token: SolanaTransferToken, owner: string, account: RawSolanaAccount, amount: bigint): DecodedTokenAccount {
+  if (!account) fail('INSUFFICIENT_TOKEN_BALANCE');
+  if (account!.owner !== programId) fail('TOKEN_ACCOUNT_MISMATCH');
+  const from = decodeSplTokenAccount(account!.data, token.program === 'token-2022');
+  if (from.mint !== token.mint || from.owner !== owner) fail('TOKEN_ACCOUNT_MISMATCH');
+  if (from.state === 2) fail('TOKEN_ACCOUNT_FROZEN');
+  if (from.state !== 1) fail('TOKEN_ACCOUNT_MISMATCH');
+  assertSafeAccountExtensions(from.extensions, false);
+  if (from.amount < amount) fail('INSUFFICIENT_TOKEN_BALANCE');
+  return from;
+}
+/** The recipient's ATA when it exists (its current token amount), or null when it is to be created. Refuses one that is not the recipient's. */
+export function readSolanaTransferDestinationAccount(programId: string, token: SolanaTransferToken, recipient: string, account: RawSolanaAccount): string | null {
+  if (!account) return null;
+  if (account.owner !== programId) fail('TOKEN_ACCOUNT_MISMATCH');
+  const to = decodeSplTokenAccount(account.data, token.program === 'token-2022');
+  // A classic SPL ATA's owner can be reassigned: tokens would reach someone other than the named recipient.
+  if (to.mint !== token.mint || to.owner !== recipient) fail('DESTINATION_OWNER_MISMATCH');
+  if (to.state === 2) fail('TOKEN_ACCOUNT_FROZEN');
+  if (to.state !== 1) fail('TOKEN_ACCOUNT_MISMATCH');
+  assertSafeAccountExtensions(to.extensions, true);
+  return to.amount.toString();
+}
+
 /** Chain facts of the owner, the recipient and (SPL) the mint and both token accounts, at one confirmed slot. Refuses anything unsafe. */
 export async function readSolanaTransferFacts(rpc: SolanaRpc, intent: SolanaTransferIntent, reviewedSource?: string,
   options: { readonly ownerMayBeAbsent?: boolean } = {}): Promise<{ state: SolanaTransferState; token: SolanaTransferTokenFacts | null }> {
@@ -164,77 +233,34 @@ export async function readSolanaTransferFacts(rpc: SolanaRpc, intent: SolanaTran
   const rent = await rpc('getMinimumBalanceForRentExemption', [0, { commitment: 'confirmed' }]);
   if (!Number.isSafeInteger(rent) || (rent as number) <= 0) fail('RPC_INVALID');
   const token = fields.token, programId = token ? programOf(profile, token.program) : null;
-  let source = token ? reviewedSource ?? associatedTokenAddress(owner, token.mint, programId!, P.associatedToken) : null;
+  let source = token ? reviewedSource ?? null : null;
   const destination = token ? associatedTokenAddress(recipient, token.mint, programId!, P.associatedToken) : null;
   // Prefer the sender ATA. If it cannot cover the transfer, resolve a single sufficient account belonging to this sender and mint.
   // Multiple accounts are never silently combined into a different transaction.
-  if (token && !reviewedSource) {
-    const initial = (await readSolanaAccounts(rpc, [source!, token.mint])).accounts;
-    const canonical = initial[0], mint = initial[1];
-    if (!mint) fail('MINT_NOT_FOUND');
-    if (mint!.owner !== programId) fail('TOKEN_PROGRAM_MISMATCH');
-    if (!canonical || canonical.owner === programId && decodeSplTokenAccount(canonical.data, token.program === 'token-2022').amount < BigInt(intent.amount)) {
-      const listed = solanaRecord(await rpc('getTokenAccountsByOwner', [owner, { mint: token.mint }, { encoding: 'base64', commitment: 'confirmed' }]), `${X}_RPC_INVALID`);
-      if (!Array.isArray(listed.value)) fail('RPC_INVALID');
-      const candidates = (listed.value as unknown[]).map(value => {
-        const item = solanaRecord(value, `${X}_RPC_INVALID`), account = decodeRpcAccount(item.account);
-        if (!account || account.owner !== programId) fail('TOKEN_ACCOUNT_MISMATCH');
-        const decoded = decodeSplTokenAccount(account!.data, token.program === 'token-2022');
-        if (decoded.owner !== owner || decoded.mint !== token.mint) fail('TOKEN_ACCOUNT_MISMATCH');
-        return { address: solanaAddress(item.pubkey), decoded };
-      }).filter(candidate => candidate.decoded.state === 1 && candidate.decoded.amount >= BigInt(intent.amount)).sort((a, b) => a.address.localeCompare(b.address));
-      if (!candidates.length) fail('INSUFFICIENT_TOKEN_BALANCE');
-      source = candidates[0]!.address;
-    }
-  }
+  if (token && !reviewedSource) source = await selectSolanaTransferSource(rpc, profile, owner, token, programId!, BigInt(intent.amount));
   const keys = [owner, recipient, ...token ? [token.mint, source!, destination!] : []];
   const { slot, accounts } = await readSolanaAccounts(rpc, keys);
   const [ownerAccount, recipientAccount] = accounts;
   // The signer pays the fee: it must be an ordinary System account (no data, not a program). ADR-0010 Kora mode: Kora pays the fee, so a wallet
   // holding no SOL at all (no account yet) may sign; an existing account must still be an ordinary wallet.
   if (ownerAccount ? ownerAccount.owner !== P.system || ownerAccount.data.length > 0 : !options.ownerMayBeAbsent) fail('OWNER_NOT_WALLET');
-  if (recipientAccount) {
-    if (recipientAccount.owner === P.token || recipientAccount.owner === P.token2022) fail('RECIPIENT_IS_TOKEN_ACCOUNT');
-    if (recipientAccount.owner !== P.system || recipientAccount.data.length) fail('RECIPIENT_NOT_WALLET');
-  }
+  assertSolanaTransferRecipientAccount(profile, recipientAccount ?? null);
   const state: SolanaTransferState = { slot, ownerLamports: lamports(ownerAccount ?? null).toString(), recipientExists: Boolean(recipientAccount),
     recipientLamports: lamports(recipientAccount ?? null).toString(), rentExemptMinimum: String(rent) };
   if (!token) return { state, token: null };
   const [, , mintAccount, sourceAccount, destinationAccount] = accounts;
-  const token2022 = token.program === 'token-2022';
-  if (!mintAccount) fail('MINT_NOT_FOUND');
-  if (mintAccount!.owner !== programId) fail('TOKEN_PROGRAM_MISMATCH');
-  const mint = decodeSplMint(mintAccount!.data, token2022);
-  if (!mint.initialized) fail('MINT_INVALID');
-  if (mint.decimals !== token.decimals) fail('MINT_DECIMALS_MISMATCH');
-  assertSafeMintExtensions(mint.extensions);
+  const mint = readSolanaTransferMintAccount(programId!, token, mintAccount ?? null);
   // The chosen source is re-read with the other facts and bound into the exact reviewed message.
-  if (!sourceAccount) fail('INSUFFICIENT_TOKEN_BALANCE');
-  if (sourceAccount!.owner !== programId) fail('TOKEN_ACCOUNT_MISMATCH');
-  const from = decodeSplTokenAccount(sourceAccount!.data, token2022);
-  if (from.mint !== token.mint || from.owner !== owner) fail('TOKEN_ACCOUNT_MISMATCH');
-  if (from.state === 2) fail('TOKEN_ACCOUNT_FROZEN');
-  if (from.state !== 1) fail('TOKEN_ACCOUNT_MISMATCH');
-  assertSafeAccountExtensions(from.extensions, false);
-  if (from.amount < BigInt(intent.amount)) fail('INSUFFICIENT_TOKEN_BALANCE');
-  let destinationAmount: string | null = null;
-  if (destinationAccount) {
-    if (destinationAccount.owner !== programId) fail('TOKEN_ACCOUNT_MISMATCH');
-    const to = decodeSplTokenAccount(destinationAccount.data, token2022);
-    // A classic SPL ATA's owner can be reassigned: tokens would reach someone other than the named recipient.
-    if (to.mint !== token.mint || to.owner !== recipient) fail('DESTINATION_OWNER_MISMATCH');
-    if (to.state === 2) fail('TOKEN_ACCOUNT_FROZEN');
-    if (to.state !== 1) fail('TOKEN_ACCOUNT_MISMATCH');
-    assertSafeAccountExtensions(to.extensions, true);
-    destinationAmount = to.amount.toString();
-  }
+  const from = readSolanaTransferSourceAccount(programId!, token, owner, sourceAccount ?? null, BigInt(intent.amount));
+  const destinationAmount = readSolanaTransferDestinationAccount(programId!, token, recipient, destinationAccount ?? null);
   const known = solanaTransferAsset(profile, token.mint);
   return { state, token: { program: token.program, programId: programId!, mint: token.mint, decimals: token.decimals, symbol: known?.symbol ?? null, verified: Boolean(known),
     extensions: mint.extensions.map(e => e.type), sourceAccount: source!, destinationAccount: destination!, sourceAmount: from.amount.toString(), destinationAmount,
     createDestination: destinationAccount === null } };
 }
 
-function tokenAmountAfter(account: RawSolanaAccount, token: SolanaTransferTokenFacts, owner: string): bigint | null {
+/** A token account's amount after a simulation (null when absent or closed); one that is not (mint, owner) under the token program is refused. */
+export function tokenAmountAfter(account: RawSolanaAccount, token: Pick<SolanaTransferTokenFacts, 'programId' | 'program' | 'mint'>, owner: string): bigint | null {
   if (!account || account.lamports === 0n && account.data.length === 0) return null;
   if (account.owner !== token.programId) fail('SIMULATED_TRANSFER_MISMATCH');
   const decoded = decodeSplTokenAccount(account.data, token.program === 'token-2022');

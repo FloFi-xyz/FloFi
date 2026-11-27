@@ -37,6 +37,12 @@ const SETTLEMENT: Readonly<Record<string, Settlement>> = {
     'native legs credited from the atomic success of the reviewed calls; a failed batch settles no leg',
     finality: 'Transfer-profile confirmation depth for the batch receipt, reorg re-check', suites: ['apps/reference-dapp/src/engine/batch-payment.test.ts',
       'apps/reference-dapp/src/user-funded/groups.test.ts', 'apps/reference-dapp/src/workflow-runs/batch-payment-run.pg.test.ts'] },
+  // BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-20): a Solana Batch Payment settles only as its one atomic owner-signed transaction.
+  'asset.transfer.batch|solana.batch-payment': { proof: 'One owner-signed atomic v0 transaction carrying exactly the reviewed legs (or them plus only a verified ' +
+    'Lighthouse wallet guard); finalized meta: each recipient\'s exact lamport or token-account delta, the owner\'s delta equal to the total plus the fee and ' +
+    'the created token-account deposits, nothing else moving; a failed transaction settles no leg',
+    finality: 'Finalized commitment', suites: ['packages/reference-compiler/test/solana-batch-payment.test.ts',
+      'packages/reference-reconciler/test/solana-batch-payment.test.ts'] },
   'asset.bridge|flofi.router': { proof: 'Destination FilledRelay and the exact ERC-20 Transfer to the recipient (durable log scan fallback); ERC-20 profiles only',
     finality: 'Safe head on both chains, reorg re-check', suites: [S + 'router-service.test.ts', S + 'router-arbitrum-base.test.ts', S + 'router-robinhood.test.ts', S + 'router-ethereum.test.ts'] },
   'asset.bridge|flofi.router.universal': { proof: 'Source deposit logs bound to the order id; destination ERC-20 net Transfer, or native net credit from a validated trace (trace_transaction or callTracer) of an order-bound Relay solver fill; provider status is never proof',

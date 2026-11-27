@@ -20,7 +20,12 @@ type Snapshot = { lamports: Map<string, bigint>; systemData: Map<string, number>
 type Landed = { signature: string; slot: number; bytes: string; err: unknown; fee: bigint; keys: string[]; pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[];
   finalizedAt: number; /** The block height it landed at (`getBlock`). */ height: number };
 export type MockedTransferOptions = { profile?: SolanaTransferProfile; send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number;
-  /** A wrong RPC cluster (genesis hash) for wrong-network tests. */ genesisHash?: string; simulateWithoutFee?: boolean };
+  /** A wrong RPC cluster (genesis hash) for wrong-network tests. */ genesisHash?: string; simulateWithoutFee?: boolean;
+  /**
+   * KAN-20: enforce the transaction's compute-unit limit like the runtime (default off, so every existing test keeps its behavior): once the
+   * consumed units exceed the reviewed limit the transaction fails with `ComputationalBudgetExceeded` and nothing of it takes effect.
+   */
+  enforceComputeLimit?: boolean };
 const cloneToken = (t: MockedTransferTokenAccount): MockedTransferTokenAccount => ({ ...t, extensions: t.extensions.map(e => ({ ...e })) });
 
 export function createMockedSolanaTransferChain(options: MockedTransferOptions = {}) {
@@ -81,8 +86,10 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
     if (chargeFee) s.lamports.set(payer, s.lamports.get(payer)! - fee);
     const debit = (k: string, n: bigint, index: number) => { const v = s.lamports.get(k) ?? 0n; if (v < n) throw custom(index, { Custom: 1 }); s.lamports.set(k, v - n); };
     let units = 300;
+    const exceeded = (index: number) => { if (options.enforceComputeLimit && units > limit) throw custom(Math.max(0, index), 'ComputationalBudgetExceeded'); };
     try {
       instructions.forEach((i, index) => {
+        exceeded(index - 1);
         const a = (n: number) => i.accounts[n]!.pubkey;
         if (i.programId === P.computeBudget) { units += 150; return; }
         if (i.programId === P.system) {
@@ -125,6 +132,7 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
         }
         throw custom(index, 'UnsupportedProgramId');
       });
+      exceeded(instructions.length - 1);
       // Rent rule: a System account with no data ends either empty or rent-exempt; token accounts keep their deposit.
       for (const [k, v] of s.lamports) if (!s.tokens.has(k) && !s.mints.has(k) && !s.executables.has(k) && (s.systemData.get(k) ?? 0) === 0 && v > 0n && v < MOCKED_RENT.system)
         throw Object.assign(new Error('rent'), { custom: { InsufficientFundsForRent: { account_index: 0 } } });
