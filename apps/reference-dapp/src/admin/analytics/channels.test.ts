@@ -280,14 +280,23 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel counts access
 });
 
 describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 recorded execution origins (0037)', () => {
-  it('a recorded origin wins over a binding, Legacy Web is its own row, and two recorded channels for one execution stay Unknown', () => {
+  it('a recorded origin wins over a binding except a web record an approval binding contradicts; Legacy Web is its own row', () => {
     const execution = (runIds: string[]) => ({ environment: 'MAINNET' as const, runIds, workflowIds: ['wf'] });
     const folded = foldChannels({ workflowRuns: [], steps: new Set(), executions: [execution(['web-run']), execution(['legacy-run']), execution(['bound-run']),
       execution(['root', 'recovery']), execution(['unrecorded'])],
       bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'flofi_dcr_x', runIds: ['web-run', 'bound-run', 'unrecorded'] }],
-      recorded: new Map([['web-run', 'web'], ['legacy-run', 'legacy_web'], ['root', 'telegram'], ['recovery', 'mcp_claude']] as const) });
-    expect(folded.byEnvironment.MAINNET.counts).toEqual({ ...NONE, FLOFI_WEB: 1, LEGACY_WEB: 1, MCP_UNIDENTIFIED: 2, UNKNOWN: 1 });
+      recorded: new Map([['web-run', { origin: 'web', basis: 'CREATION' }], ['legacy-run', { origin: 'legacy_web', basis: 'BACKFILL' }],
+        ['root', { origin: 'telegram', basis: 'APPROVAL_BINDING' }], ['recovery', { origin: 'mcp_claude', basis: 'APPROVAL_BINDING' }],
+        ['web-only', { origin: 'web', basis: 'CREATION' }], ['corrected', { origin: 'mcp_chatgpt', basis: 'CORRECTION' }]] as const) });
+    // web-run: created on an /app URL but bound by an MCP approval (exact reviewed hash after its claim): the approval's channel wins over the
+    // browser-chosen page. legacy-run: recovered history. root+recovery: two channels, Unknown. unrecorded: the binding as before.
+    expect(folded.byEnvironment.MAINNET.counts).toEqual({ ...NONE, LEGACY_WEB: 1, MCP_UNIDENTIFIED: 3, UNKNOWN: 1 });
     expect(folded.byEnvironment.MAINNET.total).toBe(5);
+    const more = foldChannels({ workflowRuns: [], steps: new Set(), executions: [execution(['web-only']), execution(['corrected'])],
+      bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'flofi_dcr_x', runIds: ['corrected'] }],
+      recorded: new Map([['web-only', { origin: 'web', basis: 'CREATION' }], ['corrected', { origin: 'mcp_chatgpt', basis: 'CORRECTION' }]] as const) });
+    // An unbound web record stays FloFi Web; an approved correction wins over any binding.
+    expect(more.byEnvironment.MAINNET.counts).toEqual({ ...NONE, FLOFI_WEB: 1, CHATGPT_MCP: 1 });
   });
   it('maps every recorded origin to exactly one reported row (Chat and Editor are FloFi Web; automation stays in its note)', () => {
     expect(['web', 'web_chat', 'web_editor'].map(o => channelOfOrigin(o as never))).toEqual(['FLOFI_WEB', 'FLOFI_WEB', 'FLOFI_WEB']);

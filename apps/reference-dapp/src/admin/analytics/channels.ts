@@ -137,8 +137,11 @@ export function completedExecutions(executions: readonly Execution[], runs: read
 /** The tally (pure). `steps`: run ids a workflow run's OWNER_RUN step names. An execution no binding names is UNKNOWN, whenever it ran. */
 export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRunGroup[]; readonly executions: readonly CompletedExecution[];
   readonly steps: ReadonlySet<string>; readonly bindings: readonly RunBinding[];
-  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: recorded origins of single-flow runs (0037), by run id; they win over bindings. */
-  readonly recorded?: ReadonlyMap<string, ExecutionOrigin> }):
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: recorded origins of single-flow runs (0037), by run id. They win over bindings, except a web
+   * record made at creation (the page a server action was posted to is the browser's choice): an approval binding names the channel then.
+   */
+  readonly recorded?: ReadonlyMap<string, { readonly origin: ExecutionOrigin; readonly basis: string }> }):
   { readonly byEnvironment: Readonly<Record<AnalyticsEnvironment, ChannelTally>>; readonly unrecognizedEnvironment: number } {
   const tallies = Object.fromEntries(ENVIRONMENTS.map(env => [env, { counts: Object.fromEntries(CHANNELS.map(c => [c, 0])) as Record<Channel, number>, automation: 0 }]));
   let unrecognizedEnvironment = 0;
@@ -158,8 +161,16 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
   }
   for (const e of input.executions) {
     if (e.runIds.some(id => input.steps.has(id)) || e.workflowIds.some(isWorkflowRunStepWorkflow)) continue;
-    const recorded = new Set(e.runIds.flatMap(id => { const o = input.recorded?.get(id); return o ? [channelOfOrigin(o)] : []; }));
-    const origins = recorded.size ? recorded : new Set(e.runIds.flatMap(id => [...bound.get(id) ?? []]));
+    const records = e.runIds.flatMap(id => { const o = input.recorded?.get(id); return o ? [o] : []; });
+    const weakWeb = (o: { origin: ExecutionOrigin; basis: string }) => o.basis === 'CREATION' && channelOfOrigin(o.origin) === 'FLOFI_WEB';
+    const strong = new Set(records.filter(o => !weakWeb(o)).map(o => channelOfOrigin(o.origin)));
+    const boundOrigins = new Set(e.runIds.flatMap(id => [...bound.get(id) ?? []]));
+    let origins: Set<Origin> = boundOrigins;
+    if (strong.size) origins = strong;
+    else if (records.length) {
+      const approval = [...boundOrigins].filter(o => o !== 'FLOFI_WEB');
+      origins = new Set<Origin>(approval.length ? approval : ['FLOFI_WEB']);
+    }
     const origin: Origin = origins.size === 1 ? [...origins][0]! : 'UNKNOWN';
     add(e.environment, origin, 1);
   }
@@ -238,8 +249,8 @@ export async function loadChannelCounts(host: AdminHost, options: { readonly per
     const ids = [...new Set(executions.flatMap(e => e.runIds))];
     const { steps, bindings, recorded } = ids.length ? await bounded(host, async tx => ({ steps: await workflowRunSteps(tx, host.tenantId, ids),
       bindings: await runBindings(tx, host.tenantId, ids, period.to),
-      recorded: new Map([...(await effectiveOrigins(tx, host.tenantId, { runIds: ids, workflowRunIds: [] })).runs].map(([id, o]) => [id, o.origin] as const)) }))
-      : { steps: new Set<string>(), bindings: [], recorded: new Map<string, ExecutionOrigin>() };
+      recorded: (await effectiveOrigins(tx, host.tenantId, { runIds: ids, workflowRunIds: [] })).runs }))
+      : { steps: new Set<string>(), bindings: [], recorded: new Map() };
     const compositionsWithoutRecord = Object.fromEntries(ENVIRONMENTS.map(env => [env, all.filter(e => e.environment === env && COMPOSITION_FLOWS.has(e.flow) && !e.actions).length]));
     const originsRecorded = await bounded(host, tx => revenueOriginsActive(tx));
     return { ok: true, value: { period, originsRecorded, ...foldChannels({ workflowRuns: workflowRuns.groups, executions, steps, bindings, recorded }), coverage: read.coverage,

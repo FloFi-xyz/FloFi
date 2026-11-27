@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { EXECUTION_SURFACE_HEADER, recordExecutionOrigin, type ExecutionSurface } from '../src/workflow-runs/execution-origins.ts';
+import { EXECUTION_SURFACE_HEADER, recordExecutionOrigin, revenueOriginsActive, type ExecutionSurface } from '../src/workflow-runs/execution-origins.ts';
 import { reportUniversalFailure } from '../src/server/universal-router/failure.ts';
 import { routeRefusalsFor } from '../src/domain/route-refusals.ts';
 /**
@@ -259,8 +259,12 @@ export function createBackend(options: BackendOptions) {
     if (surface !== 'WEB_APP' || (method !== 'simulate' && method !== 'prepare')) return;
     const runId = typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string' ? (value as { id: string }).id : null;
     if (!runId || !FLOWS[flow].runId.test(runId)) return;
-    try { await recordExecutionOrigin(options.db, tenantId, { runId }, 'web', 'CREATION', 'WEB_APP_SERVER_ACTION'); }
-    catch { logger.warn('execution_origin.not_recorded', { flow, action: method, code: 'EXECUTION_ORIGIN_NOT_RECORDED' }); }
+    try {
+      // Checked on the pool first (remembered once active); the write itself is bounded so it can never hold the financial response for long.
+      if (!await revenueOriginsActive(options.db)) return;
+      await options.db.transaction(async tx => { await tx.query("SET LOCAL statement_timeout = '2000'");
+        await recordExecutionOrigin(tx, tenantId, { runId }, 'web', 'CREATION', 'WEB_APP_SERVER_ACTION'); });
+    } catch { logger.warn('execution_origin.not_recorded', { flow, action: method, code: 'EXECUTION_ORIGIN_NOT_RECORDED' }); }
   }
 
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,

@@ -143,7 +143,10 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
      * The run of an approval handoff, created once with all its steps PENDING (the same transaction); a repeated claim returns the existing
      * run unchanged. The caller has already verified the claim (wallet proof, requester rule, re-composition to the same hash).
      */
-    create: (input: NewRun, now: Date) => db.transaction(async tx => {
+    create: async (input: NewRun, now: Date) => {
+      // Decided before the transaction: a failed check inside it would abort the run's own transaction.
+      const recordOrigin = input.origin !== undefined && await revenueOriginsActive(db);
+      return db.transaction(async tx => {
       const inserted = (await tx.query(`INSERT INTO workflow_runs (tenant_id, run_id, handoff_id, requester_kind, requester_ref, owner_namespace, owner_account, wallets, strategy,
           workflow_hash, engine_version, step_count, state, expires_at, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, 'PENDING', $13, $14, $14)
@@ -156,7 +159,7 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         await event(tx, input.runId, null, 'RUN_CREATED', null, { stepCount: input.stepCount, workflowHash: input.workflowHash });
         // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the run's origin, in the creating transaction (0037 only). Its own savepoint: an origin that
         // cannot be written never rolls the run back (attribution is analytics, never a precondition of an execution).
-        if (input.origin && await revenueOriginsActive(tx)) {
+        if (input.origin && recordOrigin) {
           await tx.query('SAVEPOINT execution_origin');
           try {
             await tx.query(`INSERT INTO execution_origins (tenant_id, workflow_run_id, origin, basis, evidence) VALUES ($1, $2, $3, 'CREATION', 'APPROVAL_REQUESTER')
@@ -166,7 +169,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         }
       }
       return runOf((await tx.query('SELECT * FROM workflow_runs WHERE tenant_id = $1 AND handoff_id = $2', [tenantId, input.handoffId])).rows[0]!);
-    }),
+      });
+    },
     async byId(runId: string): Promise<RunRecord | null> {
       const row = (await db.query('SELECT * FROM workflow_runs WHERE tenant_id = $1 AND run_id = $2', [tenantId, runId])).rows[0];
       return row ? runOf(row) : null;

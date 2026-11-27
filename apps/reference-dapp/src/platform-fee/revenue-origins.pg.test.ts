@@ -22,8 +22,9 @@ import { effectiveOrigins, recordExecutionOrigin, revenueOriginsActive } from '.
 import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
 import { platformFeeActivation } from './activation.ts';
 import { accruePlatformFees, loadFeeTotals } from './ledger.ts';
+import { composeWorkflow } from '../engine/strategy-engine';
 
-const NOW = new Date('2026-11-27T12:00:00.000Z'), DAY = 86_400_000, ago = (days: number) => new Date(NOW.getTime() - days * DAY);
+const NOW = new Date('2026-12-10T12:00:00.000Z'), DAY = 86_400_000, ago = (days: number) => new Date(NOW.getTime() - days * DAY);
 const HASH = '0x' + 'a'.repeat(64), OWNER = '0x' + 'ab'.repeat(20), OTHER = '0x' + 'cd'.repeat(20);
 const CHATGPT = 'https://chatgpt.com/oauth/fixture/client.json';
 const accountId = 'mcpacct_' + 'b'.repeat(26), GRANT = 'grt_' + 'f'.repeat(26);
@@ -69,10 +70,13 @@ async function run(runId: string, seed: { flow?: string; createdAt?: Date; owner
 }
 const SWAP = { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'ETH', amount: '100', slippageBps: 100 };
 const BRIDGE = { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'robinhood', asset: 'ETH', amount: '0.04' };
+const SWAP_ONLY = { ...SWAP, amount: '5' };
 const BATCH = { action: 'batch_payment', network: 'base', asset: 'USDC', recipients: [{ recipient: '0x' + 'a1'.repeat(20), amount: '20' },
   { recipient: '0x' + 'b2'.repeat(20), amount: '30' }, { recipient: '0x' + 'c3'.repeat(20), amount: '50' }] };
 type StepSeed = { state: string; received?: { asset: string; amount: string }[] };
-async function workflowRun(seed: { strategy: unknown; steps: StepSeed[]; state?: string; createdAt?: Date; kind?: Kind }): Promise<string> {
+/** The run's own canonical workflow hash, as the approval stored it (accrual composes bound to it). */
+const hashOf = (strategy: unknown) => { const w = composeWorkflow(strategy); if (!w.ok) throw new Error(w.code); return w.workflowHash; };
+async function workflowRun(seed: { strategy: unknown; steps: StepSeed[]; state?: string; createdAt?: Date; kind?: Kind; hash?: string }): Promise<string> {
   const createdAt = seed.createdAt ?? ago(1), state = seed.state ?? 'COMPLETED', kind = seed.kind ?? 'EDITOR_SESSION';
   const h = await handoff({ kind, plan: { kind: 'SEQUENTIAL', flow: null }, claimedAt: createdAt });
   const ref = (await db.query<{ ref: string }>('SELECT requester_ref AS ref FROM mcp_handoffs WHERE handoff_id = $1', [h])).rows[0]!.ref;
@@ -80,11 +84,11 @@ async function workflowRun(seed: { strategy: unknown; steps: StepSeed[]; state?:
   await db.query(`INSERT INTO workflow_runs (tenant_id, run_id, handoff_id, requester_kind, requester_ref, owner_namespace, owner_account, wallets, strategy,
       workflow_hash, engine_version, step_count, mode, state, completed_at, expires_at, created_at, updated_at)
     VALUES ('default', $1, $2, $3, $4, 'eip155', $5, jsonb_build_object('eip155', $5::text), $6, $7, 'fixture', $8, 'USER_FUNDED', $9, $10, $11, $12, $12)`,
-  [id, h, kind, ref, OWNER, JSON.stringify(seed.strategy), HASH, seed.steps.length, state, state === 'COMPLETED' ? createdAt : null, new Date(createdAt.getTime() + DAY), createdAt]);
+  [id, h, kind, ref, OWNER, JSON.stringify(seed.strategy), seed.hash ?? hashOf(seed.strategy), seed.steps.length, state, state === 'COMPLETED' ? createdAt : null, new Date(createdAt.getTime() + DAY), createdAt]);
   for (const [index, step] of seed.steps.entries()) {
     const outcome = step.state === 'RECONCILED' ? { kind: 'USER_FUNDED_GROUP', executionId: `${id}:g0`, flow: null, status: 'RECONCILED', transactions: [],
       evidence: { environment: 'PUBLIC_MAINNET', outcome: 'RECONCILED', bundleHash: null }, spent: [], received: step.received ?? [], observedAt: createdAt.toISOString() } : null;
-    const resolved = step.state !== 'PENDING';
+    const resolved = step.state !== 'PENDING' && step.state !== 'SKIPPED';
     await db.query(`INSERT INTO workflow_run_steps (tenant_id, run_id, step_index, state, flow, strategy, workflow_hash, outcome) VALUES ('default', $1, $2, $3, $4, $5, $6, $7)`,
       [id, index, step.state, resolved ? 'ethereum-swap' : null, resolved ? '{}' : null, resolved ? HASH : null, outcome]);
   }
@@ -193,29 +197,45 @@ describe('platform fee ledger (schema 37)', () => {
       { state: 'RECONCILED' }], kind: 'MCP_ACCOUNT' });
     const batch = await workflowRun({ strategy: BATCH, steps: [{ state: 'RECONCILED' }, { state: 'RECONCILED' }, { state: 'RECONCILED' }] });
     const failedAfterStart = await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, state: 'FAILED', steps: [{ state: 'RECONCILED' }, { state: 'FAILED' }] });
-    const cancelledUnstarted = await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, state: 'CANCELLED', steps: [{ state: 'PENDING' }, { state: 'PENDING' }] });
+    // As `store.cancel` leaves a run that never reached a chain: every step SKIPPED, no outcome.
+    const cancelledUnstarted = await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, state: 'CANCELLED', steps: [{ state: 'SKIPPED' }, { state: 'SKIPPED' }] });
+    // A run composed to another hash (an engine or catalog change since its Review) is never charged under today's composition.
+    const drifted = await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, hash: '0x' + 'e'.repeat(64),
+      steps: [{ state: 'RECONCILED', received: [{ asset: ETH, amount: '1' }] }, { state: 'RECONCILED' }] });
     const halted = await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, state: 'HALTED', steps: [{ state: 'RECONCILED' }, { state: 'BLOCKED' }] });
     const historical = await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, createdAt: ago(10), steps: [{ state: 'RECONCILED' }, { state: 'RECONCILED' }] });
     await recordExecutionOrigin(db, 'default', { workflowRunId: again }, 'mcp_chatgpt', 'CREATION', 'APPROVAL_REQUESTER');
     // Concurrent accruals (two workers, a restart mid-pass): one row per execution.
     const reports = await Promise.all([1, 2, 3].map(() => accruePlatformFees(db, 'default', activation, { apply: true, limit: 200 })));
-    expect(reports.reduce((n, r) => n + r.recorded, 0)).toBe(4);
+    expect(reports.reduce((n, r) => n + r.recorded, 0)).toBe(5);
     const rows = new Map((await db.query<{ workflow_run_id: string; state: string; lines: { fee: string; principal: string; chainId: string }[]; reason: string | null; origin: string | null }>(
       'SELECT workflow_run_id, state, lines, reason, origin FROM platform_fee_ledger')).rows.map(r => [r.workflow_run_id, r]));
     expect(rows.get(swapBridge)).toMatchObject({ state: 'DUE', lines: [{ chainId: 'eip155:1', principal: '100000000', fee: '800000' }] });
     expect(rows.get(again)).toMatchObject({ state: 'DUE', origin: 'mcp_chatgpt' }); // F14: a second execution of the same saved workflow
     expect(rows.get(batch)).toMatchObject({ state: 'DUE', lines: [{ chainId: 'eip155:8453', principal: '100000000', fee: '800000' }] });
     expect(rows.get(failedAfterStart)).toMatchObject({ state: 'WAIVED', reason: 'WORKFLOW_FAILED', lines: [] });
+    expect(rows.get(drifted)).toMatchObject({ state: 'UNSUPPORTED', reason: 'PLATFORM_FEE_WORKFLOW_HASH_MISMATCH', lines: [] });
     for (const id of [cancelledUnstarted, halted, historical]) expect(rows.has(id)).toBe(false);
     expect(await accruePlatformFees(db, 'default', activation, { apply: true, limit: 200 })).toMatchObject({ recorded: 0 });
     // The ledger itself refuses a second row or a forged collection.
     await expect(db.query(`UPDATE platform_fee_ledger SET state = 'COLLECTED', version = version + 1 WHERE workflow_run_id = $1`, [swapBridge])).rejects.toThrow();
-    const totals = await loadFeeTotals(db, 'default', { from: ago(30), to: new Date(Date.now() + DAY) }, 'MAINNET');
-    expect(totals.byState).toMatchObject({ DUE: 3, WAIVED: 1 });
+    const totals = await loadFeeTotals(db, 'default', { from: ago(30), to: new Date(Math.max(Date.now(), NOW.getTime()) + DAY) }, 'MAINNET');
+    expect(totals.byState).toMatchObject({ DUE: 3, WAIVED: 1, UNSUPPORTED: 1 });
     expect(totals.collectedByAsset).toEqual([]);
     expect(totals.dueByAsset).toEqual([
       { chainId: 'eip155:1', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6, fee: '1600000', executions: 2 },
       { chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, fee: '800000', executions: 1 }]);
     expect(totals.byOrigin).toMatchObject({ mcp_chatgpt: 1 });
   });
+
+  it('never stalls: runs that record nothing (expired before starting) cannot hold a completed run back, whatever the page size', async () => {
+    const created = ago(2);
+    for (let i = 0; i < 3; i++) await workflowRun({ strategy: { version: 2, steps: [SWAP, BRIDGE] }, state: 'EXPIRED', createdAt: new Date(created.getTime() + i),
+      steps: [{ state: 'PENDING' }, { state: 'PENDING' }] });
+    const completed = await workflowRun({ strategy: SWAP_ONLY, createdAt: new Date(created.getTime() + 10), steps: [{ state: 'RECONCILED' }] });
+    const first = await accruePlatformFees(db, 'default', activation, { apply: true, limit: 1 });
+    expect(first.recorded).toBe(1);
+    expect(await count('SELECT count(*)::int AS n FROM platform_fee_ledger WHERE workflow_run_id = $1', [completed])).toBe(1);
+  });
 });
+

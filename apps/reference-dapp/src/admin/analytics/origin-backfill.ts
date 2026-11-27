@@ -39,6 +39,12 @@ export type OriginBackfill = {
 const APPROVAL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/;
 const REASON = /^[A-Z][A-Z0-9_]{2,63}$/;
 const LIMIT = 5_000;
+/**
+ * flofi-security review: how long after its creation an approval can still produce a run (pending 900 s + claimed 600 s, `platform/approvals.ts`),
+ * with a whole day of margin. An approval removed before the oldest retained one can only have produced runs up to this long after it, so only
+ * runs created at least this long after the oldest retained approval can be proven to have no approval.
+ */
+export const APPROVAL_RUN_HORIZON_MS = 86_400_000 + (900 + 600) * 1000;
 
 type Row = { run_id: string; created_at: Date; bound: { kind: string; client: string }[] | null; candidates: number };
 
@@ -52,8 +58,9 @@ export async function originBackfill(host: { readonly db: Database; readonly ten
   const since = input.approvalsCompleteSince ?? null;
   if (since && !Number.isFinite(since.getTime())) throw new Error('ORIGIN_BACKFILL_REQUEST_INVALID');
   const oldest = (await host.db.query<{ at: Date | null }>('SELECT min(created_at) AS at FROM mcp_handoffs WHERE tenant_id = $1', [host.tenantId])).rows[0]?.at ?? null;
-  // The completeness claim cannot reach back before the oldest approval retention left in place.
-  if (since && oldest && since.getTime() < oldest.getTime()) throw new Error('ORIGIN_BACKFILL_HISTORY_INCOMPLETE');
+  // The completeness claim cannot reach back before the oldest approval retention left in place, and with no approval retained nothing is proven.
+  if (since && (!oldest || since.getTime() < oldest.getTime())) throw new Error('ORIGIN_BACKFILL_HISTORY_INCOMPLETE');
+  const provable = since && oldest ? Math.max(since.getTime(), oldest.getTime() + APPROVAL_RUN_HORIZON_MS) : null;
   const { rows } = await host.db.query<Row>(`
     WITH roots AS (
       SELECT r.tenant_id, r.run_id, r.flow, lower(r.owner_account) AS owner, r.created_at FROM execution_runs r
@@ -76,7 +83,7 @@ export async function originBackfill(host: { readonly db: Database; readonly ten
     if (bound.length === 1) { byClass.BOUND++; plan.push({ runId: row.run_id, origin: bound[0]!, evidence: 'APPROVAL_RUN_BINDING' }); continue; }
     if (bound.length > 1) { byClass.CONFLICTING_BINDINGS++; continue; }
     if (row.candidates > 0) { byClass.AMBIGUOUS++; continue; }
-    if (!since || row.created_at.getTime() < since.getTime()) { byClass.BEFORE_COMPLETE_HISTORY++; continue; }
+    if (provable === null || row.created_at.getTime() < provable) { byClass.BEFORE_COMPLETE_HISTORY++; continue; }
     byClass.NO_APPROVAL++; plan.push({ runId: row.run_id, origin: 'legacy_web', evidence: 'NO_APPROVAL_COULD_CREATE_RUN' });
   }
   for (const p of plan) byOrigin[p.origin] = (byOrigin[p.origin] ?? 0) + 1;

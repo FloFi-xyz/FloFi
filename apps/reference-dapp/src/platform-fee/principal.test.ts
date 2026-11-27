@@ -124,3 +124,17 @@ describe('workflow fee basis', () => {
     expect(settledFee(fee, fee)).toEqual(fee.lines);
   });
 });
+
+describe('fee accounting activation', () => {
+  it('F15: accounting never starts before the current policy took effect, whatever the configured instant', async () => {
+    const { platformFeeActivation, accountedExecution } = await import('./activation');
+    const { PLATFORM_FEE_POLICY_EFFECTIVE_FROM } = await import('./policy');
+    const early = platformFeeActivation({ FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: '2026-10-01T00:00:00Z' });
+    expect(early.accounting).toMatchObject({ active: true, from: PLATFORM_FEE_POLICY_EFFECTIVE_FROM });
+    expect(accountedExecution(early, new Date(PLATFORM_FEE_POLICY_EFFECTIVE_FROM.getTime() - 1))).toBe(false);
+    expect(accountedExecution(early, PLATFORM_FEE_POLICY_EFFECTIVE_FROM)).toBe(true);
+    const later = platformFeeActivation({ FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: '2027-01-01T00:00:00Z' });
+    expect(later.accounting.from?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+    expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: '2027-01-01' }).accounting).toMatchObject({ active: false, code: 'PLATFORM_FEE_ACCOUNTING_FROM_INVALID' });
+  });
+});

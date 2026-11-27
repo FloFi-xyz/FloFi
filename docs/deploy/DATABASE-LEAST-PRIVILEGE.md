@@ -61,7 +61,9 @@ The snapshot includes metadata and ledger identity and does not include customer
    Confirm a restorable point and keep the catalog reports with the release record.
 2. Using the direct owner endpoint and a trusted secret mechanism such as
    `PGSERVICE` and a protected passfile, run the read-only audit below. Confirm
-   `existing_protections_intact=true`, 36 ledger entries and the expected owner.
+   `existing_protections_intact=true`, 37 ledger entries and the expected owner.
+   The policy is pinned to the schema-37 ledger: a schema-36 database applies
+   0037 first (`revenue-origins-migrate`), or keeps the previous release's policy.
    Check the role attributes and direct memberships. The activation requires
    login roles with no parent roles and no elevated attributes or owned objects.
    Investigate catalog drift before changing grants. The prior 0016 and ledger

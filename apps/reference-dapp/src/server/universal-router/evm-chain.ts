@@ -285,8 +285,9 @@ function directTokenPayout(data: string, sender: string, recipient: string, orde
 
 /**
  * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R01/R05): Arbitrum Nitro chains (Arbitrum One, Robinhood Chain and their testnets) report the L1
- * posting gas inside the receipt's `gasUsed` and itemize it as `gasUsedForL1`; only the remainder is EVM execution. A direct native payout there
- * (21,000 + one calldata word) reads e.g. 25,359 gas on Robinhood Chain (RH-DEMO-001: 21,000 execution + 4,359 L1), so the 23k execution bound
+ * posting gas inside the receipt's `gasUsed` and itemize it as `gasUsedForL1`; only the remainder is EVM execution. Even a plain transfer reads
+ * above 23k there (RH-DEMO-001, a Robinhood Chain testnet transfer without calldata: 25,359 = 21,000 execution + 4,359 L1), and a Relay payout
+ * adds one calldata word (about 21,128–21,512 execution gas) and more L1 gas, so the 23k execution bound
  * below wrongly sent every such delivery to the trace path, and a destination RPC without traces left it UNVERIFIABLE_NATIVE forever. The bound
  * now applies to execution gas on those chains only; anywhere else, or with a missing or inconsistent `gasUsedForL1`, it applies to `gasUsed`
  * unchanged (never a looser bound).
@@ -354,8 +355,8 @@ export async function verifyEvmCredit(rpc: Rpc, input: EvmCreditInput): Promise<
     if (!orderBound) return { ok: false, reason: 'UNBOUND_NATIVE' };
     if (from === input.recipient || to === null) return { ok: false, reason: 'UNVERIFIABLE_NATIVE' };
     // The direct solver EOA transfer can be verified without archive-trace support.
-    // With at most one 32-byte calldata word and 23k gas used, execution
-    // cannot have paid for an outgoing value call or self-destruct.
+    // With at most one 32-byte calldata word and 23k EXECUTION gas (L1 posting gas excluded on Nitro chains),
+    // execution cannot have paid for an outgoing value call or self-destruct.
     const direct = directOrder && t.type !== '0x4'
       && executionGasUsed(raw, input.chainId) <= 23_000n && await rpc('eth_getCode', [to, { blockHash, requireCanonical: true }]).catch(() => null) === '0x';
     if (direct) amount = quantity(t.value);

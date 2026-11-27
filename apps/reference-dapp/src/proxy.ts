@@ -20,6 +20,16 @@ function withNonce(request: NextRequest, policy: (nonce: string) => string, extr
   return response;
 }
 
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (flofi-security review): a request that passes through without the nonce policy still never carries a
+ * caller-supplied `x-flofi-pathname` (the header is authoritative only when this proxy set it: embedded-wallet proof, execution origin).
+ */
+function passThrough(request: NextRequest) {
+  const headers = new Headers(request.headers);
+  headers.delete('x-flofi-pathname');
+  return NextResponse.next({ request: { headers } });
+}
+
 /** Evaluate the trusted deployment origin at runtime, including deliberately isolated previews. */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -31,7 +41,7 @@ export function proxy(request: NextRequest) {
   if (wallet ? host === wallet.host.toLowerCase() : reservedWalletHosts(process.env).has(host)) {
     if (request.headers.has('next-action')) return notFound();
     if (isWalletAsset(pathname) || pathname.startsWith('/api/wallet')) {
-      const response = NextResponse.next();
+      const response = passThrough(request);
       response.headers.set('X-Content-Type-Options', 'nosniff');
       // Static brand images and route responses never run script or frame anything on the wallet origin.
       if (!pathname.startsWith('/_next/static/')) response.headers.set('Content-Security-Policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
@@ -47,7 +57,7 @@ export function proxy(request: NextRequest) {
   const card = cardOrigin(process.env);
   if (card ? host === card.host.toLowerCase() : reservedCardHosts(process.env).has(host)) {
     if (request.headers.has('next-action')) return notFound();
-    if (isCardAsset(pathname)) { const response = NextResponse.next(); response.headers.set('X-Content-Type-Options', 'nosniff'); return response; }
+    if (isCardAsset(pathname)) { const response = passThrough(request); response.headers.set('X-Content-Type-Options', 'nosniff'); return response; }
     if (!card || !isCardPath(pathname)) return notFound();
     return withNonce(request, nonce => cardPagePolicy(nonce, card), { 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' });
@@ -67,10 +77,10 @@ export function proxy(request: NextRequest) {
   // OAuth loopback landing used only as a same-origin redirect_uri (e2e MCP host). It must not carry a nonce script policy:
   // Playwright's embedded host then replaces the document with setContent, and Chromium inherits the prior navigation's CSP into
   // that document.write — which would block the host fixture's inline script and never render the approval panel.
-  if (pathname === '/mcp-e2e-callback') return NextResponse.next();
+  if (pathname === '/mcp-e2e-callback') return passThrough(request);
   // BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: the native signing transit pages send their own stricter policy (no script, or one fixed script by hash,
   // no frame, no form); the product's nonce policy must not be applied on top of it.
-  if (pathname.startsWith('/api/native-signing/')) return NextResponse.next();
+  if (pathname.startsWith('/api/native-signing/')) return passThrough(request);
   // Privy's trust boundary is the entire product origin. Public pages, admin pages and even error documents must carry the same
   // script restrictions: a script injected there could otherwise open a signer page and drive its same-origin wallet frame.
   // Route handlers that return their own stricter policy (e.g. script-free OAuth consent) keep that response policy.

@@ -38,8 +38,11 @@ export function originOfRequester(requesterKind: string, clientId: string): Exec
     case 'AUTOMATION_RULE': return 'automation';
     case 'CHANNEL_CONVERSATION': return TELEGRAM_CLIENT.test(clientId) ? 'telegram' : 'unknown';
     case 'MCP_ACCOUNT': {
-      const check = cimdClientId(clientId, Object.keys(CIMD_ORIGINS));
-      return check.ok ? CIMD_ORIGINS[check.url.hostname] ?? 'mcp_other' : 'mcp_other';
+      // Total: a client id the CIMD check cannot even parse (it decodes percent-escapes) is an unidentified client, never an exception.
+      try {
+        const check = cimdClientId(clientId, Object.keys(CIMD_ORIGINS));
+        return check.ok ? CIMD_ORIGINS[check.url.hostname] ?? 'mcp_other' : 'mcp_other';
+      } catch { return 'mcp_other'; }
     }
     default: return 'unknown';
   }
@@ -49,6 +52,11 @@ export function originOfRequester(requesterKind: string, clientId: string): Exec
 export type ExecutionSurface = 'WEB_APP';
 /** The BFF → API header carrying it (set only by FloFi's own server, on the API_AUTH_TOKEN-authenticated call; value `web-app`). */
 export const EXECUTION_SURFACE_HEADER = 'x-flofi-execution-surface';
+/**
+ * flofi-security review: the path is the proxy's own (`x-flofi-pathname`, set on every product page and stripped from every pass-through request),
+ * but the browser chooses which page a server action is posted to. A web record is therefore the weakest origin: an approval that later binds the
+ * run (an exact reviewed workflow hash after its claim) takes precedence over it in the Admin counts (`channels.ts`).
+ */
 export const surfaceOfPath = (pathname: string | null | undefined): ExecutionSurface | null =>
   typeof pathname === 'string' && (pathname === '/app' || pathname.startsWith('/app/')) ? 'WEB_APP' : null;
 

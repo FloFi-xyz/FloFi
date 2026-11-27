@@ -22,6 +22,7 @@ import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-regist
 import { applyMockedPhantomLighthouseGuards, compileMessageV0, parseMessageV0, decompileMessageV0, serializeMessageV0, RELAY_SOLANA_VAULT } from '@defi-workflow-engine/reference-compiler';
 import { createUniversalBridgeNode, UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow, type UniversalAssetRef, type UniversalBridgeFields, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { createRelayProvider } from './relay-provider.ts';
+import { executionGasUsed } from './evm-chain.ts';
 import { createUniversalRouterService, universalNeedsObservation, validateUniversalLog, type UniversalRecord } from './service.ts';
 import { createEvmMockChain, createRelayMock, createSolanaMock, mockedUniversalDeployment, solanaTestWallet, type EvmMock } from './universal.test-harness.ts';
 import { refreshBridgeAfterApproval } from '../../domain/bridge-review-recovery';
@@ -1146,8 +1147,9 @@ describe('BUILD-P0-MAINNET-EXECUTION-RELIABILITY: pre-send wallet nonce refusals
 });
 
 describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 R01/R05: Nitro destinations fold L1 posting gas into gasUsed', () => {
-  // A direct registered-executor native payout on an Arbitrum Nitro chain: 21,000 + one calldata word of execution, plus L1 posting gas the
-  // receipt itemizes as gasUsedForL1 (RH-DEMO-001 recorded 25,359 = 21,000 + 4,359 on Robinhood Chain). No trace namespace is served.
+  // A direct native payout on an Arbitrum Nitro chain: 21,512 execution gas (21,000 + one nonzero 32-byte order word), plus L1 posting gas the receipt
+  // itemizes as gasUsedForL1 (0x650f = 25,871 = 21,512 + 4,359; RH-DEMO-001 recorded 4,359 L1 gas on Robinhood Chain). No trace namespace is served.
+  // Robinhood Chain pays from a registered executor; Arbitrum One's only registered executor is the mock's own solver, so that case is the solver branch.
   const payout = async (from: UniversalNetworkKey, to: UniversalNetworkKey, receipt: { gasUsed: string; gasUsedForL1?: string }) => {
     const c = await setup(), source = c.chainOf(from), destination = c.chainOf(to);
     const w = workflow({ sourceChain: UNIVERSAL_NETWORKS[from].chain, destinationChain: UNIVERSAL_NETWORKS[to].chain,
@@ -1167,7 +1169,7 @@ describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 R01/R05: Nitro destination
 
   it.each([['ethereum', 'robinhood'], ['base', 'robinhood'], ['base', 'arbitrum-one']] as const)(
     'reconciles a %s -> %s native payout without traces once its execution gas (gasUsed - gasUsedForL1) is within the direct bound', async (from, to) => {
-      const { c, source, destination, confirmed, hash, amount } = await payout(from, to, { gasUsed: '0x6317', gasUsedForL1: '0x1107' });
+      const { c, source, destination, confirmed, hash, amount } = await payout(from, to, { gasUsed: '0x650f', gasUsedForL1: '0x1107' });
       expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'DESTINATION_OBSERVED', error: 'UNIVERSAL_AWAITING_FINALITY',
         destination: { transactionHash: hash, orderBound: true, final: false } });
       for (let i = 0; i < 3; i++) { source.mine(); destination.mine(); }
@@ -1179,12 +1181,27 @@ describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 R01/R05: Nitro destination
     });
 
   it.each([
-    ['no gasUsedForL1 on a Nitro chain', 'robinhood', { gasUsed: '0x6317' }],
-    ['gasUsedForL1 above gasUsed', 'robinhood', { gasUsed: '0x6317', gasUsedForL1: '0x7000' }],
-    ['execution gas still above the bound', 'arbitrum-one', { gasUsed: '0x7000', gasUsedForL1: '0x0400' }],
-    ['a non-Nitro chain that reports gasUsedForL1', 'ethereum', { gasUsed: '0x6317', gasUsedForL1: '0x1107' }],
+    ['no gasUsedForL1 on a Nitro chain', 'robinhood', { gasUsed: '0x650f' }],
+    ['gasUsedForL1 above gasUsed', 'robinhood', { gasUsed: '0x650f', gasUsedForL1: '0x7000' }],
+    ['malformed gasUsedForL1', 'robinhood', { gasUsed: '0x650f', gasUsedForL1: '0x' }],
+    ['execution gas one above the bound (23,001)', 'arbitrum-one', { gasUsed: '0x6ae0', gasUsedForL1: '0x1107' }],
+    ['a non-Nitro chain that reports gasUsedForL1', 'ethereum', { gasUsed: '0x650f', gasUsedForL1: '0x1107' }],
   ] as const)('stays not independently verifiable with %s (never a looser bound)', async (_label, to, receipt) => {
     const { c, confirmed } = await payout('base', to, receipt);
     expect(await c.service.observe(confirmed.id)).toMatchObject({ error: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE', destination: null, evidence: null });
+  });
+
+  it('accepts exactly 23,000 execution gas on a Nitro chain (the unchanged bound, applied to execution gas)', async () => {
+    const { c, confirmed, hash } = await payout('base', 'robinhood', { gasUsed: '0x6adf', gasUsedForL1: '0x1107' });
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'DESTINATION_OBSERVED', destination: { transactionHash: hash, orderBound: true } });
+  });
+
+  it('executionGasUsed subtracts only a well-formed gasUsedForL1 no larger than gasUsed, and only on Nitro chains', () => {
+    expect(executionGasUsed({ gasUsed: '0x650f', gasUsedForL1: '0x1107' }, 4663)).toBe(21_512n);
+    expect(executionGasUsed({ gasUsed: '0x650f', gasUsedForL1: '0x1107' }, 42161)).toBe(21_512n);
+    expect(executionGasUsed({ gasUsed: '0x650f', gasUsedForL1: '0x1107' }, 1)).toBe(25_871n);
+    expect(executionGasUsed({ gasUsed: '0x650f', gasUsedForL1: '0x1107' }, 8453)).toBe(25_871n);
+    for (const bad of [undefined, '0x', '1107', 4359, '0x' + 'f'.repeat(65), '0x7000'])
+      expect(executionGasUsed({ gasUsed: '0x650f', gasUsedForL1: bad }, 4663)).toBe(25_871n);
   });
 });

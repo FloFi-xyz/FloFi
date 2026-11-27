@@ -19,6 +19,12 @@ export const PLATFORM_FEE_DENOMINATOR = 10_000n;
  * below is a new identity, and an execution authorized under another identity must be reviewed again (`policyChanged`).
  */
 export const PLATFORM_FEE_POLICY_ID = 'flofi-platform-fee/v2-80bps';
+/**
+ * The first instant this policy applies to (an execution created earlier was reviewed under an earlier one). Accounting never starts before it
+ * (`activation.ts`), so an execution is only ever accounted under the policy in force when it was created. A new policy changes the id AND this
+ * instant together; executions created before the new instant are then never accounted under the new policy (F15).
+ */
+export const PLATFORM_FEE_POLICY_EFFECTIVE_FROM = new Date('2026-11-27T00:00:00.000Z');
 /** The rate as the product shows it: "0.80%" (English) / "0,80%" (Portuguese). */
 export const PLATFORM_FEE_PERCENT_LABEL = '0.80%';
 export const PLATFORM_FEE_PERCENT_LABEL_PT = '0,80%';

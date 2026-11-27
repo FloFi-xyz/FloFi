@@ -8,7 +8,7 @@ import { CERTIFIED_FORWARD_MIGRATIONS, forwardMigrationSqlUrl, loadMigrations, m
 import { indexRunFacts } from './analytics/indexer.ts';
 import { historicalReconciliation } from './support/historical-reconciliation.ts';
 import { supportPrivacyConfig } from './support/privacy.ts';
-import { createAdminStore, type AdminRole } from './store.ts';
+import { createAdminStore, recordAudit, type AdminRole } from './store.ts';
 import { studioInstalled, studioReviewQueue } from '../studio/integration-store.ts';
 import { activateRetention, applyRetention, completePrivacyRequest, decidePrivacyRequest, openPrivacyRequest, placeLegalHold, privacyAccess, privacyErase,
   releaseLegalHold, REQUEST_KINDS, RETENTION_POLICIES, retentionReport, revokeRetention, walletSubject, type RequestKind, type RetentionPolicy } from './privacy-ops.ts';
@@ -135,8 +135,16 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     // Dry run unless --apply. Records what completed executions owe; never collects or moves funds (collection is not implemented).
     // The ledger composes workflows with the shared engine: loaded only here (plain Node needs `backend/source-resolution.ts` for it).
     case 'platform-fee-accrue': {
+      // flofi-security review: ledger rows are permanent, so --apply needs an approval reference and leaves an audit event (closed counts only).
+      const apply = values.apply === true, approvalRef = apply ? required(flag('approval-ref'), 'approval-ref') : null;
+      if (approvalRef !== null && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/.test(approvalRef)) throw new Error('ARGUMENT_REQUIRED: --approval-ref');
       const { accruePlatformFees } = await import('../platform-fee/ledger.ts');
-      return { accrual: await accruePlatformFees(db, tenantId, platformFeeActivation(io.env), { apply: values.apply === true, limit: limitOf(flag('limit'), 200, 1_000) }) };
+      const accrual = await accruePlatformFees(db, tenantId, platformFeeActivation(io.env), { apply, limit: limitOf(flag('limit'), 200, 1_000) });
+      if (approvalRef !== null) await recordAudit(db, tenantId, { actor: 'cli', kind: 'PLATFORM_FEES_ACCRUED', outcome: accrual.code ? 'REFUSED' : 'OK', code: accrual.code,
+        target: 'approval:' + createHash('sha256').update(approvalRef).digest('hex').slice(0, 32),
+        detail: { examined: accrual.examined, recorded: accrual.recorded, deferred: accrual.deferred,
+          ...Object.fromEntries(Object.entries(accrual.byState).map(([k, v]) => ['state_' + k, v ?? 0])) } });
+      return { accrual };
     }
     // Read-only dry run: nothing is deleted.
     case 'retention-report': return { report: await retentionReport(db, tenantId, io.env, io.now()) };

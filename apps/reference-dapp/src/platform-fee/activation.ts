@@ -13,6 +13,7 @@
  * touches reconciliation of anything already submitted.
  */
 import { isChecksumAddress } from '@defi-workflow-engine/action-registry';
+import { PLATFORM_FEE_POLICY_EFFECTIVE_FROM } from './policy.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
 export type FeeActivation = {
@@ -27,8 +28,10 @@ const APPROVAL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/;
 export function platformFeeActivation(env: Env): FeeActivation {
   const raw = env.FLOFI_PLATFORM_FEE_ACCOUNTING_FROM?.trim();
   const from = raw && ISO.test(raw) ? new Date(raw) : null;
+  // Never before the current policy took effect: an execution created earlier was reviewed under another policy (F15).
+  const start = from && Number.isFinite(from.getTime()) ? new Date(Math.max(from.getTime(), PLATFORM_FEE_POLICY_EFFECTIVE_FROM.getTime())) : null;
   const accounting = !raw ? { active: false, from: null, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' }
-    : from && Number.isFinite(from.getTime()) ? { active: true, from, code: null } : { active: false, from: null, code: 'PLATFORM_FEE_ACCOUNTING_FROM_INVALID' };
+    : start ? { active: true, from: start, code: null } : { active: false, from: null, code: 'PLATFORM_FEE_ACCOUNTING_FROM_INVALID' };
   return { accounting, collection: { active: false, code: collectionBlocker(env) } };
 }
 
