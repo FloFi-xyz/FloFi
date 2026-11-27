@@ -149,4 +149,30 @@ describe('certificate 0037_execution_origins_platform_fees', () => {
     expect(await catalog(t.db)).toEqual(before);
     expect((await t.db.query('SELECT max(version)::int AS v FROM schema_migrations')).rows[0]!.v).toBe(36);
   });
+
+  it('the documented reversal restores the exact schema-36 catalog, only on 0037 as head, and refuses while any fee is recorded', async () => {
+    const reversal = await readFile(new URL('../../../docs/deploy/RELEASE-REVENUE-ORIGINS-0037.reversal.sql', import.meta.url), 'utf8');
+    const { t, chain, m37 } = await schema36();
+    const before = await catalog(t.db);
+    await expect(t.db.query(reversal)).rejects.toThrow('NOT_CERTIFIED_0037_HEAD');
+    await t.db.query('ROLLBACK').catch(() => undefined);
+    await migrate(t.db, [...chain, m37]);
+    await run(t.db, 'run-r', 'RECONCILED');
+    await t.db.query(`INSERT INTO platform_fee_ledger (tenant_id, run_id, policy_id, rate_bps, state, lines, network_environment)
+      VALUES ('default', 'run-r', 'flofi-platform-fee/v2-80bps', 80, 'DUE', $1::jsonb, 'MAINNET')`, [LINE]);
+    await expect(t.db.query(reversal)).rejects.toThrow('REVERSAL_REFUSED_FEES_RECORDED');
+    await t.db.query('ROLLBACK').catch(() => undefined);
+    expect((await t.db.query('SELECT max(version)::int AS v FROM schema_migrations')).rows[0]!.v).toBe(37);
+    // Owed rows settled elsewhere (here: a disposable database, so the owner removes the test row directly with the trigger off).
+    await t.db.query('ALTER TABLE platform_fee_ledger DISABLE TRIGGER platform_fee_transition');
+    await t.db.query('DELETE FROM platform_fee_ledger');
+    await t.db.query(reversal);
+    expect((await t.db.query('SELECT max(version)::int AS v FROM schema_migrations')).rows[0]!.v).toBe(36);
+    const after = await catalog(t.db);
+    expect(after.tables).toEqual(before.tables);
+    expect(after.functions).toEqual(before.functions);
+    expect(after.triggers).toEqual(before.triggers);
+    expect(await migrate(t.db, [...chain, m37])).toEqual([37]);
+  });
 });
+

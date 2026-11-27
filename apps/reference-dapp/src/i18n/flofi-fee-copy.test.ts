@@ -51,8 +51,11 @@ describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
     }
     expect(product).toContain("'FloFi fee (0.80% obligation)'");
     expect(translate('PT', 'FloFi fee (0.80% obligation)')).toBe('Taxa do FloFi (obrigação de 0,80%)');
-    // A Review made under the earlier 10 bps policy keeps its own line (and its Portuguese text).
+    // A Review made under the earlier 10 bps policy keeps its own line (and its Portuguese text), in the compact Review and the panel's route review.
     expect(translate('PT', 'FloFi fee (0.1% obligation)')).toBe('Taxa do FloFi (obrigação de 0,1%)');
+    const legacyPanel = '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.';
+    expect(product).toContain(legacyPanel);
+    expect(translate('PT', legacyPanel)).toContain('0,1%');
     expect(translate('PT', 'FloFi fee')).toBe('Taxa do FloFi');
   });
 });

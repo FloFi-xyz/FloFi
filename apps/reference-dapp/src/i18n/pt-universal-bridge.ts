@@ -89,6 +89,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
     '0,80% do valor de entrada do fluxo concluído. Registrada como obrigação quando a execução é reconciliada; não é cobrada neste momento. Dispensada se o fluxo falhar ou for reembolsado.',
   '0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.':
     '0,80% do valor de entrada do fluxo concluído — obrigação registrada na reconciliação; não é cobrada neste momento.',
+  '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.':
+    '0,1% do valor de entrada do fluxo concluído — obrigação registrada na reconciliação; não é cobrada neste momento.',
   'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do provedor)',
   'Signatures': 'Assinaturas', 'wallet signature on the source network': 'assinatura da carteira na rede de origem',
   'wallet signatures on the source network (an exact approval, then the deposit)': 'assinaturas da carteira na rede de origem (uma aprovação exata e depois o depósito)',

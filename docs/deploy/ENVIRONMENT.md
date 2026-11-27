@@ -556,7 +556,7 @@ Read by the operator command `platform-fee-accrue` and the Admin fee panel only.
 | `FLOFI_PLATFORM_FEE_POLICY_APPROVAL` | unset | Reference of the owner-approved financial accounting policy, required likewise. |
 
 The Admin fee panel names the first missing condition (`PLATFORM_FEE_COLLECTION_DISABLED`, `PLATFORM_FEE_TREASURY_NOT_CONFIGURED`,
-`PLATFORM_FEE_TREASURY_INVALID`, `PLATFORM_FEE_POLICY_NOT_APPROVED`, `PLATFORM_FEE_COLLECTOR_NOT_IMPLEMENTED`). Rollback: unset
+`PLATFORM_FEE_TREASURY_INVALID`, `PLATFORM_FEE_POLICY_NOT_APPROVED`, `PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED`). An impossible date (2026-11-31) is refused, never rolled forward. Rollback: unset
 `FLOFI_PLATFORM_FEE_ACCOUNTING_FROM` stops new accrual; existing ledger rows stay (they only record what was owed). No switch here touches
 reconciliation of anything already submitted.
 

@@ -9675,7 +9675,8 @@
         "apps/reference-dapp/src/platform-fee/ledger.ts",
         "apps/reference-dapp/src/platform-fee/policy.ts",
         "apps/reference-dapp/src/platform-fee/principal.ts",
-        "packages/cloud-runtime/optional-migrations/0037_execution_origins_platform_fees.sql"
+        "packages/cloud-runtime/optional-migrations/0037_execution_origins_platform_fees.sql",
+        "docs/deploy/RELEASE-REVENUE-ORIGINS-0037.reversal.sql"
       ],
       "suites": [
         "app.platform-fee.principal",

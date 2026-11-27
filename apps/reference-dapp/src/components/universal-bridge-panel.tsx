@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { reviewedFeeRate } from '../server/universal-router/fee-obligation';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { destinationWalletMessage, requotedMessage } from '../domain/simulation-presentation';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -400,7 +401,9 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr(record?.evidence ? 'Actual received' : 'Expected to receive')}</dt><dd>{outp(record?.evidence?.received ?? route.expectedOutput)} {tr('on')} {net(route.destinationChain)}</dd>
       <dt>{tr('Guaranteed minimum')}</dt><dd>{outp(route.minimumOutput)} {tr('— fixed in the provider order; a smaller delivery is a mismatch')}</dd>
       <dt>{tr('Provider fees')}</dt><dd>{route.fees.length ? route.fees.map((f, i) => <span key={i}>{f.label}: {amountOf(f.amount, f.decimals, f.symbol)}{tr(f.included ? ' (included in the quote)' : ' (paid separately)')}. </span>) : tr('none listed')}</dd>
-      <dt>{tr('FloFi fee')}</dt><dd>{tr('0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.')}</dd>
+      {/* BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the rate THIS Review disclosed (a run reviewed under the earlier policy keeps 0.1%). */}
+      <dt>{tr('FloFi fee')}</dt><dd>{tr(reviewedFeeRate(r.feePolicy) === 10 ? '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.'
+        : '0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.')}</dd>
       <dt>{tr('Network fees')}</dt><dd>{tr('at most')} {nativeFee} {tr('on')} {net(route.sourceChain)}</dd>
       <dt>{tr('Estimated duration')}</dt><dd>{tr('about')} {route.quote.estimatedDurationSeconds}s {tr('after the deposit confirms (provider estimate)')}</dd>
       <dt>{tr('Signatures')}</dt><dd>{r.authorizations.sourceSignatures} {tr(r.authorizations.sourceSignatures === 1 ? 'wallet signature on the source network' : 'wallet signatures on the source network (an exact approval, then the deposit)')}{tr('; nothing to sign on the destination network.')}</dd>

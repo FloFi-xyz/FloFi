@@ -106,7 +106,7 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     // the FloFi fee says what this route actually does (nothing charged or recorded), and nothing is summed into a total.
     expect(review.unknown).toEqual(['Network cost']);
     expect(review.fees.every(line => line.treatment === 'INCLUDED')).toBe(true);
-    expect(review.flofiFee).toEqual({ value: 'Not charged', note: expect.stringContaining('not collected on-chain'), recorded: false });
+    expect(review.flofiFee).toEqual({ value: 'Not charged', note: expect.stringContaining('not charged at this time'), recorded: false });
     expect(review.totals).toMatchObject({ additional: [], ceilings: [], excludes: [{ text: 'Network cost', parameters: [] }] });
     // The expected output is the record's own quote (100 USDC → 0.025 WETH in the fixture); with no record there is none, never a guess.
     expect(review.steps[0]!.result).toBe('0.025 WETH'); expect(review.steps[0]!.minimum).toBe('0.024875 WETH');

@@ -221,7 +221,7 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     expect(investorCsv(report()).split('\n').filter(line => line.startsWith('"single-card runs"'))).toHaveLength(6);
     const revenue = html(createElement(FinopsRevenue, { report: report(), language: 'EN' }));
     expect([...revenue.matchAll(/<h3 class="admin-finops-subhead">([^<]+)</g)].map(match => match[1])).toEqual(['Collected revenue', 'Operating costs', 'Margins', 'Break-even']);
-    expect(revenue).toContain('Deferred 10 bps obligations do not contribute to collected revenue.');
+    expect(revenue).toContain('Uncollected FloFi fee obligations and accrued estimates (0.80%; 0.1% on earlier Reviews) do not contribute to collected revenue.');
   });
 
   it('shows the selected period once, with the custom UTC dates only for a custom period', () => {

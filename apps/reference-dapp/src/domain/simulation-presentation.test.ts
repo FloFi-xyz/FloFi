@@ -315,7 +315,7 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 Bridge fee accounting (the live Arbitr
   it('never double counts: the route fee is already in the quoted output, the gas ceiling is not an estimate, and nothing is summed across assets', () => {
     const costs = payableCosts(project(live, now, bridge).fees);
     expect(costs).toEqual({ additional: [], ceilings: ['0.00000808176 ETH'], unknown: [], unclassified: 0,
-      flofiFee: { value: 'Not charged', note: expect.stringContaining('not collected on-chain'), recorded: false } });
+      flofiFee: { value: 'Not charged', note: expect.stringContaining('not charged at this time'), recorded: false } });
     expect(JSON.stringify(costs)).not.toMatch(/0\.008206|0\.004103/);
   });
   it('estimates add up exactly per asset while ceilings stay apart; an unclassified line is reported, never summed', () => {

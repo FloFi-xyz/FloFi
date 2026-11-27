@@ -51,7 +51,8 @@ its collection transactions in the row; an owed or collected row cannot be delet
 **Collection: not implemented (Blocked).** No treasury address exists, no accounting policy is approved and the collection rail is an owner
 decision (Relay app fees, a separate owner-authorized transfer after completion, or an invoice; options recorded in
 BUILD-CROSSCHAIN-UNIVERSAL-001-REPORT.md). `activation.ts` reports the first missing condition and is never active:
-`PLATFORM_FEE_COLLECTION_DISABLED`, `…_TREASURY_NOT_CONFIGURED`, `…_TREASURY_INVALID`, `…_POLICY_NOT_APPROVED`, `…_COLLECTOR_NOT_IMPLEMENTED`.
+`PLATFORM_FEE_COLLECTION_DISABLED`, `…_TREASURY_NOT_CONFIGURED`, `…_TREASURY_INVALID`, `…_POLICY_NOT_APPROVED`, `…_AUTHORIZED_BASIS_NOT_RECORDED`
+(no workflow Review discloses or stores the fee basis a collector would be capped by).
 Because nothing is collected, every disclosure keeps "not charged at this time" and only the rate changes (0.1% → 0.80%).
 
 **Universal bridge**: its existing per-run obligation uses the canonical rate and the rate its own Review disclosed (`reviewedFeeRate`): a Review
@@ -100,6 +101,8 @@ server-held conversation identity).
 **Historical recovery** (`origin-backfill`, audited, idempotent, dry run by default): BOUND → the approval's origin; NO_APPROVAL → `legacy_web`;
 AMBIGUOUS, CONFLICTING_BINDINGS, BEFORE_COMPLETE_HISTORY → stay Unknown. Read-only production pre-check (SQL equivalent): 78 reconciled root
 single flows → 70 Legacy Web, 5 Unknown (an MCP approval for the same wallet and flow could have created them), 2 MCP-bound, 1 workflow step.
+The 70 assume the owner's statement that no approval was ever removed (`--assert-approvals-never-purged`); with the default 31-day horizon only
+runs from 2026-11-09 on are recoverable.
 Execution totals do not change. Corrections: `origin-correct` (approval reference, append-only audit). Not yet run on production.
 
 **Admin**: rows FloFi Web (Chat or Editor), Legacy Web, ChatGPT MCP, Claude MCP, Telegram, Developer API, Unidentified MCP client, Unknown;

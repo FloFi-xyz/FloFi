@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ACTION_KINDS, ACTION_LABELS } from '../../admin/analytics/actions';
-import { channelPeriod, loadChannelCounts } from '../../admin/analytics/channels';
+import { CHANNEL_PERIOD_LABELS, channelPeriod, loadChannelCounts } from '../../admin/analytics/channels';
 import { ENVIRONMENT_LABELS, type NetworkInfo } from '../../admin/analytics/networks';
 import { param, withParams, workflowView, type AnalyticsParams } from '../../admin/analytics/view';
 import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/workflows';
@@ -247,7 +247,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
           <a href="/admin/automations">Automations</a> page shows how many FloFi has linked to their proposal (a verified lower bound). Delegated executions are
           separate records and are not counted here. † attributed by flow only (no indexed canonical record), counted as executions but not as actions.</p>
       </section>
-      <PlatformFees totals={fees} activation={platformFeeActivation(process.env)} eligibleCompleted={a.fees.eligibleCompleted} environment={env} language={language}/>
+      <PlatformFees totals={fees} activation={platformFeeActivation(process.env)} period={copy(CHANNEL_PERIOD_LABELS[channelsPeriod.id])} environment={copy(env)} language={language}/>
     </div>
 
     <section className="admin-card" aria-labelledby="admin-errors">

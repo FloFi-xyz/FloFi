@@ -312,7 +312,7 @@ describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 recorded execution origins
   it('with origins recorded, the obsolete "no origin record" notes are gone and the recovery rule is stated', () => {
     const body = text(render({ ok: true, value: counts({ originsRecorded: true }) }));
     expect(body).not.toContain('One-step runs started directly in the app have no origin record');
-    expect(body).toContain('Every execution records the channel it started from when it is created.');
-    expect(text(render({ ok: true, value: counts({ originsRecorded: true }) }, 'PT'))).toContain('Cada execução registra o canal de origem quando é criada.');
+    expect(body).toContain('New executions keep the channel they started from');
+    expect(text(render({ ok: true, value: counts({ originsRecorded: true }) }, 'PT'))).toContain('Novas execuções mantêm o canal de origem');
   });
 });

@@ -55,7 +55,7 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('execution_log_segments',                        'SI',   'S',    'S',    ''),
       ('execution_logs',                                'SI',   'S',    'S',    ''),
       ('execution_nonce_conflicts',                     'SIU',  'S',    '',     ''),
-      ('execution_origin_corrections',                  '',     'S',    'SI',   ''),
+      ('execution_origin_corrections',                  'SI',   'S',    'SI',   ''),
       ('execution_origins',                             'SI',   'S',    'SI',   ''),
       ('execution_purge_audit',                         'S',    '',     'S',    ''),
       ('execution_purge_permits',                       '',     '',     '',     ''),

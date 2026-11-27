@@ -118,18 +118,24 @@ describe('execution origins (schema 37)', () => {
     expect(await count(`SELECT count(*)::int AS n FROM execution_origins WHERE workflow_run_id = $1`, [created.runId])).toBe(1);
   });
 
-  it('first record wins: a web-created run stays FloFi Web when an MCP approval binds it; an approval-page run takes the approval channel', async () => {
+  it('an approval binding supersedes a web record durably (correction row); an approval-page run takes the approval channel; purge erases nothing', async () => {
     const web = await run('web-run-' + tag()), signed = await run('signed-run-' + tag());
     expect(await recordExecutionOrigin(db, 'default', { runId: web }, 'web', 'CREATION', 'WEB_APP_SERVER_ACTION')).toBe('RECORDED');
     expect(await recordExecutionOrigin(db, 'default', { runId: web }, 'web', 'CREATION', 'WEB_APP_SERVER_ACTION')).toBe('EXISTS');
     const h = await handoff({ kind: 'MCP_ACCOUNT' });
     await createPgHandoffStore(db, 'default').bindRuns(h, [web, signed]);
     const origins = await effectiveOrigins(db, 'default', { runIds: [web, signed], workflowRunIds: [] });
-    expect(origins.runs.get(web)).toEqual({ origin: 'web', basis: 'CREATION' });
+    // The web record stays as written; an append-only correction names the approval's channel (and only once).
+    expect(origins.runs.get(web)).toEqual({ origin: 'mcp_chatgpt', basis: 'CORRECTION' });
+    await createPgHandoffStore(db, 'default').bindRuns(h, [web]);
+    expect(await count(`SELECT count(*)::int AS n FROM execution_origin_corrections WHERE run_id = $1 AND reason_code = 'APPROVAL_BINDING_SUPERSEDES_WEB'`, [web])).toBe(1);
+    expect(await count(`SELECT count(*)::int AS n FROM execution_origins WHERE run_id = $1 AND origin = 'web'`, [web])).toBe(1);
     expect(origins.runs.get(signed)).toEqual({ origin: 'mcp_chatgpt', basis: 'APPROVAL_BINDING' });
     // Approval deletion (retention) no longer erases the attribution: the origin is the run's own durable record.
-    await db.query(`UPDATE mcp_handoffs SET run_ids = '{}' WHERE handoff_id = $1`, [h]);
-    expect((await effectiveOrigins(db, 'default', { runIds: [signed], workflowRunIds: [] })).runs.get(signed)?.origin).toBe('mcp_chatgpt');
+    await db.query(`DELETE FROM mcp_handoffs WHERE handoff_id = $1`, [h]);
+    const after = await effectiveOrigins(db, 'default', { runIds: [signed, web], workflowRunIds: [] });
+    expect(after.runs.get(signed)?.origin).toBe('mcp_chatgpt');
+    expect(after.runs.get(web)?.origin).toBe('mcp_chatgpt');
   });
 
   it('backfills Legacy Web only where no approval could have created the run, idempotently, audited, never changing execution totals', async () => {
@@ -142,17 +148,21 @@ describe('execution origins (schema 37)', () => {
     const totalsBefore = await count('SELECT count(*)::int AS n FROM execution_runs');
     const oldest = (await db.query<{ at: Date }>('SELECT min(created_at) AS at FROM mcp_handoffs')).rows[0]!.at;
     await expect(originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: new Date(oldest.getTime() - 1) })).rejects.toThrow('ORIGIN_BACKFILL_HISTORY_INCOMPLETE');
-    const dry = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest });
+    // Without the operator's statement that no approval was ever removed, a run younger than 31 days after the oldest approval is not provable.
+    const cautious = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest });
+    expect(cautious.byClass.NO_APPROVAL).toBe(0);
+    expect(cautious.byClass.BEFORE_COMPLETE_HISTORY).toBeGreaterThanOrEqual(1);
+    const dry = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest, approvalsNeverPurged: true });
     expect(dry.mode).toBe('DRY_RUN');
     expect(await count(`SELECT count(*)::int AS n FROM execution_origins WHERE basis = 'BACKFILL'`)).toBe(0);
     expect(dry.byClass).toMatchObject({ AMBIGUOUS: 1 });
-    const applied = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest, apply: { approvalRef: 'KAN-25', actor: 'cli' } });
+    const applied = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest, approvalsNeverPurged: true, apply: { approvalRef: 'KAN-25', actor: 'cli' } });
     expect(applied.recorded).toBe(dry.byClass.BOUND + dry.byClass.NO_APPROVAL);
     const origins = await effectiveOrigins(db, 'default', { runIds: [quiet, ambiguous, boundTelegram], workflowRunIds: [] });
     expect(origins.runs.get(quiet)).toEqual({ origin: 'legacy_web', basis: 'BACKFILL' });
     expect(origins.runs.get(boundTelegram)).toEqual({ origin: 'telegram', basis: 'BACKFILL' });
     expect(origins.runs.has(ambiguous)).toBe(false);
-    const again = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest, apply: { approvalRef: 'KAN-25', actor: 'cli' } });
+    const again = await originBackfill({ db, tenantId: 'default' }, { now: NOW, approvalsCompleteSince: oldest, approvalsNeverPurged: true, apply: { approvalRef: 'KAN-25', actor: 'cli' } });
     expect(again.recorded).toBe(0);
     expect(await count('SELECT count(*)::int AS n FROM execution_runs')).toBe(totalsBefore);
     expect(await count(`SELECT count(*)::int AS n FROM admin_audit_events WHERE kind = 'EXECUTION_ORIGINS_BACKFILLED'`)).toBe(2);
@@ -185,7 +195,7 @@ describe('platform fee ledger (schema 37)', () => {
       FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '11111111111111111111111111111111' }).collection.code).toBe('PLATFORM_FEE_POLICY_NOT_APPROVED');
     expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
       FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '11111111111111111111111111111111', FLOFI_PLATFORM_FEE_POLICY_APPROVAL: 'FIN-1' }).collection)
-      .toEqual({ active: false, code: 'PLATFORM_FEE_COLLECTOR_NOT_IMPLEMENTED' });
+      .toEqual({ active: false, code: 'PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED' });
     expect(await accruePlatformFees(dormant.db, 'default', activation, { apply: true, limit: 50 })).toMatchObject({ recorded: 0, code: 'PLATFORM_FEE_LEDGER_NOT_MIGRATED' });
     expect(await accruePlatformFees(db, 'default', platformFeeActivation({}), { apply: true, limit: 50 })).toMatchObject({ recorded: 0, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' });
   });

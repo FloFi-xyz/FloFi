@@ -14,6 +14,7 @@
 import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { cimdClientId } from '../mcp/oauth/cimd.ts';
+import { typedId } from '../platform/ids.ts';
 
 export const EXECUTION_ORIGINS = ['web_chat', 'web_editor', 'web', 'legacy_web', 'mcp_chatgpt', 'mcp_claude', 'mcp_other', 'telegram', 'developer_api',
   'automation', 'unknown'] as const;
@@ -94,13 +95,23 @@ export async function recordExecutionOrigin(db: Queryable, tenantId: string, tar
   return rowCount ? 'RECORDED' : 'EXISTS';
 }
 
-/** Records the origin of every listed single-flow run an approval bound (best effort, first record wins). Never throws. */
+/**
+ * Records the origin of every listed single-flow run an approval bound (best effort, first record wins). Never throws. flofi-admin-analytics review:
+ * a run recorded `web` at creation (the page a server action was posted to is the browser's choice) that an MCP, channel, developer or automation
+ * approval binds is corrected durably, once, to that approval's channel (an append-only correction row), so a later approval purge never flips it.
+ */
 export async function recordBoundOrigins(db: Queryable, tenantId: string, runIds: readonly string[], requester: { readonly kind: string; readonly clientId: string },
   report: (code: string) => void = () => undefined): Promise<void> {
   const origin = originOfRequester(requester.kind, requester.clientId);
   for (const runId of runIds) {
-    try { await recordExecutionOrigin(db, tenantId, { runId }, origin, 'APPROVAL_BINDING', 'APPROVAL_RUN_BINDING'); }
-    catch { report('EXECUTION_ORIGIN_NOT_RECORDED'); }
+    try {
+      const recorded = await recordExecutionOrigin(db, tenantId, { runId }, origin, 'APPROVAL_BINDING', 'APPROVAL_RUN_BINDING');
+      if (recorded !== 'EXISTS' || origin === 'web' || origin === 'unknown') continue;
+      await db.query(`INSERT INTO execution_origin_corrections (tenant_id, correction_id, run_id, origin, previous_origin, approval_ref, reason_code)
+        SELECT $1, $2, $3, $4, 'web', 'auto:approval-binding', 'APPROVAL_BINDING_SUPERSEDES_WEB'
+        WHERE EXISTS (SELECT 1 FROM execution_origins o WHERE o.tenant_id = $1 AND o.run_id = $3 AND o.origin = 'web' AND o.basis = 'CREATION')
+          AND NOT EXISTS (SELECT 1 FROM execution_origin_corrections c WHERE c.tenant_id = $1 AND c.run_id = $3)`, [tenantId, typedId('eoc'), runId, origin]);
+    } catch { report('EXECUTION_ORIGIN_NOT_RECORDED'); }
   }
 }
 

@@ -135,7 +135,10 @@ export type FeeTotals = {
   readonly byState: Readonly<Partial<Record<LedgerState, number>>>;
   /** Per exact asset of DUE rows: the fee owed and not collected (native units). */
   readonly dueByAsset: readonly { readonly chainId: string; readonly address: string; readonly decimals: number; readonly fee: string; readonly executions: number }[];
-  /** Per exact asset of COLLECTED rows (always empty while no collector exists). */
+  /**
+   * Per exact asset of COLLECTED rows (always empty while no collector exists). flofi-payments-billing review: before a collector ships, this must sum
+   * the amounts its collection transactions prove, not the accrued lines (a collector capped by the authorized fee may collect less).
+   */
   readonly collectedByAsset: readonly { readonly chainId: string; readonly address: string; readonly decimals: number; readonly fee: string }[];
   readonly byOrigin: Readonly<Partial<Record<ExecutionOrigin | 'unrecorded', number>>>;
 };

@@ -40,17 +40,21 @@ const APPROVAL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/;
 const REASON = /^[A-Z][A-Z0-9_]{2,63}$/;
 const LIMIT = 5_000;
 /**
- * flofi-security review: how long after its creation an approval can still produce a run (pending 900 s + claimed 600 s, `platform/approvals.ts`),
- * with a whole day of margin. An approval removed before the oldest retained one can only have produced runs up to this long after it, so only
- * runs created at least this long after the oldest retained approval can be proven to have no approval.
+ * How long after its creation an approval can still produce a run. flofi-admin-analytics review: an APPLIED approval never lapses and can be reloaded
+ * until retention removes it (30 days, `HandoffStore.purge`), so a removed approval can have produced runs for up to 30 days: only runs created at
+ * least 31 days after the oldest retained approval are provably approval-free. When the operator asserts (audited) that no approval was ever removed,
+ * the bound is the claim lifetime (pending 900 s + claimed 600 s, `platform/approvals.ts`) plus a day.
  */
-export const APPROVAL_RUN_HORIZON_MS = 86_400_000 + (900 + 600) * 1000;
+export const APPROVAL_RUN_HORIZON_MS = 31 * 86_400_000;
+export const UNPURGED_APPROVAL_RUN_HORIZON_MS = 86_400_000 + (900 + 600) * 1000;
 
 type Row = { run_id: string; created_at: Date; bound: { kind: string; client: string }[] | null; candidates: number };
 
 /** Dry run (no `apply`) or apply. `approvalsCompleteSince` is required to recover NO_APPROVAL runs; without it they are reported only. */
 export async function originBackfill(host: { readonly db: Database; readonly tenantId: string }, input: {
   readonly approvalsCompleteSince?: Date; readonly now: Date;
+  /** The operator's audited statement that no approval was ever removed (retention never ran): the short horizon applies. */
+  readonly approvalsNeverPurged?: boolean;
   readonly apply?: { readonly approvalRef: string; readonly actor: 'cli' };
 }): Promise<OriginBackfill> {
   if (!await revenueOriginsActive(host.db)) throw new Error('EXECUTION_ORIGINS_NOT_MIGRATED');
@@ -60,7 +64,8 @@ export async function originBackfill(host: { readonly db: Database; readonly ten
   const oldest = (await host.db.query<{ at: Date | null }>('SELECT min(created_at) AS at FROM mcp_handoffs WHERE tenant_id = $1', [host.tenantId])).rows[0]?.at ?? null;
   // The completeness claim cannot reach back before the oldest approval retention left in place, and with no approval retained nothing is proven.
   if (since && (!oldest || since.getTime() < oldest.getTime())) throw new Error('ORIGIN_BACKFILL_HISTORY_INCOMPLETE');
-  const provable = since && oldest ? Math.max(since.getTime(), oldest.getTime() + APPROVAL_RUN_HORIZON_MS) : null;
+  const horizon = input.approvalsNeverPurged === true ? UNPURGED_APPROVAL_RUN_HORIZON_MS : APPROVAL_RUN_HORIZON_MS;
+  const provable = since && oldest ? Math.max(since.getTime(), oldest.getTime() + horizon) : null;
   const { rows } = await host.db.query<Row>(`
     WITH roots AS (
       SELECT r.tenant_id, r.run_id, r.flow, lower(r.owner_account) AS owner, r.created_at FROM execution_runs r
@@ -98,7 +103,7 @@ export async function originBackfill(host: { readonly db: Database; readonly ten
       await recordAudit(tx, host.tenantId, { actor: input.apply!.actor, kind: 'EXECUTION_ORIGINS_BACKFILLED', outcome: 'OK',
         target: 'approval:' + createHash('sha256').update(input.apply!.approvalRef).digest('hex').slice(0, 32),
         // Flat, closed facts only (the audit detail holds scalars): the counts per class and per recovered origin.
-        detail: { recorded, truncated, approvalsCompleteSince: since?.toISOString() ?? null,
+        detail: { recorded, truncated, approvalsCompleteSince: since?.toISOString() ?? null, approvalsNeverPurged: input.approvalsNeverPurged === true,
           ...Object.fromEntries(Object.entries(byClass).map(([k, v]) => ['class_' + k, v])),
           ...Object.fromEntries(Object.entries(byOrigin).map(([k, v]) => ['origin_' + k, v ?? 0])) } });
     });

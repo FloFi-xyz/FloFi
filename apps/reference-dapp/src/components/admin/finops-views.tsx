@@ -347,7 +347,7 @@ export function FinopsRevenue({ report, language, mode = 'dashboard' }: { report
   return <Section id="finops-revenue" title={copy("Revenue & Margins")} description={copy("Actual fee revenue is recognized through reconciled accounting records.")}>
     <div className="admin-finops-revenue">{groups.map(([title, keys]) => <section key={title} aria-label={copy(title)}><h3 className="admin-finops-subhead">{copy(title)}</h3>
       <Indicators report={report} keys={keys} language={language} mode={mode}/></section>)}</div>
-    <p className="admin-diff">{copy("Gross transaction volume, fee-eligible volume, and expected fee revenue are unavailable. Deferred 10 bps obligations do not contribute to collected revenue.")}</p>
+    <p className="admin-diff">{copy("Gross transaction volume, fee-eligible volume, and expected fee revenue are unavailable. Uncollected FloFi fee obligations and accrued estimates (0.80%; 0.1% on earlier Reviews) do not contribute to collected revenue.")}</p>
     <Basis report={report} keys={['revenue', 'variable', 'infrastructure', 'contribution', 'result', 'breakEvenRevenue']} language={language} mode={mode}/>
   </Section>;
 }

@@ -7,7 +7,8 @@
  *
  * Collection (moving the fee to FloFi) is fail-closed and cannot be active in this build. It would need, all at once: the owner's switch
  * `FLOFI_PLATFORM_FEE_COLLECTION=on`, a verified treasury for each namespace (`FLOFI_PLATFORM_FEE_TREASURY_EVM`, `..._SOLANA`), the approved
- * financial accounting policy reference (`FLOFI_PLATFORM_FEE_POLICY_APPROVAL`) and an implemented, reviewed collection mechanism. No
+ * financial accounting policy reference (`FLOFI_PLATFORM_FEE_POLICY_APPROVAL`), the fee basis each Review disclosed recorded with its authorization
+ * (the cap a collector may charge) and an implemented, reviewed collection mechanism. No
  * collection mechanism is implemented (the rail is an owner decision: provider app fees, a separate owner-authorized transfer or an invoice), so
  * `collection.active` is always false and its code names the first missing condition. The switch only gates NEW collection attempts; it never
  * touches reconciliation of anything already submitted.
@@ -22,12 +23,15 @@ export type FeeActivation = {
 };
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/;
+/** A real calendar instant: an impossible date (2026-11-31) is refused, never rolled forward. */
+const realInstant = (raw: string, date: Date) => Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === raw.slice(0, 10);
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const APPROVAL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/;
 
 export function platformFeeActivation(env: Env): FeeActivation {
   const raw = env.FLOFI_PLATFORM_FEE_ACCOUNTING_FROM?.trim();
-  const from = raw && ISO.test(raw) ? new Date(raw) : null;
+  const parsed = raw && ISO.test(raw) ? new Date(raw) : null;
+  const from = parsed && realInstant(raw!, parsed) ? parsed : null;
   // Never before the current policy took effect: an execution created earlier was reviewed under another policy (F15).
   const start = from && Number.isFinite(from.getTime()) ? new Date(Math.max(from.getTime(), PLATFORM_FEE_POLICY_EFFECTIVE_FROM.getTime())) : null;
   const accounting = !raw ? { active: false, from: null, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' }
@@ -43,7 +47,8 @@ function collectionBlocker(env: Env): string {
   // A treasury must be exactly checksummed (EVM) or canonical base58 (Solana): never lower-cased, padded or guessed.
   if (!/^0x[0-9a-fA-F]{40}$/.test(evm) || !isChecksumAddress(evm) || /^0x0{40}$/i.test(evm) || !BASE58.test(solana)) return 'PLATFORM_FEE_TREASURY_INVALID';
   if (!APPROVAL.test(env.FLOFI_PLATFORM_FEE_POLICY_APPROVAL?.trim() ?? '')) return 'PLATFORM_FEE_POLICY_NOT_APPROVED';
-  return 'PLATFORM_FEE_COLLECTOR_NOT_IMPLEMENTED';
+  // flofi-payments-billing review: a collector may charge only what the owner authorized, and no Review records an authorized fee basis yet.
+  return 'PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED';
 }
 
 /** Whether an execution created at `createdAt` is accounted under this activation (never anything created before `from`). */

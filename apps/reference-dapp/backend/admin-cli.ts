@@ -19,7 +19,7 @@
  *   studio-migrate                                                      applies certified 0035 on exact schema 34
  *   studio-certification-migrate                                        applies certified 0036 on exact schema 35
  *   revenue-origins-migrate                                             applies certified 0037 on exact schema 36 (execution origins, fee ledger)
- *   origin-backfill [--approvals-complete-since ISO] [--apply --approval-ref REF]
+ *   origin-backfill [--approvals-complete-since ISO] [--assert-approvals-never-purged] [--apply --approval-ref REF]
  *                                                                         dry run by default; --apply records only missing origins (audited)
  *   origin-correct --run <run id> --origin <origin> --reason-code <CODE> --approval-ref <ref>
  *   platform-fee-accrue [--limit 200] [--apply]                           dry run by default; records what completed executions owe (no collection)
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     'reason-code': { type: 'string' }, hold: { type: 'string' }, kind: { type: 'string' }, 'subject-kind': { type: 'string' }, request: { type: 'string' },
     decision: { type: 'string' }, code: { type: 'string' }, 'include-text': { type: 'boolean' }, 'wallet-stdin': { type: 'boolean' },
     flow: { type: 'string' }, reason: { type: 'string' }, apply: { type: 'boolean' }, run: { type: 'string' }, origin: { type: 'string' },
-    'approvals-complete-since': { type: 'string' } } });
+    'approvals-complete-since': { type: 'string' }, 'assert-approvals-never-purged': { type: 'boolean' } } });
   const migration = command === 'finops-migrate' || command === 'finops-sync-migrate' || command === 'position-purge-migrate'
     || command === 'single-step-runs-migrate' || command === 'workflow-run-purge-migrate' || command === 'developer-projects-migrate'
     || command === 'studio-migrate' || command === 'studio-certification-migrate' || command === 'revenue-origins-migrate';

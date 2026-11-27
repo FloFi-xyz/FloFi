@@ -128,6 +128,7 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'origin-backfill': {
       const since = flag('approvals-complete-since');
       return { backfill: await originBackfill({ db, tenantId }, { now: io.now(), ...since ? { approvalsCompleteSince: new Date(since) } : {},
+        approvalsNeverPurged: values['assert-approvals-never-purged'] === true,
         ...values.apply === true ? { apply: { approvalRef: required(flag('approval-ref'), 'approval-ref'), actor: 'cli' as const } } : {} }) };
     }
     case 'origin-correct': return { correction: await correctOrigin({ db, tenantId }, { runId: required(flag('run'), 'run'), origin: required(flag('origin'), 'origin'),

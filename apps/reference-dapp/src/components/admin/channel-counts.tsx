@@ -23,8 +23,9 @@ function channelNotes(data: Counts, environment: AnalyticsEnvironment, language:
     ...tally.counts.FLOFI_WEB || tally.counts.LEGACY_WEB ? [copy('FloFi Web in total: {0} ({1} recorded when they started, {2} recovered from history).',
       count(tally.counts.FLOFI_WEB + tally.counts.LEGACY_WEB), count(tally.counts.FLOFI_WEB), count(tally.counts.LEGACY_WEB))] : [],
     ...data.originsRecorded ? [
-      copy('Every execution records the channel it started from when it is created. Legacy Web is earlier web history recovered only where the ' +
-        'approval records prove no approval page created it; anything else without evidence stays Unknown origin.'),
+      copy('New executions keep the channel they started from: a workflow run from its approval, a run created in the FloFi app when it is created, ' +
+        'and a run signed on an approval page once that approval records it (only when the owner shares its status). Legacy Web is earlier web history ' +
+        'recovered only where the approval records prove no approval page created it; anything else without evidence stays Unknown origin.'),
     ] : [
       copy('One-step runs started directly in the app have no origin record and are shown as Unknown origin.'),
       copy("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at " +
