@@ -104,7 +104,7 @@ test('a network without the asset clears it (never ETH); the total ignores a wro
   await form.getByRole('textbox', { name: 'Recipient 2 amount (USDC)' }).fill(' 1 ');
   // FE-BATCH-09/11: the trimmed amounts are valid, so the exact total is shown; only the wrong address is marked invalid.
   await expect(form.locator('.batch-payment-summary')).toHaveText('2 recipients · Total: 1.5 USDC');
-  await expect(form.getByRole('alert')).toHaveText('Enter a valid 0x address for every recipient (a mixed-case address must match its checksum).');
+  await expect(form.getByRole('alert')).toHaveText('Enter a valid address.');
   await expect(form.getByRole('textbox', { name: 'Recipient 1 address' })).toHaveAttribute('aria-invalid', 'true');
   await expect(form.getByRole('textbox', { name: 'Recipient 2 address' })).not.toHaveAttribute('aria-invalid', 'true');
   // FE-BATCH-07: Robinhood Chain offers no USDC: the asset is cleared (never switched to ETH with the same amounts) until the person picks one.
@@ -180,7 +180,7 @@ test('KAN-20: Solana in the Batch Payment card: SOL / USDC / USDT, base58 recipi
   await form.getByRole('textbox', { name: 'Recipient 1 amount (SOL)' }).fill('0.01');
   await form.getByRole('textbox', { name: 'Recipient 2 address' }).fill(SOL_B);
   await form.getByRole('textbox', { name: 'Recipient 2 amount (SOL)' }).fill('0.02');
-  await expect(form.getByRole('alert')).toHaveText('Enter a valid Solana wallet address for every recipient (base58, exactly as written: letter case matters).');
+  await expect(form.getByRole('alert')).toHaveText('Enter a valid address.');
   await expect(form.getByRole('textbox', { name: 'Recipient 1 address' })).toHaveAttribute('aria-invalid', 'true');
   await expect(form.getByRole('textbox', { name: 'Recipient 2 address' })).not.toHaveAttribute('aria-invalid', 'true');
   // The same wallet twice is named, never merged.
@@ -225,6 +225,6 @@ test('KAN-20: Solana in the Batch Payment card: SOL / USDC / USDT, base58 recipi
   await ptForm.getByRole('combobox', { name: 'Rede' }).selectOption('Solana');
   await expect(ptForm.getByRole('textbox', { name: 'Endereço do destinatário 1' })).toHaveAttribute('placeholder', 'Endereço Solana');
   await ptForm.getByRole('textbox', { name: 'Endereço do destinatário 1' }).fill(A);
-  await expect(ptForm.getByRole('alert')).toHaveText('Informe um endereço de carteira Solana válido para cada destinatário (base58, exatamente como foi escrito: maiúsculas e minúsculas fazem diferença).');
+  await expect(ptForm.getByRole('alert')).toHaveText('Informe um endereço válido.');
   networkGuard.assertClean();
 });

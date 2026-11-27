@@ -414,8 +414,10 @@ export const priceDifference = (formatted: string) => formatted.replace(/\s*\(\d
  */
 export function significantAmount(value: string, digits = 6, language: 'EN' | 'PT' = 'EN'): string {
   // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: the global rule (an estimate, rounded to nearest) for the default six digits.
-  // A large amount reads compactly (1.23457M) rather than with invented digits; an exact value is returned exactly as written.
-  if (digits === 6 && /^\d+(?:\.\d+)?$/.test(value)) { const shown = displayTokenAmount(value, { marker: false, group: false, language }); return shown?.approximate ? shown.value : value; }
+  // A large amount reads compactly (1.23457M) rather than with invented digits. BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06): an exact value is shown
+  // normalized too (no trailing zeros, the interface's decimal separator: 0.040000000000000000 → 0.04, PT 0,04), so every read-only surface reads the same;
+  // the value as written stays one tap away (CardAmount discloses it whenever the shown text differs).
+  if (digits === 6 && /^\d+(?:\.\d+)?$/.test(value)) return displayTokenAmount(value, { marker: false, group: false, language })?.value ?? value;
   const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
   if (!match || digits < 1) return value;
   const integer = match[1]!.replace(/^0+(?=\d)/, ''), fraction = match[2] ?? '';
@@ -756,10 +758,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       {poolCard && <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/>}
       {!card.inspection && card.batchPayment ? <BatchPaymentFields batch={card.batchPayment}/> : card.inspection ? <>
         {card.summary.liquidityValues ? <ValuePair relationship="contribution">
-          {card.summary.liquidityValues.map((value, index) => <ValueBox key={value.token} readOnly source={index === 0} amount={value.amount} token={value.token} network={sourceNetwork}
+          {card.summary.liquidityValues.map((value, index) => <ValueBox key={value.token} readOnly round source={index === 0} amount={value.amount} token={value.token} network={sourceNetwork}
             label={`${index === 0 ? 'First' : 'Second'} liquidity asset amount`} hint="Configured liquidity contribution" fiatFirst={false} onFiatFirstChange={setFiatFirst}/>)}
         </ValuePair> : <div className={pairDestination ? 'composer-value-pair' : undefined}>
-          {amountParts ? <ValueBox readOnly source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
+          {amountParts ? <ValueBox readOnly round source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span>{received ? <ValueBox readOnly round token={pairDestination} network={destinationNetwork}
             amount={received.amount} hint={received.label} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>

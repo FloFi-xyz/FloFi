@@ -2245,6 +2245,10 @@
     "cloud-runtime.certificate-0037.pg": {
       "path": "packages/cloud-runtime/test/certificate-0037.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.domain.token-amount-global": {
+      "path": "apps/reference-dapp/src/domain/token-amount-global.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2462,7 +2466,8 @@
     "app.editor.workflow-execution-solana-batch",
     "app.components.editor-workflow-run-solana-batch",
     "app.platform.native-signing",
-    "app.platform-fee.principal"
+    "app.platform-fee.principal",
+    "app.domain.token-amount-global"
   ],
   "modules": [
     {
@@ -5209,7 +5214,8 @@
         "app.domain.approval-notice",
         "app.domain.run-outcome-amounts",
         "app.mcp.platform-help-cancel",
-        "app.domain.copilot-batch-payment-solana"
+        "app.domain.copilot-batch-payment-solana",
+        "app.domain.token-amount-global"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",

@@ -537,7 +537,8 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     expect(significantAmount('0.99999999')).toBe('1');
     expect(significantAmount('999999.5')).toBe('1M');
     expect(significantAmount('12.5')).toBe('12.5');
-    expect(significantAmount('0.000000')).toBe('0.000000');
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06, owner rule): trailing zeros are removed from exact values too (0.040000000000000000 → 0.04).
+    expect(significantAmount('0.000000')).toBe('0');
     for (const value of ['—', '1e-7', '-1.5', '1,234.5', '']) expect(significantAmount(value)).toBe(value);
   });
 
