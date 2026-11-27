@@ -76,11 +76,13 @@ describe('KAN-20: the Editor panel of a lone Solana Batch Payment', () => {
       groups: [{ ...review().groups[0]!, solanaBatch: undefined as never }] });
     const html = render(state({ review: refused, grouped: false }));
     expect(html).toContain('Not enough SOL on Solana for the network fee');
-    for (const [label, value] of [['You have', '0.001 SOL'], ['The fee can reach', '0.00612284 SOL'], ['Token-account deposits, at most', '0.00611784 SOL'],
+    // The fee row already includes the deposits (its own row says so), so the rows add up: fee + minimum balance - balance = missing.
+    for (const [label, value] of [['You have', '0.001 SOL'], ['The fee can reach', '0.00612284 SOL'], ['Includes token-account deposits, at most', '0.00611784 SOL'],
       ['Kept as Solana&#x27;s minimum balance', '0.00089088 SOL'], ['Missing, at least', '0.00601372 SOL']] as const) expect(html).toContain(`${label}</dt><dd class="numeric">${value}</dd>`);
+    expect(html).not.toContain('<dt>Token-account deposits, at most</dt>');
     expect(html).not.toContain('This request also sends');
     const pt = render(state({ review: refused, grouped: false }), 'PT');
-    expect(pt).toContain('Depósitos de contas de token, no máximo');
+    expect(pt).toContain('Inclui depósitos de contas de token, no máximo');
     expect(pt).toContain('Mantido como saldo mínimo da Solana');
   });
   it('the core\'s refusals and the earlier request say what happened, in English and Portuguese', () => {

@@ -312,12 +312,18 @@ const union = compileSchema<StrategySpec>(StrategySpecSchema);
 const inputUnion = compileSchema<StrategyInput>(StrategyInputSchema);
 const branches = Object.fromEntries(Object.entries(BRANCHES).map(([action, schema]) => [action, compileSchema<StrategySpec>(schema)])) as
   Readonly<Record<StrategyAction, ReturnType<typeof compileSchema<StrategySpec>>>>;
+/**
+ * KAN-20: a Batch Payment is reported against the one member its network names (Solana, else the EVM one), never against both: the union would add the
+ * other member's errors and its `anyOf`, so an EVM batch keeps exactly its own issues and a Solana batch gets only the Solana member's.
+ */
+const batchPaymentMembers = { evm: compileSchema<StrategySpec>(BatchPayment), solana: compileSchema<StrategySpec>(SolanaBatchPayment) } as const;
 export const isStrategySpec = union.check;
 /** Every violation of a strategy spec, reported against its own action's schema (not the whole union). */
 export function strategySpecIssues(value: unknown): readonly SchemaIssue[] {
   if (union.check(value)) return [];
   const action = value && typeof value === 'object' && !Array.isArray(value) ? (value as { action?: unknown }).action : undefined;
   if (typeof action !== 'string' || !Object.hasOwn(branches, action)) return [{ path: '/action', rule: 'enum' }];
+  if (action === 'batch_payment') return batchPaymentMembers[(value as { network?: unknown }).network === 'solana' ? 'solana' : 'evm'].issues(value);
   return branches[action as StrategyAction].issues(value);
 }
 

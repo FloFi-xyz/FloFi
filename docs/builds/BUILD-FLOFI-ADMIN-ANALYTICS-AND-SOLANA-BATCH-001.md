@@ -51,7 +51,9 @@ Channel mapping (`channelOf`, pure): `EDITOR_SESSION` FloFi Web; `DEVELOPER_PROJ
 `CHANNEL_CONVERSATION` with `telegram:<bot id>` Telegram, otherwise Unknown origin; `MCP_ACCOUNT` with an exact CIMD client id on `chatgpt.com` or
 `claude.ai` ChatGPT MCP or Claude MCP, anything else (DCR, other hosts, look-alikes) Unidentified MCP client. `client_name` is never read. No channel is
 inferred from wallet addresses, amounts or timestamps. FloFi Web comes only from positive records (Editor workflow runs, and one-step runs an Editor
-approval recorded); Web Chat and the Editor are one row because no record separates them.
+approval recorded, which no current code path produces); Web Chat and the Editor are one row because no record separates them. Other channels (such
+as WhatsApp) are Unknown origin. A workflow run counts in its handoff's network environment, or under Mocked when any of its steps carries MOCKED
+evidence; a single flow counts in its run's provenance environment.
 
 `80db193` removed two parts of `a7b4519` after review: the simulation-time binder (it consumed the 16-run `run_ids` list, which makes native signing
 fail closed and blocks the owner from deleting an unstarted simulation) and the time-based Web rule (`FLOFI_ADMIN_WEB_ATTRIBUTION_FROM`). No execution is
@@ -64,7 +66,8 @@ classified Web by time or by the absence of an approval.
 - An approval records at most 16 runs (`0005`, `bindRuns`; unchanged). Approvals may be removed by retention (`HandoffStore.purge`); their bindings go
   with them. Observed, not fixed (out of scope): the single-statement purge fails while any old approval is referenced by a workflow run.
 - A durable per-execution origin record was designed but not implemented in this build (owner scope instruction). Expect a large Unknown origin share.
-- Reads are bounded (4 s statement timeout; 20,000 runs, 5,000 groups, 20,000 bindings); truncation turns every figure into a lower bound with a note;
+- Reads are bounded (every query of the section, the run loader included, under a 4 s statement timeout; 20,000 runs, 5,000 groups, 20,000
+  bindings); truncation turns every figure into a lower bound with a note;
   more bindings than the bound is the closed code `ADMIN_CHANNEL_COUNTS_UNAVAILABLE`, never an estimate.
 
 ### 2.4 Access and evidence
@@ -135,9 +138,10 @@ A refreshed preparation recomposes the same immutable strategy: identical `manif
 and per-recipient deposits may differ, and the owner signs the new bytes. An answer after `validUntil` (50 s) is refused; signed too late for the send
 budget is BLOCKED and never sent. Duplicate-payment protection (Solana batch groups only, no migration): an expired, unsigned batch preparation is
 prepared again only after the finalized height passes its last valid block height (`SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE` until then, about
-20-40 s) and the owner's history over that window shows no landed copy. A landed copy halts the run (`BATCH_PAYMENT_EARLIER_REQUEST_LANDED`) and
-nothing is asked again; an unreadable history retries (`BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN`); a history beyond the scan bound halts
-(`BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE`).
+20-40 s) and the owner's history over that window shows no landed copy. A landed copy halts the run (`BATCH_PAYMENT_EARLIER_REQUEST_LANDED`),
+keeps its signature in the group's outcome, and nothing is asked again; every surface says the recipients may have been paid, also after End. An
+unreadable history retries (`BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN`); a history beyond the scan bound halts (`BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE`).
+Every expiry write after the chain proof is a compare-and-set on the version read before it, so a concurrent newer preparation is never discarded.
 
 ### 3.7 Compositions and channels
 
@@ -196,7 +200,26 @@ browser `e2e/batch-payment-card.spec.ts` (Solana card), `e2e/admin-console.spec.
 
 ## 6. Specialist reviews
 
-Pending; dispositions are recorded in the PR.
+Seven read-only specialists (`agent_guard.py impact` selected 14): flofi-workflow, flofi-security, flofi-wallet-execution, flofi-transfer-payments,
+flofi-admin-analytics, flofi-mcp, flofi-channels, at most three at a time. Not run, with reason: flofi-automations (no automation code changed),
+flofi-data-privacy (no new persisted personal data; WS01 only reads), flofi-developers (production code unchanged; tests and regenerated OpenAPI only),
+flofi-infrastructure-ci (no CI change; coverage map only), flofi-payments-billing (no billing change), flofi-protocol-integrations (one registry row,
+reviewed by transfer-payments), flofi-swap (no swap path changed). Limit: the reviewer hook lets specialists read only repository files, so they
+reviewed the HEAD files without the scratch diffs. Every finding was verified against the code before any change; each fix has a test that failed
+before it.
+
+| # | Reviewer | Finding | Disposition |
+|---|---|---|---|
+| 1 | workflow | A stale pass or request could expire a newer batch preparation after its own chain proof (no version check) | Fixed: compare-and-set on the version read before the proof (Solana batch groups only); interleaving unit and PostgreSQL tests |
+| 2 | wallet-execution, security, channels | A copy proven landed was recorded with its code only, and channel and run text said "stopped before any step completed" | Fixed: the landed signature (or the unprovable settlement) is kept in the group's outcome, never logged; run view, `/approve`, the requester note and channel status say it may have executed, also after End |
+| 3 | mcp | `simulate_strategy` could preview a Solana batch one payment at a time and report it completed | Fixed: every batch leg is `SIMULATION_REQUIRES_OWNER_BROWSER` before any preview; EVM output byte-identical |
+| 4 | mcp | Invalid EVM batches also got the Solana member's schema errors | Fixed: validated against the member the network names; EVM issues equal `fed320e`'s |
+| 5 | admin-analytics | Workflow runs with MOCKED step evidence counted under Mainnet | Fixed: such a run counts under Mocked |
+| 6 | admin-analytics | The channel read's run loader ran outside the 4 s statement timeout; a bound comment was wrong | Fixed: loaded under the same timeout (type-only widening of `loadRuns`); comment corrected |
+| 7 | admin-analytics | WhatsApp runs are Unknown origin while the note said Unknown means no record | Fixed: one note sentence (EN/PT) |
+| 8 | admin-analytics | Texts claimed FloFi Web counts one-step runs an Editor approval recorded, which current code never produces | Fixed: wording |
+| 9 | transfer-payments | The SOL shortfall panel showed deposits as if added to the fee; the explanation's numbers did not add up | Fixed: "Includes token-account deposits, at most"; the Solana explanation names deposits and the minimum balance |
+| 10 | workflow, wallet-execution | End is accepted while an unsigned batch preparation could still land | Documented residual (rule unchanged since `fed320e`, see 8) |
 
 ## 7. Certification
 
@@ -210,8 +233,11 @@ Local (PostgreSQL 16.15, pinned anvil 1.8.3, offline):
 | Browser profiles `canvas-workflow-ux` (incl. the Solana card test), `admin-console`, `editor-single-card`, `editor-wallet-batch`, `approve-workflow-run` | pass |
 | Browser profile `default-product-1` | 9 environmental failures (font rendering of 7 screenshots, no DNS for a public quote host); the clean `fed320e` build fails the same 9 with pixel-identical renders |
 
-Not run locally: PostgreSQL 18 (CircleCI only, `postgres:18.6`), fork suites (owner fork phrase), the other browser shards. CircleCI certification of the
-exact final commit is recorded in the PR.
+Not run locally: PostgreSQL 18 (CircleCI only, `postgres:18.6`), fork suites (owner fork phrase), the other browser shards.
+
+CircleCI: run `c3d83ca4` certified `e3d3666` (all 15 statuses: governance, supply chain, build, unit, checks with PostgreSQL 18 and the fork suite,
+browser shards 1-8, the certification fan-in, and the Vercel Preview). The review fixes after it need their own certification; the run of the exact
+final commit is recorded in the PR.
 
 ## 8. Limitations
 
@@ -219,6 +245,10 @@ exact final commit is recorded in the PR.
   unverified. The first owner-initiated batch is the only proof.
 - Two signed variants of one preparation broadcast outside FloFi (Phantom's guard differs per prompt) are not prevented; FloFi sends only the first
   recorded answer. Non-batch `SOLANA_SIGN_ALL` groups keep the existing re-preparation (preexisting).
+- End is accepted while an unsigned batch preparation is still inside its blockhash window (about 60 s; the rule `groupInFlight` is unchanged since
+  `fed320e` for every non-EVM group), and End runs no chain proof. If the owner's wallet broadcast a signed copy outside FloFi (FloFi only asks for
+  `signTransaction`), whether it landed before or after End, FloFi does not see it, and the ended run's legs read as not run (SKIPPED,
+  `OWNER_CANCELLED`). A copy the chain proof settled before End keeps its record and its "may have executed" wording (6, item 2).
 - A swap followed by a batch is not run in place in the Editor; it runs through `/approve`.
 - MCP and Telegram can hand off a Solana batch only where the existing settings `FLOFI_MCP_HANDOFF_MAINNET_NETWORKS`,
   `FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS` and the user-funded chains include Solana (no new setting).

@@ -14,8 +14,9 @@ import { applyMockedPhantomLighthouseGuards, createMockedSolanaTransferChain, cr
 import { requirementOf, type WorkflowRequirement } from '../delegation/steps.ts';
 import { composeWorkflow, type WorkflowComposition } from '../engine/strategy-engine';
 import type { KoraGas } from '../gas-abstraction/kora/runtime.ts';
-import { advanceSolanaSubmission, authorizeGroup, isSolanaBatchPrepared, prepareGroup, reconcileSolanaGroup, sameSolanaBatchAnswer, settleExpiredSolanaBatch,
-  solanaBatchAuthorizationRefusal, solanaBatchView, solanaSubmission, type NativeFeeShortfall, type Prepared, type SolanaGroupTx, type UserFundedDeps } from './groups.ts';
+import { advanceSolanaSubmission, authorizeGroup, earlierSolanaBatchRequestOutcome, hasEarlierSolanaBatchRequest, isSolanaBatchPrepared, prepareGroup, reconcileSolanaGroup,
+  sameSolanaBatchAnswer, settleExpiredSolanaBatch, solanaBatchAuthorizationRefusal, solanaBatchView, solanaSubmission, type NativeFeeShortfall, type Prepared, type SolanaGroupTx,
+  type UserFundedDeps } from './groups.ts';
 
 const SOLANA = SOLANA_MAINNET_TRANSFER.chain, USDC = SOLANA_MAINNET_TOKENS.USDC.mint, WSOL = 'So11111111111111111111111111111111111111112';
 const NOW = new Date('2026-11-27T12:00:00.000Z');
@@ -339,24 +340,26 @@ describe('KAN-20 C.4: an expired, unsigned preparation is prepared again only on
   it('LIVE while its blockhash may still land; ABSENT once provably expired with no copy; LANDED when an owner-signed copy landed out of band', async () => {
     const s = setup();
     const { prepared } = await s.prepared(s.batch('SOL'));
-    expect(await settleExpiredSolanaBatch(s.deps, prepared)).toBe('LIVE');
+    expect(await settleExpiredSolanaBatch(s.deps, prepared)).toEqual({ outcome: 'LIVE' });
     s.chain.advance(150);
-    expect(await settleExpiredSolanaBatch(s.deps, prepared)).toBe('LIVE');
+    expect(await settleExpiredSolanaBatch(s.deps, prepared)).toEqual({ outcome: 'LIVE' });
     s.chain.advance(1);
-    expect(await settleExpiredSolanaBatch(s.deps, prepared)).toBe('ABSENT');
-    // The owner's wallet signed P1 and broadcast it outside FloFi before its blockhash expired: preparing again would pay every recipient twice.
+    expect(await settleExpiredSolanaBatch(s.deps, prepared)).toEqual({ outcome: 'ABSENT' });
+    // The owner's wallet signed P1 and broadcast it outside FloFi before its blockhash expired: preparing again would pay every recipient twice. The
+    // landed copy's signature is returned (the blocked group keeps it as evidence of the funds that moved).
     const t = setup();
     const p1 = (await t.prepared(t.batch('SOL'))).prepared;
-    await t.chain.rpc('sendTransaction', [t.owner.sign(txOf(p1).unsignedTransaction), { encoding: 'base64' }]);
+    const landed = await t.chain.rpc('sendTransaction', [t.owner.sign(txOf(p1).unsignedTransaction), { encoding: 'base64' }]) as string;
     t.chain.advance(151);
-    expect(await settleExpiredSolanaBatch(t.deps, p1)).toBe('LANDED');
+    expect(await settleExpiredSolanaBatch(t.deps, p1)).toEqual({ outcome: 'LANDED', signature: landed });
+    expect(landed).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/);
     // A copy that landed and failed (atomic: no recipient paid) is absent for this purpose.
     const f = setup();
     const p2 = (await f.prepared(f.batch('USDC'))).prepared;
     f.chain.fundToken(f.recipients[0]!, USDC, 0n, { tokenOwner: createMockedSolanaWallet().owner });
     await f.chain.rpc('sendTransaction', [f.owner.sign(txOf(p2).unsignedTransaction), { encoding: 'base64' }]);
     f.chain.advance(151);
-    expect(await settleExpiredSolanaBatch(f.deps, p2)).toBe('ABSENT');
+    expect(await settleExpiredSolanaBatch(f.deps, p2)).toEqual({ outcome: 'ABSENT' });
   });
 
   it('UNKNOWN without an RPC or a readable height or history; UNPROVABLE without the Review slot or with more history than a scan reads', async () => {
@@ -364,10 +367,10 @@ describe('KAN-20 C.4: an expired, unsigned preparation is prepared again only on
     const { prepared } = await s.prepared(s.batch('SOL'));
     s.chain.advance(151);
     const failing = (method: string): UserFundedDeps['solana'] => async (m, params) => { if (m === method) throw new Error('SOLANA_RPC_UNAVAILABLE'); return s.chain.rpc(m, params); };
-    expect(await settleExpiredSolanaBatch({ solana: null }, prepared)).toBe('UNKNOWN');
-    expect(await settleExpiredSolanaBatch({ solana: failing('getBlockHeight') }, prepared)).toBe('UNKNOWN');
-    expect(await settleExpiredSolanaBatch({ solana: failing('getSignaturesForAddress') }, prepared)).toBe('UNKNOWN');
-    expect(await settleExpiredSolanaBatch(s.deps, tampered(prepared, tx => { delete tx.sinceSlot; }))).toBe('UNPROVABLE');
+    expect(await settleExpiredSolanaBatch({ solana: null }, prepared)).toEqual({ outcome: 'UNKNOWN' });
+    expect(await settleExpiredSolanaBatch({ solana: failing('getBlockHeight') }, prepared)).toEqual({ outcome: 'UNKNOWN' });
+    expect(await settleExpiredSolanaBatch({ solana: failing('getSignaturesForAddress') }, prepared)).toEqual({ outcome: 'UNKNOWN' });
+    expect(await settleExpiredSolanaBatch(s.deps, tampered(prepared, tx => { delete tx.sinceSlot; }))).toEqual({ outcome: 'UNPROVABLE' });
     // Every history page full, every entry inside the window: the scan never reaches the Review's slot (the blockhash provably expired).
     let pages = 0;
     const busy: UserFundedDeps['solana'] = async (m, params) => {
@@ -375,16 +378,27 @@ describe('KAN-20 C.4: an expired, unsigned preparation is prepared again only on
       pages++;
       return Array.from({ length: 1000 }, (_, i) => ({ signature: '5' + String(pages * 1000 + i).padStart(87, '1').replace(/0/g, 'z'), slot: txOf(prepared).sinceSlot! + 100 }));
     };
-    expect(await settleExpiredSolanaBatch({ solana: busy }, prepared)).toBe('UNPROVABLE');
+    expect(await settleExpiredSolanaBatch({ solana: busy }, prepared)).toEqual({ outcome: 'UNPROVABLE' });
     // Never asked of another kind of group.
-    expect(await settleExpiredSolanaBatch(s.deps, { kind: 'SOLANA_SIGN_ALL', transactions: [{ kind: 'TRANSFER', lastValidBlockHeight: 1 }] })).toBe('UNPROVABLE');
+    expect(await settleExpiredSolanaBatch(s.deps, { kind: 'SOLANA_SIGN_ALL', transactions: [{ kind: 'TRANSFER', lastValidBlockHeight: 1 }] })).toEqual({ outcome: 'UNPROVABLE' });
+  });
+
+  it('a group stopped by an earlier request keeps its settlement (and the landed copy\'s signature) in its outcome; nothing else reads as one', () => {
+    const signature = '5' + '1'.repeat(87);
+    expect(earlierSolanaBatchRequestOutcome({ outcome: 'LANDED', signature })).toEqual({ earlierRequest: { settlement: 'LANDED', signature } });
+    expect(earlierSolanaBatchRequestOutcome({ outcome: 'UNPROVABLE' })).toEqual({ earlierRequest: { settlement: 'UNPROVABLE' } });
+    expect([earlierSolanaBatchRequestOutcome({ outcome: 'LANDED', signature }), earlierSolanaBatchRequestOutcome({ outcome: 'UNPROVABLE' })].map(hasEarlierSolanaBatchRequest))
+      .toEqual([true, true]);
+    // A reconciled outcome, no outcome, or anything malformed never reads as an earlier request that may have paid.
+    expect([null, { gasPaid: { amount: '5000' } }, { earlierRequest: null }, { earlierRequest: { settlement: 'ABSENT' } }, { earlierRequest: 'LANDED' }]
+      .map(o => hasEarlierSolanaBatchRequest(o as Record<string, unknown> | null))).toEqual([false, false, false, false, false]);
   });
 
   it('T11: a refreshed preparation re-derives the same manifest (hash, legs, order, asset, owner); only the blockhash and chain facts change', async () => {
     const s = setup();
     const p1 = (await s.prepared(s.batch('USDC'))).prepared;
     s.chain.advance(151);
-    expect(await settleExpiredSolanaBatch(s.deps, p1)).toBe('ABSENT');
+    expect(await settleExpiredSolanaBatch(s.deps, p1)).toEqual({ outcome: 'ABSENT' });
     // Between the two preparations a recipient's token account appears, and the owner's USDC moves to another account of the owner.
     s.chain.fundToken(s.recipients[2]!, USDC, 0n);
     s.chain.fundToken(s.owner.owner, USDC, 0n);

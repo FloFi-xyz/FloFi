@@ -10,6 +10,7 @@ import { workflowVisualLayout } from '../platform/workflow-visual-layout.ts';
 import type { WorkflowVisualModel } from '../platform/workflow-visual.ts';
 import { credential, gatewayEnv, memoryLogger, session } from './gateway.test-harness.ts';
 import { MCP_INSTRUCTIONS, MCP_RECIPIENT_LIST_REFUSAL_MAX } from './tools.ts';
+import type { McpRuntime } from './runtime';
 
 const alice = { principal: 'dev-alice', token: credential() };
 const env = gatewayEnv([alice], { FLOFI_NETWORK_SCOPE: '' });
@@ -212,6 +213,25 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment over MCP
     // A workflow without a batch carries no such field.
     for (const tool of ['validate_strategy', 'review_strategy'] as const)
       expect((await client.callTool(tool, { strategy: { version: 2, steps: [SWAP, SWAP] } })).output, tool).not.toHaveProperty('batchPayments');
+  });
+
+  // KAN-20: a Solana Batch Payment's legs are Solana transfers, which alone preview on `solana-transfer`. Even with a runtime whose `solana-transfer`
+  // preview succeeds, simulate_strategy never previews them one payment at a time and never reports the batch's preview as completed.
+  it('KAN-20: simulate_strategy never previews a Solana Batch Payment one payment at a time, nor reports PREVIEW_COMPLETED', async () => {
+    const flows: string[] = [];
+    const runtime = { kind: 'embedded', mode: async () => 'live', preview: async (flow: string) => {
+      flows.push(flow);
+      return { ok: true, value: { provenance: 'MOCKED', review: { expiresAt: '2099-01-01T00:00:00.000Z', simulation: { freshness: { observedAt: '2026-11-09T10:00:00.000Z' } },
+        asset: { symbol: 'SOL', decimals: 9 }, simulationResult: { slot: 1 } } } };
+    }, run: async () => ({ ok: true, value: null }), journal: async () => ({ ok: true, value: null }), evidence: async () => ({ ok: true, value: null }) } as unknown as McpRuntime;
+    const client = session({ env, token: alice.token, runtime });
+    const composed = (await client.callTool('compose_strategy', { strategy: SOLANA_BATCH })).output as { strategy: unknown; workflowHash: string };
+    const preview = (await client.callTool('simulate_strategy', { strategy: composed.strategy, workflowHash: composed.workflowHash, simulationSubject: SOL_A })).output as {
+      status: string; readiness: { simulation: string }; steps: { state: string; code: string }[]; batchSimulation: string };
+    expect(flows).toEqual([]);
+    expect(preview).toMatchObject({ ok: true, kind: 'WORKFLOW_PREVIEW', status: 'INCOMPLETE', readiness: { simulation: 'PREVIEW_INCOMPLETE' },
+      batchSimulation: 'ONE_ATOMIC_BATCH_WITH_THE_OWNER_WALLET_AT_SIGNING' });
+    expect(preview.steps.map(s => [s.state, s.code])).toEqual(Array(3).fill(['NOT_COMPLETED', 'SIMULATION_REQUIRES_OWNER_BROWSER']));
   });
 
   for (const [scope, scoped] of Object.entries(ENVS)) {

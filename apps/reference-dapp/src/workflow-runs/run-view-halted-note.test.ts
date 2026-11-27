@@ -101,3 +101,42 @@ describe('round 4 F1: a run halted while a wallet batch it handed out was never 
     expect(plain.note).not.toContain('may have executed');
   });
 });
+
+describe('KAN-20 (C.4): a Solana Batch Payment stopped because an earlier request landed, or can never be proven not to have, may have paid every recipient', () => {
+  const MAY_HAVE_EXECUTED = 'A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
+    + 'deadline; check the wallet\'s activity.';
+  const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', SOL_OWNER = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', SIGNATURE = '5' + '1'.repeat(87);
+  const PAY = { action: 'batch_payment', network: 'solana', asset: 'SOL', recipients: [{ recipient: SOL_OWNER, amount: '0.01' }] };
+  const batchRun = (state: string, code: string) => ({ ...halted('USER_FUNDED'), state, code, stepCount: 3, strategy: PAY }) as unknown as RunRecord;
+  const batchGroup = (patch: Partial<GroupRecord>) => group(0, 0, 2, { namespace: 'solana', chain: SOLANA, feePayer: SOL_OWNER, strategy: 'SOLANA_SIGN_ALL', signing: 'UPFRONT',
+    state: 'BLOCKED', prepared: { kind: 'SOLANA_SIGN_ALL', atomic: true }, ...patch });
+  const legs = (state: string, code: string) => [0, 1, 2].map(i => ({ ...step(i, state), code }) as RunStepRecord);
+  const viewOf = (run: RunRecord, steps: readonly RunStepRecord[], groups: readonly GroupRecord[], outcomes = true) =>
+    runView({ store: { steps: async () => [...steps], groups: async () => [...groups] } }, run, { outcomes });
+  const STOPPED = `Stopped. ${MAY_HAVE_EXECUTED} FloFi submits nothing more of it; the owner decides what happens next.`;
+
+  it('HALTED: never "stopped before any step completed" — the batch may have executed (LANDED, with its signature kept, and UNPROVABLE alike)', async () => {
+    for (const [code, outcome] of [['BATCH_PAYMENT_EARLIER_REQUEST_LANDED', { earlierRequest: { settlement: 'LANDED', signature: SIGNATURE } }],
+      ['BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', { earlierRequest: { settlement: 'UNPROVABLE' } }]] as const) {
+      const view = await viewOf(batchRun('HALTED', code), legs('BLOCKED', code), [batchGroup({ code, outcome })]);
+      expect(view, code).toMatchObject({ halted: 'STOPPED', resumable: false, note: STOPPED });
+      expect(view.note).not.toMatch(/before any step completed|nothing was sent|before anything was sent/i);
+      // The code alone is enough (a group blocked before its outcome was kept); a requester the owner did not share status with sees only the consent note.
+      expect((await viewOf(batchRun('HALTED', code), legs('BLOCKED', code), [batchGroup({ code })])).note, code).toBe(STOPPED);
+      expect((await viewOf(batchRun('HALTED', code), legs('BLOCKED', code), [batchGroup({ code, outcome })], false)).note)
+        .toBe('The owner has not shared the transactions and evidence of this workflow with this conversation.');
+    }
+  });
+  it('after End (the group and legs SKIPPED, their code rewritten): its kept outcome still says it may have executed', async () => {
+    const view = await viewOf(batchRun('CANCELLED', 'OWNER_CANCELLED'), legs('SKIPPED', 'OWNER_CANCELLED'),
+      [batchGroup({ state: 'SKIPPED', code: 'OWNER_CANCELLED', outcome: { earlierRequest: { settlement: 'LANDED', signature: SIGNATURE } } })]);
+    expect(view).toMatchObject({ halted: null, note: `Ended. ${MAY_HAVE_EXECUTED}` });
+    // An ordinary ended batch (nothing handed out that may have landed) says nothing of the kind.
+    expect((await viewOf(batchRun('CANCELLED', 'OWNER_CANCELLED'), legs('SKIPPED', 'OWNER_CANCELLED'), [batchGroup({ state: 'SKIPPED', code: 'OWNER_CANCELLED' })])).note).toBeNull();
+  });
+  it('a Solana batch halted for another reason keeps its own wording', async () => {
+    const view = await viewOf(batchRun('HALTED', 'SOLANA_BATCH_PAYMENT_COMPUTE_LIMIT_EXCEEDED'), legs('BLOCKED', 'SOLANA_BATCH_PAYMENT_COMPUTE_LIMIT_EXCEEDED'),
+      [batchGroup({ code: 'SOLANA_BATCH_PAYMENT_COMPUTE_LIMIT_EXCEEDED', prepared: null })]);
+    expect(view.note).not.toContain('may have executed');
+  });
+});

@@ -188,10 +188,19 @@ export async function simulateWorkflowPreview(runtime: EngineRuntime, request: P
   let budget: Promise<boolean> | undefined;
   const consumeBudget = options.budget;
   const stepOptions = { ...options, ...consumeBudget ? { budget: () => budget ??= consumeBudget() } : {} };
+  const batchLeg = (index: number) => (workflow.batches ?? []).some(b => b.from <= index && index <= b.to);
   for (const [index, composition] of workflow.steps.entries()) {
     // The caller's request ended: no further step is started (its answer has already been given).
     if (options.signal?.aborted) return refuse('SIMULATION_CANCELLED');
-    const plan = previewPlan(composition.strategy), dependencies = workflow.bindings.filter(b => b.step === index).map(b => b.amountFrom);
+    const dependencies = workflow.bindings.filter(b => b.step === index).map(b => b.amountFrom);
+    // KAN-20: a Batch Payment's leg is never previewed on its own, whatever its network (a Solana leg is a transfer that alone previews on
+    // `solana-transfer`): NOT_COMPLETED, SIMULATION_REQUIRES_OWNER_BROWSER, exactly as an EVM leg's own preview plan already answers.
+    if (batchLeg(index)) {
+      steps.push({ index, workflowHash: composition.workflowHash, flow: null, state: 'NOT_COMPLETED', code: 'SIMULATION_REQUIRES_OWNER_BROWSER', amountFrom: dependencies,
+        simulationSubject: null, subjectSource: 'NONE', view: null });
+      continue;
+    }
+    const plan = previewPlan(composition.strategy);
     let binding: SubjectBinding = { address: null, source: 'NONE' };
     try {
       if ('code' in plan) throw new PlatformRefusal(plan.code);

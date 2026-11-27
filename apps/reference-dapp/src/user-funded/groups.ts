@@ -888,25 +888,40 @@ export async function solanaSendBudget(deps: UserFundedDeps, prepared: Prepared)
  *   LIVE        the finalized height has not passed its last valid block height: it can still land, nothing is decided
  *   UNKNOWN     no RPC, an unreadable height or history: nothing is decided now
  *   ABSENT      provably expired and no owner-signed copy landed in its window (a copy that landed and failed paid no recipient)
- *   LANDED      an owner-signed copy landed and succeeded: preparing again would pay every recipient twice
+ *   LANDED      an owner-signed copy landed and succeeded: preparing again would pay every recipient twice. Its `signature` (the public transaction
+ *               signature the owner's wallet sent) is returned so the blocked group keeps it as evidence; it is never logged
  *   UNPROVABLE  it can never be decided (no Review slot recorded, more owner history in its window than a scan reads): fail closed
  */
-export type SolanaBatchSettlement = 'LIVE' | 'UNKNOWN' | 'ABSENT' | 'LANDED' | 'UNPROVABLE';
+export type SolanaBatchSettlement = { readonly outcome: 'LIVE' | 'UNKNOWN' | 'ABSENT' } | SolanaBatchEarlierRequestStop;
+/** The settlements that stop the group for good (it is never prepared again). */
+export type SolanaBatchEarlierRequestStop = { readonly outcome: 'UNPROVABLE' } | { readonly outcome: 'LANDED'; readonly signature: string };
 export async function settleExpiredSolanaBatch(deps: Pick<UserFundedDeps, 'solana'>, prepared: Readonly<Record<string, unknown>>): Promise<SolanaBatchSettlement> {
   const rpc = deps.solana;
-  if (!rpc) return 'UNKNOWN';
+  if (!rpc) return { outcome: 'UNKNOWN' };
   const tx = isSolanaBatchPrepared(prepared) ? (prepared.transactions as readonly Partial<SolanaGroupTx>[])[0]! : null;
   // FloFi's own frozen artifact without a provable window: never decided as absent.
   if (!tx || !Number.isSafeInteger(tx.lastValidBlockHeight) || (tx.lastValidBlockHeight as number) < 0 || typeof tx.owner !== 'string' || typeof tx.message !== 'string')
-    return 'UNPROVABLE';
+    return { outcome: 'UNPROVABLE' };
   let finalized: unknown;
-  try { finalized = await rpc('getBlockHeight', [{ commitment: 'finalized' }]); } catch { return 'UNKNOWN'; }
-  if (!Number.isSafeInteger(finalized) || (finalized as number) < 0) return 'UNKNOWN';
-  if ((finalized as number) <= tx.lastValidBlockHeight!) return 'LIVE';
-  if (!Number.isSafeInteger(tx.sinceSlot) || (tx.sinceSlot as number) < 0) return 'UNPROVABLE';
+  try { finalized = await rpc('getBlockHeight', [{ commitment: 'finalized' }]); } catch { return { outcome: 'UNKNOWN' }; }
+  if (!Number.isSafeInteger(finalized) || (finalized as number) < 0) return { outcome: 'UNKNOWN' };
+  if ((finalized as number) <= tx.lastValidBlockHeight!) return { outcome: 'LIVE' };
+  if (!Number.isSafeInteger(tx.sinceSlot) || (tx.sinceSlot as number) < 0) return { outcome: 'UNPROVABLE' };
   const found = await findLandedSolanaBatchPreparation(rpc, { owner: tx.owner, message: tx.message, sinceSlot: tx.sinceSlot!, lastValidBlockHeight: tx.lastValidBlockHeight! });
-  return found.state === 'FOUND' ? found.failed ? 'ABSENT' : 'LANDED' : found.state === 'ABSENT' ? 'ABSENT' : found.state === 'UNKNOWN' ? 'UNKNOWN' : 'UNPROVABLE';
+  if (found.state === 'FOUND') return found.failed ? { outcome: 'ABSENT' } : { outcome: 'LANDED', signature: found.signature };
+  return found.state === 'ABSENT' ? { outcome: 'ABSENT' } : found.state === 'UNKNOWN' ? { outcome: 'UNKNOWN' } : { outcome: 'UNPROVABLE' };
 }
+/**
+ * KAN-20 (C.4): what a Solana Batch Payment group blocked by an earlier request keeps in its outcome (never a reconciliation: no leg, no fee): the
+ * settlement and, for LANDED, the signature of the copy the owner's wallet sent. Survives End (cancellation rewrites the group's code, never its outcome).
+ */
+export const earlierSolanaBatchRequestOutcome = (settled: SolanaBatchEarlierRequestStop) =>
+  ({ earlierRequest: settled.outcome === 'LANDED' ? { settlement: 'LANDED', signature: settled.signature } : { settlement: 'UNPROVABLE' } }) as const;
+/** Whether a group's outcome records an earlier Solana Batch Payment request that landed, or can never be proven not to have (see above). */
+export const hasEarlierSolanaBatchRequest = (outcome: Readonly<Record<string, unknown>> | null): boolean => {
+  const settlement = (outcome?.earlierRequest as { settlement?: unknown } | undefined)?.settlement;
+  return settlement === 'LANDED' || settlement === 'UNPROVABLE';
+};
 async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<readonly SignatureStatus[]> {
   const r = await rpc('getSignatureStatuses', [signatures, { searchTransactionHistory: true }]) as { value?: readonly SignatureStatus[] };
   return r?.value ?? signatures.map(() => null);

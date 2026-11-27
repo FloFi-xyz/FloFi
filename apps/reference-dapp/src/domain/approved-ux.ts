@@ -121,6 +121,13 @@ export function blockerExplanation(blocker: ActiveBlocker): { readonly text: str
   if (fee) {
     const short = `${fee.owner.slice(0, 6)}…${fee.owner.slice(-4)}`;
     // "Nothing was sent" holds here: this evidence comes only from the Review's preparation before any run of this workflow exists.
+    // KAN-20 (a Solana Batch Payment, lamports): the fee includes the token-account deposits, and Solana keeps the wallet's minimum balance (part
+    // of `required`), so both are named and the sentence's numbers add up. EVM evidence keeps the sentences below.
+    if (blocker.feeShortfall!.unit === 'lamports') return fee.sends === null
+      ? { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}; this Batch Payment\'s fee can reach {4} {1}, including up to {6} {1} in deposits for recipients who need a token account, and Solana keeps {7} {1} in your wallet as its minimum balance, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',
+        parameters: [fee.network, fee.symbol, short, fee.balance, fee.fee, fee.missing, fee.deposits ?? '0', fee.reserve ?? '0'] }
+      : { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}; this Batch Payment sends {6} {1}, its fee can reach {4} {1} and Solana keeps {7} {1} in your wallet as its minimum balance, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',
+        parameters: [fee.network, fee.symbol, short, fee.balance, fee.fee, fee.missing, fee.sends, fee.reserve ?? '0'] };
     return fee.sends === null ? { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}, and this fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',
       parameters: [fee.network, fee.symbol, short, fee.balance, fee.fee, fee.missing] }
       : { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}; this request sends {6} {1} and its fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',

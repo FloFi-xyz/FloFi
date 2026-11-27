@@ -36,8 +36,9 @@ import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '.
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, MAX_BATCH_SLIPPAGE_BPS, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
-import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, isSolanaBatchPrepared, koraGroupNativeCovers, prepareGroup, sameSolanaBatchAnswer, settleExpiredSolanaBatch,
-  solanaBatchView, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared, type SolanaBatchGroupView } from '../user-funded/groups.ts';
+import { authorizeGroup, earlierSolanaBatchRequestOutcome, EVM_PREPARED_TTL_MS, hasEarlierSolanaBatchRequest, isKoraGroup, isSolanaBatchPrepared, koraGroupNativeCovers,
+  prepareGroup, sameSolanaBatchAnswer, settleExpiredSolanaBatch, solanaBatchView, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared,
+  type SolanaBatchGroupView } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { circleFactsOf, circleUpgradeState, consentCircleUpgrade, finalizeCircleAuthorization, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
 import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, expireTokenGasPreparation as expireTokenGas, ownerStepsUnloaded, plannedCodeAfterCircle,
@@ -412,9 +413,10 @@ export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BI
  * HALTED even when this is the FIRST group and nothing ran (where any other stop with no progress is FAILED): the steps can still run through
  * their own owner-signed flows on Resume. The run's note then says it stopped before anything was sent, never that it partially completed.
  */
-async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord, code: string, from: readonly GroupState[] = ['PLANNED']): Promise<never> {
+async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord, code: string, from: readonly GroupState[] = ['PLANNED'],
+  outcome?: Readonly<Record<string, unknown>>): Promise<never> {
   const stored = code.split(':')[0]!;
-  if (!await deps.store.groupTransition(run.runId, g.groupIndex, from, 'BLOCKED', { code: stored }, 'GROUP_STATE', g.version)) return refuse(code);
+  if (!await deps.store.groupTransition(run.runId, g.groupIndex, from, 'BLOCKED', { code: stored, ...outcome ? { outcome } : {} }, 'GROUP_STATE', g.version)) return refuse(code);
   for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: stored });
   const halted = await stopRunFromCurrent(deps, run.runId, 'HALTED', stored);
   const steps = await deps.store.steps(run.runId);
@@ -691,21 +693,26 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   // copy that landed, or a window no scan can cover: the group is blocked from exactly the PREPARED state read here and the run HALTED.
   if (g.state === 'PREPARED' && !rewrite && isSolanaBatchPrepared(g.prepared)) {
     const settled = await settleExpiredSolanaBatch(userFunded, g.prepared!);
-    deps.log('workflow_run.solana_batch_earlier_request', { run: run.runId, group: groupIndex, outcome: settled });
-    if (settled === 'LIVE') refuse('SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE');
-    if (settled === 'UNKNOWN') refuse('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
-    if (settled === 'LANDED' || settled === 'UNPROVABLE')
-      return blockDueGroup(deps, run, g, settled === 'LANDED' ? 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' : 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', ['PREPARED']);
+    deps.log('workflow_run.solana_batch_earlier_request', { run: run.runId, group: groupIndex, outcome: settled.outcome });
+    if (settled.outcome === 'LIVE') refuse('SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE');
+    if (settled.outcome === 'UNKNOWN') refuse('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
+    // The group keeps what the chain proved (the landed copy's signature) in its outcome: evidence of funds that moved, never a reconciliation.
+    if (settled.outcome === 'LANDED' || settled.outcome === 'UNPROVABLE')
+      return blockDueGroup(deps, run, g, settled.outcome === 'LANDED' ? 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' : 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', ['PREPARED'],
+        earlierSolanaBatchRequestOutcome(settled));
   }
-  if (g.state === 'PREPARED' && !rewrite) g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' })
-    ?? refuse('WORKFLOW_RUN_CHANGED');
+  // KAN-20 (C.4): a Solana Batch Payment preparation is expired (then planned again) only from exactly the row version read before its chain proof
+  // (which takes RPC calls): one prepared again meanwhile (P2, possibly open in the owner's wallet) is never expired by this stale request.
+  const batchVersion = (x: GroupRecord) => isSolanaBatchPrepared(x.prepared) ? x.version : null;
+  if (g.state === 'PREPARED' && !rewrite) g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' },
+    'GROUP_STATE', batchVersion(g)) ?? refuse('WORKFLOW_RUN_CHANGED');
   // The earlier preparations stay on the PLANNED group (history only, no artifact): a preparation that fails now must not lose them.
   // ADR-0010: an expired Circle-paid preparation gives the group back the strategy it was planned with (native gas is decided afresh).
   if (g.state === 'EXPIRED') {
     // (A FloFi Wallet owner-step group's Circle preparation was given back above, atomically.)
     g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED',
       { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: plannedCodeAfterCircle(g.prepared, null),
-        ...plannedStrategyPatch(g) }) ?? refuse('WORKFLOW_RUN_CHANGED');
+        ...plannedStrategyPatch(g) }, 'GROUP_STATE', batchVersion(g)) ?? refuse('WORKFLOW_RUN_CHANGED');
     if (g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
   }
   if (!rewrite && g.state !== 'PLANNED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
@@ -1209,7 +1216,12 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
    * KAN-20 (owner only, like `planned`): a prepared Solana Batch Payment group — ONE atomic transaction of every leg, its asset and total, the network
    * fee, the token-account deposits it charges now and at most, what the owner's SOL must cover, and its size. Absent for every other group.
    */
-  readonly solanaBatch?: SolanaBatchGroupView };
+  readonly solanaBatch?: SolanaBatchGroupView;
+  /**
+   * KAN-20 (C.4): a Solana Batch Payment group stopped because an earlier request of it landed through the owner's wallet, or can never be proven not
+   * to have: every recipient may be paid already. Kept from the group's outcome, so it survives End (which rewrites the group's and steps' codes).
+   */
+  readonly mayHaveExecuted?: true };
 
 /** The code a wallet batch group and its steps carry when the wallet split it and only part of it succeeded (`user-funded/evm-reconcile.ts`). */
 const WALLET_BATCH_PARTIALLY_EXECUTED = 'WALLET_BATCH_PARTIALLY_EXECUTED';
@@ -1304,7 +1316,8 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,
-      signed: g.authorization !== null, planned: owner ? plannedOf(g) : null, delivery: deliveryOf(g), ...solanaBatchOf(g) };
+      signed: g.authorization !== null, planned: owner ? plannedOf(g) : null, delivery: deliveryOf(g), ...solanaBatchOf(g),
+      ...g.strategy === 'SOLANA_SIGN_ALL' && hasEarlierSolanaBatchRequest(g.outcome) ? { mayHaveExecuted: true as const } : {} };
   });
   const views: RunStepView[] = steps.map(s => {
     const local = s.outcome?.evidence?.environment === 'MOCKED';
@@ -1343,8 +1356,12 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   // A PARTIAL run never claims nothing later was sent: a later step or group may have been submitted and failed on chain (its own outcome says).
   // A run stopped (at its expiry: user-funded-pass.ts) or ended while a wallet batch it handed out was never answered says that batch may have
   // executed (`walletBatchUnanswered`): never "stopped before any step completed" or "nothing was sent", which its records cannot prove.
+  // KAN-20 (C.4): so does a Solana Batch Payment whose earlier request a copy the owner's wallet sent landed with, or that can never be proven not to
+  // have: every recipient may be paid already, and it is never sent again. Its outcome keeps that after End, which rewrites the group's code.
+  const earlierBatchRequest = groupRecords.some(g => g.strategy === 'SOLANA_SIGN_ALL'
+    && ((g.code !== null && SOLANA_BATCH_EARLIER_REQUEST_STOPS.has(g.code)) || hasEarlierSolanaBatchRequest(g.outcome)));
   const unanswered = (run.state === 'CANCELLED' || run.state === 'HALTED')
-    && (groupRecords.some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN));
+    && (groupRecords.some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN) || earlierBatchRequest);
   // "Never recorded", never "never reached FloFi": an answer may have arrived after the stop, been refused and logged
   // (WALLET_BATCH_ANSWERED_AFTER_STOP, `batchAnsweredAfterStop`).
   const mayHaveExecuted = 'A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '

@@ -20,7 +20,7 @@ import { composeWorkflowBound } from '../engine/strategy-engine';
 import { oauthClient, oauthEnv, signIn } from '../mcp/oauth/oauth-test-harness.ts';
 import { createPgOAuthStore } from '../mcp/oauth/pg-store.ts';
 import { approvalLinkScheme, assembleApprovalSurface, claimApproval, requestApproval, type ApprovalRequester } from '../platform/index.ts';
-import { workflowRunContinue, workflowRunResume, workflowRunStart, workflowRunStatus, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare,
+import { workflowRunCancel, workflowRunContinue, workflowRunResume, workflowRunStart, workflowRunStatus, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare,
   workflowRunUserFundedStart } from '../platform/approve.ts';
 import { ownedRun } from '../platform/workflow-run-approvals.ts';
 import type { SolanaGroupTx } from '../user-funded/groups.ts';
@@ -33,6 +33,10 @@ const PHANTOM = { solana: { wallet: 'WALLET_STANDARD', signMultiple: true, nonce
 const FLOFI = { solana: { wallet: 'FLOFI_WALLET', signMultiple: false, nonceAccounts: 0 } };
 type Prepared = { transactions: SolanaGroupTx[] };
 const refusal = async (work: Promise<unknown>) => { try { await work; return 'NO_REFUSAL'; } catch (e) { return e instanceof Error ? e.message : 'UNEXPECTED'; } };
+/** The note every viewer with shared status reads for a run stopped while a request handed to the owner's wallet may have executed (`runView`). */
+const MAY_HAVE_EXECUTED = 'A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
+  + 'deadline; check the wallet\'s activity.';
+const NEVER_NOTHING_SENT = /before any step completed|nothing was sent|before anything was sent/i;
 
 /**
  * A run of a 3-recipient batch, claimed at /approve by the owner's proven wallets. `requester` MCP_ACCOUNT: requested by an MCP account (an OAuth grant of
@@ -44,10 +48,15 @@ async function setup(options: { readonly asset?: 'SOL' | 'USDC'; readonly chain?
   const chain = createMockedSolanaTransferChain(options.chain ?? {});
   chain.createMint(USDC, { decimals: 6 });
   const blocked = new Set<string>();
-  /** `simulated`: changes what the cluster's simulation answers (an RPC or simulator that measures more than any batch may use). */
-  const tamper: { simulated?: (value: Record<string, unknown>) => void } = {};
+  /**
+   * `simulated`: changes what the cluster's simulation answers (an RPC or simulator that measures more than any batch may use). `before`: runs before
+   * each RPC call is answered (plays a concurrent request in the middle of a chain read). `history`: answers the owner's history instead of the cluster.
+   */
+  const tamper: { simulated?: (value: Record<string, unknown>) => void; before?: (method: string) => Promise<void>; history?: () => unknown } = {};
   const solana = async (method: string, params: readonly unknown[]) => {
+    await tamper.before?.(method);
     if (blocked.has(method)) throw new Error('SOLANA_RPC_UNAVAILABLE');
+    if (method === 'getSignaturesForAddress' && tamper.history) return tamper.history();
     const result = await chain.rpc(method, params);
     if (method !== 'simulateTransaction' || !tamper.simulated) return result;
     const value = { ...(result as { value: Record<string, unknown> }).value };
@@ -196,21 +205,107 @@ describe('KAN-20 Solana Batch Payment run (PostgreSQL, MOCKED Solana mainnet)', 
       try {
         await workflowRunUserFundedStart(s.surface, s.approval.approvalId, s.wallets, PHANTOM);
         const p1 = (await s.prepare()).transactions[0]!;
-        await s.chain.rpc('sendTransaction', [await s.sign(p1), { encoding: 'base64' }]);
+        const landed = await s.chain.rpc('sendTransaction', [await s.sign(p1), { encoding: 'base64' }]) as string;
         s.h.d.advance(55_000);
         s.chain.advance(151);
         if (via === 'prepare') expect(await refusal(s.prepare())).toBe('BATCH_PAYMENT_EARLIER_REQUEST_LANDED');
         await s.drain(3);
         const run = await s.run();
         expect(run).toMatchObject({ state: 'HALTED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' });
-        expect((await s.h.store.groups(run.runId))[0]).toMatchObject({ state: 'BLOCKED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' });
+        // The landed copy's signature is kept with the block (migration 0023's outcome column; never a reconciliation), and never logged.
+        expect((await s.h.store.groups(run.runId))[0]).toMatchObject({ state: 'BLOCKED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED',
+          outcome: { earlierRequest: { settlement: 'LANDED', signature: landed } } });
+        expect(s.h.lines.some(l => l.includes(landed)), via).toBe(false);
         expect((await s.h.store.steps(run.runId)).map(x => [x.state, x.code])).toEqual([0, 1, 2].map(() => ['BLOCKED', 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED']));
+        // Every viewer is told the batch may have executed, never that the run stopped before any step completed.
+        const stopped = `Stopped. ${MAY_HAVE_EXECUTED} FloFi submits nothing more of it; the owner decides what happens next.`;
         const view = (await workflowRunStatus(s.surface, s.approval.approvalId, s.wallets)).view.workflowRun!.run;
-        expect(view).toMatchObject({ halted: 'STOPPED', resumable: false });
+        expect(view).toMatchObject({ halted: 'STOPPED', resumable: false, note: stopped });
+        const requester = await runView(s.h.runs, run, { outcomes: true });
+        expect(requester.note).toBe(stopped);
+        expect(requester.note).not.toMatch(NEVER_NOTHING_SENT);
         expect(await refusal(workflowRunResume(s.surface, s.approval.approvalId, s.wallets))).toBe('BATCH_PAYMENT_EARLIER_REQUEST_LANDED');
         expect(await refusal(s.prepare())).toMatch(/^WORKFLOW_RUN_HALTED$/);
         expect(s.chain.state.sent).toHaveLength(1);
         expect(s.recipients.map(r => s.chain.lamports(r)), via).toEqual([10_000_000n, 20_000_000n, 30_000_000n]);
+        // End (the only action left) rewrites the group's and legs' codes, but the kept signature still tells every viewer it may have executed.
+        await workflowRunCancel(s.surface, s.approval.approvalId, s.wallets);
+        const ended = await s.run();
+        expect(ended.state).toBe('CANCELLED');
+        expect((await s.h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED', outcome: { earlierRequest: { settlement: 'LANDED', signature: landed } } });
+        const endedView = await runView(s.h.runs, ended, { outcomes: true });
+        expect(endedView.note).toBe(`Ended. ${MAY_HAVE_EXECUTED}`);
+        // Channels read the group's flag (the codes now say OWNER_CANCELLED): its legs never read "not run".
+        expect(endedView.groups?.[0]?.mayHaveExecuted).toBe(true);
+        expect(s.chain.state.sent).toHaveLength(1);
+      } finally { await s.t.drop(); }
+    }
+  });
+
+  it('C.4: a window no history scan can cover is UNPROVABLE: BLOCKED with that settlement kept, HALTED, never resumed, and never "nothing sent"', async () => {
+    for (const via of ['prepare', 'pass'] as const) {
+      const s = await setup();
+      try {
+        await workflowRunUserFundedStart(s.surface, s.approval.approvalId, s.wallets, PHANTOM);
+        const p1 = (await s.prepare()).transactions[0]!;
+        s.h.d.advance(55_000);
+        s.chain.advance(151);
+        // Every history page full, every entry inside the Review's window: the scan never reaches the Review's slot (the blockhash provably expired).
+        let page = 0;
+        s.tamper.history = () => {
+          page++;
+          return Array.from({ length: 1000 }, (_, i) => ({ signature: '5' + String(page * 1000 + i).padStart(87, '1').replace(/0/g, 'z'), slot: p1.sinceSlot! + 100 }));
+        };
+        if (via === 'prepare') expect(await refusal(s.prepare())).toBe('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE');
+        await s.drain(3);
+        const run = await s.run();
+        expect(run).toMatchObject({ state: 'HALTED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE' });
+        expect((await s.h.store.groups(run.runId))[0]).toMatchObject({ state: 'BLOCKED', code: 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE',
+          outcome: { earlierRequest: { settlement: 'UNPROVABLE' } } });
+        expect((await s.h.store.steps(run.runId)).map(x => [x.state, x.code])).toEqual([0, 1, 2].map(() => ['BLOCKED', 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE']));
+        const stopped = `Stopped. ${MAY_HAVE_EXECUTED} FloFi submits nothing more of it; the owner decides what happens next.`;
+        expect((await workflowRunStatus(s.surface, s.approval.approvalId, s.wallets)).view.workflowRun!.run).toMatchObject({ halted: 'STOPPED', resumable: false,
+          note: stopped });
+        const requester = await runView(s.h.runs, run, { outcomes: true });
+        expect(requester.note, via).toBe(stopped);
+        expect(requester.note).not.toMatch(NEVER_NOTHING_SENT);
+        expect(await refusal(workflowRunResume(s.surface, s.approval.approvalId, s.wallets))).toBe('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE');
+        expect(s.chain.state.sent).toEqual([]);
+      } finally { await s.t.drop(); }
+    }
+  });
+
+  it('C.4: a stale request never expires a preparation made again while its own chain proof ran: P2 stays PREPARED and is the one sent, once', async () => {
+    // The stale reader is the owner's prepare request (the service), or the background pass.
+    for (const via of ['prepare', 'pass'] as const) {
+      const s = await setup();
+      try {
+        await workflowRunUserFundedStart(s.surface, s.approval.approvalId, s.wallets, PHANTOM);
+        const p1 = (await s.prepare()).transactions[0]!;
+        const runId = (await s.run()).runId;
+        s.h.d.advance(55_000);
+        s.chain.advance(151);
+        // While the stale reader scans the owner's history for P1, the owner asks again: P1 is proven absent and P2 prepared (a new row version).
+        let p2: SolanaGroupTx | null = null;
+        s.tamper.before = async method => {
+          if (method !== 'getSignaturesForAddress') return;
+          delete s.tamper.before;
+          p2 = (await s.prepare()).transactions[0]!;
+        };
+        if (via === 'prepare') expect(await refusal(s.prepare())).toBe('WORKFLOW_RUN_CHANGED');
+        else await s.h.drain(runId);
+        const next = p2 as SolanaGroupTx | null;
+        expect(next, via).not.toBeNull();
+        expect(next!.messageHash).not.toBe(p1.messageHash);
+        expect(next!.batch!.manifestHash).toBe(p1.batch!.manifestHash);
+        expect((await s.h.store.groups(runId))[0], via).toMatchObject({ state: 'PREPARED', code: null, prepared: { transactions: [{ messageHash: next!.messageHash }] } });
+        expect(await s.run()).toMatchObject({ state: 'RUNNING' });
+        // The owner's answer for P2 is taken and sent once; every recipient is paid exactly once.
+        await s.authorize([await s.sign(next!)]);
+        await s.drain();
+        expect(await s.run(), via).toMatchObject({ state: 'COMPLETED' });
+        expect(s.recipients.map(r => s.chain.lamports(r)), via).toEqual([10_000_000n, 20_000_000n, 30_000_000n]);
+        expect(s.chain.state.sent).toHaveLength(1);
       } finally { await s.t.drop(); }
     }
   });

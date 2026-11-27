@@ -14,7 +14,7 @@ import { authorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { exactBoundAmount } from './workflow-bindings';
 import { composeWorkflow, workflowSequenceHash, type WorkflowComposition } from './strategy-engine';
-import { isStrategyInput, strategyRequiredFields } from './strategy-spec';
+import { isStrategyInput, strategyInputIssues, strategyRequiredFields, strategySpecIssues } from './strategy-spec';
 import { toChecksumAddress } from '@defi-workflow-engine/action-registry';
 import { checkBatchPaymentDraft } from '../domain/batch-payment-authoring';
 
@@ -164,6 +164,29 @@ describe('KAN-20 Solana Batch Payment composition', () => {
       expect(refusal({ ...SOL_BATCH, asset }), asset).toBe('STRATEGY_SCHEMA_INVALID');
     expect(refusal({ ...SOL_BATCH, network: 'base', asset: 'USDC' })).toBe('STRATEGY_SCHEMA_INVALID');
     expect(isStrategyInput({ ...SOL_BATCH, recipients: [SOL_BATCH.recipients[0]] })).toBe(false);
+  });
+  // An invalid batch is reported against the one member its network names: an EVM batch with exactly its fed320e issues (never the Solana member's network
+  // const, base58 pattern or the union's anyOf), a Solana batch with only the Solana member's own.
+  it('schema issues: an EVM batch keeps exactly its own (pre-KAN-20) issues; a Solana batch reports only the Solana member\'s', () => {
+    const evm = { action: 'batch_payment', network: 'base', asset: 'USDC', recipients: [{ recipient: A, amount: '1' }, { recipient: B, amount: '2' }] };
+    const nine = Array.from({ length: 9 }, (_, i) => ({ recipient: '0x' + (i + 1).toString(16).padStart(2, '0').repeat(20), amount: '1' }));
+    for (const [input, issues] of [
+      [{ ...evm, recipients: [evm.recipients[0]] }, [{ path: '/recipients', rule: 'minItems' }]],
+      [{ ...evm, recipients: [{ recipient: 'nope', amount: '1' }, evm.recipients[1]] }, [{ path: '/recipients/0/recipient', rule: 'minLength' }, { path: '/recipients/0/recipient', rule: 'pattern' }]],
+      [{ ...evm, network: 'ethereum', asset: 'ETH', memo: 'x' }, [{ path: '/memo', rule: 'additionalProperties' }]],
+      [{ ...evm, network: 'polygon' }, [{ path: '/network', rule: 'const' }, { path: '/network', rule: 'anyOf' }]],
+      [{ action: 'batch_payment', asset: 'USDC', recipients: evm.recipients }, [{ path: '/network', rule: 'required' }]],
+      [{ ...evm, recipients: nine }, [{ path: '/recipients', rule: 'maxItems' }]],
+      [{ version: 2, steps: [{ ...evm, recipients: [evm.recipients[0]] }] }, [{ path: '/steps/0/recipients', rule: 'minItems' }]],
+      // A Solana batch: only the Solana member (never the EVM network enum or the 0x recipient length and pattern).
+      [{ ...SOL_BATCH, asset: 'BONK' }, [{ path: '/asset', rule: 'const' }, { path: '/asset', rule: 'anyOf' }]],
+      [{ ...SOL_BATCH, recipients: [SOL_BATCH.recipients[0]] }, [{ path: '/recipients', rule: 'minItems' }]],
+    ] as const) {
+      expect(strategyInputIssues(input), JSON.stringify(input)).toEqual(issues);
+      if (!('steps' in input)) expect(strategySpecIssues(input), JSON.stringify(input)).toEqual(issues);
+    }
+    expect(strategyInputIssues(SOL_BATCH)).toEqual([]);
+    expect(strategyInputIssues(evm)).toEqual([]);
   });
   it('the Capability API\'s required parameters of a Batch Payment are what both of its schema branches require (unchanged)', () => {
     expect(strategyRequiredFields('batch_payment')).toEqual(['network', 'asset', 'recipients']);

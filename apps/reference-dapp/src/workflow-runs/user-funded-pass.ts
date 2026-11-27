@@ -27,9 +27,9 @@
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
-import { advanceSolanaSubmission, checkUserOperation, isSolanaBatchPrepared, koraGroupProgress, koraGroupSubmission, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation,
-  settleExpiredSolanaBatch, solanaBatchAuthorizationRefusal, solanaSendBudget, solanaSubmission, type Prepared, type Reconciled, type SolanaBatchLeg,
-  type UserFundedDeps } from '../user-funded/groups.ts';
+import { advanceSolanaSubmission, checkUserOperation, earlierSolanaBatchRequestOutcome, isSolanaBatchPrepared, koraGroupProgress, koraGroupSubmission, reconcileEvmGroup,
+  reconcileSolanaGroup, relayUserOperation, settleExpiredSolanaBatch, solanaBatchAuthorizationRefusal, solanaSendBudget, solanaSubmission, type Prepared, type Reconciled,
+  type SolanaBatchLeg, type SolanaBatchSettlement, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { bridgeOf, bridgeProgressOf, observeBridgeDelivery, type BridgeDelivery } from '../user-funded/bridge-delivery.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
@@ -96,7 +96,7 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   if (!g) return settled(run);
   if (ownerStep(g)) { const pass = await deps.confirmPass(run); await syncOwnerGroups(deps, run.runId); return pass; }
   const now = deps.now();
-  const block = async (refusal: string, options: { readonly halt?: boolean } = {}): Promise<Pass> => {
+  const block = async (refusal: string, options: { readonly halt?: boolean; readonly outcome?: Readonly<Record<string, unknown>> } = {}): Promise<Pass> => {
     const code = stored(refusal);
     // A wallet batch handed to the owner's wallet and never answered may have executed (its answer lost on the way): the run HALTS (its owner
     // ends it, and is told to check the wallet's activity), never FAILED, which would say nothing irreversible happened. Its group and steps
@@ -107,7 +107,8 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
     // read: a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be
     // on their way) is never reported blocked, and never leaves a run failed with a send in flight. Once that write won, the run stops from its
     // CURRENT version (a status poll may have moved it since this pass read it), never left RUNNING behind a blocked group and blocked steps.
-    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
+    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked, ...options.outcome ? { outcome: options.outcome } : {} }, 'GROUP_STATE',
+      g.version)) return { ...settled(run), progressed: true };
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: marked });
     const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
     const moved = await stopRunFromCurrent(deps, run.runId, options.halt || partial || unanswered ? 'HALTED' : 'FAILED', code);
@@ -119,12 +120,15 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   // `validUntil`) and the run is never failed or planned again; once its blockhash provably expired, the owner's history decides. A copy that landed,
   // or a window no scan can cover, stops the group and HALTS the run (the owner checks the wallet's activity and ends it): never prepared twice.
   if (g.state === 'PREPARED' && isSolanaBatchPrepared(g.prepared) && (g.validUntil !== null && g.validUntil <= now || run.expiresAt <= now)) {
-    const outcome = deps.userFunded ? await settleExpiredSolanaBatch(deps.userFunded, g.prepared!) : 'UNKNOWN';
+    const settlement: SolanaBatchSettlement = deps.userFunded ? await settleExpiredSolanaBatch(deps.userFunded, g.prepared!) : { outcome: 'UNKNOWN' };
+    const outcome = settlement.outcome;
     deps.log('workflow_run.solana_batch_earlier_request', { run: run.runId, group: g.groupIndex, outcome });
     if (outcome === 'LIVE') return settled(run, SOLANA_BATCH_SETTLE_RETRY_MS, false, 'SOLANA_BATCH_PAYMENT_EARLIER_REQUEST_LIVE');
     if (outcome === 'UNKNOWN') return settled(run, SOLANA_BATCH_SETTLE_RETRY_MS, false, 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
-    if (outcome === 'LANDED') return block('BATCH_PAYMENT_EARLIER_REQUEST_LANDED', { halt: true });
-    if (outcome === 'UNPROVABLE') return block('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE', { halt: true });
+    // The group keeps what the chain proved (the landed copy's signature) in its outcome: evidence of funds that moved, never a reconciliation.
+    if (settlement.outcome === 'LANDED' || settlement.outcome === 'UNPROVABLE')
+      return block(settlement.outcome === 'LANDED' ? 'BATCH_PAYMENT_EARLIER_REQUEST_LANDED' : 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE',
+        { halt: true, outcome: earlierSolanaBatchRequestOutcome(settlement) });
     // ABSENT: provably never paid — expired (or blocked at the run's expiry) exactly as any other preparation below.
   }
   // At the run's expiry a group nobody signed yet is blocked — never one the owner's wallet may still be confirming: a wallet batch inside its
@@ -145,9 +149,13 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
           const back = await expireTokenGasPreparation(deps.store, run.runId, g, 'USER_FUNDED_PREPARED_EXPIRED', null);
           return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: back !== null };
         }
-        const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' });
-        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
-        return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
+        // KAN-20 (C.4): a Solana Batch Payment preparation is expired only from exactly the row version read before its chain proof (which takes RPC
+        // calls): one prepared again meanwhile (P2, possibly open in the owner's wallet) is never expired by this stale pass, which looks again at once.
+        const batchVersion = isSolanaBatchPrepared(g.prepared) ? g.version : null;
+        const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' }, 'GROUP_STATE', batchVersion);
+        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null }, 'GROUP_STATE',
+          batchVersion === null ? null : expired.version);
+        return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null || batchVersion !== null };
       }
       // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed. KAN-20: a Solana Batch Payment
       // preparation right after its validity, so its chain proof runs while the owner's history in its window is still short.

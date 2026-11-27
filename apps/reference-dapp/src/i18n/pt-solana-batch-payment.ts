@@ -12,9 +12,13 @@ export const portugueseSolanaBatchPayment: Readonly<Record<string, string>> = {
   'about {0} in network fees; your wallet pays it in SOL': 'cerca de {0} em taxas de rede; sua carteira paga em SOL',
   'up to {0} in network fees and account deposits; your wallet pays it in SOL': 'até {0} em taxas de rede e depósitos de contas; sua carteira paga em SOL',
   'Includes up to {0} in deposits for recipients who need a token account.': 'Inclui até {0} em depósitos para destinatários que precisam de uma conta de token.',
-  // The fee-shortfall panel's Solana rows.
-  'Token-account deposits, at most': 'Depósitos de contas de token, no máximo',
+  // The fee-shortfall panel's Solana rows (the fee row already includes the deposits), and the assistant's explanation of that shortfall.
+  'Includes token-account deposits, at most': 'Inclui depósitos de contas de token, no máximo',
   'Kept as Solana\'s minimum balance': 'Mantido como saldo mínimo da Solana',
+  'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}; this Batch Payment\'s fee can reach {4} {1}, including up to {6} {1} in deposits for recipients who need a token account, and Solana keeps {7} {1} in your wallet as its minimum balance, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.':
+    'Toda transação na {0} paga uma taxa de rede em {1}. Sua carteira {2} tem {3} {1}; a taxa deste pagamento em lote pode chegar a {4} {1}, incluindo até {6} {1} em depósitos para destinatários que precisam de uma conta de token, e a Solana mantém {7} {1} na sua carteira como saldo mínimo, então faltam pelo menos {5} {1}. Envie um pouco de {1} na rede {0} para {2} e depois escolha Simular novamente. Nada foi enviado.',
+  'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}; this Batch Payment sends {6} {1}, its fee can reach {4} {1} and Solana keeps {7} {1} in your wallet as its minimum balance, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.':
+    'Toda transação na {0} paga uma taxa de rede em {1}. Sua carteira {2} tem {3} {1}; este pagamento em lote envia {6} {1}, a taxa pode chegar a {4} {1} e a Solana mantém {7} {1} na sua carteira como saldo mínimo, então faltam pelo menos {5} {1}. Envie um pouco de {1} na rede {0} para {2} e depois escolha Simular novamente. Nada foi enviado.',
   // The Solana wallet the Editor's in-place run needs, and its scope.
   'Connect your Solana wallet (Phantom or Solflare) on Solana mainnet to review this workflow.':
     'Conecte sua carteira Solana (Phantom ou Solflare) na mainnet da Solana para revisar este fluxo.',

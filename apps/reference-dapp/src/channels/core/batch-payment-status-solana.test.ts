@@ -55,4 +55,51 @@ describe('KAN-20: a Solana Batch Payment run in a chat', () => {
         for (const n of plannedNotifications(language, handoff, progressOf(run), ORIGIN).due) expect(n.text).not.toMatch(OWNER_DECIDES_BATCH);
       }
   });
+
+  // An earlier request of the batch that landed outside FloFi, or that the chain can never prove did not land, halts the run with every leg BLOCKED
+  // under that code (`workflow-runs/service.ts`, server view `halted: 'STOPPED'`): the recipients may have been paid, so the chat never says the batch
+  // stopped before submission or the workflow before any step completed (that would invite paying everyone twice).
+  it.each(['BATCH_PAYMENT_EARLIER_REQUEST_LANDED', 'BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE'])('a halt with every leg BLOCKED %s says it may have executed (EN/PT)', code => {
+    const blocked = (index: number) => ({ ...leg(index, 'BLOCKED'), code });
+    const run = runOf({ state: 'HALTED', code, halted: 'STOPPED', nextAction: 'OWNER_DECIDES', updatedAt: '2026-11-09T10:20:00.000Z',
+      steps: [blocked(0), blocked(1), blocked(2)], groups: [{ ...group('BLOCKED'), code }] });
+    const NEVER = /stopped before submission|before any step completed|before anything was sent|antes do envio|antes de concluir qualquer etapa|antes de qualquer envio/;
+    const said = { EN: /^1\. Batch Payment of 0\.06 SOL to 3 recipients \(.+\) — outcome unknown — it may have executed; check your wallet's activity$/m,
+      PT: /^1\. Pagamento em lote de 0\.06 SOL para 3 destinatários \(.+\) — resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira$/m };
+    const halt = { EN: /^Workflow stopped\. A batch was handed to your wallet .*it may have executed .*Check your wallet's activity\./,
+      PT: /^Fluxo interrompido\. Um lote foi entregue à sua carteira .*ele pode ter sido executado .*Confira a atividade da sua carteira\./ };
+    for (const language of ['EN', 'PT'] as const) {
+      const reply = status(run, language);
+      expect(reply, language).toMatch(said[language]);
+      expect(reply, language).not.toMatch(NEVER);
+      const { due } = plannedNotifications(language, handoff, progressOf(run), ORIGIN);
+      expect(due.map(n => n.key), language).toEqual([`notify:${handoff.handoffId}:wfr:step:0:blocked:${code.toLowerCase()}`,
+        `notify:${handoff.handoffId}:wfr:halted:0:stopped:${code.toLowerCase()}:unknown:${Date.parse('2026-11-09T10:20:00.000Z')}`]);
+      expect(due[0]!.text, language).toMatch(said[language]);
+      expect(due[1]!.text, language).toMatch(halt[language]);
+      for (const n of due) expect(n.text, language).not.toMatch(NEVER);
+    }
+  });
+
+  // End rewrites the group's and every leg's code to OWNER_CANCELLED; the server keeps the earlier request in the group's outcome and its view says
+  // so (`mayHaveExecuted`). The ended run still reads "may have executed", never "not run" or "ended without completing (OWNER_CANCELLED)".
+  it('after End, a batch whose earlier request may have paid every recipient still reads "outcome unknown" (EN/PT)', () => {
+    const skipped = (index: number) => ({ ...leg(index, 'SKIPPED'), code: 'OWNER_CANCELLED' });
+    const run = runOf({ state: 'CANCELLED', code: 'OWNER_CANCELLED', halted: null, nextAction: null, updatedAt: '2026-11-09T10:30:00.000Z',
+      steps: [skipped(0), skipped(1), skipped(2)], groups: [{ ...group('SKIPPED'), code: 'OWNER_CANCELLED', mayHaveExecuted: true }] });
+    const said = { EN: /^1\. Batch Payment of 0\.06 SOL to 3 recipients \(.+\) — outcome unknown — it may have executed; check your wallet's activity$/m,
+      PT: /^1\. Pagamento em lote de 0\.06 SOL para 3 destinatários \(.+\) — resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira$/m };
+    for (const language of ['EN', 'PT'] as const) {
+      const reply = status(run, language);
+      expect(reply, language).toMatch(said[language]);
+      expect(reply, language).not.toMatch(/not run|não executad/);
+      const ended = plannedNotifications(language, handoff, progressOf(run), ORIGIN).due.find(n => n.key.endsWith(':ended'));
+      expect(ended, language).toBeDefined();
+      expect(ended!.text, language).not.toMatch(/OWNER_CANCELLED/);
+    }
+    // Without the group's record the same ended run reads as before (no claim either way is invented).
+    const plain = runOf({ state: 'CANCELLED', code: 'OWNER_CANCELLED', halted: null, nextAction: null,
+      steps: [skipped(0), skipped(1), skipped(2)], groups: [{ ...group('SKIPPED'), code: 'OWNER_CANCELLED' }] });
+    expect(status(plain)).not.toMatch(/outcome unknown/);
+  });
 });
