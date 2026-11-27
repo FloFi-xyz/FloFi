@@ -2109,6 +2109,66 @@
     "app.mcp.oauth.portfolio-consent.pg": {
       "path": "apps/reference-dapp/src/mcp/oauth/portfolio-consent.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.channels.core.batch-payment-status": {
+      "path": "apps/reference-dapp/src/channels/core/batch-payment-status.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.core.conversation-batch-payment": {
+      "path": "apps/reference-dapp/src/channels/core/conversation-batch-payment.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.core.copy": {
+      "path": "apps/reference-dapp/src/channels/core/copy.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.core.status-batch-payment-owner-decides": {
+      "path": "apps/reference-dapp/src/channels/core/status-batch-payment-owner-decides.test.ts",
+      "stage": "unit"
+    },
+    "app.components.app-shell-client-safety": {
+      "path": "apps/reference-dapp/src/components/app-shell-client-safety.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.batch-payment-card": {
+      "path": "apps/reference-dapp/src/components/batch-payment-card.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.batch-payment-fields": {
+      "path": "apps/reference-dapp/src/components/batch-payment-fields.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.batch-payment-run-action": {
+      "path": "apps/reference-dapp/src/components/batch-payment-run-action.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.batch-payment-run-blocked": {
+      "path": "apps/reference-dapp/src/components/batch-payment-run-blocked.test.tsx",
+      "stage": "unit"
+    },
+    "app.developer.batch-payment": {
+      "path": "apps/reference-dapp/src/developer/batch-payment.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.canvas-execution-batch": {
+      "path": "apps/reference-dapp/src/domain/canvas-execution-batch.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.batch-payment-approval.pg": {
+      "path": "apps/reference-dapp/src/mcp/batch-payment-approval.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.platform.batch-payment-capabilities": {
+      "path": "apps/reference-dapp/src/platform/batch-payment-capabilities.test.ts",
+      "stage": "unit"
+    },
+    "app.state.workflow-store-batch-payment": {
+      "path": "apps/reference-dapp/src/state/workflow-store-batch-payment.test.tsx",
+      "stage": "unit"
+    },
+    "app.user-funded.evm-reconcile": {
+      "path": "apps/reference-dapp/src/user-funded/evm-reconcile.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -3852,7 +3912,11 @@
         "app.channels.telegram.universal-actions.pg",
         "app.platform.external-single-step",
         "app.channels.core.native-start",
-        "app.channels.telegram.native-signing.pg"
+        "app.channels.telegram.native-signing.pg",
+        "app.channels.core.batch-payment-status",
+        "app.channels.core.conversation-batch-payment",
+        "app.channels.core.copy",
+        "app.channels.core.status-batch-payment-owner-decides"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -4373,7 +4437,12 @@
         "app.components.editor-workflow-run-single-card",
         "app.components.signing-destination",
         "app.components.wallet-address",
-        "app.editor.batch-payment-canvas"
+        "app.editor.batch-payment-canvas",
+        "app.components.app-shell-client-safety",
+        "app.components.batch-payment-card",
+        "app.components.batch-payment-fields",
+        "app.components.batch-payment-run-action",
+        "app.components.batch-payment-run-blocked"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4817,7 +4886,8 @@
         "app.developer.webhooks.pg",
         "developer-sdk.client",
         "developer-sdk.webhooks",
-        "app.developer.events-sync"
+        "app.developer.events-sync",
+        "app.developer.batch-payment"
       ],
       "gaps": [
         "Developer credentials are SANDBOX only; real B2B partners and live webhook receivers require acceptance."
@@ -5366,7 +5436,8 @@
         "apps/reference-dapp/src/domain/defi-positions.ts",
         "apps/reference-dapp/src/domain/editor-stages.ts",
         "apps/reference-dapp/src/domain/product-areas.ts",
-        "apps/reference-dapp/src/domain/workflow-propagation.ts"
+        "apps/reference-dapp/src/domain/workflow-propagation.ts",
+        "apps/reference-dapp/src/domain/batch-run-record.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5399,7 +5470,9 @@
         "app.domain.liquidity-position-execute",
         "app.domain.liquidity-position-declined",
         "app.domain.execution-receipt",
-        "app.domain.workflow-propagation"
+        "app.domain.workflow-propagation",
+        "app.components.app-shell-client-safety",
+        "app.domain.canvas-execution-batch"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5908,7 +5981,8 @@
         "app.mcp.batch-payment",
         "app.mcp.step-limit",
         "app.mcp.platform-help-cancel",
-        "app.mcp.oauth.portfolio-consent.pg"
+        "app.mcp.oauth.portfolio-consent.pg",
+        "app.mcp.batch-payment-approval.pg"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -6079,7 +6153,8 @@
         "app.platform.external-single-step",
         "app.editor.single-card-run.pg",
         "app.editor.single-card-strategy",
-        "app.server.native-signing.pg"
+        "app.server.native-signing.pg",
+        "app.platform.batch-payment-capabilities"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -8638,7 +8713,8 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "app.state.build-estimate"
+        "app.state.build-estimate",
+        "app.state.workflow-store-batch-payment"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -8703,7 +8779,8 @@
         "app.editor.single-card-review",
         "app.components.editor-workflow-run-single-card",
         "app.e2e.editor-single-card",
-        "app.user-funded.decline-proof"
+        "app.user-funded.decline-proof",
+        "app.user-funded.evm-reconcile"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."

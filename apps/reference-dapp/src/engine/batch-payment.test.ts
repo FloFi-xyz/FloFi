@@ -74,7 +74,7 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment composit
     expect(fine.batches![0]!.composition.workflow.nodes.find(n => n.actionType === 'asset.transfer.batch')!.userConstraints[0]).toMatchObject({ quantity: { amount: '123456789123457' } });
   });
 
-  it('refuses a duplicate recipient (never merged or dropped), one recipient, nine recipients, a zero amount, Solana and a Stock Token', () => {
+  it('refuses a duplicate recipient (never merged or dropped), a reserved recipient, one recipient, nine recipients, a zero amount, Solana and a Stock Token', () => {
     const refusal = (input: unknown) => { const w = composeWorkflow(input); return w.ok ? 'OK' : w.code; };
     expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '1' }, { recipient: A.toUpperCase().replace('0X', '0x'), amount: '2' }] })).toBe('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
     expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '1' }] })).toBe('STRATEGY_SCHEMA_INVALID');
@@ -83,6 +83,11 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment composit
     expect(refusal({ ...BATCH, recipients: [{ recipient: A, amount: '0' }, { recipient: B, amount: '1' }] })).toBe('BATCH_PAYMENT_AMOUNT_INVALID');
     // A checksummed address with a mistyped letter is refused, never lower-cased into another wallet.
     expect(refusal({ ...BATCH, recipients: [{ recipient: MISTYPED, amount: '1' }, { recipient: B, amount: '1' }] })).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+    // A reserved payee (the zero address or a precompile 0x…01..0x…ff: nobody holds its key) is refused, never paid.
+    for (const reserved of ['0x' + '0'.repeat(38) + '02', '0x' + '0'.repeat(40), '0x' + '0'.repeat(38) + 'ff'])
+      expect(refusal({ ...BATCH, recipients: [{ recipient: reserved, amount: '1' }, { recipient: B, amount: '1' }] }), reserved).toBe('BATCH_PAYMENT_RECIPIENT_INVALID');
+    // The first address past the precompile range is an ordinary payee.
+    expect(refusal({ ...BATCH, recipients: [{ recipient: '0x' + '0'.repeat(37) + '100', amount: '1' }, { recipient: B, amount: '1' }] })).toBe('OK');
     // An ETH payment above the network's per-payment maximum (uint256 on mainnets: no USD cap) is named as such (never "enter a positive amount").
     expect(refusal({ ...BATCH, asset: 'ETH', recipients: [{ recipient: A, amount: '1' + '0'.repeat(60) }, { recipient: B, amount: '0.001' }] })).toBe('STRATEGY_SCHEMA_INVALID');
     expect(checkBatchPaymentDraft({ network: 'Base', asset: 'ETH', payments: [{ recipient: A, amount: '1' + '0'.repeat(60) }, { recipient: B, amount: '0.001' }] }).code)
@@ -95,7 +100,8 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment composit
   });
 
   it('counts every recipient toward the 8-step budget: 8 alone is allowed, a swap plus 8 is refused, a swap plus 7 is allowed', () => {
-    const eight = Array.from({ length: 8 }, (_, i) => ({ recipient: '0x' + (i + 1).toString(16).padStart(40, '0'), amount: '1' }));
+    // Ordinary payees 0x0101…01..0x0808…08: the former 0x…01..0x…08 are precompile addresses a Batch Payment refuses as payees.
+    const eight = Array.from({ length: 8 }, (_, i) => ({ recipient: '0x' + (i + 1).toString(16).padStart(2, '0').repeat(20), amount: '1' }));
     expect(compose({ ...BATCH, recipients: eight }).steps).toHaveLength(8);
     const over = composeWorkflow({ version: 2, steps: [SWAP, { ...BATCH, recipients: eight }] });
     expect(over.ok ? 'OK' : over.code).toBe('BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET');

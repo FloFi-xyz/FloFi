@@ -111,6 +111,41 @@ const STEP_BY_STEP_REFUSALS: ReadonlySet<string> = new Set(['USER_FUNDED_SIMULAT
 /** Whether a whole-workflow Review sends the owner to the step-by-step path: it planned one, or refused the batch for good. */
 export const reviewOffersStepByStep = (review: Pick<EditorExecutionReview, 'mode' | 'refusal'>) =>
   review.mode === 'STEP_BY_STEP' || (review.refusal !== null && STEP_BY_STEP_REFUSALS.has(review.refusal.code));
+/** FE-BATCH-04: why a lone Batch Payment's whole-workflow action is closed, in plain words (catalog keys). */
+export const BATCH_RUN_BLOCKED: Readonly<Record<'CHECKING' | 'SIGN_IN' | 'UNAVAILABLE' | 'HELD' | 'ATOMIC_ONLY', string>> = {
+  CHECKING: 'Checking whether this Batch Payment can run here…',
+  SIGN_IN: 'Sign in to your FloFi account to simulate and run this Batch Payment.',
+  UNAVAILABLE: 'Batch Payment cannot run on this FloFi deployment yet. Nothing was signed or sent.',
+  HELD: 'This Batch Payment cannot be simulated right now. Nothing was signed or sent.',
+  ATOMIC_ONLY: 'This Batch Payment runs only as one atomic approval in your wallet (every payment, or none), and that is not available here. Nothing was signed or sent.',
+};
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (FE-BATCH-04): a lone Batch Payment has no per-card flow: it runs only as this whole-workflow run, one
+ * atomic wallet authorization (never split into separate transfers). Why that path cannot simulate it here (a `BATCH_RUN_BLOCKED` message), or null
+ * while it can, or once its run exists. The Editor then shows this action closed with the reason, never another runtime's Simulate. Each reason is
+ * the state's own:
+ *
+ *   HELD         the Editor holds this path right now (`held`: a restore, or an execution of this visit on another path), a Review that failed for a
+ *                reason no retry changes, or an availability answer that failed for a moment: never "this deployment cannot"
+ *   ATOMIC_ONLY  only a Review proves the one atomic approval is not available here (it planned step by step, or refused the batch for good)
+ *   SIGN_IN      no FloFi account session, whether the availability answer or the Review says so
+ *   CHECKING     the availability answer has not arrived
+ *   UNAVAILABLE  this deployment answered that the path is off
+ *
+ * A Review that failed for a moment (`TRANSIENT_REVIEW_FAILURE`) keeps the action open: reviewing again is the way forward.
+ */
+export function batchPaymentRunBlocked(state: Pick<EditorWorkflowRunState, 'started' | 'available' | 'canReview' | 'availability' | 'review' | 'error' | 'held'>): string | null {
+  if (state.started) return null;
+  if (state.held) return BATCH_RUN_BLOCKED.HELD;
+  if (state.review && reviewOffersStepByStep(state.review)) return BATCH_RUN_BLOCKED.ATOMIC_ONLY;
+  if (state.error === 'ACCOUNT_SESSION_REQUIRED' || state.availability?.code === 'ACCOUNT_SESSION_REQUIRED') return BATCH_RUN_BLOCKED.SIGN_IN;
+  // An error without a Review is the Review's own failure (an error beside a Review, e.g. an authorization refused, leaves it to be reviewed again).
+  if (state.canReview) return !state.review && state.error !== null && !TRANSIENT_REVIEW_FAILURE.has(state.error) ? BATCH_RUN_BLOCKED.HELD : null;
+  if (state.availability && !state.availability.known) return BATCH_RUN_BLOCKED.CHECKING;
+  const code = state.availability?.code ?? null;
+  if (!state.available) return code !== null && TRANSIENT_REVIEW_FAILURE.has(code) ? BATCH_RUN_BLOCKED.HELD : BATCH_RUN_BLOCKED.UNAVAILABLE;
+  return BATCH_RUN_BLOCKED.HELD;
+}
 /**
  * Wallet answers that prove nothing was sent: the request was declined, or never made (no wallet, the network switch or account check failed,
  * or this browser could not keep its "handed to the wallet" record, WALLET_ATTEMPT_UNRECORDABLE).
@@ -174,6 +209,16 @@ const EVM_MAINNETS: readonly string[] = ['eip155:1', 'eip155:8453', 'eip155:4216
 export type EditorRunPhase = 'idle' | 'reviewing' | 'reviewed' | 'authorizing' | 'proving' | 'confirm-update' | 'wallet' | 'confirming' | 'running' | 'done';
 export type EditorWorkflowRunState = {
   readonly available: boolean; readonly phase: EditorRunPhase; readonly review: EditorExecutionReview | null; readonly error: string | null;
+  /**
+   * FE-BATCH-04: this deployment's answer about the whole-workflow path (`known` false until it arrives; `code` its closed reason when unavailable,
+   * e.g. ACCOUNT_SESSION_REQUIRED). Absent: a state without it.
+   */
+  readonly availability?: { readonly known: boolean; readonly code: string | null };
+  /**
+   * FE-BATCH-04: the Editor holds this path off right now: its `enabled` input is false (in the Editor's workspace, a restore or an execution of this
+   * visit on another path). Not the deployment's answer, which is `availability`.
+   */
+  readonly held?: boolean;
   readonly run: RunView | null;
   /**
    * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the Canvas workflow (id and revision) this tab's OWN shown run was authorized for, from its stored
@@ -234,7 +279,7 @@ export type EditorWorkflowRunState = {
 export function useEditorWorkflowRun(input: { readonly workflow: { readonly workflowId: string; readonly revision: number }; readonly evmAccount: string | null;
   readonly enabled: boolean; readonly single?: boolean }): EditorWorkflowRunState {
   const { workflow, evmAccount } = input;
-  const [availability, setAvailability] = useState<{ readonly enabled: boolean; readonly singleStep: boolean }>({ enabled: false, singleStep: false });
+  const [availability, setAvailability] = useState<{ readonly enabled: boolean; readonly singleStep: boolean; readonly known?: boolean; readonly code?: string | null }>({ enabled: false, singleStep: false });
   const available = availability.enabled;
   // A single card is reviewed and authorized here only where one-step runs exist. A run of this workflow already stored in this browser is
   // followed whatever that answer (or before it arrives): a started card is never offered again through its own flow.
@@ -286,8 +331,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const evmChains = [...new Set(chains.filter(c => c.startsWith('eip155:')))];
   const evmWorkflow = evmChains.length > 0 && !chains.some(c => c.startsWith('solana:'));
   // Re-read when the wallet changes (a FloFi sign-in usually comes with it): without an account session the step-by-step path stays primary.
-  useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailability({ enabled: r.enabled, singleStep: r.enabled && r.singleStep === true }))
-    .catch(() => setAvailability({ enabled: false, singleStep: false })); }, [evmAccount]);
+  useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailability({ enabled: r.enabled, singleStep: r.enabled && r.singleStep === true, known: true, code: r.code ?? null }))
+    .catch(() => setAvailability({ enabled: false, singleStep: false, known: true, code: 'EDITOR_EXECUTION_FAILED' })); }, [evmAccount]);
   // A Review describes one workflow revision and one wallet: any edit or wallet change makes it stale (nothing was started).
   const reviewKey = `${workflow.workflowId}:${workflow.revision}:${evmAccount ?? ''}`;
   const reviewedFor = useRef<string | null>(null);
@@ -731,6 +776,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const ownRun = Boolean(approvalId);
   const authorizedFor = ownRun && run && authorizedRevision.current !== null ? { workflowId: shownWorkflow.current, revision: authorizedRevision.current } : null;
   return { available: Boolean(approvalId) || available && enabled, phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, resume, signing, endAndReview,
+    availability: { known: availability.known === true, code: availability.enabled ? null : availability.code ?? null }, held: !followable,
     canReview: available && enabled && evmWorkflow && !approvalId,
     visible: Boolean(approvalId) || available && enabled,
     stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)

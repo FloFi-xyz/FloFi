@@ -9,8 +9,11 @@ import type { StrategySpec } from './strategy-spec';
 const EXAMPLE_ACCOUNT = '0x0000000000000000000000000000000000000001';
 /** BUILD-SOLANA-TRANSFER-UX-001: a valid Ed25519 wallet key (sha256("flofi-example-recipient") seed) used only to compose; never simulated. */
 const EXAMPLE_SOLANA_RECIPIENT = 'CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH';
-/** BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: two distinct placeholder recipients used only to compose a Batch Payment; never simulated or paid. */
-const EXAMPLE_PAYEES = ['0x0000000000000000000000000000000000000002', '0x0000000000000000000000000000000000000003'] as const;
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: two distinct illustrative recipients used only to compose a Batch Payment; never simulated or paid. Ordinary
+ * lower-case addresses outside the precompile range (0x…01..0x…ff, which a Batch Payment refuses as a payee: nobody holds their keys).
+ */
+const EXAMPLE_PAYEES = ['0x1234567890abcdef1234567890abcdef12345678', '0xabcdef0123456789abcdef0123456789abcdef01'] as const;
 const batch = (network: 'robinhood' | 'base' | 'arbitrum-one' | 'ethereum', asset: string, amounts: readonly [string, string]): StrategySpec =>
   ({ action: 'batch_payment', network, asset, recipients: EXAMPLE_PAYEES.map((recipient, i) => ({ recipient, amount: amounts[i]! })) });
 export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strategy: StrategySpec }[] = Object.freeze([

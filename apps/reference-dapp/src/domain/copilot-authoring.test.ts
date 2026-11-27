@@ -5,7 +5,8 @@ import { createBaseSepoliaReviewContext, createReviewContext } from '@defi-workf
 import { commandIsValid, parseLocalCommand } from './commands';
 import { editorReducer, initialEditor } from './editor';
 import { describeProposal } from './proposal';
-import { COPILOT_AUTHORING_COMMANDS, copilotIntentToCommand, groundedAddress, groundedAmount, groundedBps, mentionedNetworks, type CopilotOutcome } from './copilot-authoring';
+import { COPILOT_AUTHORING_COMMANDS, copilotIntentToCommand, copilotRejection, groundedAddress, groundedAmount, groundedBps, mentionedNetworks, writtenPayments,
+  type CopilotOutcome } from './copilot-authoring';
 
 const baseContext = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id,
   actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
@@ -340,5 +341,28 @@ describe('Ethereum Sepolia (BUILD-ETHEREUM-001)', () => {
     const ethereumComposition = { version: '1', kind: 'COMPOSITION', actions: [lending('SUPPLY', { network: 'ETHEREUM_SEPOLIA', asset: 'WBTC', amount: '0.01' }),
       lending('BORROW', { network: 'ETHEREUM_SEPOLIA', asset: 'USDC', amount: '1' }), swap({ network: 'ETHEREUM_SEPOLIA', amount: '1', outputAsset: 'WETH' })] };
     expect(convert(ethereumComposition, 'Supply 0.01 WBTC, borrow 1 USDC and swap the borrowed USDC to WETH on Ethereum Sepolia').kind).not.toBe('PROPOSAL');
+  });
+});
+
+describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment refusals and written payments', () => {
+  it('chat review M1/M2: every Batch Payment refusal the chat can reach is said in English and Portuguese, never as a raw code', () => {
+    const codes = ['BATCH_PAYMENT_DUPLICATE_RECIPIENT', 'BATCH_PAYMENT_RECIPIENT_INVALID', 'BATCH_PAYMENT_AMOUNT_INVALID', 'BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM',
+      'BATCH_PAYMENT_AMOUNT_TOO_PRECISE', 'BATCH_PAYMENT_TOO_MANY_RECIPIENTS', 'BATCH_PAYMENT_TOO_FEW_RECIPIENTS', 'BATCH_PAYMENT_ASSET_UNSUPPORTED',
+      'BATCH_PAYMENT_TOKEN_UNSUPPORTED', 'BATCH_PAYMENT_NETWORK_UNSUPPORTED', 'BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET', 'BATCH_PAYMENT_ASSET_MIXED'];
+    for (const code of codes) {
+      const en = copilotRejection(code, 'EN').message, pt = copilotRejection(code, 'PT').message;
+      for (const message of [en, pt]) expect(message, code).not.toMatch(/BATCH_PAYMENT|could not author|não conseguiu criar/);
+      expect(en, code).not.toBe(pt);
+    }
+    expect(copilotRejection('BATCH_PAYMENT_TOO_MANY_RECIPIENTS', 'EN').message).toContain('at most 8 recipients');
+    expect(copilotRejection('BATCH_PAYMENT_ASSET_MIXED', 'PT').message).toContain('um único ativo');
+  });
+  it('chat review H2: reads only payments the person paired, in their order ("to", "para"); a value written elsewhere pairs nothing', () => {
+    const A = '0x2222222222222222222222222222222222222222', B = '0x3333333333333333333333333333333333333333';
+    expect(writtenPayments(`Send 25 USDC to ${A}, 1,5 usdc para ${B} on Base`)).toEqual([{ written: '25', readings: ['25'], asset: 'USDC', recipient: A },
+      { written: '1,5', readings: ['1.5'], asset: 'usdc', recipient: B }]);
+    expect(writtenPayments(`Pay ${A} 1 USDC and ${B} 1000 USDC on Base`)).toEqual([]);
+    // Digits inside an address never start an amount.
+    expect(writtenPayments(`send to ${A} 5 ETH to ${B}`)).toEqual([{ written: '5', readings: ['5'], asset: 'ETH', recipient: B }]);
   });
 });

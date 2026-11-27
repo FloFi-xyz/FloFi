@@ -3,7 +3,7 @@
 import { displayAmountText } from '../domain/token-amount-display';
 import { useEffect, useRef, useState } from 'react';
 import type { AutomationInput } from '../automations/definition';
-import type { CopilotReply } from '../domain/copilot-conversation';
+import { batchPaymentConfirmation, type CopilotReply } from '../domain/copilot-conversation';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { parseLocalCommand, summarize, type Command } from '../domain/commands';
 import { editorReducer } from '../domain/editor';
@@ -111,10 +111,20 @@ export type PendingEdit = { readonly nodeId: string; readonly step: number; read
 type Question = { readonly open: PendingQuestion; readonly language: ConversationLanguage };
 type Workflow = LifecycleView['workflow'];
 type Commit = { readonly before: Workflow; readonly expected: Workflow; readonly role: 'flofi' | 'ai'; readonly language: ConversationLanguage; readonly notes: readonly string[]; readonly reviewed: boolean;
-  /** What a position operation does (it may leave the IR as it is): said instead of the step diff. */ readonly summary?: string | undefined };
+  /** What a position operation does (it may leave the IR as it is): said instead of the step diff. */ readonly summary?: string | undefined;
+  /** The Batch Payment the commit adds (its lines are written in each language the message is shown in). */ readonly batch?: CommitBatch | undefined };
 /** The Copilot's interpretation without its proposal instruction ("…nothing changes until you apply it"): the chat commits instead. */
 const APPLY_INSTRUCTION = /\s*(?:Review (?:the proposal |it )?below: nothing changes until you apply it\.|Apply the proposal, then Simulate, Review and sign in your wallet\.|Revise (?:a proposta )?abaixo: nada muda até você aplicá-la\.|Aplique a proposta e depois simule, revise e assine na sua carteira\.)\s*$/;
 const short = (value: string) => value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+/** Chat review L1: the Batch Payment a commit adds, and how many of the commit's notes come before its payment lines. */
+type CommitBatch = { readonly input: Extract<Command, { type: 'ADD_BATCH_PAYMENT' }>['input']; readonly at: number };
+const batchOf = (command: Command, at: number): { readonly batch?: CommitBatch } => command.type === 'ADD_BATCH_PAYMENT' ? { batch: { input: command.input, at } } : {};
+/**
+ * A commit's notes in `language`. Chat review L1 / C4: a Batch Payment's payment lines and all-or-nothing rule are written in the language the message
+ * is shown in (built per language, never reused from the commit's language); every other note is as given. Nothing else has them.
+ */
+const commitNotes = (commit: { readonly notes: readonly string[]; readonly batch?: CommitBatch | undefined }, language: ConversationLanguage): readonly string[] =>
+  commit.batch ? [...commit.notes.slice(0, commit.batch.at), ...batchPaymentConfirmation(commit.batch.input, language), ...commit.notes.slice(commit.batch.at)] : commit.notes;
 const actionable = (workflow: LifecycleView['workflow']) => composerActions(workflow).length > 0;
 /** BUILD-FLOFI-E2E-RELIABILITY-001: the public swap run behind the view (its quote binds the owner on owner-bound networks), else null. */
 type PublicRunFacts = { readonly quote?: { readonly ownerReview?: unknown } | null; readonly attempts?: readonly { readonly account?: string }[] } | null;
@@ -353,7 +363,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (!commit) return;
     const scope = session.current;
     if (state.workflow === commit.before) {
-      if (state.error) { const code = state.error.split(':')[0]!.trim(); pendingCommit.current = null; say(scope, commit.language, language => copilotRejection(code, language).message, commit.role, { notes: commit.notes }); }
+      if (state.error) { const code = state.error.split(':')[0]!.trim(); pendingCommit.current = null; say(scope, commit.language, language => [copilotRejection(code, language).message, { notes: commitNotes(commit, language) }], commit.role); }
       return;
     }
     pendingCommit.current = null;
@@ -369,7 +379,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     say(scope, commit.language, (language, c) => {
       const history = executed?.executed ? executed.executed > executed.carried ? [c.executedAgain] : [c.executedKept(executed.carried)] : whole ? [c.executedAgain] : [];
       return [commit.summary ? `${commit.summary}. ${c.positionPrepared}` : describeChatChange(commit.before, stored, context, language).join(' '),
-        { notes: [...commit.notes, ...commit.reviewed ? [c.changed] : [], ...history], question: c.nextQuestion, options: commit.summary ? [c.addAnother, c.review] : [c.addAnother, c.review, c.undo] }];
+        { notes: [...commitNotes(commit, language), ...commit.reviewed ? [c.changed] : [], ...history], question: c.nextQuestion, options: commit.summary ? [c.addAnother, c.review] : [c.addAnother, c.review, c.undo] }];
     }, commit.role);
     setQuestion({ open: { kind: 'NEXT_STEP', workflowId: stored.workflowId, revision: stored.revision }, language: commit.language });
   }
@@ -390,9 +400,10 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       options: [c.addAnother, c.modify, ...view.startNewWorkflow ? [c.startNew] : []] }]; });
   }
 
-  function commit(scope: number, command: Command, meta: { exact: boolean; role: 'flofi' | 'ai'; language: ConversationLanguage; notes: readonly string[]; summary?: string }) {
+  function commit(scope: number, command: Command, meta: { exact: boolean; role: 'flofi' | 'ai'; language: ConversationLanguage; notes: readonly string[]; summary?: string;
+    readonly batch?: CommitBatch }) {
     const now = latest.current, before = now.state.workflow;
-    if (now.bridge.editingPaused) { say(scope, meta.language, language => translate(language, EDITING_PAUSED), meta.role, { notes: meta.notes }); return; }
+    if (now.bridge.editingPaused) { say(scope, meta.language, language => [translate(language, EDITING_PAUSED), { notes: commitNotes(meta, language) }], meta.role); return; }
     const preview = editorReducer(now.state, command, now.context);
     const lost = preview.error ? [] : lostSteps(before, preview.workflow, command, now.context, meta.language);
     if (lost.length) {
@@ -400,20 +411,20 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // CTO decision (2026-11-25, no mandatory Canvas navigation): the proposal is resolved here or on the Canvas, bound to this exact command.
       setQuestion({ open: { kind: 'RESOLVE_PROPOSAL', workflowId: before.workflowId, revision: now.state.workflow.revision, command: JSON.stringify(command) }, language: meta.language });
       say(scope, meta.language, (language, c) => [c.destructive(lostSteps(before, preview.workflow, command, now.context, language).join(', ')),
-        { options: [c.applyEdit, c.discardEdit] }], meta.role, { notes: meta.notes }); return;
+        { notes: commitNotes(meta, language), options: [c.applyEdit, c.discardEdit] }], meta.role); return;
     }
     const result = commitChatCommand(command);
     if (!result.ok) {
       // A refusal sentence (a test network in the public product) is shown as is (the interface translates it); an editor code gets the
       // Copilot's existing explanation.
       const error = result.error;
-      say(scope, meta.language, (language, c) => error === 'NO_CHANGE' ? c.noChange : error.startsWith('LOCKED_PARAMETER') ? c.locked : / /.test(error) && !/^[A-Z_]+:/.test(error) ? error
-        : copilotRejection(error.split(':')[0]!.trim(), language).message, meta.role, { notes: meta.notes }); return;
+      say(scope, meta.language, (language, c) => [error === 'NO_CHANGE' ? c.noChange : error.startsWith('LOCKED_PARAMETER') ? c.locked : / /.test(error) && !/^[A-Z_]+:/.test(error) ? error
+        : copilotRejection(error.split(':')[0]!.trim(), language).message, { notes: commitNotes(meta, language) }], meta.role); return;
     }
     copilot.committed(command, result.expected, meta.exact);
     setQuestion(null);
     const pending: Commit = { before: result.before, expected: result.expected, role: meta.role, language: meta.language, notes: meta.notes, reviewed: Boolean(now.bridge.authorization.key),
-      summary: meta.summary };
+      summary: meta.summary, batch: meta.batch };
     // A position operation on the step the workflow already holds leaves the IR as it is: it only prepares the operation for Simulate.
     if (result.expected === result.before) { lastCommit.current = null; confirm(scope, pending, result.before); return; }
     pendingCommit.current = pending;
@@ -1153,14 +1164,19 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         return;
       }
       copilot.reset();
-      if (direct) { commit(scope, command, { exact: true, role: 'flofi', language, notes: [] }); return; }
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review L1): a Batch Payment's confirmation lists every recipient and amount and its
+      // all-or-nothing rule before Review.
+      if (direct) { commit(scope, command, { exact: true, role: 'flofi', language, notes: [], ...batchOf(command, 0) }); return; }
       propose(command);
       // A catalog message with its values (never an English sentence with the request spliced in).
       append(scope, { role: 'system', text: 'Proposal: {0}. Review against revision {1} before applying.', params: [request, String(command.baseRevision)] });
     } catch (cause) {
       // BUILD-FLOFI-CHAT-E2E-FIX-002: a native-ETH swap where none exists is refused with its exact reason, deterministically (ETH is never authored
       // as WETH). BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a wrap without its network, or a swap without its amount, is asked for — never guessed.
-      if (cause instanceof Error && ['SWAP_NATIVE_ASSET_UNSUPPORTED', 'WRAP_NETWORK_REQUIRED', 'SWAP_AMOUNT_REQUIRED'].includes(cause.message)) {
+      // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review M2): a `pay` request FloFi read and refused (a repeated recipient, an invalid,
+      // too precise or too large amount, an unsupported network or asset, two assets) says why; it is never handed to an interpretation that could
+      // turn it into separate, non-atomic transfers.
+      if (cause instanceof Error && (['SWAP_NATIVE_ASSET_UNSUPPORTED', 'WRAP_NETWORK_REQUIRED', 'SWAP_AMOUNT_REQUIRED'].includes(cause.message) || /^BATCH_PAYMENT_[A-Z_]+$/.test(cause.message))) {
         const code = cause.message;
         dismissProposal(); say(scope, language, language => copilotRejection(code, language).message, 'system'); return;
       }
@@ -1179,7 +1195,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           // A position operation (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a verified mainnet position too) is said as what it prepares, not as a step diff.
           const position = reply.command.type === 'MANAGE_SOLANA_POSITION' || reply.command.type === 'MANAGE_LIQUIDITY_POSITION';
           commit(scope, reply.command, { exact: false, role: 'ai', language: spoken, ...position && read
-            ? { summary: read.replace(/\.$/, ''), notes: reply.notes } : { notes: [...read ? [read] : [], ...reply.notes] } });
+            ? { summary: read.replace(/\.$/, ''), notes: reply.notes } : { notes: [...read ? [read] : [], ...reply.notes], ...batchOf(reply.command, read ? 1 : 0) } });
           // BUILD-FLOFI-UNIFIED-COPILOT-001: the optional offer to save the typed address, after the proposal and independent of it.
           if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
           return;

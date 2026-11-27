@@ -25,8 +25,20 @@ export const portugueseBatchPayment: Readonly<Record<string, string>> = {
   'Batch Payment is available on Base, Arbitrum One, Ethereum and Robinhood Chain.': 'O pagamento em lote está disponível na Base, Arbitrum One, Ethereum e Robinhood Chain.',
   'Choose an asset available for Batch Payment on this network.': 'Escolha um ativo disponível para pagamento em lote nesta rede.',
   'Check the recipients and amounts.': 'Confira os destinatários e os valores.',
+  // Shown when another card is still being configured (existing Canvas feedback, now also on the Batch Payment path); it had no PT entry.
+  'Configure this action before adding another.': 'Configure esta ação antes de adicionar outra.',
   'An ETH amount is above the per-payment maximum FloFi sends on this network. Lower it or split the payment.':
     'Um valor em ETH está acima do máximo por pagamento que a FloFi envia nesta rede. Diminua o valor ou divida o pagamento.',
   'An amount has more decimal places than this asset allows.': 'Um valor tem mais casas decimais do que este ativo permite.',
   'ETH is paid only to plain wallet addresses (not contracts or smart accounts).': 'ETH é pago apenas para endereços de carteira comuns (não contratos nem contas inteligentes).',
+  // Review fixes (FE-BATCH-04/07/10/11): the asset a network change cleared, the total without an asset, and why the card's run action is closed.
+  'Choose an asset': 'Escolha um ativo',
+  'Recipient {0} amount': 'Valor do destinatário {0}',
+  'Total: choose an asset': 'Total: escolha um ativo',
+  'Checking whether this Batch Payment can run here…': 'Verificando se este pagamento em lote pode ser executado aqui…',
+  'Sign in to your FloFi account to simulate and run this Batch Payment.': 'Entre na sua conta FloFi para simular e executar este pagamento em lote.',
+  'Batch Payment cannot run on this FloFi deployment yet. Nothing was signed or sent.': 'O pagamento em lote ainda não pode ser executado nesta implantação da FloFi. Nada foi assinado nem enviado.',
+  'This Batch Payment cannot be simulated right now. Nothing was signed or sent.': 'Este pagamento em lote não pode ser simulado agora. Nada foi assinado nem enviado.',
+  'This Batch Payment runs only as one atomic approval in your wallet (every payment, or none), and that is not available here. Nothing was signed or sent.':
+    'Este pagamento em lote só é executado como uma única aprovação atômica na sua carteira (todos os pagamentos, ou nenhum), e isso não está disponível aqui. Nada foi assinado nem enviado.',
 };

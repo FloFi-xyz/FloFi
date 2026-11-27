@@ -111,6 +111,42 @@ describe('explain_strategy: a composed strategy explained, never a live value', 
     }
   }, 30_000);
 
+  it('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment is explained as its ONE operation, between the steps around it, each line its own step', async () => {
+    const c = client(), A = '0x' + 'a1'.repeat(20), B = '0x' + 'b2'.repeat(20), C = '0x' + 'c3'.repeat(20);
+    const SWAP = { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1.5', slippageBps: 100 };
+    const BATCH = { action: 'batch_payment', network: 'base', asset: 'USDC', recipients: [{ recipient: A, amount: '25' }, { recipient: B, amount: '50' }, { recipient: C, amount: '75' }] };
+    type Explained = { stepCount: number; steps: { index: number; workflowStep: number; legs?: number[]; action: string; kind: string; description: string; keyConcepts: string[] }[];
+      concepts: { id: string; inWorkflow: string }[]; review: { steps: unknown[] } };
+    for (const language of ['EN', 'PT'] as const) {
+      const strategy = { version: 2, steps: [SWAP, BATCH, SWAP] };
+      const composed = await c.callTool('compose_strategy', { strategy, expectedStepCount: 3 });
+      const explained = (await c.callTool('explain_strategy', { strategy, workflowHash: composed.output.workflowHash, language })).output as unknown as Explained;
+      // Three operations (the batch once, with every payment), on the legs compose_strategy and the review report (swap 0, payments 1..3, swap 4).
+      expect(explained.stepCount).toBe(5);
+      expect(explained.review.steps).toHaveLength(5);
+      expect(explained.steps.map(s => [s.index, s.workflowStep, s.legs ?? null, s.action, s.kind])).toEqual([[1, 0, null, 'swap', 'SWAP'],
+        [2, 1, [1, 3], 'batch_payment', 'BATCH_PAYMENT'], [3, 4, null, 'swap', 'SWAP']]);
+      const [first, batch, last] = explained.steps;
+      expect(first!.description).toMatch(/^(Swap|Trocar) \(Uniswap v3\) · 1\.5 USDC → WETH · Base/);
+      expect(batch!.description).toBe(language === 'EN'
+        ? 'Batch Payment · Total 150 USDC · Base · 3 recipients · All or nothing: one wallet authorization · 25 USDC → 0xa1a1…a1a1 · 50 USDC → 0xb2b2…b2b2 · 75 USDC → 0xc3c3…c3c3'
+        : 'Pagamento em lote · Total 150 USDC · Base · 3 destinatários · Tudo ou nada: uma só autorização da carteira · 25 USDC → 0xa1a1…a1a1 · 50 USDC → 0xb2b2…b2b2 · 75 USDC → 0xc3c3…c3c3');
+      expect(last!.description).toBe(first!.description);
+      expect(first!.keyConcepts).toEqual(['SLIPPAGE', 'TOKEN_APPROVAL']);
+      expect(batch!.keyConcepts).toEqual([]);
+      // The fees concept locates the batch as the one step it is, never one line per payment.
+      const fees = explained.concepts.find(item => item.id === 'GAS_FEES')!;
+      expect(fees.inWorkflow.match(/Batch Payment|Pagamento em lote/g)).toHaveLength(1);
+      expect(`${explained.steps.map(s => s.description).join('\n')}\n${fees.inWorkflow}`).not.toMatch(/Transfer|Transferir/);
+    }
+    // A lone Batch Payment: one step explained, its legs named, all or nothing said once (by the workflow warning, not again on the card).
+    const lone = (await c.callTool('explain_strategy', { strategy: BATCH })).output as unknown as Explained & { warnings: string[] };
+    expect(lone.steps.map(s => [s.index, s.workflowStep, s.legs, s.description])).toEqual([[1, 0, [0, 2],
+      'Batch Payment · Total 150 USDC · Base · 3 recipients · 25 USDC → 0xa1a1…a1a1 · 50 USDC → 0xb2b2…b2b2 · 75 USDC → 0xc3c3…c3c3']]);
+    expect(lone.warnings).toEqual(['REAL_FUNDS', 'BATCH_PAYMENT_ALL_OR_NOTHING']);
+    expect(lone.concepts.map(item => item.id)).toContain('GAS_FEES');
+  });
+
   it('refuses an invalid strategy with the same closed codes as compose_strategy, never an explanation', async () => {
     const c = client(), strategy = example('bridge-base-arbitrum-one');
     for (const bad of [{ ...strategy, destinationNetwork: 'base-sepolia' }, { ...strategy, amount: '5 USDC' }, { ...strategy, calldata: '0xa9059cbb' }]) {

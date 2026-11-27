@@ -10,8 +10,9 @@
  * operation): every leg settles, or none does. A wallet or deployment that cannot do that refuses the operation; it is never split into separate
  * transfers on its own.
  *
- *   payments   2..BATCH_PAYMENT_MAX_RECIPIENTS ordered `{recipient, amount}`: an explicit lower-case EVM address (never the zero address, never the
- *              connected owner placeholder) and a positive integer amount in the asset's base units; a recipient appears at most once
+ *   payments   2..BATCH_PAYMENT_MAX_RECIPIENTS ordered `{recipient, amount}`: an explicit lower-case EVM address (never the zero address, never a
+ *              precompile address 0x…01..0x…ff, never the connected owner placeholder) and a positive integer amount in the asset's base units; a
+ *              recipient appears at most once
  *   total      the exact integer sum of the amounts, the node's MAXIMUM_INPUT (what the source wallet spends, before network fees)
  */
 import { canonicalJson } from './canonical.js';
@@ -32,7 +33,12 @@ export type BatchPaymentLine = { readonly recipient: string; readonly amount: st
 export type BatchPaymentFields = { readonly chain: string; readonly asset: BatchPaymentAsset; readonly payments: readonly BatchPaymentLine[] };
 type Node = SemanticWorkflow['nodes'][number];
 
-const CHAIN = /^eip155:[1-9][0-9]{0,18}$/, ADDRESS = /^0x[0-9a-f]{40}$/, ZERO = '0x0000000000000000000000000000000000000000';
+const CHAIN = /^eip155:[1-9][0-9]{0,18}$/, ADDRESS = /^0x[0-9a-f]{40}$/;
+/**
+ * The zero address and the precompile range (0x…00 to 0x…ff: ecrecover, sha256, …, and the addresses EVM chains reserve for their own precompiles).
+ * Nobody holds a key for them, so a payment there is lost; they are refused like the zero address, never paid.
+ */
+const RESERVED = /^0x0{38}[0-9a-f]{2}$/;
 const UNITS = /^[1-9][0-9]{0,77}$/, OFFICIAL_ID = /^0x[0-9a-f]{64}$/, MAX_UINT256 = (1n << 256n) - 1n;
 function fail(code: string): never { throw new Error(code); }
 const slot = (index: number) => String(index + 1).padStart(2, '0');
@@ -62,7 +68,7 @@ export function validateBatchPaymentFields(fields: BatchPaymentFields): void {
   if (fields.payments.length > BATCH_PAYMENT_MAX_RECIPIENTS) fail('BATCH_PAYMENT_TOO_MANY_RECIPIENTS');
   const seen = new Set<string>();
   for (const p of fields.payments) {
-    if (!p || typeof p.recipient !== 'string' || !ADDRESS.test(p.recipient) || p.recipient === ZERO) fail('BATCH_PAYMENT_RECIPIENT_INVALID');
+    if (!p || typeof p.recipient !== 'string' || !ADDRESS.test(p.recipient) || RESERVED.test(p.recipient)) fail('BATCH_PAYMENT_RECIPIENT_INVALID');
     // A second payment to the same address is never merged or dropped: it is refused, and the person decides.
     if (seen.has(p.recipient)) fail('BATCH_PAYMENT_DUPLICATE_RECIPIENT');
     seen.add(p.recipient);

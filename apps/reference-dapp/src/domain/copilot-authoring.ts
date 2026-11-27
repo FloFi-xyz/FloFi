@@ -305,6 +305,17 @@ function slippageWritten(text: string, value: string): boolean {
   return [...own.matchAll(new RegExp(SLIPPAGE_WORD, 'giu'))].some(word => [...own.slice(word.index, word.index + word[0].length + 40)
     .matchAll(new RegExp(String.raw`(${UNSIGNED_SLIPPAGE})\s*(%|${BPS_UNIT})`, 'giu'))].some(match => bps(match[1]!, match[2] === '%' ? '%' : undefined) === value));
 }
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review H2): the payments a person's own words pair, in their order: each explicit clause
+ * "<amount> <asset> to <0x address>" ("para" / "pra" in Portuguese). `groundedAmount` and `groundedAddress` only show that a value appears somewhere
+ * in the request; they never show which amount belongs to which recipient. A Batch Payment is proposed only when the interpreted sends are exactly
+ * these clauses (`readings`: every exact reading of the written amount).
+ */
+export type WrittenPayment = { readonly written: string; readonly readings: readonly string[]; readonly asset: string; readonly recipient: string };
+const PAYMENT_CLAUSE = /(?<![A-Za-z0-9_.,])(\d(?:[\d.,]*\d)?)\s*([A-Za-z][A-Za-z0-9.-]{0,23})\s+(?:to|para|pra)\s+(0x[0-9a-fA-F]{40})(?![0-9a-fA-F])/gi;
+export function writtenPayments(text: string): WrittenPayment[] {
+  return [...text.matchAll(PAYMENT_CLAUSE)].map(match => ({ written: match[1]!, readings: amountReadings(match[1]!), asset: match[2]!, recipient: match[3]! }));
+}
 export function groundedAddress(text: string, address: string): boolean {
   if (!address.startsWith('0x')) return [...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => match[0] === address);
   return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => match[0].toLowerCase() === address.toLowerCase());

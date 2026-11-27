@@ -25,6 +25,7 @@
  * `final` means nothing changes without a new action by the person. Only CONFIRMED is ever reported as completion.
  */
 import { canonicalRunLifecycle, type CanonicalExecutionStatus, type CanonicalLifecycle } from '../domain/canonical-execution-status.ts';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS } from '@defi-workflow-engine/workflow-contracts';
 import { MAX_WORKFLOW_STEPS } from '../engine/strategy-spec';
 
 export const CONVERSATION_STATES = Object.freeze(['DRAFT_CREATED', 'MISSING_INFORMATION', 'VALIDATION_REQUIRED', 'SIMULATION_COMPLETED', 'REVIEW_REQUIRED',
@@ -229,6 +230,25 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
       '(every payment, or none), and that is not available here. Nothing was signed or sent. Use a wallet that supports atomic batches, or send separate transfers.',
     PT: 'Este Pagamento em lote só pode executar como uma autorização atômica da sua própria carteira (todos os pagamentos, ou nenhum), e isso não está disponível ' +
       'aqui. Nada foi assinado nem enviado. Use uma carteira que suporte lotes atômicos, ou envie transferências separadas.' }],
+  // Review MCP-5: a recipient count outside 2..8 is said as such (TOO_MANY would otherwise read as the rate-limit family, TOO_FEW as the fallback).
+  [/^BATCH_PAYMENT_TOO_MANY_RECIPIENTS$/, { EN: `A Batch Payment pays at most ${BATCH_PAYMENT_MAX_RECIPIENTS} recipients, and this one has more. No recipient was ` +
+      'dropped, and nothing was signed or sent. Remove recipients, or split the payments into two separate workflows.',
+    PT: `Um Pagamento em lote paga no máximo ${BATCH_PAYMENT_MAX_RECIPIENTS} destinatários, e este tem mais. Nenhum destinatário foi descartado, e nada foi ` +
+      'assinado nem enviado. Remova destinatários ou divida os pagamentos em dois fluxos separados.' }],
+  [/^BATCH_PAYMENT_TOO_FEW_RECIPIENTS$/, { EN: `A Batch Payment pays at least ${BATCH_PAYMENT_MIN_RECIPIENTS} recipients. To pay one recipient, use a transfer. ` +
+      'Nothing was signed or sent.',
+    PT: `Um Pagamento em lote paga pelo menos ${BATCH_PAYMENT_MIN_RECIPIENTS} destinatários. Para pagar um único destinatário, use uma transferência. ` +
+      'Nada foi assinado nem enviado.' }],
+  // Review M6: an invalid recipient or amount names what each payment needs (the generic INVALID family would only say "some details are invalid").
+  [/^BATCH_PAYMENT_RECIPIENT_INVALID$/, { EN: 'Every recipient of a Batch Payment must be a valid 0x wallet address: a mixed-case address must match its checksum, ' +
+      'and a reserved system address (0x…00 to 0x…ff) is never a recipient. FloFi never corrects an address. Nothing was signed or sent. Check each address.',
+    PT: 'Cada destinatário de um Pagamento em lote precisa ser um endereço de carteira 0x válido: um endereço com maiúsculas e minúsculas precisa corresponder ao ' +
+      'seu checksum, e um endereço reservado do sistema (0x…00 a 0x…ff) nunca é destinatário. O FloFi nunca corrige um endereço. Nada foi assinado nem enviado. ' +
+      'Confira cada endereço.' }],
+  [/^BATCH_PAYMENT_AMOUNT_INVALID$/, { EN: 'Every recipient of a Batch Payment needs a positive amount. Nothing was signed or sent. Check each amount.',
+    PT: 'Cada destinatário de um Pagamento em lote precisa de um valor positivo. Nada foi assinado nem enviado. Confira cada valor.' }],
+  [/^BATCH_PAYMENT_ASSET_MIXED$/, { EN: 'One Batch Payment pays one asset on one network. Nothing was signed or sent.',
+    PT: 'Um Pagamento em lote paga um único ativo em uma única rede. Nada foi assinado nem enviado.' }],
   [/^BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET$/, { EN: `Each recipient of a Batch Payment counts as one of the ${MAX_WORKFLOW_STEPS} steps of a workflow, and this ` +
       'workflow has more. Nothing was dropped, signed or sent. Pay fewer recipients or split it into two workflows.',
     PT: `Cada destinatário de um Pagamento em lote conta como uma das ${MAX_WORKFLOW_STEPS} etapas de um fluxo, e este fluxo tem mais. Nada foi descartado, assinado ` +
@@ -251,6 +271,11 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
       + 'ask your wallet again (that could pay every recipient twice). Check your wallet\u2019s activity; you can end the run at any time.',
     PT: 'O FloFi ainda não consegue provar pela rede que o pedido anterior deste Pagamento em lote nunca executou, então não pede de novo à sua carteira (isso poderia '
       + 'pagar cada destinatário duas vezes). Confira a atividade da sua carteira; você pode encerrar a execução a qualquer momento.' }],
+  // Review MCP-5: the earlier request can never be proven unexecuted (e.g. an ETH batch): FloFi will not ask the wallet again; the person starts afresh.
+  [/^BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE$/, { EN: 'FloFi cannot prove from the chain that the earlier request of this Batch Payment never executed (for example, '
+      + 'an ETH batch), so it will not ask your wallet again. Check your wallet’s activity first, then end the run and start a new Review.',
+    PT: 'O FloFi não consegue provar pela rede que o pedido anterior deste Pagamento em lote nunca executou (por exemplo, um lote em ETH), então não vai pedir '
+      + 'de novo à sua carteira. Confira primeiro a atividade da sua carteira; depois encerre a execução e comece uma nova Revisão.' }],
   [/^WALLET_BATCH_PARTIALLY_EXECUTED$/, { EN: 'Your wallet sent this batch as several transactions and only some of them succeeded, so part of it executed. FloFi records '
       + 'it for review and never sends it again; check each transaction before doing anything else.',
     PT: 'Sua carteira enviou este lote como várias transações e só algumas deram certo, então parte dele foi executada. O FloFi registra isso para revisão e nunca o '

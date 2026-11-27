@@ -213,7 +213,7 @@ const STEP_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting', RE
   GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet', GROUP_NOT_SIGNED: 'not signed', OUTCOME_UNKNOWN: 'outcome unknown — it may have executed; check your wallet\'s activity',
   RECONCILED: 'reconciled ✅', FAILED: 'failed', UNCERTAIN: 'outcome pending', SKIPPED: 'not run', BLOCKED: 'stopped before submission' };
 const ACTION_EN: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
-  add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
+  add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition', batch_payment: 'Batch Payment' };
 const RUN_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'esperando você escolher como autorizar', RUNNING: 'em execução', COMPLETED: 'concluído ✅',
   HALTED: 'interrompido', HALTED_PARTIAL: 'parcialmente concluído', HALTED_NOTHING_SENT: 'interrompido antes de qualquer envio', HALTED_STOPPED: 'interrompido', FAILED: 'falhou',
   ATTENTION: 'requer atenção', CANCELLED: 'encerrado', EXPIRED: 'expirado' };
@@ -221,7 +221,7 @@ const STEP_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'em espera', 
   GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira', GROUP_NOT_SIGNED: 'não assinada', OUTCOME_UNKNOWN: 'resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira',
   RECONCILED: 'reconciliada ✅', FAILED: 'falhou', UNCERTAIN: 'resultado pendente', SKIPPED: 'não executada', BLOCKED: 'parada antes do envio' };
 const ACTION_PT: Readonly<Record<string, string>> = { swap: 'Troca', bridge: 'Ponte entre redes', supply: 'Depósito', borrow: 'Empréstimo', repay: 'Reembolso', withdraw: 'Saque',
-  add_liquidity: 'Liquidez', transfer: 'Transferência', lending_composition: 'Composição de empréstimo' };
+  add_liquidity: 'Liquidez', transfer: 'Transferência', lending_composition: 'Composição de empréstimo', batch_payment: 'Pagamento em lote' };
 const REFUSALS_EN: Readonly<Record<string, string>> = {
   MAINNET_HANDOFF_DISABLED_BY_POLICY: 'This strategy uses a mainnet (real funds). Proposals with real funds are disabled for this channel.',
   TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY: 'Test-network proposals are disabled for this channel.',

@@ -13,7 +13,7 @@ import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput, isSolanaTransferNetwork } from './robinhood-transfer-authoring';
-import { createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
+import { BATCH_PAYMENT_NETWORKS, createAuthoredBatchPayment, type BatchPaymentInput } from './batch-payment-authoring';
 import { parseSolanaTransferChat } from './solana-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
@@ -27,7 +27,7 @@ import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
 import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
-import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, copilotNetworksMentioned, networkIdentity, networkOfCopilot } from './network-registry';
+import { CATALOG_CHAT_NETWORKS, NETWORKS, catalogNetworkOfChatName, copilotNetworksMentioned, networkIdentity, networkOfCopilot, type NetworkIdentity } from './network-registry';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
 /**
@@ -59,6 +59,15 @@ function nativeSwapNetwork(tail: string): boolean {
 }
 const lendingAsset = (network: SupplyInput['network'], text: string): SupplyInput['asset'] =>
   lendingProfileFor(network, text).symbol;
+/**
+ * The registry network a chat sentence names after "on", as a whole (a catalog chat name, a display name or alias in any case, a Copilot mention,
+ * or a network FloFi only names), or null for a name FloFi does not know.
+ */
+function namedNetwork(text: string): NetworkIdentity | null {
+  const name = text.trim(), lower = name.toLowerCase();
+  return catalogNetworkOfChatName(name) ?? NETWORKS.find(n => n.name.toLowerCase() === lower || n.aliases.some(alias => alias.toLowerCase() === lower)
+    || (n.mention !== null && new RegExp(`^(?:${n.mention.source})$`, 'i').test(name))) ?? networkIdentity(name);
+}
 /**
  * BUILD-FLOFI-INTELLIGENCE-001: the authoring commands a goal plan may combine into one `ADD_SEQUENCE` (each step is an independent single-action
  * runtime step of a reviewed sequence, `domain/workflow-sequence.ts`).
@@ -232,12 +241,30 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     const lines = parts.map(part => new RegExp(`^([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} to (0x[0-9a-fA-F]{40})$`, 'i').exec(part.trim()));
     if (lines.length >= 2 && lines.every(Boolean)) {
       const symbols = new Set(lines.map(line => symbolOn(batchNetwork.chain, line![2]!)));
-      if (symbols.size === 1) {
-        const fields: BatchPaymentInput = { network: batchNetwork.name as BatchPaymentInput['network'], asset: [...symbols][0]!,
-          payments: lines.map(line => ({ recipient: line![3]!.toLowerCase(), amount: line![1]! })) };
-        createAuthoredBatchPayment('node-preview', fields);
-        return { type: 'ADD_BATCH_PAYMENT', input: fields, source: 'CHAT', baseRevision: workflow.revision };
-      }
+      // Chat review M2: one asset pays every recipient. Two assets are a closed refusal, never left to an interpretation that could turn them into
+      // separate (non-atomic) transfers.
+      if (symbols.size !== 1) throw new Error('BATCH_PAYMENT_ASSET_MIXED');
+      // Chat review H1: each recipient exactly as typed. `createAuthoredBatchPayment` applies the EIP-55 rule (a mixed-case address must be its exact
+      // checksum encoding) and lower-cases it in the node; lower-casing it here first would have accepted a mistyped checksum.
+      const fields: BatchPaymentInput = { network: batchNetwork.name as BatchPaymentInput['network'], asset: [...symbols][0]!,
+        payments: lines.map(line => ({ recipient: line![3]!, amount: line![1]! })) };
+      createAuthoredBatchPayment('node-preview', fields);
+      return { type: 'ADD_BATCH_PAYMENT', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+    }
+  }
+  // Chat review C3: a request that is clearly a pay list ("(batch) pay <amount> <asset> to <x>, … on <network>", two or more payments, a network FloFi
+  // knows) is only ever one Batch Payment. On a network Batch Payment does not pay (a test network, Solana, a network FloFi only names), or with a
+  // recipient that is not an explicit 0x address ("my wallet", a name: never resolved inside a batch), it is a closed refusal, never left to an
+  // interpretation that could author separate, non-atomic transfers.
+  const payList = /^(?:batch )?pay (.+) on (.+)$/i.exec(input);
+  const payNetwork = payList ? namedNetwork(payList[2]!) : null;
+  if (payList && payNetwork) {
+    const lines = payList[1]!.split(/\s*(?:,|\band\b)\s*/i).filter(Boolean).map(part => new RegExp(`^[0-9]+(?:\\.[0-9]+)? ${SYMBOL} to (\\S.*)$`, 'i').exec(part.trim()));
+    if (lines.length >= 2 && lines.every(Boolean)) {
+      if (!(BATCH_PAYMENT_NETWORKS as readonly string[]).includes(payNetwork.name)) throw new Error('BATCH_PAYMENT_NETWORK_UNSUPPORTED');
+      // A recipient that names no full address at all. One that holds an address with more words ("0x… on Base") is not this grammar: it is read as
+      // before (the interpretation must still pair every payment exactly as written).
+      if (lines.some(line => !/0x[0-9a-fA-F]{40}/.test(line![2]!))) throw new Error('BATCH_PAYMENT_RECIPIENT_INVALID');
     }
   }
   const catalogTransfer = new RegExp(`^(?:transfer|send) ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: to (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);

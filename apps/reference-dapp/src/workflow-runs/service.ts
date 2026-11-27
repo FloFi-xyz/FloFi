@@ -309,6 +309,24 @@ function holdsBatchPayment(run: RunRecord, g: Pick<GroupRecord, 'stepFrom' | 'st
   if (!composed.ok) return true;
   return (composed.batches ?? []).some(b => b.from <= g.stepTo && g.stepFrom <= b.to);
 }
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review SEC-3): why the chain can never prove that the wallet batch prepared for this group was not
+ * sent (`declineProofFacts`, anchored exactly as the re-preparation proof reads it), or null when a proof may still succeed later. Structural only:
+ * no chain read, and the answer never changes for the same preparation.
+ */
+function batchRequestUnprovable(g: Pick<GroupRecord, 'prepared'>): string | null {
+  const facts = declineProofFacts(g.prepared, true);
+  return 'reason' in facts ? facts.reason : null;
+}
+/**
+ * Review SEC-3: a Batch Payment request handed to the owner's wallet, never answered, past its on-chain deadline and settle margin, that the chain
+ * can never prove unsent: it is never handed out again (`BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE`), so the owner decides (check the wallet's
+ * activity, end the run, start a new Review); never offered as something to sign.
+ */
+function unprovableBatchRequest(run: RunRecord, g: GroupRecord | undefined, now: Date): boolean {
+  return Boolean(g && g.state === 'PREPARED' && walletBatchUnanswered(g) && g.validUntil && g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS <= now.getTime()
+    && holdsBatchPayment(run, g) && batchRequestUnprovable(g));
+}
 async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord): Promise<RunRecord> {
   const atomicOnly = holdsBatchPayment(run, g);
   if (atomicOnly && g.code !== null && PERMANENT_DUE_REFUSALS.has(g.code)) refuse('BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION');
@@ -620,6 +638,13 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   // owner's nonce and transfers unchanged since it was prepared). A wallet that does not dedupe EIP-5792 ids, or a second wallet instance, would
   // otherwise pay every recipient twice. Unproven: the owner confirms the open request, or ends the run (its outcome stays to be observed).
   if (rewrite && rewrite.validUntil && holdsBatchPayment(run, rewrite)) {
+    // Review SEC-3: a request no chain read can ever prove unsent (it sends ETH, which moves without a log; FloFi sponsored it; it was prepared
+    // again already; its preparation recorded no nonce or block) is refused for good, without reading the chain: asking again never changes it.
+    const unprovable = batchRequestUnprovable(rewrite);
+    if (unprovable) {
+      deps.log('workflow_run.batch_payment_rewrite_unprovable', { runId: run.runId, group: groupIndex, reason: unprovable });
+      refuse('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVABLE');
+    }
     const key = `rewrite:${run.runId}:${groupIndex}:${String((rewrite.prepared as { preparedAt?: unknown } | null)?.preparedAt)}`, last = recentUnproven.get(key);
     if (last !== undefined && now.getTime() - last < DECLINE_PROOF_RETRY_MS) refuse('BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN');
     const proof = await proveDeclinedBatchUnsent(deps.userFunded?.evm(g.chain) ?? null, rewrite.prepared, new Date(rewrite.validUntil.getTime() + WALLET_BATCH_SETTLE_MS), now, true);
@@ -1005,6 +1030,17 @@ async function batchAnsweredAfterStop(deps: WorkflowRunDeps, run: RunRecord, g: 
   return refuse('WALLET_BATCH_ANSWERED_AFTER_STOP');
 }
 /**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review SEC-4): how many transactions the owner's browser may report for a wallet batch group. A wallet
+ * that ignores `atomicRequired` sends one transaction per call (an 8-recipient Batch Payment is 9 calls with its deadline guard, more with a
+ * funding step), and its partial execution must still be recorded: one per prepared call of any preparation of the group, never fewer than the
+ * earlier fixed 8, never more than a batch can hold (`erc4337.MAX_BATCH_CALLS`, 16).
+ */
+const MAX_REPORTED_HASHES = 16, MIN_REPORTED_HASHES = 8;
+function reportableHashes(g: GroupRecord): number {
+  const calls = supersede(g.prepared as Prepared | null).map(e => Array.isArray(e.group?.calls) ? e.group.calls.length : 0);
+  return Math.min(MAX_REPORTED_HASHES, Math.max(MIN_REPORTED_HASHES, ...calls));
+}
+/**
  * The owner's browser reports the transactions of a wallet batch (from `wallet_getCallsStatus`): only the hashes are taken; the chain decides.
  * `notSent`: the wallet reported the batch failed OFF chain (EIP-5792 status 400, no receipt): nothing was sent, so the group stops before
  * anything ran (BLOCKED) and the owner decides (end the run, or resume it). Either report for a group FloFi stopped while its batch was
@@ -1034,7 +1070,8 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
     await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', 'EIP5792_BATCH_NOT_SENT');
     return (await deps.store.byId(run.runId))!;
   }
-  if (!Array.isArray(hashes) || !hashes.length || hashes.length > 8 || hashes.some(h => typeof h !== 'string' || !/^0x[0-9a-f]{64}$/.test(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
+  if (!Array.isArray(hashes) || !hashes.length || hashes.length > reportableHashes(g)
+    || hashes.some(h => typeof h !== 'string' || !/^0x[0-9a-f]{64}$/.test(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
   // A transaction already counted for another group of this run can never reconcile this one.
   const used = new Set(groups.filter(x => x.groupIndex !== groupIndex).flatMap(x => (x.submission as { hashes?: string[] } | null)?.hashes ?? []));
   if (hashes.some(h => used.has(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
@@ -1123,6 +1160,8 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly delivery?: { readonly step: number; readonly chain: string; readonly state: BridgeDeliveryState;
     readonly fill: { readonly hash: string; readonly explorerUrl: string | null } | null } | null };
 
+/** The code a wallet batch group and its steps carry when the wallet split it and only part of it succeeded (`user-funded/evm-reconcile.ts`). */
+const WALLET_BATCH_PARTIALLY_EXECUTED = 'WALLET_BATCH_PARTIALLY_EXECUTED';
 /**
  * Whether the run's own records PROVE nothing of it was ever sent: no step that may have reached a chain (`MAYBE_SUBMITTED`; in a user-funded run
  * a DELEGATED step only waits for its group), no group submitted, reconciled or failed, and no wallet batch ever handed to the owner's wallet (its
@@ -1225,9 +1264,11 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   // A confirm-mode step whose predecessor reconciled is the owner's to sign (it is resolved when they open it); one in flight waits for its chain.
   const group = groupRecords.find(g => g.stepFrom <= run.currentStep && run.currentStep <= g.stepTo);
   const ownerGroup = group && (group.strategy === 'EVM_OWNER_STEP' || group.strategy === 'SOLANA_OWNER_STEP');
+  // Review SEC-3: an unanswered Batch Payment request the chain can never prove unsent is never handed out again: the owner decides, never signs.
+  const unprovable = run.mode === 'USER_FUNDED' && ['RUNNING', 'ATTENTION'].includes(run.state) && unprovableBatchRequest(run, group, now);
   const nextAction = run.state === 'PENDING' ? 'OWNER_CHOOSES_MODE' : run.state === 'HALTED' ? 'OWNER_DECIDES'
     : ['RUNNING', 'ATTENTION'].includes(run.state)
-      ? group?.code === WALLET_BATCH_REFUSAL_RECORDED && group.state === 'PREPARED' ? 'OWNER_DECIDES'
+      ? group?.code === WALLET_BATCH_REFUSAL_RECORDED && group.state === 'PREPARED' || unprovable ? 'OWNER_DECIDES'
         : (run.mode === 'CONFIRM_EACH_STEP' || (run.mode === 'USER_FUNDED' && ownerGroup)) && (current?.state === 'READY' || current?.state === 'PENDING') ? 'OWNER_SIGNS_STEP'
         : run.mode === 'USER_FUNDED' && group && !ownerGroup && ['PLANNED', 'PREPARED'].includes(group.state) ? 'OWNER_SIGNS_GROUP'
           : run.mode === 'USER_FUNDED' && group?.state === 'AUTHORIZED' && group.strategy === 'EVM_WALLET_BATCH' ? 'OWNER_CONFIRMS_BATCH'
@@ -1250,18 +1291,27 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   // (WALLET_BATCH_ANSWERED_AFTER_STOP, `batchAnsweredAfterStop`).
   const mayHaveExecuted = 'A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
     + 'deadline; check the wallet\'s activity.';
+  // Review CH-4: a batch the wallet split into transactions that did not all succeed executed in part (`evm-reconcile.ts`): never "no final outcome
+  // yet" and never "stopped before any step completed" — part of it is on chain, FloFi never sends it again, and only the owner can check each one.
+  // Its precedence is the channels' (`channels/core/status.ts`): over every PARTIAL, STOPPED or NOTHING_SENT note of a halted run, while a batch
+  // whose answer FloFi never recorded (`unanswered`) keeps its "may have executed" wording first, in a halted or an ended run.
+  const partlyExecuted = groupRecords.some(g => g.code === WALLET_BATCH_PARTIALLY_EXECUTED) || steps.some(s => s.code === WALLET_BATCH_PARTIALLY_EXECUTED);
   const note = !options.outcomes ? 'The owner has not shared the transactions and evidence of this workflow with this conversation.'
     : halted === 'PARTIAL' && unanswered ? `Partially completed: the reconciled steps stay done. ${mayHaveExecuted} FloFi submits nothing more of it; the owner decides `
       + 'what happens next.'
-      : halted === 'PARTIAL' ? 'Partially completed: the reconciled steps stay done and their funds rest in the owner\'s wallet. See the step that stopped for its outcome.'
-        : halted !== null && unanswered ? `Stopped. ${mayHaveExecuted} FloFi submits nothing more of it; the owner decides what happens next.`
+      : halted !== null && unanswered ? `Stopped. ${mayHaveExecuted} FloFi submits nothing more of it; the owner decides what happens next.`
+        : unanswered ? `Ended. ${mayHaveExecuted}`
+          : partlyExecuted ? 'Part of a batch executed: the owner\'s wallet sent it as several transactions and only some of them succeeded. FloFi never sends '
+            + 'it again; the owner checks each of its transactions in the wallet\'s activity.'
+          : halted === 'PARTIAL' ? 'Partially completed: the reconciled steps stay done and their funds rest in the owner\'s wallet. See the step that stopped for its outcome.'
+          : unprovable ? 'The Batch Payment request handed to the owner\'s wallet was never answered, and the chain cannot prove it was never sent, so FloFi '
+            + 'never hands it out again. The owner checks the wallet\'s activity, then ends the run and starts a new Review.'
           : halted === 'NOTHING_SENT' && atomicHalt ? 'Stopped before anything was sent. A Batch Payment runs only as one atomic wallet request, never payment by '
             + 'payment: the owner ends the run and authorizes a new Review.'
           : halted === 'NOTHING_SENT' ? 'Stopped before anything was sent. Until the run expires the owner can resume it (each stopped step then runs through its own flow); '
             + 'the owner can always end it.'
             : halted === 'STOPPED' ? 'Stopped before any step completed. FloFi submits nothing more of it; the owner decides what happens next.'
-              : run.state === 'ATTENTION' ? 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.'
-                : unanswered ? `Ended. ${mayHaveExecuted}` : null;
+              : run.state === 'ATTENTION' ? 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.' : null;
   const resumable = resumeRefusal(run, steps, groupRecords, now) === null;
   return { workflowRunId: run.runId, approvalId: run.handoffId, state: run.state, mode: run.mode, stepCount: run.stepCount, currentStep: run.currentStep, code: run.code,
     workflowHash: run.workflowHash, expiresAt: run.expiresAt.toISOString(), completedAt: run.completedAt?.toISOString() ?? null, createdAt: run.createdAt.toISOString(),

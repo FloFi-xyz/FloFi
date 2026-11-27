@@ -126,6 +126,9 @@ Batch Payment is **atomic only**. Sequential execution is never offered, so ther
 | Another browser asks for the batch | Refused | `WALLET_BATCH_HANDED_OUT_ELSEWHERE` |
 | Timeout, disconnect or unknown outcome | The existing wallet-batch status and reconciliation decide; nothing is resent before the outcome is established | unchanged run machinery |
 | A failed atomic batch | Every leg stays unexecuted; never reported as partial | the atomic group has one outcome |
+| The wallet ignores `atomicRequired` and sends several transactions, or uses a non-atomic `execute` mode | Mixed results are UNMATCHED and held for attention, never FAILED. A non-atomic `execute` mode is a calls mismatch. Nothing is resent | `WALLET_BATCH_PARTIALLY_EXECUTED`, `RECONCILIATION_CALLS_MISMATCH` |
+| An unanswered request is past its validity | Handed out again only with a chain proof that the earlier request never executed. Where that proof is impossible by design (e.g. an ETH batch), the owner is asked to check the wallet, end the run and start a new Review | `BATCH_PAYMENT_EARLIER_REQUEST_UNPROVEN` / `_UNPROVABLE`, next action `OWNER_DECIDES` |
+| A refused or halted batch | No Resume, no step-by-step fallback is offered. Ending it is closed as "not sent" once the decline proof holds | `BATCH_PAYMENT_REQUIRES_ATOMIC_EXECUTION`, `WALLET_REQUEST_REJECTED` |
 
 Swap→Batch, Bridge→Batch, Swap→Bridge→Batch and Aave Withdraw→Batch compose through typed bindings. A batch consumer binds every leg
 `exact: true`: each recipient receives exactly its amount from reconciled funding. If the reconciled funding is short, nothing is paid and
@@ -135,7 +138,7 @@ the run stops for a new Review (`WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT
 ### 3.4 Validation and limits
 
 - **Recipients.** 2 to 8. The maximum is the workflow-run budget: every payment is one run step, and `workflow_runs.step_count` is at most 8 (migration 0015). A batch inside a longer workflow shares that budget (`BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET`). The bound also keeps one atomic EIP-5792 request well within wallet and gas limits.
-- **Addresses.** Each must be a 0x address that is not the zero address, and the network's transfer profile must allow explicit recipients. Recipients are lower-cased, and a duplicate (case-insensitive) is refused with `BATCH_PAYMENT_DUPLICATE_RECIPIENT`, never merged or dropped. Addresses are never invented: every channel requires the explicit address.
+- **Addresses.** Each must be a 0x address. The zero address and the reserved system range `0x…00`–`0x…ff` (precompiles) are refused. A mixed-case address must be its exact EIP-55 checksum encoding (the Send card's rule), in every channel. The network's transfer profile must allow explicit recipients. Recipients are lower-cased, and a duplicate (case-insensitive) is refused with `BATCH_PAYMENT_DUPLICATE_RECIPIENT`, never merged or dropped. Addresses are never invented: every channel requires the explicit address.
 - **Amounts.** Positive exact decimals, turned into integer base units with the asset's decimals. Native amounts respect the profile's per-transfer maximum. The total is an exact integer sum, refused above 2^256−1.
 - **Asset.** Native ETH or a non-stock ERC-20 of the network's validated catalog. A mixed asset is refused at the IR. There is no USD cap. Internal transfers count toward the step budget.
 - **Prerequisites.** Balance, fee balance, gas and wallet capabilities are evaluated by the existing user-funded Review (simulation of the exact calls) before authorization.
@@ -187,10 +190,10 @@ WS02:
 
 - **Contracts and registry.** `packages/workflow-contracts/src/batch-payment.ts`, `packages/reference-linter/src/batch-payment.ts`, `packages/action-registry/src/execution-capabilities.ts`.
 - **Engine.** `apps/reference-dapp/src/engine/{strategy-spec,strategy-engine,workflow-bindings,strategy-examples,capability-catalog,certification-matrix}.ts`.
-- **Authoring.** `domain/{batch-payment-authoring,commands,editor,workflow-steps,composer-presentation,copilot-*}.ts`.
-- **Runs and execution.** `workflow-runs/{execution-groups,authorization-plan,runner,service}.ts`, `user-funded/evm-calls.ts`, `delegation/{steps,executor}.ts`.
-- **Platform and channels.** `platform/{approvals,strategy,workflow-visual,conversation-state}.ts`, `channels/core/strategy.ts`, `mcp/{tools,simulation}.ts`, `editor/workflow-strategy.ts`, `app/editor-workflow-execution-action.ts`.
-- **UI.** `components/{batch-payment-fields,composer-card,workflow-canvas,action-icon,app-shell}.tsx`, `i18n/pt-batch-payment.ts`.
+- **Authoring.** `domain/{batch-payment-authoring,batch-run-record,commands,editor,workflow-steps,composer-presentation,copilot-*}.ts`, `state/{workflow-store,flofi-conversation}.ts(x)`.
+- **Runs and execution.** `workflow-runs/{execution-groups,authorization-plan,runner,service}.ts`, `user-funded/{evm-calls,evm-reconcile}.ts`, `delegation/{steps,executor}.ts`.
+- **Platform and channels.** `platform/{approvals,strategy,capabilities,preview,explain,workflow-visual,workflow-visual-layout,conversation-state}.ts`, `channels/core/{strategy,status,conversation,copy}.ts`, `mcp/{tools,simulation}.ts`, `developer/{errors,service,views}.ts`, `editor/workflow-strategy.ts`, `app/editor-workflow-execution-action.ts`.
+- **UI.** `components/{batch-payment-fields,composer-card,workflow-canvas,action-icon,app-shell,editor-workflow-run}.tsx`, `domain/canvas-execution.ts`, `i18n/pt-batch-payment.ts`, `app/approved-ux.css`.
 - **Tests.** New and updated tests are listed in §8.
 - **CI.** `scripts/guarded-release-browser.mjs` and `scripts/test_ci_optimization.py` (the `canvas-workflow-ux` profile also runs `batch-payment-card.spec.ts`).
 - **Generated.** OpenAPI and its public copy, the capability, certification and settlement matrices, and `docs/engineering/{coverage.json,COVERAGE.md}`.
@@ -199,7 +202,28 @@ No new dependency, contract, custody, paid infrastructure or database migration.
 
 ## 6. Specialist reviews
 
-Pending at this commit: WS02 specialist reviews are running; their verified findings and fixes are recorded here before delivery.
+WS01 was reviewed by flofi-mcp, flofi-security and flofi-data-privacy; their findings were fixed in `2e1e180`.
+
+WS02 was reviewed in three rounds. The specialists are Read-only. Round 1 was three specialists. In round 2, six specialists ran in two batches of three. Their medium and high findings were then fixed in four file-disjoint groups, and each group's change was checked by an independent adversarial verifier, in round 2 and again in round 3. Every finding below was checked against the code before it was fixed.
+
+| Round | Reviewer | Highest | What was found and fixed |
+|---|---|---|---|
+| 1 | flofi-workflow | medium | A halted or refused batch advertised a Resume, a fallback and "each step through its own flow" that the server refuses. A stale non-batch run got the batch refusal code. Plan notes described exact legs as capped. Binding error paths named leg indexes. A wallet refusal could only end as "may have executed". All fixed (`3341fbd`) |
+| 1 | flofi-wallet-execution | medium | Same Resume finding. A wallet that splits a batch with mixed results was recorded FAILED although part was paid; it is now UNMATCHED (`WALLET_BATCH_PARTIALLY_EXECUTED`). A batch could be prepared again after its validity with no chain proof that the first request never ran; this now needs a decline proof. All fixed |
+| 1 | flofi-transfer-payments | low | Stock Token through raw IR, no per-recipient EXPLICIT_RECIPIENT warning, misleading amount messages, no EIP-55 checksum, fee and plain-wallet disclosure, test gaps. All fixed |
+| 2 | flofi-security | high | The chat `pay` grammar lower-cased addresses before the checksum. `execute` calls in a non-atomic mode passed reconciliation by substring. Unprovable re-prepares used a temporary-sounding code. The 8-hash report limit was too low. All fixed |
+| 2 | flofi-chat | high | The model alone paired amounts with recipients. Batch codes had no chat messages. A Stock Token regression. `pay` refusals were swallowed. COPILOT_COMMAND_MISMATCH for 5 to 8 sends. All fixed: pairing now requires the person's own `<amount> <asset> to <address>` clauses, in order, each with exactly one reading |
+| 2 | flofi-frontend-ux | high | Unapplied batch drafts bypassed the unapplied-edits gate. A completed lone batch was not recorded as executed. The Canvas showed no execution state for batches. Fallback to another runtime's Simulate, selection and Delete, the header from the draft, the asset reset on network change, stale drafts, accessibility, the total and catalog loading. All fixed |
+| 2 | flofi-mcp | medium | `expectedStepCount` versus `stepCount`, step-by-step wording and visual for a batch, `get_capabilities` versus the approval, no coded refusal for more than 8 recipients, messages, `batchPayments` only on compose. All fixed |
+| 2 | flofi-channels | high | The checksum gap (same as security). The visual said "Runs step by step". Status counted legs as steps. A partly executed batch was described as pending. All fixed |
+| 2 | flofi-developers | medium | A production-key batch approval returned HTTP 500, and `approvable: true` was reported when the approval is always refused. The simulate reason, example payees on precompiles (now refused) and the OpenAPI wording. All fixed |
+| 3 | verifiers | high | The client shell imported a server-only module (now `domain/batch-run-record.ts`, with a client-safety test). The step-list guard briefly accepted the leg count (restored to the semantic count). Ambiguous amounts in pairing. The `explain_strategy` alignment. Atomic wording for mixed workflows. All fixed |
+
+Left open, with reasons:
+
+- **Undo/redo of two setup cards.** Undo/redo can place a Batch Payment setup card beside another action's setup card. This is presentation only; Simulate, Execute and save stay held. Changing undo semantics is an owner decision.
+- **Pre-existing amount grounding.** The ambiguous-amount check outside the batch path (`copilot-authoring.ts` `ambiguousAmount`) predates this build. It is recorded as a follow-up.
+- **Channel display of an unprovable request.** The channel view of an unprovable batch request depends on the run's strategy composing. The server still refuses; only the channel's wording can lag.
 
 ## 7. Security notes
 
@@ -241,7 +265,9 @@ LIVE VERIFIED is claimed only after step 4 is performed and reconciled on mainne
 - **Solana.** Not exposed: FloFi has no atomic multi-recipient Solana path.
 - **Recipient budget.** At most 8 recipients (the run step budget). A batch inside a longer workflow shares the 8 steps.
 - **Atomic wallets only.** A wallet without EIP-5792 atomic batches (and without a FloFi smart account) cannot run a Batch Payment. There is no sequential mode, by design.
-- **Saved recipients.** The Copilot resolves at most one saved-recipient name per sentence (existing limitation). Explicit addresses work for every recipient.
+- **Copilot phrasing.** A Copilot Batch Payment needs the person's own `<amount> <asset> to <0x address>` clauses, one per recipient. Shorter phrasings ("25 USDC to A and 50 to B"), saved-recipient names and ambiguous amounts get a clarification instead of a batch, by design: the AI never pairs amounts with recipients on its own. The exact `pay … on <network>` command and the Canvas card are unaffected.
+- **ETH re-preparation.** An unanswered ETH batch cannot be handed out again after its validity. FloFi cannot prove from the chain that a native-value batch never ran, so the owner ends the run and starts a new Review.
+- **Developer API production keys.** Production keys cannot hand off a Batch Payment: their approvals use owner steps only, and a batch is atomic-only. They get a coded 422 `CAPABILITY_NOT_SUPPORTED`, and `approvable` reports false. Allowing user-funded atomic groups for developer production approvals is an owner decision.
 - **MCP idempotency and OAuth logs.** `request_user_approval` and `cancel_approval` carry no idempotency key (mitigated by supersession and `retryable: false`). OAuth endpoints carry no request id.
 - **Visual baselines.** See §4.
 

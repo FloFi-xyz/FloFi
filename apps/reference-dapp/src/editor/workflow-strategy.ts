@@ -27,6 +27,7 @@ import { compositionWorkflow, sequenceOrder, stepProjection, workflowSequence } 
 import { workflowSteps, type StepDetail } from '../domain/workflow-steps';
 import { composeWorkflow, dappReviewContext, operationSteps, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
 import { editorReducer, initialEditor } from '../domain/editor';
+import { loneCardRunVerdict } from '../domain/batch-run-record';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 
 /** The Editor's workflow-run limits: 2..8 steps for a sequence (0015), and one step only on the single-card opt-in (`workflow_runs.step_count BETWEEN 1 AND 8` from migration 0032). */
@@ -174,9 +175,15 @@ export function canvasWorkflowOfStrategy(input: unknown): CanvasOfStrategy {
 
 /**
  * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (workflow review): what a single-card run proves about ONE Canvas card — or null when the run is not
- * exactly that card's run: it must have exactly one step and the canonical hash of exactly this card (`editorWorkflowStrategy` single-step; the
- * run's engine workflow carries no Canvas ids, so the card's own ids are echoed only once it is proven). `verdict` RECONCILED only for a completed
- * run whose step reconciled; `received` is the step's reconciled delivery; `owner` the run's own EVM wallet (its group's fee payer). Pure.
+ * exactly that card's run: it must have exactly the card's steps and the canonical hash of exactly this card (`editorWorkflowStrategy` single-step;
+ * the run's engine workflow carries no Canvas ids, so the card's own ids are echoed only once it is proven). `verdict` RECONCILED only for a completed
+ * run whose every step reconciled; `received` is the step's reconciled delivery; `owner` the run's own EVM wallet (its group's fee payer). Pure.
+ *
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (FE-BATCH-02): a lone Batch Payment card's run is its N payments (2..8 steps, one atomic group), so its
+ * record is proven the same way with N steps: a completed run of exactly this card whose N steps all reconciled is this card executed, never offered
+ * again. A Batch Payment delivers nothing to the owner's wallet (each payment goes to its own recipient): it proves no delivery a later step could spend.
+ * The step reading is the client-safe one the Editor uses in the browser (`loneCardRunVerdict`, `domain/batch-run-record.ts`: the card's own legs); the
+ * server also proves the engine composed exactly that many steps under the run's canonical hash.
  */
 export type SingleRunRecord = { readonly verdict: string; readonly workflow: { readonly workflowId: string; readonly nodes: readonly { readonly nodeId: string }[] };
   readonly received: readonly { readonly asset: string; readonly amount: string }[]; readonly owner: string | null };
@@ -185,9 +192,10 @@ export function singleCardRunRecord(run: { readonly state: string; readonly step
   readonly groups: readonly { readonly feePayer?: string | null }[] }, card: unknown): SingleRunRecord | null {
   const workflow = canonicalWorkflow(card);
   if (!workflow) return null;
-  const nodes = financialNodes(workflow), converted = editorWorkflowStrategy(workflow, { singleStep: true });
-  if (!converted.ok || nodes.length !== 1 || run.stepCount !== 1 || run.steps.length !== 1 || run.workflowHash !== converted.workflowHash) return null;
-  const step = run.steps[0]!;
-  return { verdict: run.state === 'COMPLETED' && step.state === 'RECONCILED' ? 'RECONCILED' : run.state,
-    workflow: { workflowId: workflow.workflowId, nodes: [{ nodeId: nodes[0]!.nodeId }] }, received: step.outcome?.received ?? [], owner: run.groups[0]?.feePayer ?? null };
+  const nodes = financialNodes(workflow);
+  if (nodes.length !== 1) return null;
+  const verdict = loneCardRunVerdict(run, workflow), converted = editorWorkflowStrategy(workflow, { singleStep: true });
+  if (verdict === null || !converted.ok || converted.stepCount !== run.stepCount || run.workflowHash !== converted.workflowHash) return null;
+  return { verdict, workflow: { workflowId: workflow.workflowId, nodes: [{ nodeId: nodes[0]!.nodeId }] },
+    received: isBatchPaymentNode(nodes[0]!) ? [] : run.steps[0]!.outcome?.received ?? [], owner: run.groups[0]?.feePayer ?? null };
 }

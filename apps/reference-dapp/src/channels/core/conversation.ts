@@ -24,7 +24,7 @@
 import { parseLocalCommand, type Command } from '../../domain/commands';
 import { MAX_WORKFLOW_STEPS } from '../../engine/strategy-spec';
 import { buildCopilotFacts } from '../../domain/copilot-answers';
-import { COPILOT_AUTHORING_COMMANDS } from '../../domain/copilot-authoring';
+import { COPILOT_AUTHORING_COMMANDS, copilotRejection } from '../../domain/copilot-authoring';
 import { turnMetrics, type TurnMetrics } from '../../domain/intelligence/turn-metrics';
 import { closeSegment, emptyConversation, failureText, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
   type CopilotLearning, type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type MemoryAction } from '../../domain/copilot-conversation';
@@ -270,7 +270,15 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
       const next = withCopilot(greeted, recordProposal(closeSegment(conversation), environment(command, learning), command), environment(command, learning), { pending: command });
       return decision('PROPOSE', 'PROPOSED_EXACT', greet([]), next, { command });
     }
-  } catch { /* not an exact authoring command: the interpreter decides */ }
+  } catch (cause) {
+    // Chat review C2: a `pay` request FloFi read and refused (a recipient that is not an explicit address or appears twice, two assets, an invalid
+    // amount, a network or asset Batch Payment does not pay) says why, as in FloFi's own chat. It never reaches the interpreter, which could author
+    // separate, non-atomic transfers, and nothing is proposed or kept.
+    const code = cause instanceof Error ? cause.message : '';
+    if (/^BATCH_PAYMENT_[A-Z_]+$/.test(code))
+      return decision('REPLY', code, greet([text(copilotRejection(code, PORTUGUESE.test(raw) ? 'PT' : state.language).message)]), greeted);
+    /* otherwise not an exact authoring command: the interpreter decides */
+  }
   if (!input.interpret) return decision('REPLY', 'NOT_UNDERSTOOD', greet([text(m.grammarOnly)]), greeted);
   const languageHint = PORTUGUESE.test(raw) ? 'PT' : state.language;
   const start = startTurn(conversation.language === languageHint ? conversation : { ...conversation, language: languageHint }, raw, env);

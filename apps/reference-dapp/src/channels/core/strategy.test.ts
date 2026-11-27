@@ -16,11 +16,13 @@ import { canonicalStrategy, intendedWalletOf, sameCommand, strategyOfCommand } f
 const OWNER = '0x0000000000000000000000000000000000000001';
 /** The DApp chat sentence of every capability example (the engine's own parity table). */
 const SENTENCES: Readonly<Record<string, string>> = {
-  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment, in the chat's (and Telegram's) exact grammar.
-  'batch-payment-robinhood': 'pay 1 USDG to 0x0000000000000000000000000000000000000002 and 2 USDG to 0x0000000000000000000000000000000000000003 on Robinhood Chain',
-  'batch-payment-base': 'pay 25 USDC to 0x0000000000000000000000000000000000000002 and 50 USDC to 0x0000000000000000000000000000000000000003 on Base',
-  'batch-payment-arbitrum': 'pay 5 USDC to 0x0000000000000000000000000000000000000002, 10 USDC to 0x0000000000000000000000000000000000000003 on Arbitrum One',
-  'batch-payment-ethereum': 'batch pay 5 USDC to 0x0000000000000000000000000000000000000002 and 10 USDC to 0x0000000000000000000000000000000000000003 on Ethereum',
+  // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: one Batch Payment, in the chat's (and Telegram's) exact grammar. Its payees are the examples' own
+  // (`strategy-examples.ts` EXAMPLE_PAYEES): the former 0x…02 / 0x…03 are precompile addresses a Batch Payment now refuses as payees (nobody holds
+  // their keys), so the parity sentences name the same ordinary addresses the examples do.
+  'batch-payment-robinhood': 'pay 1 USDG to 0x1234567890abcdef1234567890abcdef12345678 and 2 USDG to 0xabcdef0123456789abcdef0123456789abcdef01 on Robinhood Chain',
+  'batch-payment-base': 'pay 25 USDC to 0x1234567890abcdef1234567890abcdef12345678 and 50 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Base',
+  'batch-payment-arbitrum': 'pay 5 USDC to 0x1234567890abcdef1234567890abcdef12345678, 10 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Arbitrum One',
+  'batch-payment-ethereum': 'batch pay 5 USDC to 0x1234567890abcdef1234567890abcdef12345678 and 10 USDC to 0xabcdef0123456789abcdef0123456789abcdef01 on Ethereum',
   'bridge-base-sepolia-arbitrum-sepolia': 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps',
   'bridge-base-arbitrum-one': 'bridge 5 USDC from Base to Arbitrum via auto slippage 100 bps',
   'swap-base': 'swap 2 USDC to WETH on Base slippage 50 bps',

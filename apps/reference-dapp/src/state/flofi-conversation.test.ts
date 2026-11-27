@@ -1229,3 +1229,59 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001 chat resumes after the d
     expect(simulate).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment in the product chat. Its confirmation lists every recipient, amount and the
+ * all-or-nothing rule before Review (chat review L1), and a `pay` request FloFi read and refused says why, in both languages, without reaching the
+ * interpretation (M2). Nothing is simulated, signed or sent here.
+ */
+describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment in the chat', () => {
+  const A = '0x2222222222222222222222222222222222222222', B = '0x3333333333333333333333333333333333333333';
+  const ATOMIC = 'It runs only as one atomic authorization of your wallet: every payment settles, or none does. Review every recipient before you authorize.';
+  const ATOMIC_PT = 'Ele só executa como uma autorização atômica da sua carteira: todos os pagamentos são liquidados, ou nenhum. Revise cada destinatário antes de autorizar.';
+  it('chat review L1: the exact `pay` confirmation lists each recipient and amount and the all-or-nothing rule', async () => {
+    const chat = await say(`pay 0.001 ETH to ${A} and 0.002 ETH to ${B} on Base`);
+    expect(editor.workflow.revision).toBe(1); expect(f.propose).toEqual([]);
+    expect(editor.workflow.nodes.at(-1)!.actionType).toBe('asset.transfer.batch');
+    expect(last(chat).notes).toEqual([`1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC]);
+    expect(last(chat).question).toBe('Would you like to add another action or review your workflow?');
+    // Chat review C4: switching the interface to Portuguese shows the all-or-nothing rule in Portuguese (never the English one reused), and back.
+    expect(shownMessage(last(chat), 'PT').notes).toEqual([`1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC_PT]);
+    expect(shownMessage(shownMessage(last(chat), 'PT'), 'EN').notes).toEqual([`1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC]);
+  });
+  it('chat review L1: an interpreted Batch Payment keeps its per-recipient lines and atomic sentence in the confirmation', async () => {
+    const command = { type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0,
+      input: { network: 'Base', asset: 'ETH', payments: [{ recipient: A, amount: '0.001' }, { recipient: B, amount: '0.002' }] } };
+    f.respond = async () => ({ kind: 'PROPOSAL', text: `One Batch Payment on Base to 2 recipients: 1. 0.001 ETH → ${A} 2. 0.002 ETH → ${B} ${ATOMIC}`,
+      notes: ['Base uses real funds.'], options: [], sentence: 'batch payment of ETH to 2 recipients on Base', command });
+    const chat = await say(`Send 0.001 ETH to ${A} and 0.002 ETH to ${B} on Base`);
+    expect(editor.workflow.revision).toBe(1); expect(last(chat).role).toBe('ai');
+    expect(last(chat).notes).toEqual(['Interpreted as “batch payment of ETH to 2 recipients on Base”.', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC,
+      'Base uses real funds.']);
+    // Chat review C4: in Portuguese the payment lines keep their place and the all-or-nothing rule is the Portuguese one; the model's notes stay as written.
+    expect(shownMessage(last(chat), 'PT').notes).toEqual(['Interpreted as “batch payment of ETH to 2 recipients on Base”.', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`,
+      ATOMIC_PT, 'Base uses real funds.']);
+  });
+  it('chat review M2: a `pay` refusal says why in English and Portuguese and never reaches the interpretation', async () => {
+    const asked: string[] = [];
+    f.respond = async text => { asked.push(text); return { kind: 'PROPOSAL', text: 'x', notes: [], options: [], sentence: 'x', command: null }; };
+    const cases: readonly (readonly [string, string])[] = [
+      [`pay 0.001 ETH to ${A} and 0.002 ETH to ${A} on Base`, 'BATCH_PAYMENT_DUPLICATE_RECIPIENT'],
+      [`pay 0 ETH to ${A} and 0.002 ETH to ${B} on Base`, 'BATCH_PAYMENT_AMOUNT_INVALID'],
+      [`pay 1.1234567 USDC to ${A} and 2 USDC to ${B} on Base`, 'BATCH_PAYMENT_AMOUNT_TOO_PRECISE'],
+      [`pay 0.001 ETH to 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD and 0.002 ETH to ${B} on Base`, 'BATCH_PAYMENT_RECIPIENT_INVALID'],
+      [`batch pay 1 USDC to ${A} and 0.002 ETH to ${B} on Base`, 'BATCH_PAYMENT_ASSET_MIXED'],
+      // Chat review C3: a recipient that is not an explicit address, and a network Batch Payment does not pay, are refusals too (never the generic help).
+      [`pay 1 USDC to my wallet and 2 USDC to ${B} on Base`, 'BATCH_PAYMENT_RECIPIENT_INVALID'],
+      [`batch pay 0.001 ETH to ${A} and 0.002 ETH to ${B} on Base Sepolia`, 'BATCH_PAYMENT_NETWORK_UNSUPPORTED'],
+    ];
+    const { copilotRejection } = await import('../domain/copilot-authoring');
+    for (const [request, code] of cases) {
+      const message = last(await say(request));
+      expect(message.text, request).toBe(copilotRejection(code, 'EN').message);
+      expect(shownMessage(message, 'PT').text, request).toBe(copilotRejection(code, 'PT').message);
+    }
+    expect(asked).toEqual([]);
+    expect(editor.workflow.revision).toBe(0); expect(f.propose).toEqual([]);
+  });
+});

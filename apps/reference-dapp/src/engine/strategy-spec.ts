@@ -138,7 +138,9 @@ const Transfer = Type.Object({
  */
 export const BATCH_PAYMENT_NETWORK_IDS = ['robinhood', 'base', 'arbitrum-one', 'ethereum'] as const;
 const BatchPaymentLine = Type.Object({
-  recipient: EvmAddress('Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once.'),
+  recipient: EvmAddress('Recipient wallet address, exactly as the person gave it. Never invent, guess or substitute one; each recipient at most once. ' +
+    'EIP-55: an all-lower-case or all-upper-case address carries no checksum; a mixed-case address must be its exact checksum encoding (a mistyped ' +
+    'letter is refused, never corrected). Never the zero address or a precompile address (0x…01 to 0x…ff).'),
   amount: Decimal('This recipient\'s exact amount, as a decimal string (the same amount for each recipient only when the person asked for equal amounts).'),
 }, strict);
 const BatchPayment = Type.Object({
@@ -147,7 +149,8 @@ const BatchPayment = Type.Object({
   asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'Native ETH, or a symbol or whole name of the network\'s validated official catalog ' +
     '(Stock Tokens are not paid in batches). Every recipient receives this one asset.' }),
   recipients: Type.Array(BatchPaymentLine, { minItems: 2, maxItems: 8, description: 'Ordered payments, each one recipient and its amount. Two to eight; ' +
-    'each recipient counts as one step of the workflow\'s 8-step budget. One recipient is a transfer.' }),
+    'each recipient counts as one step of the workflow\'s 8-step budget. One recipient is a transfer. Never drop, merge, reorder or shorten a recipient ' +
+    'the person asked for: more than eight is refused; the person decides which to remove.' }),
 }, strict);
 const BRANCHES = Object.freeze({ bridge: Bridge, swap: Swap, supply: Lending('supply', 'Account credited with the supplied position.'),
   borrow: Lending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: Lending('repay', 'Account whose debt is repaid (onBehalfOf).'),

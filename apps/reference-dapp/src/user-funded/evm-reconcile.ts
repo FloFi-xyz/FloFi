@@ -140,6 +140,11 @@ const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, 
  * Whether the batch's transactions carry exactly the prepared calls, in order. An EIP-7702 self-call is decoded (`execute(batch)`); a wallet
  * that sends one transaction per call is compared field by field. A self-call FloFi cannot decode must still contain every call's target,
  * value and calldata (a redirected recipient or amount is inside the calldata, so it cannot match).
+ *
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (review SEC-2): that substring fallback is only for a self-call that is not an ERC-7579
+ * `execute(bytes32,bytes)` at all (another account's own encoding). An `execute` in any mode other than the default batch mode (call type batch,
+ * exec type revert) is never this batch: in 'try' mode a failed call does not undo the others, and a native ETH payment leaves no log that could
+ * show it failed, so the bytes containing every call would read as paid. Such a call, or an `execute` FloFi cannot decode, is a calls mismatch.
  */
 export function batchCarriesCalls(owner: string, txs: readonly EvmTransaction[], prepared: readonly { target: string; value: bigint; data: string }[]): boolean {
   const sent: { target: string; value: bigint; data: string }[] = [];
@@ -147,8 +152,14 @@ export function batchCarriesCalls(owner: string, txs: readonly EvmTransaction[],
   for (const tx of txs) {
     const to = String(tx.to ?? '').toLowerCase(), input = String(tx.input ?? '0x').toLowerCase();
     if (to === owner) {
-      try { sent.push(...erc4337.decodeBatchCallData(input).map(c => ({ target: c.target.toLowerCase(), value: c.value, data: c.data.toLowerCase() }))); }
-      catch { opaque.push(input); }
+      let decoded: readonly { target: string; value: bigint; data: string }[];
+      try { decoded = erc4337.decodeBatchCallData(input); }
+      catch {
+        if (input.startsWith(erc4337.EXECUTE_SELECTOR)) return false;
+        opaque.push(input);
+        continue;
+      }
+      sent.push(...decoded.map(c => ({ target: c.target.toLowerCase(), value: c.value, data: c.data.toLowerCase() })));
     } else sent.push({ target: to, value: quantity(tx.value), data: input });
   }
   const want = prepared.map(c => ({ target: c.target.toLowerCase(), value: c.value, data: c.data.toLowerCase() }));

@@ -4,6 +4,7 @@ import { capabilityText, catalogNetworkNames, compositionOnlyText, lendingOnlyTe
 import { activeNetworkScope } from './network-scope';
 import { formatSlippage } from './slippage-policy';
 import { positionNetworksText } from './copilot-positions';
+import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS } from '@defi-workflow-engine/workflow-contracts';
 
 /**
  * BUILD-COPILOT-002: every reply the Copilot writes itself, in English and Portuguese. English is byte-identical to
@@ -28,6 +29,52 @@ const EN_COMPOSITION = () => activeNetworkScope() === 'PUBLIC_MAINNET' ? 'FloFi 
 const PT_COMPOSITION = () => activeNetworkScope() === 'PUBLIC_MAINNET' ? 'O FloFi não conseguiu construir esta sequência com os dados verificados das ações. Verifique as redes, as identidades dos tokens e as dependências de fundos.'
   : compositionOnlyText('PT') ? `O Flofi só combina passos como ${compositionOnlyText('PT')}. Outras combinações ainda não podem ficar no mesmo fluxo: crie cada ação separadamente.`
     : 'O FloFi não conseguiu construir esta sequência com os dados verificados das ações.';
+
+/**
+ * BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review M1/M2): the Batch Payment refusals the chat, the exact `pay` grammar and the channels can
+ * reach, in both languages (the same facts as the platform's own wording in `platform/conversation-state.ts`). Display copy only: like every other
+ * `rejection` entry, each language's sentence is chosen by `copilotCopy(language)`, not looked up in the product catalog.
+ */
+const BATCH_PAYMENT_AVAILABILITY_EN = 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, Ethereum and Robinhood Chain '
+  + '(never Stock Tokens, never Solana in this version).';
+const BATCH_PAYMENT_AVAILABILITY_PT = 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain '
+  + '(nunca Stock Tokens, nunca Solana nesta versão).';
+const BATCH_PAYMENT_REJECTION_EN = {
+  BATCH_PAYMENT_DUPLICATE_RECIPIENT: 'A recipient appears more than once. A Batch Payment pays each recipient once, and FloFi never merges or drops a payment: '
+    + 'give that recipient one amount.',
+  BATCH_PAYMENT_RECIPIENT_INVALID: 'A recipient is not an address FloFi can pay: it must be a full 0x address (never a reserved system address), and a mixed-case '
+    + 'address must match its checksum exactly. Copy it again from its source.',
+  BATCH_PAYMENT_AMOUNT_INVALID: 'Every payment of a Batch Payment needs a positive amount.',
+  BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM: 'An ETH amount in this Batch Payment is above the per-payment maximum FloFi sends on this network. Lower the amount or split the payment.',
+  BATCH_PAYMENT_AMOUNT_TOO_PRECISE: 'An amount in this Batch Payment has more decimal places than the asset allows. Nothing was rounded.',
+  BATCH_PAYMENT_TOO_MANY_RECIPIENTS: `A Batch Payment pays at most ${BATCH_PAYMENT_MAX_RECIPIENTS} recipients. Split the payments into two Batch Payments.`,
+  BATCH_PAYMENT_TOO_FEW_RECIPIENTS: `A Batch Payment pays at least ${BATCH_PAYMENT_MIN_RECIPIENTS} recipients. For one recipient, send a single transfer.`,
+  BATCH_PAYMENT_ASSET_UNSUPPORTED: BATCH_PAYMENT_AVAILABILITY_EN, BATCH_PAYMENT_TOKEN_UNSUPPORTED: BATCH_PAYMENT_AVAILABILITY_EN,
+  BATCH_PAYMENT_NETWORK_UNSUPPORTED: BATCH_PAYMENT_AVAILABILITY_EN,
+  BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET: 'Each recipient of a Batch Payment counts as one step of the workflow, and this workflow would have more steps than '
+    + 'FloFi accepts. Nothing was dropped. Pay fewer recipients or split it into two workflows.',
+  BATCH_PAYMENT_ASSET_MIXED: 'A Batch Payment pays every recipient in one asset, and this request names more than one. FloFi never splits it into separate '
+    + 'transfers by itself: write one Batch Payment per asset.',
+};
+const BATCH_PAYMENT_REJECTION_PT: typeof BATCH_PAYMENT_REJECTION_EN = {
+  BATCH_PAYMENT_DUPLICATE_RECIPIENT: 'Um destinatário aparece mais de uma vez. Um Pagamento em lote paga cada destinatário uma vez, e o FloFi nunca junta nem descarta '
+    + 'um pagamento: dê um único valor a esse destinatário.',
+  BATCH_PAYMENT_RECIPIENT_INVALID: 'Um destinatário não é um endereço que o FloFi possa pagar: ele precisa ser um endereço 0x completo (nunca um endereço reservado '
+    + 'do sistema), e um endereço com letras maiúsculas e minúsculas precisa corresponder exatamente ao seu checksum. Copie-o de novo da origem.',
+  BATCH_PAYMENT_AMOUNT_INVALID: 'Cada pagamento de um Pagamento em lote precisa de um valor positivo.',
+  BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM: 'Um valor em ETH neste Pagamento em lote está acima do máximo por pagamento que o FloFi envia nesta rede. Diminua o valor ou '
+    + 'divida o pagamento.',
+  BATCH_PAYMENT_AMOUNT_TOO_PRECISE: 'Um valor neste Pagamento em lote tem mais casas decimais do que o ativo permite. Nada foi arredondado.',
+  BATCH_PAYMENT_TOO_MANY_RECIPIENTS: `Um Pagamento em lote paga no máximo ${BATCH_PAYMENT_MAX_RECIPIENTS} destinatários. Divida os pagamentos em dois Pagamentos em lote.`,
+  BATCH_PAYMENT_TOO_FEW_RECIPIENTS: `Um Pagamento em lote paga pelo menos ${BATCH_PAYMENT_MIN_RECIPIENTS} destinatários. Para um único destinatário, envie uma `
+    + 'transferência simples.',
+  BATCH_PAYMENT_ASSET_UNSUPPORTED: BATCH_PAYMENT_AVAILABILITY_PT, BATCH_PAYMENT_TOKEN_UNSUPPORTED: BATCH_PAYMENT_AVAILABILITY_PT,
+  BATCH_PAYMENT_NETWORK_UNSUPPORTED: BATCH_PAYMENT_AVAILABILITY_PT,
+  BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET: 'Cada destinatário de um Pagamento em lote conta como uma etapa do fluxo, e este fluxo teria mais etapas do que o FloFi '
+    + 'aceita. Nada foi descartado. Pague menos destinatários ou divida em dois fluxos.',
+  BATCH_PAYMENT_ASSET_MIXED: 'Um Pagamento em lote paga todos os destinatários em um único ativo, e este pedido cita mais de um. O FloFi nunca o divide em '
+    + 'transferências separadas por conta própria: faça um Pagamento em lote por ativo.',
+};
 
 /**
  * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owner's own liquidity positions from chat (Uniswap v3 on the catalog mainnets, Orca SOL/USDC on Solana).
@@ -287,6 +334,8 @@ const EN = {
     COPILOT_TOO_MANY_ACTIONS: 'Flofi Copilot returned more steps than a proposal may contain. Nothing changed.',
     ...Object.fromEntries(['SUPPLY_ISOLATED_ONLY', 'SOLANA_SWAP_ISOLATED_ONLY', 'SOLANA_LIQUIDITY_ISOLATED_ONLY', 'UNISWAP_LIQUIDITY_ISOLATED_ONLY', 'TRANSFER_ISOLATED_ONLY']
       .map(code => [code, 'Flofi keeps this action in its own workflow, and this workflow already has other steps. Remove them first (or use Undo), then ask again.'])),
+    // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review M1/M2): every Batch Payment refusal the chat can reach, said as it is (never a raw code).
+    ...BATCH_PAYMENT_REJECTION_EN,
   } as Record<string, string>,
   routerAmountRange: (ranges: string) => `The amount is outside the Cross-chain Router range: ${ranges}.`,
   rejectedCode: (code: string) => `Flofi could not author this request (${code}). Nothing changed.`,
@@ -564,6 +613,7 @@ const PT: CopilotCopy = {
     COPILOT_TOO_MANY_ACTIONS: 'O Flofi Copilot devolveu mais passos do que uma proposta pode ter. Nada mudou.',
     ...Object.fromEntries(['SUPPLY_ISOLATED_ONLY', 'SOLANA_SWAP_ISOLATED_ONLY', 'SOLANA_LIQUIDITY_ISOLATED_ONLY', 'UNISWAP_LIQUIDITY_ISOLATED_ONLY', 'TRANSFER_ISOLATED_ONLY']
       .map(code => [code, 'O Flofi mantém esta ação em um fluxo próprio, e este fluxo já tem outros passos. Remova-os primeiro (ou use Undo) e peça de novo.'])),
+    ...BATCH_PAYMENT_REJECTION_PT,
   },
   routerAmountRange: ranges => `O valor está fora da faixa do Cross-chain Router: ${ranges}.`,
   rejectedCode: code => `O Flofi não conseguiu criar este pedido (${code}). Nada mudou.`,

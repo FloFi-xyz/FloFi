@@ -11,7 +11,7 @@
 import { answerConcept, CONCEPT_IDS, conceptCatalog, conceptInWorkflow, conceptName, conceptProtocols, conceptsForSteps, matchConcept, type ConceptId,
   type ConceptLevel, type ConceptProtocol } from '../domain/intelligence/concepts';
 import type { WorkflowStep } from '../domain/workflow-steps';
-import type { WorkflowComposition } from '../engine/strategy-engine';
+import { operationSteps, type WorkflowComposition } from '../engine/strategy-engine';
 import { refuse } from './refusal.ts';
 import { reviewWorkflow } from './strategy.ts';
 import { workflowVisualModel } from './workflow-visual.ts';
@@ -79,17 +79,31 @@ function focusOf(step: WorkflowStep): readonly ConceptId[] {
  */
 export function explainWorkflow(workflow: WorkflowComposition, language: ExplainLanguage = 'EN') {
   const reviewed = reviewWorkflow(workflow), model = workflowVisualModel(workflow), text = workflowVisualText(model, language);
-  // The presentation model shows every canonical step in order except the editor's authoring-only template (`workflow-visual.ts`).
-  const canonical = workflow.steps.flatMap((composition, step) => composition.steps.filter(s => s.detail.type !== 'TEMPLATE')
-    .map(s => ({ step, action: composition.strategy.action, canonical: s })));
+  // The presentation model shows every operation's canonical steps in order except the editor's authoring-only template (`workflow-visual.ts`): a Batch
+  // Payment is its one operation (`operationSteps`), never its legs. `workflowStep` stays the index in `workflow.steps` (the legs `review.steps` and
+  // compose_strategy's `workflowSteps` use): a Batch Payment's first leg, and `legs` names all of them.
+  let leg = 0;
+  const canonical = operationSteps(workflow).flatMap(composition => {
+    const step = leg, batch = (workflow.batches ?? []).find(b => b.composition === composition) ?? null;
+    leg = batch ? batch.to + 1 : leg + 1;
+    return composition.steps.filter(s => s.detail.type !== 'TEMPLATE').map(s => ({ step, action: composition.strategy.action, canonical: s, batch }));
+  });
   const words = new Map<WorkflowStep, string>(canonical.map((entry, i) => [entry.canonical, (text.lines[i] ?? '').replace(/^\d+\.\s*/, '')]));
+  // A Batch Payment's concepts are those of the transfers it executes (gas and network fees, which the owner's wallet pays): its first leg's step stands
+  // for them, described as the batch itself (one line, never one per payment). Every other step is its own.
+  const conceptStep = (entry: (typeof canonical)[number]) => {
+    const transfer = entry.batch ? workflow.steps[entry.batch.from]?.steps.find(s => s.detail.type !== 'TEMPLATE') : undefined;
+    if (transfer) words.set(transfer, words.get(entry.canonical) ?? entry.canonical.kind);
+    return transfer ?? entry.canonical;
+  };
   const describe = (step: WorkflowStep) => words.get(step) ?? step.kind;
-  const steps = canonical.map(entry => entry.canonical), applies = conceptsForSteps(steps);
-  const highlighted = new Set(steps.flatMap(focusOf));
+  const steps = canonical.map(conceptStep), applies = conceptsForSteps(steps);
+  const highlighted = new Set(canonical.flatMap(entry => focusOf(entry.canonical)));
   const ordered = [...applies.filter(id => highlighted.has(id)), ...applies.filter(id => !highlighted.has(id))];
   return {
     workflowHash: workflow.workflowHash, fundsClass: workflow.fundsClass, stepCount: workflow.steps.length, language, title: text.title, summary: text.summary,
-    steps: canonical.map((entry, i) => ({ index: i + 1, workflowStep: entry.step, action: entry.action, kind: entry.canonical.kind, protocol: entry.canonical.protocol,
+    steps: canonical.map((entry, i) => ({ index: i + 1, workflowStep: entry.step, ...entry.batch ? { legs: [entry.batch.from, entry.batch.to] as const } : {},
+      action: entry.action, kind: entry.canonical.kind, protocol: entry.canonical.protocol,
       network: entry.canonical.network, description: describe(entry.canonical), keyConcepts: focusOf(entry.canonical) })),
     warnings: model.warnings,
     review: { kind: 'DETERMINISTIC_STRATEGY_REVIEW' as const, summary: reviewed.summary,
