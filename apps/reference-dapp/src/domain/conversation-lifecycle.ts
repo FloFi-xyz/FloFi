@@ -346,7 +346,7 @@ export function payableCosts(fees: readonly SimulationLine[]) {
   const unclassified = fees.filter(line => !line.treatment).length + additional.unreadable + ceilings.unreadable;
   const obligation = fees.find(line => line.treatment === 'OBLIGATION');
   const flofiFee = obligation ? { value: obligation.value, note: obligation.note ?? '', recorded: true }
-    : { value: 'Not charged', note: 'FloFi\'s 0.1% fee per completed workflow is not collected on-chain, and this route records no fee obligation yet.', recorded: false };
+    : { value: 'Not charged', note: 'FloFi\'s 0.80% fee per completed workflow is not collected on-chain, and this route records no fee obligation yet.', recorded: false };
   return { additional: additional.sums, ceilings: ceilings.sums, unknown, unclassified, flofiFee };
 }
 /**

@@ -295,7 +295,7 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
       <SlippageChoices bps={input.slippage} maximumBps={UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS} onBpsChange={changeSlippage}
         autoBps={autoBps} {...autoSupported ? { onRequestAuto: requestAuto } : {}} onApplyAuto={applyAutoSlippage} autoPending={currentAuto?.pending ?? false}/></>}
     {currentAuto && !currentAuto.pending && autoBps === null && <small role="status">{tr('Relay could not recommend a price difference for this bridge. Check the networks, assets and amount, or enter a value.')}</small>}
-    {!compact && <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
+    {!compact && <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.80% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr('Cancel')}</button>}
@@ -373,7 +373,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   return <section className="panel" aria-label={tr('Universal cross-chain bridge')}>
     <h2>{tr(view === 'simulate' ? 'Simulate universal bridge' : 'Review universal bridge')}</h2>
     {d && <p>{tr('Bridge')} {d.amount} {d.inputSymbol} {tr('from')} {d.sourceLabel} {tr('to')} {d.destinationLabel}{tr(', receiving')} {d.outputSymbol}.</p>}
-    <p role="note">{tr('Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.')}</p>
+    <p role="note">{tr('Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.80% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.')}</p>
     {!router.available && <p role="status">{tr(MESSAGES.UNIVERSAL_ROUTER_NOT_ENABLED!)}</p>}
     {router.retired && <p role="alert">{tr('The workflow changed. Prior authorization is invalid. Simulate the current bridge again.')}</p>}
     {router.recovered && record && <p role="status">{tr('Recovered run')} {record.id}{tr('. Its state comes from the server; nothing is resent automatically.')}</p>}
@@ -400,7 +400,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr(record?.evidence ? 'Actual received' : 'Expected to receive')}</dt><dd>{outp(record?.evidence?.received ?? route.expectedOutput)} {tr('on')} {net(route.destinationChain)}</dd>
       <dt>{tr('Guaranteed minimum')}</dt><dd>{outp(route.minimumOutput)} {tr('— fixed in the provider order; a smaller delivery is a mismatch')}</dd>
       <dt>{tr('Provider fees')}</dt><dd>{route.fees.length ? route.fees.map((f, i) => <span key={i}>{f.label}: {amountOf(f.amount, f.decimals, f.symbol)}{tr(f.included ? ' (included in the quote)' : ' (paid separately)')}. </span>) : tr('none listed')}</dd>
-      <dt>{tr('FloFi fee')}</dt><dd>{tr('0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.')}</dd>
+      <dt>{tr('FloFi fee')}</dt><dd>{tr('0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.')}</dd>
       <dt>{tr('Network fees')}</dt><dd>{tr('at most')} {nativeFee} {tr('on')} {net(route.sourceChain)}</dd>
       <dt>{tr('Estimated duration')}</dt><dd>{tr('about')} {route.quote.estimatedDurationSeconds}s {tr('after the deposit confirms (provider estimate)')}</dd>
       <dt>{tr('Signatures')}</dt><dd>{r.authorizations.sourceSignatures} {tr(r.authorizations.sourceSignatures === 1 ? 'wallet signature on the source network' : 'wallet signatures on the source network (an exact approval, then the deposit)')}{tr('; nothing to sign on the destination network.')}</dd>

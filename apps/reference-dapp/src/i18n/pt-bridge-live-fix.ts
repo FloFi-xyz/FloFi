@@ -32,8 +32,8 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
   'Estimated, paid on top': 'Estimado, pago à parte', 'network fee up to {0}': 'taxa de rede de até {0}', 'Up to {0}': 'Até {0}',
   'None beyond the amount sent': 'Nenhum além do valor enviado', 'Quote expiry': 'Validade da cotação', 'Total additional payable costs': 'Total de custos adicionais a pagar',
   'Fee breakdown': 'Detalhamento das taxas', 'Not charged': 'Não cobrada', 'Cost lines FloFi cannot classify': 'Linhas de custo que a FloFi não consegue classificar',
-  "FloFi's 0.1% fee per completed workflow is not collected on-chain, and this route records no fee obligation yet.":
-    'A taxa de 0,1% da FloFi por fluxo concluído não é cobrada on-chain, e esta rota ainda não registra obrigação de taxa.',
+  "FloFi's 0.80% fee per completed workflow is not collected on-chain, and this route records no fee obligation yet.":
+    'A taxa de 0,80% da FloFi por fluxo concluído não é cobrada on-chain, e esta rota ainda não registra obrigação de taxa.',
   'Pool fee': 'Taxa do pool', 'Uniswap v3 fee tier, already reflected in the quoted output.': 'Faixa de taxa do Uniswap v3, já refletida no valor cotado.',
   "Ceiling for the token approval request; the swap's own network fee is checked after the approval confirms.":
     'Teto para o pedido de aprovação do token; a taxa de rede da troca é verificada depois que a aprovação for confirmada.',

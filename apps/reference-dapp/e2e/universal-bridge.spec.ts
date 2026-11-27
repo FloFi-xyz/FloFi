@@ -170,7 +170,7 @@ test('Solana USDC → Base: routes found, Review, one Solana signature, FloFi br
   await panel(page).getByRole('button', { name: 'Get route and simulate' }).click();
   const review = panel(page).getByRole('definition');
   // Provider label · protocol (relay-depository), not the internal order kind (RELAY_V2).
-  for (const text of ['Relay · relay-depository', '25 USDC on Solana', 'Guaranteed minimum', '0.1% of the completed workflow input', '1 wallet signature on the source network; nothing to sign on the destination network.',
+  for (const text of ['Relay · relay-depository', '25 USDC on Solana', 'Guaranteed minimum', '0.80% of the completed workflow input', '1 wallet signature on the source network; nothing to sign on the destination network.',
     'simulateTransaction', 'Not simulated: the destination delivery and refunds.']) await expect(panel(page)).toContainText(text);
   await expect(review.filter({ hasText: wallets.evm.address.toLowerCase() })).toContainText('on Base (your connected wallet)');
   expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
@@ -279,7 +279,7 @@ for (const sentence of ['quero uma bridge de 1 USDC na Base para WETH na Arbitru
     await expect(panel(page)).toContainText('Guaranteed minimum');
     await expect(panel(page)).toContainText('WETH');
     await expect(panel(page)).toContainText('eth_simulateV1');
-    await expect(panel(page)).toContainText('0.1% of the completed workflow input');
+    await expect(panel(page)).toContainText('0.80% of the completed workflow input');
     expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
     await page.screenshot({ path: test.info().outputPath('bridge-review.png'), fullPage: true });
     networkGuard.assertClean();
