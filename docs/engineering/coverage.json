@@ -2249,6 +2249,22 @@
     "app.domain.token-amount-global": {
       "path": "apps/reference-dapp/src/domain/token-amount-global.test.ts",
       "stage": "unit"
+    },
+    "app.server.chat-initiation": {
+      "path": "apps/reference-dapp/src/server/chat-initiation.test.ts",
+      "stage": "unit"
+    },
+    "app.state.chat-initiation": {
+      "path": "apps/reference-dapp/src/state/chat-initiation.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.execution-origins": {
+      "path": "apps/reference-dapp/src/workflow-runs/execution-origins.test.ts",
+      "stage": "unit"
+    },
+    "app.backend.execution-origins-cloud.pg": {
+      "path": "apps/reference-dapp/backend/execution-origins-cloud.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -2467,7 +2483,9 @@
     "app.components.editor-workflow-run-solana-batch",
     "app.platform.native-signing",
     "app.platform-fee.principal",
-    "app.domain.token-amount-global"
+    "app.domain.token-amount-global",
+    "app.server.chat-initiation",
+    "app.workflow-runs.execution-origins"
   ],
   "modules": [
     {
@@ -3001,12 +3019,13 @@
         "app.backend.workflow-run-purge-migrate.pg",
         "app.admin.analytics.channels",
         "app.admin.analytics.channels.pg",
-        "app.platform-fee.revenue-origins.pg"
+        "app.platform-fee.revenue-origins.pg",
+        "app.backend.execution-origins-cloud.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
         "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence. Automatic provider adapters are verified against recorded response shapes from current provider references, not live provider accounts; provider entitlements and project attribution require operator evidence at activation.",
-        "Completed executions by channel (KAN-25) are verified against seeded handoff, workflow-run, run and origin records, not production data. With migration 0037 an origin is recorded when an execution is created (approval requester, the proxy's /app path, or an approval binding); a web record at creation yields to a contradicting approval binding. Web Chat and the Editor are not separable server-side. History before 0037 is recovered only by the audited, owner-run origin-backfill command (Legacy Web only where the approval history proves no approval page created the run); the production backfill has not been run."
+        "Completed executions by channel (KAN-25) are verified against seeded handoff, workflow-run, run and origin records, not production data. With migration 0037 an origin is recorded when an execution is created (approval requester; on /app Web Chat only with the Chat's server-verified, account-bound initiation reference, else Web Editor; an approval page's own approval; or an approval binding); a web record at creation yields to a contradicting approval binding. The Chat reference proves the server issued it to that account recently and the browser presented it, not which control a person pressed; Chat executions without a FloFi account session are recorded as Web Editor. History before 0037 is recovered only by the audited, owner-run origin-backfill command (Legacy Web only where the approval history proves no approval page created the run); the production backfill has not been run."
       ]
     },
     {
@@ -3235,14 +3254,17 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "apps/reference-dapp/src/app/copilot-action.ts"
+        "apps/reference-dapp/src/app/copilot-action.ts",
+        "apps/reference-dapp/src/app/chat-initiation-action.ts"
       ],
       "suites": [
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
-        "app.state.flofi-conversation"
+        "app.state.flofi-conversation",
+        "app.server.chat-initiation",
+        "app.state.chat-initiation"
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity."
@@ -5170,7 +5192,8 @@
         "apps/reference-dapp/src/components/amount-shortcuts.tsx",
         "apps/reference-dapp/src/domain/relative-amount.ts",
         "apps/reference-dapp/src/domain/approval-notice.ts",
-        "apps/reference-dapp/src/domain/run-outcome-amounts.ts"
+        "apps/reference-dapp/src/domain/run-outcome-amounts.ts",
+        "apps/reference-dapp/src/domain/chat-initiation.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -5215,7 +5238,8 @@
         "app.domain.run-outcome-amounts",
         "app.mcp.platform-help-cancel",
         "app.domain.copilot-batch-payment-solana",
-        "app.domain.token-amount-global"
+        "app.domain.token-amount-global",
+        "app.server.chat-initiation"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -7897,7 +7921,8 @@
         "apps/reference-dapp/src/server/copilot-runtime.ts",
         "apps/reference-dapp/src/server/copilot-service.ts",
         "apps/reference-dapp/src/server/copilot-toolkit.ts",
-        "apps/reference-dapp/src/server/conversation-scope.ts"
+        "apps/reference-dapp/src/server/conversation-scope.ts",
+        "apps/reference-dapp/src/server/chat-initiation.ts"
       ],
       "suites": [
         "app.domain.copilot-context",
@@ -7907,7 +7932,8 @@
         "app.server.copilot-orchestration",
         "app.server.copilot-prompt-scope",
         "app.state.flofi-conversation",
-        "app.server.conversation-scope"
+        "app.server.conversation-scope",
+        "app.server.chat-initiation"
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity.",
@@ -8591,7 +8617,8 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/state/copilot-catalogs.ts",
-        "apps/reference-dapp/src/state/flofi-conversation.ts"
+        "apps/reference-dapp/src/state/flofi-conversation.ts",
+        "apps/reference-dapp/src/state/chat-initiation.ts"
       ],
       "suites": [
         "app.domain.copilot-context",
@@ -8599,7 +8626,8 @@
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.state.flofi-conversation",
-        "app.domain.conversation-persistence"
+        "app.domain.conversation-persistence",
+        "app.state.chat-initiation"
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity."
@@ -8939,7 +8967,7 @@
         "app.components.user-funded-browser"
       ],
       "gaps": [
-        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md \u00a73.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
+        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md §3.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
       ]
     },
     {
@@ -9336,7 +9364,8 @@
         "apps/reference-dapp/src/workflow-runs/user-funded-pass.ts",
         "apps/reference-dapp/src/workflow-runs/worker.ts",
         "apps/reference-dapp/src/workflow-runs/testdata/evm-batch-plans.fed320e.json",
-        "apps/reference-dapp/src/workflow-runs/execution-origins.ts"
+        "apps/reference-dapp/src/workflow-runs/execution-origins.ts",
+        "apps/reference-dapp/src/workflow-runs/approval-page-origin.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -9360,7 +9389,9 @@
         "app.engine.batch-payment",
         "app.workflow-runs.batch-payment-run.pg",
         "app.workflow-runs.solana-batch-payment-run.pg",
-        "app.platform-fee.revenue-origins.pg"
+        "app.platform-fee.revenue-origins.pg",
+        "app.workflow-runs.execution-origins",
+        "app.backend.execution-origins-cloud.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -9776,6 +9807,7 @@
     "app.workflow-runs.solana-batch-payment-run.pg",
     "app.editor.editor-solana-batch-run.pg",
     "app.platform-fee.revenue-origins.pg",
-    "cloud-runtime.certificate-0037.pg"
+    "cloud-runtime.certificate-0037.pg",
+    "app.backend.execution-origins-cloud.pg"
   ]
 }

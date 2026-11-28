@@ -31,6 +31,7 @@ import { reviewEditorExecution, solanaBatchOnly, type EditorExecutionReview } fr
 import { walletProfileOf, workflowRunCancel, workflowRunStatus, workflowRunUserFundedPrepare, workflowRunUserFundedStart, claimApproval, type ClaimedProposal } from '../platform/index';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { approvalSurface } from '../server/approval-surface';
+import { requestWebSurface } from '../server/chat-initiation';
 import { currentWalletPrincipals } from '../server/session-principal';
 import { userFundedRuntime } from '../user-funded/runtime';
 import { startEditorWorkflowRun } from './editor-run-action';
@@ -191,7 +192,10 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     if (!started.ok) return started;
     approvalId = started.value.approvalId;
     const secret = new URL(started.value.approvalUrl).hash.slice(1);
-    const s = await surface();
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25 §8.1): the run this claim creates is Web Chat only when this request carried a Chat initiation
+    // reference the server verifies for this account (`server/chat-initiation.ts`); otherwise Web Editor. Attribution only: it changes no gate.
+    const base = await surface(), initiation = await requestWebSurface(process.env);
+    const s = base.workflowRuns ? { ...base, workflowRuns: { ...base.workflowRuns, editorInitiation: initiation } } : base;
     await claimApproval(s, secret, wallets, true);
     const proposal = await workflowRunUserFundedStart(s, approvalId, wallets, parsed);
     const run = proposal.view.workflowRun?.run;

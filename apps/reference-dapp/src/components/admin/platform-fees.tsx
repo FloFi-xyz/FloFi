@@ -20,7 +20,7 @@ const COLLECTION_REASONS: Readonly<Record<string, string>> = {
   PLATFORM_FEE_POLICY_NOT_APPROVED: 'The financial accounting policy is not approved.',
   PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED: 'Fee accounting is not activated.',
 };
-const ORIGIN_LABELS: Readonly<Record<string, string>> = { web: 'FloFi Web (Chat or Editor)', web_chat: 'FloFi Web (Chat or Editor)', web_editor: 'FloFi Web (Chat or Editor)',
+const ORIGIN_LABELS: Readonly<Record<string, string>> = { web: 'FloFi Web (Chat or Editor)', web_chat: 'Web Chat', web_editor: 'Web Editor',
   legacy_web: 'Legacy Web (recovered history)', mcp_chatgpt: 'ChatGPT MCP', mcp_claude: 'Claude MCP', mcp_other: 'Unidentified MCP client', telegram: 'Telegram',
   developer_api: 'Developer API', automation: 'Automation', unknown: 'Unknown origin', unrecorded: 'Unknown origin' };
 const STATES = ['DUE', 'COLLECTION_PENDING', 'COLLECTED', 'COLLECTION_FAILED', 'NOT_APPLICABLE', 'WAIVED', 'UNSUPPORTED'] as const;

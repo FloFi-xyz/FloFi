@@ -69,6 +69,8 @@ export type NewRun = { readonly runId: string; readonly handoffId: string; reado
   readonly strategy: StrategyInput; readonly workflowHash: string; readonly engineVersion: string; readonly stepCount: number; readonly expiresAt: Date;
   /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the channel the run started from (its handoff's requester), recorded once with the run (0037). */
   readonly origin?: ExecutionOrigin;
+  /** The closed code of the server-side record that origin came from (default: the approval's requester). */
+  readonly originEvidence?: string;
   /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the platform fee basis the approved Review disclosed (0038), recorded with the run. */
   readonly feeBasis?: FeeBasis };
 export type RunPatch = { readonly currentStep?: number; readonly mode?: RunMode; readonly authorizationId?: string; readonly code?: string | null; readonly completedAt?: Date };
@@ -167,8 +169,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         if (input.origin && recordOrigin) {
           await tx.query('SAVEPOINT execution_origin');
           try {
-            await tx.query(`INSERT INTO execution_origins (tenant_id, workflow_run_id, origin, basis, evidence) VALUES ($1, $2, $3, 'CREATION', 'APPROVAL_REQUESTER')
-              ON CONFLICT DO NOTHING`, [tenantId, input.runId, input.origin]);
+            await tx.query(`INSERT INTO execution_origins (tenant_id, workflow_run_id, origin, basis, evidence) VALUES ($1, $2, $3, 'CREATION', $4)
+              ON CONFLICT DO NOTHING`, [tenantId, input.runId, input.origin, input.originEvidence ?? 'APPROVAL_REQUESTER']);
             await tx.query('RELEASE SAVEPOINT execution_origin');
           } catch { await tx.query('ROLLBACK TO SAVEPOINT execution_origin'); }
         }

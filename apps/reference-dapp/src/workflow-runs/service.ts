@@ -13,7 +13,7 @@
  */
 import { workflowFeeBasis } from '../platform-fee/principal';
 import { externalOneStepPlan } from '../platform/external-single-step.ts';
-import { originOfRequester } from './execution-origins.ts';
+import { originOfRequester, type ExecutionOrigin } from './execution-origins.ts';
 import type { ApprovalRequesterKind, HandoffRecord, WalletRef } from '../platform/handoff-store.ts';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
@@ -64,6 +64,12 @@ export type WorkflowRunDeps = Omit<RunnerDeps, 'policyFor'> & {
   /** The proven owner's delegated grants (for the owner's authorization plan), when delegation is enabled. */
   readonly grantsOf?: (owner: WalletRef) => Promise<readonly GrantView[]>;
   readonly newId: (prefix: 'wfr') => string;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25 §8.1): where the request creating an Editor handoff's run was initiated, verified by FloFi's
+   * server for that request (`server/chat-initiation.ts`): `WEB_CHAT` records the run as Web Chat. Absent, `WEB_EDITOR` or any other requester kind:
+   * the requester's own origin (an Editor handoff is Web Editor). Never read from a client.
+   */
+  readonly editorInitiation?: 'WEB_CHAT' | 'WEB_EDITOR';
 };
 const refuse = (code: string): never => { throw new Error(code); };
 const runnerDeps = (deps: WorkflowRunDeps): RunnerDeps => ({ ...deps, policyFor: run => deps.policyFor(run.requester.kind) });
@@ -99,9 +105,15 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
   const now = deps.now();
   const run = await deps.store.create({ runId: deps.newId('wfr'), handoffId: h.handoffId, requester: { kind: h.requesterKind, ref: h.requesterRef }, owner, wallets: bound,
     strategy: workflow.strategy, workflowHash: workflow.workflowHash, engineVersion: ENGINE_VERSION, stepCount: workflow.steps.length,
-    expiresAt: new Date(now.getTime() + CONFIRM_RUN_SECONDS * 1000), origin: originOfRequester(h.requesterKind, h.clientId), feeBasis: workflowFeeBasis(workflow) }, now);
+    expiresAt: new Date(now.getTime() + CONFIRM_RUN_SECONDS * 1000), ...runOrigin(deps, h), feeBasis: workflowFeeBasis(workflow) }, now);
   assertRunWallets(run, wallets);
   return run;
+}
+
+/** The origin a new run of this handoff records (its requester's; an Editor handoff's run started from a verified Chat initiation is Web Chat). */
+function runOrigin(deps: WorkflowRunDeps, h: HandoffRecord): { readonly origin: ExecutionOrigin; readonly originEvidence?: string } {
+  return h.requesterKind === 'EDITOR_SESSION' && deps.editorInitiation === 'WEB_CHAT' ? { origin: 'web_chat', originEvidence: 'WEB_CHAT_INITIATION' }
+    : { origin: originOfRequester(h.requesterKind, h.clientId) };
 }
 
 /** The owner's authorization plan for this run (their own grants decide whether one passkey authorization can cover it). */

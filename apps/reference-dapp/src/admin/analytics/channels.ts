@@ -25,25 +25,35 @@
  * EDITOR_SESSION. A single flow an EDITOR_SESSION handoff names would be FloFi Web too, but no current code records one: Editor handoffs are
  * SEQUENTIAL (`editor/approval.ts`), and both `run_ids` writers bind runs only to a single-flow plan.
  * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: with migration 0037 a durable origin is written when an execution is created
- * (`workflow-runs/execution-origins.ts`): /app server actions record FloFi Web from the proxy's authoritative path, an approval's binding records its
- * requester, and the audited backfill records Legacy Web only where the approval history proves no approval page could have created the run.
- * A recorded origin (or its latest approved correction) wins over a binding; an execution with neither stays UNKNOWN. Without 0037 the rule
- * above applies unchanged. Chat and the Editor stay one row: no server-side record separates them.
+ * (`workflow-runs/execution-origins.ts`): /app server actions record Web Chat (a Chat initiation reference the server verified for the request's own
+ * account) or Web Editor, an approval page records its approval's requester (exact reviewed workflow hash, its claimant's proven wallet), an
+ * approval's binding records its requester, and the audited backfill records Legacy Web only where the approval history proves no approval page
+ * could have created the run. A recorded origin (or its latest approved correction) wins over a binding; an execution with neither stays UNKNOWN.
+ * An Editor workflow run is Web Chat or Web Editor by its recorded origin. FloFi Web (Chat or Editor) remains for what cannot be separated:
+ * records made before the separation (`web`), Editor workflow runs without a recorded origin, and an execution whose runs name both. Without 0037
+ * the rules above apply unchanged (every Editor workflow run is then FloFi Web (Chat or Editor)).
  */
 import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import type { AdminHost } from '../host.ts';
 import { cimdClientId } from '../../mcp/oauth/cimd.ts';
-import { effectiveOrigins, revenueOriginsActive, type ExecutionOrigin } from '../../workflow-runs/execution-origins.ts';
+import { effectiveOrigins, isExecutionOrigin, revenueOriginsActive, type ExecutionOrigin } from '../../workflow-runs/execution-origins.ts';
 import { COMPOSITION_FLOWS } from './classify.ts';
 import { ENVIRONMENTS, type AnalyticsEnvironment } from './networks.ts';
 import { executionsOf, loadRuns, type Coverage, type Execution, type LoadedRun } from './workflows.ts';
 
-/** The table's rows, in their fixed order. Web Chat and the Editor are one row: no record says which of the two started a run. */
-export const CHANNELS = ['FLOFI_WEB', 'LEGACY_WEB', 'CHATGPT_MCP', 'CLAUDE_MCP', 'TELEGRAM', 'DEVELOPER_API', 'MCP_UNIDENTIFIED', 'UNKNOWN'] as const;
+/**
+ * The table's rows, in their fixed order. Web Chat and Web Editor are separate rows; FloFi Web (Chat or Editor) holds the web executions no record
+ * separates (recorded before the separation, or naming both), and Legacy Web the recovered history: together they are the FloFi Web total.
+ */
+export const CHANNELS = ['WEB_CHAT', 'WEB_EDITOR', 'FLOFI_WEB', 'LEGACY_WEB', 'CHATGPT_MCP', 'CLAUDE_MCP', 'TELEGRAM', 'DEVELOPER_API', 'MCP_UNIDENTIFIED', 'UNKNOWN'] as const;
 export type Channel = (typeof CHANNELS)[number];
 /** An origin: a channel, or an automation rule (reported in its own note, never in the table or its total). */
 export type Origin = Channel | 'AUTOMATION';
-export const CHANNEL_LABELS: Readonly<Record<Channel, string>> = { FLOFI_WEB: 'FloFi Web (Chat or Editor)', LEGACY_WEB: 'Legacy Web (recovered history)',
+/** The FloFi Web rows (their sum is the FloFi Web total). */
+export const FLOFI_WEB_CHANNELS: readonly Channel[] = ['WEB_CHAT', 'WEB_EDITOR', 'FLOFI_WEB', 'LEGACY_WEB'];
+const recordedWeb = (origin: Origin) => origin === 'WEB_CHAT' || origin === 'WEB_EDITOR' || origin === 'FLOFI_WEB';
+export const CHANNEL_LABELS: Readonly<Record<Channel, string>> = { WEB_CHAT: 'Web Chat', WEB_EDITOR: 'Web Editor', FLOFI_WEB: 'FloFi Web (Chat or Editor)',
+  LEGACY_WEB: 'Legacy Web (recovered history)',
   CHATGPT_MCP: 'ChatGPT MCP', CLAUDE_MCP: 'Claude MCP',
   TELEGRAM: 'Telegram', DEVELOPER_API: 'Developer API', MCP_UNIDENTIFIED: 'Unidentified MCP client', UNKNOWN: 'Unknown origin' };
 
@@ -74,10 +84,12 @@ export function channelOf(requesterKind: string, clientId: string): Origin {
   }
 }
 
-/** A recorded execution origin (0037) as a reported channel. Chat and the Editor are FloFi Web; recovered history is Legacy Web. */
+/** A recorded execution origin (0037) as a reported channel. `web` (recorded before Chat and the Editor were separated) is FloFi Web (Chat or Editor). */
 export function channelOfOrigin(origin: ExecutionOrigin): Origin {
   switch (origin) {
-    case 'web': case 'web_chat': case 'web_editor': return 'FLOFI_WEB';
+    case 'web_chat': return 'WEB_CHAT';
+    case 'web_editor': return 'WEB_EDITOR';
+    case 'web': return 'FLOFI_WEB';
     case 'legacy_web': return 'LEGACY_WEB';
     case 'mcp_chatgpt': return 'CHATGPT_MCP';
     case 'mcp_claude': return 'CLAUDE_MCP';
@@ -108,7 +120,9 @@ export function channelPeriod(value: string | undefined, now: Date): ChannelPeri
  * are, whatever network environment its handoff names.
  */
 export type WorkflowRunGroup = { readonly runKind: string; readonly requesterKind: string; readonly clientId: string; readonly networkEnvironment: string;
-  readonly mocked?: boolean; readonly count: number };
+  readonly mocked?: boolean;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the runs' recorded origin (0037), which separates an Editor handoff's Web Chat and Web Editor runs. */
+  readonly origin?: string | null; readonly count: number };
 /** A handoff's binding to runs (`run_ids`), with the facts that decide its origin. */
 export type RunBinding = { readonly requesterKind: string; readonly clientId: string; readonly runIds: readonly string[] };
 /** A completed single-flow execution: every run that belongs to it, and the workflow ids they ran under. */
@@ -150,8 +164,11 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
     if (origin === 'AUTOMATION') tallies[environment]!.automation += n; else tallies[environment]!.counts[origin] += n;
   };
   for (const group of input.workflowRuns) {
-    // The run copies its handoff's requester (0015, immutable on both): a disagreement is not a trusted origin.
-    const origin = group.runKind === group.requesterKind ? channelOf(group.requesterKind, group.clientId) : 'UNKNOWN';
+    // The run copies its handoff's requester (0015, immutable on both): a disagreement is not a trusted origin. Within FloFi Web, the run's own
+    // recorded origin says whether the Chat or the Editor started it; it never moves a run to or from another channel.
+    let origin = group.runKind === group.requesterKind ? channelOf(group.requesterKind, group.clientId) : 'UNKNOWN';
+    const recorded = isExecutionOrigin(group.origin) ? channelOfOrigin(group.origin) : null;
+    if (origin === 'FLOFI_WEB' && recorded && recordedWeb(recorded)) origin = recorded;
     add(group.mocked ? 'MOCKED' : WORKFLOW_RUN_ENVIRONMENT[group.networkEnvironment] ?? null, origin, group.count);
   }
   const bound = new Map<string, Set<Origin>>();
@@ -162,14 +179,16 @@ export function foldChannels(input: { readonly workflowRuns: readonly WorkflowRu
   for (const e of input.executions) {
     if (e.runIds.some(id => input.steps.has(id)) || e.workflowIds.some(isWorkflowRunStepWorkflow)) continue;
     const records = e.runIds.flatMap(id => { const o = input.recorded?.get(id); return o ? [o] : []; });
-    const weakWeb = (o: { origin: ExecutionOrigin; basis: string }) => o.basis === 'CREATION' && channelOfOrigin(o.origin) === 'FLOFI_WEB';
+    const weakWeb = (o: { origin: ExecutionOrigin; basis: string }) => o.basis === 'CREATION' && recordedWeb(channelOfOrigin(o.origin));
     const strong = new Set(records.filter(o => !weakWeb(o)).map(o => channelOfOrigin(o.origin)));
     const boundOrigins = new Set(e.runIds.flatMap(id => [...bound.get(id) ?? []]));
     let origins: Set<Origin> = boundOrigins;
     if (strong.size) origins = strong;
     else if (records.length) {
-      const approval = [...boundOrigins].filter(o => o !== 'FLOFI_WEB');
-      origins = new Set<Origin>(approval.length ? approval : ['FLOFI_WEB']);
+      // Web records only: an approval binding names the channel; otherwise the web row they name (both Chat and Editor: not separable).
+      const approval = [...boundOrigins].filter(o => !recordedWeb(o));
+      const web = new Set(records.map(o => channelOfOrigin(o.origin)));
+      origins = new Set<Origin>(approval.length ? approval : [web.size === 1 ? [...web][0]! : 'FLOFI_WEB']);
     }
     const origin: Origin = origins.size === 1 ? [...origins][0]! : 'UNKNOWN';
     add(e.environment, origin, 1);
@@ -205,19 +224,22 @@ const bounded = <T>(host: AdminHost, work: (tx: Queryable) => Promise<T>) => hos
  * Completed workflow runs created in the period, grouped by origin facts (no row identity is selected). Bounded by the tenant's runs, as the
  * FinOps cohort (`finops/report.ts`); groups are few (requester kind × client id × environment), at most GROUP_LIMIT are read.
  */
-async function completedWorkflowRuns(host: AdminHost, period: ChannelPeriod): Promise<{ groups: WorkflowRunGroup[]; truncated: boolean }> {
+async function completedWorkflowRuns(host: AdminHost, period: ChannelPeriod, originsRecorded: boolean): Promise<{ groups: WorkflowRunGroup[]; truncated: boolean }> {
+  // With 0037, each run's effective origin (the latest approved correction, else its recorded origin) joins the grouping; without it the table does not exist.
+  const origin = originsRecorded ? `(SELECT coalesce((SELECT c.origin FROM execution_origin_corrections c WHERE c.tenant_id = r.tenant_id AND c.workflow_run_id = r.run_id
+      ORDER BY c.created_at DESC, c.correction_id DESC LIMIT 1), o.origin) FROM execution_origins o WHERE o.tenant_id = r.tenant_id AND o.workflow_run_id = r.run_id)` : 'NULL::text';
   const { rows } = await bounded(host, tx => tx.query<{ run_kind: string; requester_kind: string; client_id: string; network_environment: string; mocked: boolean;
-    n: number }>(`
+    origin: string | null; n: number }>(`
     SELECT r.requester_kind AS run_kind, h.requester_kind, h.client_id, h.network_environment,
       EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id AND s.outcome->'evidence'->>'environment' = 'MOCKED') AS mocked,
-      count(*)::int AS n
+      ${origin} AS origin, count(*)::int AS n
     FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
     WHERE r.tenant_id = $1 AND r.state = 'COMPLETED' AND r.completed_at IS NOT NULL AND r.created_at >= $2 AND r.created_at < $3
       AND NOT EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id AND s.state NOT IN ('RECONCILED', 'SKIPPED'))
       AND EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id AND s.state = 'RECONCILED')
-    GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC, 1, 2, 3, 4, 5 LIMIT $4`, [host.tenantId, period.from, period.to, GROUP_LIMIT + 1]));
+    GROUP BY 1, 2, 3, 4, 5, 6 ORDER BY 7 DESC, 1, 2, 3, 4, 5, 6 LIMIT $4`, [host.tenantId, period.from, period.to, GROUP_LIMIT + 1]));
   return { groups: rows.slice(0, GROUP_LIMIT).map(row => ({ runKind: row.run_kind, requesterKind: row.requester_kind, clientId: row.client_id,
-    networkEnvironment: row.network_environment, mocked: row.mocked, count: row.n })), truncated: rows.length > GROUP_LIMIT };
+    networkEnvironment: row.network_environment, mocked: row.mocked, origin: row.origin, count: row.n })), truncated: rows.length > GROUP_LIMIT };
 }
 /** The run ids among `ids` that a workflow run's owner-signed step names as its execution (whatever that run's state). */
 async function workflowRunSteps(tx: Queryable, tenantId: string, ids: readonly string[]): Promise<Set<string>> {
@@ -244,7 +266,8 @@ export async function loadChannelCounts(host: AdminHost, options: { readonly per
   const { period } = options;
   try {
     // The run loader reads under the same 4 s statement timeout as every other read here (All time included).
-    const [read, workflowRuns] = await Promise.all([bounded(host, tx => loadRuns(tx, host.tenantId, period)), completedWorkflowRuns(host, period)]);
+    const originsRecorded = await bounded(host, tx => revenueOriginsActive(tx));
+    const [read, workflowRuns] = await Promise.all([bounded(host, tx => loadRuns(tx, host.tenantId, period)), completedWorkflowRuns(host, period, originsRecorded)]);
     const all = executionsOf(read.runs), executions = completedExecutions(all, read.runs);
     const ids = [...new Set(executions.flatMap(e => e.runIds))];
     const { steps, bindings, recorded } = ids.length ? await bounded(host, async tx => ({ steps: await workflowRunSteps(tx, host.tenantId, ids),
@@ -252,7 +275,6 @@ export async function loadChannelCounts(host: AdminHost, options: { readonly per
       recorded: (await effectiveOrigins(tx, host.tenantId, { runIds: ids, workflowRunIds: [] })).runs }))
       : { steps: new Set<string>(), bindings: [], recorded: new Map() };
     const compositionsWithoutRecord = Object.fromEntries(ENVIRONMENTS.map(env => [env, all.filter(e => e.environment === env && COMPOSITION_FLOWS.has(e.flow) && !e.actions).length]));
-    const originsRecorded = await bounded(host, tx => revenueOriginsActive(tx));
     return { ok: true, value: { period, originsRecorded, ...foldChannels({ workflowRuns: workflowRuns.groups, executions, steps, bindings, recorded }), coverage: read.coverage,
       workflowRunsTruncated: workflowRuns.truncated, compositionsWithoutRecord: compositionsWithoutRecord as Record<AnalyticsEnvironment, number> } };
   } catch { return { ok: false, code: 'ADMIN_CHANNEL_COUNTS_UNAVAILABLE' }; }

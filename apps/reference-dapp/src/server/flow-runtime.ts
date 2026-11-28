@@ -14,7 +14,7 @@
  * Nothing here signs, holds a key or submits a transaction: the flows are the same read/simulate/review/record services the API
  * runs, and every wallet request still needs the owner's Review, Execute click and wallet signature.
  */
-import type { ExecutionSurface } from '../workflow-runs/execution-origins.ts';
+import type { OriginContext } from '../workflow-runs/execution-origins.ts';
 import { randomBytes } from 'node:crypto';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { Backend, BackendOptions } from '../../backend/app.ts';
@@ -112,8 +112,8 @@ export function embeddedRuntime(env: Env = process.env): Promise<EmbeddedRuntime
 export async function cloudFlow<T>(flow: FlowName, method: string, args: readonly unknown[],
   options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch; readonly betaIdentity?: BetaRequestIdentity | null;
     readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string; readonly developerLive?: boolean;
-    /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the server-derived surface (FloFi's /app server actions), recorded as a new run's origin. */
-    readonly surface?: ExecutionSurface | null;
+    /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the server-derived origin context of a creating call, recorded as a new run's origin. */
+    readonly surface?: OriginContext | null;
     /** P0 catalog reliability: the caller stopped waiting (read-only calls only; a mutating call's outcome is then UNKNOWN, see callCloudFlow). */
     readonly signal?: AbortSignal } = {}):
   Promise<FlowResult<T> | null> {

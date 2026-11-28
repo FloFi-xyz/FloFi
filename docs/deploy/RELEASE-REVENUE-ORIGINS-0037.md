@@ -41,11 +41,49 @@ plus column `UPDATE (state, collection, version)` on `platform_fee_ledger` (coll
 transitions); admin web and admin operations `S` on `platform_fee_authorizations`.
 
 Run step 2 immediately after step 1b. In between, on a database enforcing the schema-36 policy, origin and authorization writes fail quietly
-(nothing breaks; those executions keep no origin and can never be charged) and the Admin fee and channel panels are unavailable.
+(nothing breaks; those executions keep no origin and can never be charged) and the Admin fee and channel panels are unavailable. From step 2 on, new executions record their origin when they
+are created (§2b), approval-page runs included.
 
 Rehearsal (2026-11-28, Neon branch `revenue-0037-rehearsal-20261128` of production): 0037 and 0038 applied in the runner's transaction shape
 (advisory lock, exact-head guard, lock timeout); the resulting 38-entry history hashes to the schema-38 policy's `ledger_sha256`. The branch holds
 a copy of production data: delete it when no longer needed.
+
+## 2b. What is recorded at creation (no step to run)
+
+First record wins; nothing ever updates an origin row. Evidence codes are closed values in `execution_origins.evidence`.
+
+| Created by | Origin | Evidence |
+|---|---|---|
+| `/app`, the Review the web Chat itself started, with the Chat's initiation reference verified on the server | `web_chat` | `WEB_CHAT_INITIATION` |
+| `/app`, anything else (Editor controls; no or an unverifiable reference; no FloFi account session) | `web_editor` | `WEB_EDITOR_SERVER_ACTION` |
+| `/app`, through an API still receiving a BFF of the previous build (rolling deployment only) | `web` (legacy) | `WEB_APP_SERVER_ACTION` |
+| An approval page (`/approve`, `/mcp/approve`), the run's reviewed workflow hashing exactly to one live single-flow approval claimed by the request's proven wallet, which also owns the run | the approval's requester (`mcp_chatgpt`, `mcp_claude`, `mcp_other`, `telegram`, `developer_api`, `automation`) | `APPROVAL_PAGE_CREATION` |
+| A workflow run from an Editor handoff, created by the in-place Authorize carrying a verified Chat reference | `web_chat` | `WEB_CHAT_INITIATION` |
+| Any other workflow run (Editor handoffs included) | its approval's requester (Editor: `web_editor`) | `APPROVAL_REQUESTER` |
+
+The approval-page attribution no longer depends on the owner's status sharing: sharing still decides only what the requester can see, and
+`bindRuns` still binds (and, for a web record made at creation, corrects once through an append-only row) when sharing is on. Approvals of
+different channels that all match the same run record nothing (Unknown until a binding or the backfill decides).
+
+**The Chat initiation reference** (`src/server/chat-initiation.ts`): the Chat's own server action issues it to the FloFi account signed in on
+that request, on `/app` only; HMAC-SHA256 with a key derived (HKDF, purpose `flofi/chat-initiation/v1`) from the wallet-session key
+(`FLOFI_SESSION_SECRET`, else `API_AUTH_TOKEN`): no new variable. It carries a keyed digest of tenant and account (no account id, wallet address or
+email in clear), its issue and expiry instants (15 minutes) and a nonce. The browser presents it in a host-only, `SameSite=Strict` cookie scoped
+to `/app` only while the Chat's own Review runs. FloFi's web server verifies it on every creating call against that request's account session and
+tells the API only the closed result (`x-flofi-execution-surface: web-chat | web-editor | approval-page`, plus the proven wallets for an approval
+page, on the bearer-authenticated call). Anything unverifiable is Web Editor; nothing ever fails or waits for it. What it proves: the server issued
+it recently to the account that creates the run and the browser presented it for the Chat's Review; not which control a person pressed. Rotating
+the session secret only makes Chat executions in flight record as Web Editor.
+
+**Deployment order** (remote runtime): deploy the API before the web. An API of the previous build ignores the new header values (those
+executions keep no creation origin; approval-page runs are still bound when sharing is on); a web of the previous build sends `web-app`, which the
+new API records as the legacy `web`. On the embedded runtime both halves ship together.
+
+**Check after deploy** (read only):
+
+```sql
+SELECT origin, evidence, count(*) FROM execution_origins WHERE recorded_at > now() - interval '1 day' GROUP BY 1, 2 ORDER BY 1, 2;
+```
 
 ## 3. Recover historical origins (dry run first)
 
@@ -79,7 +117,7 @@ A run that automated evidence cannot resolve can be corrected only with an appro
 rewritten):
 
 ```bash
-… origin-correct --tenant default --run <run id> --origin <web|legacy_web|mcp_chatgpt|mcp_claude|mcp_other|telegram|developer_api|automation|unknown> \
+… origin-correct --tenant default --run <run id> --origin <web_chat|web_editor|web|legacy_web|mcp_chatgpt|mcp_claude|mcp_other|telegram|developer_api|automation|unknown> \
   --reason-code <CODE> --approval-ref <ref>
 ```
 

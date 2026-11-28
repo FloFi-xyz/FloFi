@@ -97,12 +97,12 @@ const portuguese: Readonly<Record<string, string>> = {
   "Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; simulations, quotes, approval requests, retries and individual steps are never counted.":
     "Cada contagem é uma execução única de fluxo concluída e conciliada. Um Pagamento em lote conta uma vez, qualquer que seja o número de destinatários; simulações, cotações, pedidos de aprovação, novas tentativas e etapas individuais nunca são contados.",
   "An execution belongs to the period it started in.": "Cada execução pertence ao período em que foi iniciada.",
-  "FloFi Web combines Web Chat and the Editor: they are the same app page and no server-side record says which of the two started a run.":
-    "FloFi Web reúne o Chat na web e o Editor: são a mesma página do app e nenhum registro no servidor indica qual dos dois iniciou a execução.",
-  "FloFi Web in total: {0} ({1} recorded when they started, {2} recovered from history).":
-    "FloFi Web no total: {0} ({1} registradas ao iniciar, {2} recuperadas do histórico).",
-  "New executions keep the channel they started from: a workflow run from its approval, a run created in the FloFi app when it is created, and a run signed on an approval page once that approval records it (only when the owner shares its status). Legacy Web is earlier web history recovered only where the approval records prove no approval page created it; anything else without evidence stays Unknown origin.":
-    "Novas execuções mantêm o canal de origem: um fluxo pela sua aprovação, uma execução criada no app FloFi no momento em que é criada, e uma execução assinada numa página de aprovação quando essa aprovação a registra (somente se o dono compartilhar o status). Web (histórico recuperado) é o histórico anterior da web recuperado somente quando os registros de aprovação provam que nenhuma página de aprovação a criou; o que não tiver evidência continua como Origem desconhecida.",
+  "Web Chat and Web Editor are the same app page: an execution counts as Web Chat only when the chat started it with its own server-issued, account-bound reference, and as Web Editor otherwise. FloFi Web (Chat or Editor) holds web executions no record separates, such as those recorded before the two were separated.":
+    "Chat na web e Editor na web são a mesma página do app: uma execução conta como Chat na web somente quando o chat a iniciou com sua própria referência emitida pelo servidor e vinculada à conta, e como Editor na web nos demais casos. FloFi Web (Chat ou Editor) reúne as execuções da web que nenhum registro separa, como as registradas antes da separação.",
+  "FloFi Web in total: {0} ({1} Web Chat, {2} Web Editor, {3} Chat or Editor, {4} recovered from history).":
+    "FloFi Web no total: {0} ({1} Chat na web, {2} Editor na web, {3} Chat ou Editor, {4} recuperadas do histórico).",
+  "New executions keep the channel they started from: a workflow run from its approval, a run created in the FloFi app when it is created, and a run signed on an approval page when it is created, from that approval, whether or not the owner shares its status. Legacy Web is earlier web history recovered only where the approval records prove no approval page created it; anything else without evidence stays Unknown origin.":
+    "Novas execuções mantêm o canal de origem: um fluxo pela sua aprovação, uma execução criada no app FloFi no momento em que é criada, e uma execução assinada numa página de aprovação no momento em que é criada, por essa aprovação, compartilhando o dono o status ou não. Web (histórico recuperado) é o histórico anterior da web recuperado somente quando os registros de aprovação provam que nenhuma página de aprovação a criou; o que não tiver evidência continua como Origem desconhecida.",
   "Ledger period": "Período do livro",
   "Workflow runs completed in: {0}": "Fluxos concluídos em: {0}",
   "Collected:": "Cobrado:",
@@ -137,6 +137,8 @@ const portuguese: Readonly<Record<string, string>> = {
   "Automation": "Automação",
   "Collected revenue is reported only from ledger rows that carry their collection transactions; until collection is active it is zero. Amounts stay in each token’s own units and are never added across tokens or converted to money here.":
     "A receita cobrada é informada somente a partir de linhas do livro que trazem as transações de cobrança; enquanto a cobrança não estiver ativa, ela é zero. Os valores ficam na unidade de cada token e nunca são somados entre tokens nem convertidos em dinheiro aqui.",
+  "Web Chat": "Chat na web",
+  "Web Editor": "Editor na web",
   "FloFi Web (Chat or Editor)": "FloFi Web (Chat ou Editor)",
   "Legacy Web (recovered history)": "Web (histórico recuperado)",
   "One-step runs started directly in the app have no origin record and are shown as Unknown origin.":

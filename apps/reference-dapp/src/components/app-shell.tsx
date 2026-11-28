@@ -151,6 +151,7 @@ import { isPristineDraft } from '../domain/initial-workflow';
 import { editorPersistencePath } from '../domain/editor-persistence';
 import { editorStageReasons } from '../domain/editor-stages';
 import { useProductBootstrap } from '../state/product-bootstrap';
+import { chatInitiated, ensureChatInitiation, forgetChatInitiation } from '../state/chat-initiation';
 
 /** `approvalSlot`/`approvalGate` (BUILD-FLOFI-UX-UI-002, `/approve` only): where the proposal's notice renders, and whether Simulate and
  * Execute stay closed until the proposal is loaded for the proven wallet.
@@ -1020,13 +1021,17 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : workflowRunHere.run && ['ATTENTION', 'HALTED'].includes(workflowRunHere.run.state) ? 'Execution needs attention'
     // Before its first status read answers: loading; once a read could not load it (e.g. the sign-in expired): what the run panel offers.
     : runUnloaded ? workflowRunHere.error ? 'Load workflow progress' : 'Loading…' : 'Execution in progress';
-  const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
+  const chatSurface = !approvalSlot && !autoPrepare && surface === 'workspace';
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25 §8.1): the Review the chat itself starts runs with the Chat's server-issued initiation
+  // reference presented (`state/chat-initiation.ts`), so its run is recorded as Web Chat; the Editor's own controls never present it.
+  const chatSimulate = () => chatInitiated(() => simulateAgain());
+  const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: chatSurface,
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
     // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.
     persist: editorPersistencePath(pathname), accountScope: conversationScope,
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
     bridge: { workflow: runtimeWorkflow, feeWorkflow: state.workflow, feeCollection: platformFeeCollection, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
-      invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
+      invalidWorkflow: lifecycleState.invalidWorkflow, simulate: chatSimulate, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
       // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the destination's wallets are still being read (the chat waits and resumes by itself).
@@ -1044,6 +1049,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
           ?? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone || groupedSingleDone, blocker: blockerView, editingPaused,
       workflowProgress } });
+  // The reference is the signed-in account's (none without an account session); refreshed in the background as the person talks to the chat.
+  const personTurns = conversation.messages.filter(message => message.role === 'you').length;
+  useEffect(() => { if (chatSurface && conversationScope) void ensureChatInitiation(Date.now(), conversationScope); else forgetChatInitiation(); },
+    [chatSurface, conversationScope, personTurns]);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).
   const chatFirst = conversation.direct && !engineering;

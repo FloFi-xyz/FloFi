@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { EXECUTION_SURFACE_HEADER, recordExecutionOrigin, revenueOriginsActive, type ExecutionSurface } from '../src/workflow-runs/execution-origins.ts';
+import { APPROVAL_PAGE_EVIDENCE, originContextOf, recordExecutionOrigin, revenueOriginsActive, WEB_SURFACE_ORIGINS, type OriginContext } from '../src/workflow-runs/execution-origins.ts';
+import { approvalPageOrigin } from '../src/workflow-runs/approval-page-origin.ts';
 import { reportUniversalFailure } from '../src/server/universal-router/failure.ts';
 import { routeRefusalsFor } from '../src/domain/route-refusals.ts';
 /**
@@ -253,18 +254,32 @@ export function createBackend(options: BackendOptions) {
    * principal is not the durable run's owner (or claims another owner) before the service is touched.
    */
   /**
-   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25): the run a /app server action just created (`simulate`/`prepare`) started in FloFi Web.
-   * First record wins (`execution-origins.ts`); a failure is logged with a closed code and never changes the call's result.
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25): where the run a server action just created (`simulate`/`prepare`) started, from the
+   * server-derived context only: the app page's Web Chat (a verified initiation reference) or Web Editor, or the approval page's own approval
+   * (`approval-page-origin.ts`: exact reviewed workflow hash, the request's proven wallet is the run's owner and the approval's claimant), whatever
+   * the owner's sharing choice. First record wins (`execution-origins.ts`); a failure is logged with a closed code and never changes the call's result.
    */
-  async function recordCreatedOrigin(flow: FlowName, method: string, value: unknown, tenantId: string, surface: ExecutionSurface | null): Promise<void> {
-    if (surface !== 'WEB_APP' || (method !== 'simulate' && method !== 'prepare')) return;
+  async function recordCreatedOrigin(flow: FlowName, method: string, value: unknown, tenantId: string, context: OriginContext | null): Promise<void> {
+    if (!context || (method !== 'simulate' && method !== 'prepare')) return;
     const runId = typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string' ? (value as { id: string }).id : null;
     if (!runId || !FLOWS[flow].runId.test(runId)) return;
     try {
       // Checked on the pool first (remembered once active); the write itself is bounded so it can never hold the financial response for long.
       if (!await revenueOriginsActive(options.db)) return;
+      let created: { readonly origin: Parameters<typeof recordExecutionOrigin>[3]; readonly evidence: string } | null;
+      if (context.surface === 'APPROVAL_PAGE') {
+        const record = await service(flow, tenantId, true).load(runId);
+        const stored = (await options.db.query<{ owner_account: string | null }>('SELECT owner_account FROM execution_runs WHERE tenant_id = $1 AND run_id = $2',
+          [tenantId, runId])).rows[0]?.owner_account ?? null;
+        const recordOwner = FLOWS[flow].ownership?.ownerOf(record) ?? (record as { review?: { account?: unknown } } | null)?.review?.account;
+        const origin = await approvalPageOrigin(options.db, tenantId, { flow, runId, wallets: context.wallets ?? [], record, now: new Date(),
+          owner: stored ?? (typeof recordOwner === 'string' ? recordOwner : null) });
+        created = origin ? { origin, evidence: APPROVAL_PAGE_EVIDENCE } : null;
+      } else created = WEB_SURFACE_ORIGINS[context.surface];
+      if (!created) return;
+      const { origin, evidence } = created;
       await options.db.transaction(async tx => { await tx.query("SET LOCAL statement_timeout = '2000'");
-        await recordExecutionOrigin(tx, tenantId, { runId }, 'web', 'CREATION', 'WEB_APP_SERVER_ACTION'); });
+        await recordExecutionOrigin(tx, tenantId, { runId }, origin, 'CREATION', evidence); });
     } catch { logger.warn('execution_origin.not_recorded', { flow, action: method, code: 'EXECUTION_ORIGIN_NOT_RECORDED' }); }
   }
 
@@ -278,7 +293,7 @@ export function createBackend(options: BackendOptions) {
       : Promise.resolve({ ok: false as const, code: 'FLOW_NOT_FOUND' }) });
 
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
-    betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: ExecutionSurface | null = null): Promise<FlowResult> {
+    betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: OriginContext | null = null): Promise<FlowResult> {
     const refused = await betaMethodRefusal(tenantId, method, betaIdentity, principal);
     if (refused) return { ok: false, code: refused };
     const paused = isNewExecutionMethod(method) ? executionRefusal(env) : null;
@@ -622,8 +637,8 @@ export function createBackend(options: BackendOptions) {
       const ownerRefusal = await betaFlowOwnerRefusal(flow, method, args, tenantId, principal, identity);
       if (ownerRefusal) return { status: 403, body: { ok: false, code: ownerRefusal } };
       const developerLive = request.headers[DEVELOPER_LIVE_HEADER] === 'enabled';
-      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: set only by FloFi's own server (this API requires its bearer token), from the proxy's path.
-      const surface: ExecutionSurface | null = request.headers[EXECUTION_SURFACE_HEADER] === 'web-app' ? 'WEB_APP' : null;
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: set only by FloFi's own server (this API requires its bearer token), from server-held facts.
+      const surface = originContextOf(request.headers);
       if (typeof key !== 'string' || !mutates) return { status: 200, body: await callFlow(flow, method, args, tenantId, principal, identity, developerLive, surface) };
       // The principal is part of the request identity: a key replayed under another wallet session is a conflict, never a replay.
       const scope = `flows/${flow}/${method.toLowerCase()}`, hash = requestHash(scope, principal === null ? args : [{ principal }, ...args]), store = idempotency(tenantId);
