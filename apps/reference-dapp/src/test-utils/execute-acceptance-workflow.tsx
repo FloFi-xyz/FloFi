@@ -22,3 +22,6 @@ export function forgetAaveReserves() { return undefined; }
 export function useAaveReadGeneration() { return 0; }
 // This standalone Vite bundle does not run Next's server-action transform or call live asset catalogs.
 export async function loadSolanaAssetCatalog() { return { ok: false as const, code: 'SOLANA_TOKEN_CATALOG_UNAVAILABLE' }; }
+/** The platform fee server actions in this acceptance: collection is off, so the fee line renders nothing. */
+export async function platformFeeStatus() { return { ok: false as const, code: 'PLATFORM_FEE_COLLECTION_DISABLED' }; }
+export async function platformFeeSettle() { return { ok: false as const, code: 'PLATFORM_FEE_COLLECTION_DISABLED' }; }

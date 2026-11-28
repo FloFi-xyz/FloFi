@@ -169,12 +169,13 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
       {heading(step, step.networks, step.provider)}
       {compact(step)}
     </li>)}</ol>}
-    {(sharedFee || review.flofiFee.recorded || onTop.length > 0 || review.approvals.length > 0) && <dl className="conversation-review-compact conversation-review-extra">
+    {(sharedFee || (review.flofiFee.recorded && review.flofiFee.charged) || onTop.length > 0 || review.approvals.length > 0) && <dl className="conversation-review-compact conversation-review-extra">
       {sharedFee && <div data-shared-fee="true"><dt>{t('Network fee')}</dt><dd>{sharedFee}</dd></div>}
       {onTop.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd title={line.value}>{line.treatment === 'CEILING' ? t('at most {0}', shortAmount(line.value, 'up')) : t('≈ {0}', shortAmount(line.value, 'up'))}</dd></div>)}
       {/* Review round 2: FloFi's own fee, when this route records it, is a visible line; its note and the whole breakdown stay under Technical details. */}
-      {review.flofiFee.recorded && <div data-flofi-fee={review.flofiFee.charged ? 'charged' : 'obligation'}><dt>{t('FloFi fee ({0})', feePercent)}</dt>
-        <dd title={review.flofiFee.value}>{t(shortAmount(review.flofiFee.value, 'up'))}{review.flofiFee.charged ? null : ` · ${t('not charged')}`}</dd></div>}
+      {/* The FloFi fee is a visible cost line when it is charged; while collection is off it stays one line of the cost summary below. */}
+      {review.flofiFee.recorded && review.flofiFee.charged && <div data-flofi-fee="charged"><dt>{t('FloFi fee ({0})', feePercent)}</dt>
+        <dd title={review.flofiFee.value}>{t(shortAmount(review.flofiFee.value, 'up'))}</dd></div>}
       {/* A token permission is material: always visible, exact amount and spender. Its value already names the token ("Exactly 2 USDC"); the symbol
           is added only to a value that does not ("Unlimited approval"). */}
       {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.spender}`} data-permission="true"><dt>{t('Permission')}</dt>

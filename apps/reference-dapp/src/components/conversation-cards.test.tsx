@@ -178,10 +178,11 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 compact chat Review', () => {
   it('shows FloFi\'s fee as one concise line; "not charged" only while collection is off', () => {
     const flofiFee = { value: '0.002000000000000001 USDC', note: '', recorded: true, charged: false };
     const html = renderToStaticMarkup(createElement(ConversationReviewCard, { review: review({ flofiFee }), language: 'EN' }));
-    expect(visible(html)).toContain('<div data-flofi-fee="obligation"><dt>FloFi fee (0.80%)</dt><dd title="0.002000000000000001 USDC">0.00200001 USDC · not charged</dd></div>');
+    // While collection is off the visible summary keeps its layout; the line is in the cost summary under Technical details.
+    expect(visible(html)).not.toContain('data-flofi-fee');
     expect(technical(html)).toContain('<div data-treatment="OBLIGATION" data-flofi-fee="obligation"><dt>FloFi fee (0.80%)</dt><dd>0.002000000000000001 USDC · not charged</dd></div>');
     const charged = renderToStaticMarkup(createElement(ConversationReviewCard, { review: review({ flofiFee: { ...flofiFee, charged: true } }), language: 'PT' }));
-    expect(visible(charged)).toContain('<dt>Taxa FloFi (0,80%)</dt>');
+    expect(visible(charged)).toContain('<div data-flofi-fee="charged"><dt>Taxa FloFi (0,80%)</dt>');
     expect(visible(charged)).not.toContain('não cobrada');
   });
   it('a permission names its token once: the value\'s own symbol is not repeated; a value without it gets the symbol', () => {

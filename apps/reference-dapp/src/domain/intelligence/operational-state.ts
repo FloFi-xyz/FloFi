@@ -81,7 +81,7 @@ export function operationalState(conversation: CopilotConversation, env: Copilot
   });
   const pending = env.pending ? conversation.referents.find(referent => referent.command === env.pending!.command) : undefined;
   const evmNetwork = env.walletChainId ? networkIdentity(env.walletChainId)?.name ?? null : null;
-  const details = env.facts.simulation.details, bounded = (value: string) => redactCard(value).slice(0, CONTEXT_CARD_LIMITS.maxValueLength);
+  const details = env.facts?.simulation?.details, bounded = (value: string) => redactCard(value).slice(0, CONTEXT_CARD_LIMITS.maxValueLength);
   const simulation: OperationalSimulation | null = details ? { status: details.status, revision: details.revision,
     expiresAt: details.status === 'CURRENT' && details.expiresAt !== null ? new Date(details.expiresAt).toISOString() : null,
     steps: details.steps.slice(0, CONTEXT_CARD_LIMITS.maxSteps).map(step => ({ step: step.number, action: bounded(step.action), input: bounded(step.input),

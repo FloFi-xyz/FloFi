@@ -30,7 +30,8 @@ test('Copilot keeps a destination question without buttons and resolves one toke
   const before = await counters();
   await ask(page, 'quero bridge de 1 USDT da Solana para Robinhood Chain');
   // A Portuguese request is understood; P0 approved UX: FloFi answers in the interface language (English here).
-  await expect(copilotSays(page)).toContainText('Which asset do you want to receive on Robinhood Chain?');
+  // A09 (intentional): a Portuguese request gets a Portuguese answer, whatever the interface language.
+  await expect(copilotSays(page)).toContainText('Qual ativo você quer receber na Robinhood Chain?');
   await ask(page, 'USDG');
   await expect(copilotSays(page)).toContainText('receive USDG');
   await expect(copilotSays(page)).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG via best slippage 100 bps');

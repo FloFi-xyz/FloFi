@@ -94,7 +94,8 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(conversation(page).locator('.message').last()).toContainText('Which wallet should I send it to?');
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
     await say(page, BAD);
-    await expect(conversation(page).locator('.message').last()).toContainText('That is not a valid address on this network.');
+    // A09 (intentional): FloFi replies in the language of the conversation (Portuguese here), whatever the interface language.
+    await expect(conversation(page).locator('.message').last()).toContainText('Esse não é um endereço válido nesta rede.');
     await say(page, MIXED);
     // BUILD-FLOFI-CONVERSATIONAL-001: the completed request is committed at once (no proposal to apply).
     await expect(conversation(page).locator('.message').last()).toContainText('Send added to your workflow: 5 USDC');
@@ -112,7 +113,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(answer()).toContainText('Which wallet should I send it to?');
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
     await say(page, MIXED);
-    await expect(answer()).toContainText(`Interpreted as “transfer 5 USDC on Arbitrum One to ${MIXED.toLowerCase()}”`);
+    await expect(answer()).toContainText(`Interpretado como “transfer 5 USDC on Arbitrum One to ${MIXED.toLowerCase()}”`);
     await expect(answer()).toContainText(CHAT_COMMITTED);
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
     await expectCanonicalSend(page, MIXED.toLowerCase());
@@ -282,7 +283,11 @@ test.describe('UX-007 fast live quote feedback', () => {
       const LONG = '0.123456789012345678';
       await replayQuotes(page, (_index, seen) => ({ delayMs: 20, expected: amountOf(seen) === '1000000' ? '0.04' : LONG }));
       await page.setViewportSize({ width: 390, height: 844 });
-      await open(page);
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, intentional): a phone-width screen shows Plan or Conversation, never both stacked.
+      await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
+      await page.getByRole('tab', { name: /^Conversation/ }).click();
+      await expect(conversation(page)).toContainText('Hi FloFier!');
+      await page.getByRole('tab', { name: 'Plan', exact: true }).click();
       await page.getByRole('button', { name: 'Add swap', exact: true }).click();
       const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
       await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('250');
