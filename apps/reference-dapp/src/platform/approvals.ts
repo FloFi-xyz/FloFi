@@ -37,6 +37,7 @@ import { walletDeepLinks } from './wallet-links.ts';
 import { APPROVAL_SECRET_FORMAT } from './approval-link-format.ts';
 import { trustedFlofiUrl } from './navigation.ts';
 import { landedAttempts, type AttemptFacts } from '../domain/landed-attempts.ts';
+import { reviewedWorkflows } from '../workflow-runs/approval-page-origin.ts';
 
 export const HANDOFF_SECONDS = 900;
 export const CLAIM_SECONDS = 600;
@@ -298,11 +299,6 @@ export type ApprovalView = ReturnType<typeof approvalView>;
 export type ClaimedProposal = { readonly view: ApprovalView & { readonly workflowRun?: WorkflowRunClaim }; readonly command: Command | null; readonly workflow: Workflow | null;
   readonly workflowHash: string; readonly workflowId: string | null };
 
-/** The workflow a flow record reviewed, wherever the flow keeps it (review, workflow, or the first of several reviews). */
-function reviewedWorkflows(record: unknown): unknown[] {
-  const r = record && typeof record === 'object' ? record as { review?: { workflow?: unknown }; workflow?: unknown; reviews?: { workflow?: unknown }[] } : {};
-  return [r.review?.workflow, r.workflow, Array.isArray(r.reviews) ? r.reviews[0]?.workflow : undefined].filter(w => w && typeof w === 'object');
-}
 export type RunProgress = { readonly executionId: string; readonly flow: string; readonly status: string; readonly reconciled: boolean; readonly terminal: boolean;
   readonly errorCode: string | null; readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null;
   readonly updatedAt: string; readonly receiptUrl?: string | null;
