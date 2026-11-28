@@ -153,7 +153,7 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment card: re
     expect(fresh).not.toContain('aria-invalid');
     const typed = [{ recipient: MISTYPED, amount: '1' }, { recipient: B, amount: '2' }];
     const edited = html(fields({ rows: typed, check: checkBatchPaymentDraft({ ...INPUT, payments: typed } as BatchPaymentInput), fresh: false }));
-    const problemId = /<span id="([^"]+)" class="composer-amount-error" role="alert">Enter a valid 0x address/.exec(edited)?.[1];
+    const problemId = /<span id="([^"]+)" class="composer-amount-error" role="alert">Enter a valid address\.<\/span>/.exec(edited)?.[1];
     expect(problemId).toBeTruthy();
     expect(edited).toContain(`aria-label="Batch Payment recipients" aria-describedby="${problemId}"`);
     expect(edited).toMatch(new RegExp(`aria-label="Recipient 1 address"[^>]*aria-invalid="true" aria-describedby="${problemId}"`));
@@ -321,7 +321,7 @@ describe('KAN-20 Solana in the Batch Payment card', () => {
     expect(markup).not.toContain('placeholder="0x…"');
     expect(markup.match(/autoCapitalize="none" autoCorrect="off"/gi)).toHaveLength(2);
     expect(markup).toContain(`value="${SA}"`);
-    const problemId = /<span id="([^"]+)" class="composer-amount-error" role="alert">Enter a valid Solana wallet address for every recipient \(base58, exactly as written: letter case matters\)\.<\/span>/.exec(markup)?.[1];
+    const problemId = /<span id="([^"]+)" class="composer-amount-error" role="alert">Enter a valid address\.<\/span>/.exec(markup)?.[1];
     expect(problemId).toBeTruthy();
     expect(markup).toMatch(new RegExp(`aria-label="Recipient 2 address"[^>]*aria-invalid="true" aria-describedby="${problemId}"`));
     expect(markup).not.toMatch(/aria-label="Recipient 1 address"[^>]*aria-invalid/);

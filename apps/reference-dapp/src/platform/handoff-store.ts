@@ -15,6 +15,7 @@
  * terminal and never revive. Every transition is a compare-and-set inside one short transaction with a row lock. Expiry is applied
  * lazily, by whoever reads or writes the row next. Only keyed digests of secrets are ever written.
  */
+import { recordBoundOrigins } from '../workflow-runs/execution-origins.ts';
 import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runtime';
 import type { ExecutionPlan } from '../mcp/execution.ts';
 
@@ -229,8 +230,14 @@ export function createPgHandoffStore(db: Database, tenantId: string): HandoffSto
       return { ...h, signingExpiresAt: expiresAt };
     }),
     async bindRuns(handoffId, runIds) {
-      await db.query(`UPDATE mcp_handoffs SET run_ids = (SELECT array_agg(DISTINCT r ORDER BY r) FROM unnest(run_ids || $3::text[]) AS r)
-        WHERE tenant_id = $1 AND handoff_id = $2 AND status = 'APPLIED' AND cardinality(run_ids || $3::text[]) <= 16`, [tenantId, handoffId, [...runIds]]);
+      const bound = await db.query<{ requester_kind: string; client_id: string; run_ids: string[] }>(`UPDATE mcp_handoffs
+        SET run_ids = (SELECT array_agg(DISTINCT r ORDER BY r) FROM unnest(run_ids || $3::text[]) AS r)
+        WHERE tenant_id = $1 AND handoff_id = $2 AND status = 'APPLIED' AND cardinality(run_ids || $3::text[]) <= 16
+        RETURNING requester_kind, client_id, run_ids`, [tenantId, handoffId, [...runIds]]);
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: a run signed through this approval starts from the approval's channel (0037; first record
+      // wins, so a run the web app created keeps its own origin). Best effort: the binding above never depends on it.
+      const row = bound.rows[0];
+      if (row) await recordBoundOrigins(db, tenantId, runIds.filter(id => row.run_ids.includes(id)), { kind: row.requester_kind, clientId: row.client_id });
     },
     setSharing: (digest, wallet, share, now, kinds) => db.transaction(async tx => {
       const h = await locked(tx, digest, now, kinds);

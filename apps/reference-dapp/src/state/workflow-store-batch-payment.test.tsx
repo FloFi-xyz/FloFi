@@ -52,7 +52,7 @@ describe('FE-BATCH-01: a Batch Payment draft is an unapplied Canvas edit held by
     expect(store.eligibility.eligible).toBe(false);
     // A second start keeps the one card being set up.
     expect(store.startBatchSetup!({ x: 0, y: 0 })).toBe(id);
-    expect(store.applyBatchDraft!(id)).toBe('Enter a valid 0x address for every recipient (a mixed-case address must match its checksum).');
+    expect(store.applyBatchDraft!(id)).toBe('Enter a valid address.');
     render();
     expect(batchNodes()).toHaveLength(0);
     fill(id, PAYMENTS);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { EXECUTION_SURFACE_HEADER, recordExecutionOrigin, revenueOriginsActive, type ExecutionSurface } from '../src/workflow-runs/execution-origins.ts';
 import { reportUniversalFailure } from '../src/server/universal-router/failure.ts';
 import { routeRefusalsFor } from '../src/domain/route-refusals.ts';
 /**
@@ -250,8 +251,24 @@ export function createBackend(options: BackendOptions) {
    * BUILD-JOURNEY-001: `principal` is the wallet session the BFF verified; flows with an ownership policy refuse any call whose
    * principal is not the durable run's owner (or claims another owner) before the service is touched.
    */
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25): the run a /app server action just created (`simulate`/`prepare`) started in FloFi Web.
+   * First record wins (`execution-origins.ts`); a failure is logged with a closed code and never changes the call's result.
+   */
+  async function recordCreatedOrigin(flow: FlowName, method: string, value: unknown, tenantId: string, surface: ExecutionSurface | null): Promise<void> {
+    if (surface !== 'WEB_APP' || (method !== 'simulate' && method !== 'prepare')) return;
+    const runId = typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string' ? (value as { id: string }).id : null;
+    if (!runId || !FLOWS[flow].runId.test(runId)) return;
+    try {
+      // Checked on the pool first (remembered once active); the write itself is bounded so it can never hold the financial response for long.
+      if (!await revenueOriginsActive(options.db)) return;
+      await options.db.transaction(async tx => { await tx.query("SET LOCAL statement_timeout = '2000'");
+        await recordExecutionOrigin(tx, tenantId, { runId }, 'web', 'CREATION', 'WEB_APP_SERVER_ACTION'); });
+    } catch { logger.warn('execution_origin.not_recorded', { flow, action: method, code: 'EXECUTION_ORIGIN_NOT_RECORDED' }); }
+  }
+
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
-    betaIdentity?: BetaRequestIdentity | null, developerLive = false): Promise<FlowResult> {
+    betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: ExecutionSurface | null = null): Promise<FlowResult> {
     const refused = await betaMethodRefusal(tenantId, method, betaIdentity, principal);
     if (refused) return { ok: false, code: refused };
     const paused = isNewExecutionMethod(method) ? executionRefusal(env) : null;
@@ -288,7 +305,9 @@ export function createBackend(options: BackendOptions) {
           const walletRefusal = await walletRequestRefusal(flow, method, args, tenantId, principal, developerLive, snapshot);
           if (walletRefusal) return { ok: false, code: walletRefusal } as const;
           const boundArgs = snapshot && args.length === 3 ? [...args, snapshot.review.commitment] : args;
-          return { ok: true, value: await service(flow, tenantId).call(method, boundArgs) } as const;
+          const value = await service(flow, tenantId).call(method, boundArgs);
+          await recordCreatedOrigin(flow, method, value, tenantId, surface);
+          return { ok: true, value } as const;
         }
         catch (error) {
           const code = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode;
@@ -592,7 +611,9 @@ export function createBackend(options: BackendOptions) {
       const ownerRefusal = await betaFlowOwnerRefusal(flow, method, args, tenantId, principal, identity);
       if (ownerRefusal) return { status: 403, body: { ok: false, code: ownerRefusal } };
       const developerLive = request.headers[DEVELOPER_LIVE_HEADER] === 'enabled';
-      if (typeof key !== 'string' || !mutates) return { status: 200, body: await callFlow(flow, method, args, tenantId, principal, identity, developerLive) };
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: set only by FloFi's own server (this API requires its bearer token), from the proxy's path.
+      const surface: ExecutionSurface | null = request.headers[EXECUTION_SURFACE_HEADER] === 'web-app' ? 'WEB_APP' : null;
+      if (typeof key !== 'string' || !mutates) return { status: 200, body: await callFlow(flow, method, args, tenantId, principal, identity, developerLive, surface) };
       // The principal is part of the request identity: a key replayed under another wallet session is a conflict, never a replay.
       const scope = `flows/${flow}/${method.toLowerCase()}`, hash = requestHash(scope, principal === null ? args : [{ principal }, ...args]), store = idempotency(tenantId);
       let claim;
@@ -604,7 +625,7 @@ export function createBackend(options: BackendOptions) {
       if (claim.kind === 'CONFLICT') throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED');
       if (claim.kind === 'IN_PROGRESS') throw new HttpError(409, 'IDEMPOTENCY_IN_PROGRESS');
       let result: FlowResult;
-      try { result = await callFlow(flow, method, args, tenantId, principal, identity, developerLive); } catch (error) { await store.release(scope, key, hash).catch(() => undefined); throw error; }
+      try { result = await callFlow(flow, method, args, tenantId, principal, identity, developerLive, surface); } catch (error) { await store.release(scope, key, hash).catch(() => undefined); throw error; }
       if (result.ok) await store.complete(scope, key, hash, result); else await store.release(scope, key, hash);
       return { status: 200, body: result };
     }) },

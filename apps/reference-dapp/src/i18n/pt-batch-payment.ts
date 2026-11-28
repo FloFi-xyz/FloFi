@@ -17,8 +17,7 @@ export const portugueseBatchPayment: Readonly<Record<string, string>> = {
   'Wallet batch': 'Lote na carteira',
   'Add at least 2 recipients.': 'Adicione pelo menos 2 destinatários.',
   'A Batch Payment pays at most 8 recipients.': 'Um pagamento em lote paga no máximo 8 destinatários.',
-  'Enter a valid 0x address for every recipient (a mixed-case address must match its checksum).':
-    'Informe um endereço 0x válido para cada destinatário (um endereço com maiúsculas e minúsculas precisa corresponder ao seu checksum).',
+  'Enter a valid address.': 'Informe um endereço válido.',
   'An address appears more than once. Remove the repeated recipient: payments are never merged.':
     'Um endereço aparece mais de uma vez. Remova o destinatário repetido: os pagamentos nunca são somados.',
   'Enter a positive amount for every recipient.': 'Informe um valor positivo para cada destinatário.',
@@ -41,8 +40,6 @@ export const portugueseBatchPayment: Readonly<Record<string, string>> = {
   'This Batch Payment runs only as one atomic approval in your wallet (every payment, or none), and that is not available here. Nothing was signed or sent.':
     'Este pagamento em lote só é executado como uma única aprovação atômica na sua carteira (todos os pagamentos, ou nenhum), e isso não está disponível aqui. Nada foi assinado nem enviado.',
   // BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 (KAN-20): Solana in the same card (its availability sentence replaces the EVM-only one).
-  'Enter a valid Solana wallet address for every recipient (base58, exactly as written: letter case matters).':
-    'Informe um endereço de carteira Solana válido para cada destinatário (base58, exatamente como foi escrito: maiúsculas e minúsculas fazem diferença).',
   'A recipient is a Solana program, system account or token mint, which cannot receive a payment. Use the recipient\'s wallet address.':
     'Um destinatário é um programa, uma conta de sistema ou um mint de token da Solana, que não pode receber pagamento. Use o endereço da carteira do destinatário.',
   'A recipient is the Solana wallet you are paying from. Remove it: a Batch Payment never pays your own wallet.':

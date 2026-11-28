@@ -542,6 +542,24 @@ Settlement reads (P0, same build): Universal bridge native deliveries through a 
 existing `GRYLOO_ALCHEMY_API_KEY` or `GRYLOO_<NETWORK>_FALLBACK_RPC_URLS` paths must support tracing on each destination network; without
 one such deliveries stay pending (fail-closed) instead of being reconciled. No new variable is introduced for this.
 
+## 5q. Platform fee accounting and collection (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001) — release: [RELEASE-REVENUE-ORIGINS-0037.md](RELEASE-REVENUE-ORIGINS-0037.md)
+
+Read by the operator command `platform-fee-accrue` and the Admin fee panel only. The fee rate (80 bps, 0.80%) is code, not configuration
+(`apps/reference-dapp/src/platform-fee/policy.ts`). Nothing here moves funds.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FLOFI_PLATFORM_FEE_ACCOUNTING_FROM` | unset (off) | ISO 8601 UTC instant (`2026-12-01T00:00:00Z`). Workflow runs created at or after it are accounted in `platform_fee_ledger` (migration 0037). Nothing created before it is ever accounted. |
+| `FLOFI_PLATFORM_FEE_COLLECTION` | `off` | `on` only requests collection. Collection stays off in this build whatever the value: no collection mechanism is implemented. |
+| `FLOFI_PLATFORM_FEE_TREASURY_EVM` | unset | Checksummed EVM treasury, required before any collection could be considered. Never inferred. |
+| `FLOFI_PLATFORM_FEE_TREASURY_SOLANA` | unset | Base58 Solana treasury, required likewise. |
+| `FLOFI_PLATFORM_FEE_POLICY_APPROVAL` | unset | Reference of the owner-approved financial accounting policy, required likewise. |
+
+The Admin fee panel names the first missing condition (`PLATFORM_FEE_COLLECTION_DISABLED`, `PLATFORM_FEE_TREASURY_NOT_CONFIGURED`,
+`PLATFORM_FEE_TREASURY_INVALID`, `PLATFORM_FEE_POLICY_NOT_APPROVED`, `PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED`). An impossible date (2026-11-31) is refused, never rolled forward. Rollback: unset
+`FLOFI_PLATFORM_FEE_ACCOUNTING_FROM` stops new accrual; existing ledger rows stay (they only record what was owed). No switch here touches
+reconciliation of anything already submitted.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

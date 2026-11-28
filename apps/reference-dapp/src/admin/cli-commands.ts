@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-ADMIN-001: the operator CLI's commands (`backend/admin-cli.ts`), importable by tests without starting the process. */
+import { correctOrigin, originBackfill } from './analytics/origin-backfill.ts';
+import { platformFeeActivation } from '../platform-fee/activation.ts';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { CERTIFIED_FORWARD_MIGRATIONS, forwardMigrationSqlUrl, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { indexRunFacts } from './analytics/indexer.ts';
 import { historicalReconciliation } from './support/historical-reconciliation.ts';
 import { supportPrivacyConfig } from './support/privacy.ts';
-import { createAdminStore, type AdminRole } from './store.ts';
+import { createAdminStore, recordAudit, type AdminRole } from './store.ts';
 import { studioInstalled, studioReviewQueue } from '../studio/integration-store.ts';
 import { activateRetention, applyRetention, completePrivacyRequest, decidePrivacyRequest, openPrivacyRequest, placeLegalHold, privacyAccess, privacyErase,
   releaseLegalHold, REQUEST_KINDS, RETENTION_POLICIES, retentionReport, revokeRetention, walletSubject, type RequestKind, type RetentionPolicy } from './privacy-ops.ts';
@@ -18,7 +20,9 @@ import { activateRetention, applyRetention, completePrivacyRequest, decidePrivac
  */
 export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit', 'index', 'retention-report', 'retention-activate', 'retention-revoke', 'retention-apply',
   'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate', 'position-purge-migrate',
-  'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate', 'studio-certification-migrate', 'studio-queue', 'reconcile-history'] as const;
+  'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate', 'studio-certification-migrate', 'studio-queue', 'reconcile-history',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: 0037 (execution origins, platform fee ledger), the origin backfill/correction and fee accrual.
+  'revenue-origins-migrate', 'origin-backfill', 'origin-correct', 'platform-fee-accrue'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -66,13 +70,15 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'workflow-run-purge-migrate':
     case 'developer-projects-migrate':
     case 'studio-migrate':
-    case 'studio-certification-migrate': {
+    case 'studio-certification-migrate':
+    case 'revenue-origins-migrate': {
       const activateSync = command === 'finops-sync-migrate', positionPurge = command === 'position-purge-migrate', singleStep = command === 'single-step-runs-migrate';
       const runPurge = command === 'workflow-run-purge-migrate';
       const projects = command === 'developer-projects-migrate';
       const studio = command === 'studio-migrate';
       const studioCertification = command === 'studio-certification-migrate';
-      const count = studioCertification ? 8 : studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
+      const revenue = command === 'revenue-origins-migrate';
+      const count = revenue ? 9 : studioCertification ? 8 : studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
       const target = await db.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1');
       if (activateSync && (target.rows[0]?.version ?? 0) < 29) throw new Error('FINOPS_LEDGER_NOT_MIGRATED');
       // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: 0031 follows the optional FinOps 0029/0030, which keep their own owner-run procedures; this
@@ -87,6 +93,9 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       if (projects && (target.rows[0]?.version ?? 0) < 33) throw new Error('DEVELOPER_PROJECTS_REQUIRES_SCHEMA_33');
       if (studio && (target.rows[0]?.version ?? 0) < 34) throw new Error('STUDIO_REQUIRES_SCHEMA_34');
       if (studioCertification && (target.rows[0]?.version ?? 0) < 35) throw new Error('STUDIO_CERTIFICATION_REQUIRES_SCHEMA_35');
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: 0037 follows 0029–0036, each activated by its own owner-run procedure; this command never applies
+      // them implicitly. On exact schema 36 it applies only the certified 0037; on 37 a rerun applies nothing.
+      if (revenue && (target.rows[0]?.version ?? 0) < 36) throw new Error('REVENUE_ORIGINS_REQUIRES_SCHEMA_36');
       const migrations = await loadMigrations();
       // A command whose last migration is already applied verifies a newer certified schema against the shipped history (and the base-28
       // certificate) and leaves it alone: e.g. `finops-sync-migrate` on schema 31, or `single-step-runs-migrate` on schema 33.
@@ -94,14 +103,14 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       const identities = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.slice(0, count);
       if (identities?.length !== count || (singleStep && identities[3]?.name !== 'single_step_runs') || (runPurge && identities[4]?.name !== 'workflow_run_purge')
         || (projects && identities[5]?.name !== 'developer_project_ownership') || (studio && identities[6]?.name !== 'studio_integrations')
-        || (studioCertification && identities[7]?.name !== 'studio_certification'))
-        throw new Error(studioCertification ? 'STUDIO_CERTIFICATION_MIGRATION_NOT_CERTIFIED' : studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
+        || (studioCertification && identities[7]?.name !== 'studio_certification') || (revenue && identities[8]?.name !== 'execution_origins_platform_fees'))
+        throw new Error(revenue ? 'REVENUE_ORIGINS_MIGRATION_NOT_CERTIFIED' : studioCertification ? 'STUDIO_CERTIFICATION_MIGRATION_NOT_CERTIFIED' : studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
           : positionPurge ? 'POSITION_PURGE_MIGRATION_NOT_CERTIFIED' : 'FINOPS_MIGRATION_NOT_CERTIFIED');
       // A later release that ships 0029/0030 in its own migration list applies them as ordinary migrations; never twice.
       const migrationsToApply = await Promise.all(identities.filter(identity => !migrations.some(shipped => shipped.version === identity.version)).map(async identity => {
         const sql = await readFile(forwardMigrationSqlUrl(identity), 'utf8');
         if (createHash('sha256').update(sql).digest('hex') !== identity.sha256)
-          throw new Error(identity.version === 36 ? 'STUDIO_CERTIFICATION_MIGRATION_DIGEST_MISMATCH' : identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
+          throw new Error(identity.version === 37 ? 'REVENUE_ORIGINS_MIGRATION_DIGEST_MISMATCH' : identity.version === 36 ? 'STUDIO_CERTIFICATION_MIGRATION_DIGEST_MISMATCH' : identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
             : identity.version === 31 ? 'POSITION_PURGE_MIGRATION_DIGEST_MISMATCH' : 'FINOPS_MIGRATION_DIGEST_MISMATCH');
         return { ...identity, sql };
       }));
@@ -114,6 +123,29 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
         ...flag('code') ? { codes: flag('code')!.split(',').map(code => code.trim()) } : {}, limit: limitOf(flag('limit'), 100, 500), now: io.now(),
         ...apply ? { apply: { approvalRef: required(flag('approval-ref'), 'approval-ref'), reason: required(flag('reason'), 'reason'), actor: 'cli',
           textRetentionDays: supportPrivacyConfig(io.env).textRetentionDays } } : {} }) };
+    }
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: dry run unless --apply; then only missing origins, with an approval reference and an audit event.
+    case 'origin-backfill': {
+      const since = flag('approvals-complete-since');
+      return { backfill: await originBackfill({ db, tenantId }, { now: io.now(), ...since ? { approvalsCompleteSince: new Date(since) } : {},
+        approvalsNeverPurged: values['assert-approvals-never-purged'] === true,
+        ...values.apply === true ? { apply: { approvalRef: required(flag('approval-ref'), 'approval-ref'), actor: 'cli' as const } } : {} }) };
+    }
+    case 'origin-correct': return { correction: await correctOrigin({ db, tenantId }, { runId: required(flag('run'), 'run'), origin: required(flag('origin'), 'origin'),
+      approvalRef: required(flag('approval-ref'), 'approval-ref'), reasonCode: required(flag('reason-code'), 'reason-code'), actor: 'cli' }) };
+    // Dry run unless --apply. Records what completed executions owe; never collects or moves funds (collection is not implemented).
+    // The ledger composes workflows with the shared engine: loaded only here (plain Node needs `backend/source-resolution.ts` for it).
+    case 'platform-fee-accrue': {
+      // flofi-security review: ledger rows are permanent, so --apply needs an approval reference and leaves an audit event (closed counts only).
+      const apply = values.apply === true, approvalRef = apply ? required(flag('approval-ref'), 'approval-ref') : null;
+      if (approvalRef !== null && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/.test(approvalRef)) throw new Error('ARGUMENT_REQUIRED: --approval-ref');
+      const { accruePlatformFees } = await import('../platform-fee/ledger.ts');
+      const accrual = await accruePlatformFees(db, tenantId, platformFeeActivation(io.env), { apply, limit: limitOf(flag('limit'), 200, 1_000) });
+      if (approvalRef !== null) await recordAudit(db, tenantId, { actor: 'cli', kind: 'PLATFORM_FEES_ACCRUED', outcome: accrual.code ? 'REFUSED' : 'OK', code: accrual.code,
+        target: 'approval:' + createHash('sha256').update(approvalRef).digest('hex').slice(0, 32),
+        detail: { examined: accrual.examined, recorded: accrual.recorded, deferred: accrual.deferred,
+          ...Object.fromEntries(Object.entries(accrual.byState).map(([k, v]) => ['state_' + k, v ?? 0])) } });
+      return { accrual };
     }
     // Read-only dry run: nothing is deleted.
     case 'retention-report': return { report: await retentionReport(db, tenantId, io.env, io.now()) };

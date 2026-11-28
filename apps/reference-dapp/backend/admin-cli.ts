@@ -18,6 +18,11 @@
  *   developer-projects-migrate                                          applies certified 0034 on exact schema 33
  *   studio-migrate                                                      applies certified 0035 on exact schema 34
  *   studio-certification-migrate                                        applies certified 0036 on exact schema 35
+ *   revenue-origins-migrate                                             applies certified 0037 on exact schema 36 (execution origins, fee ledger)
+ *   origin-backfill [--approvals-complete-since ISO] [--assert-approvals-never-purged] [--apply --approval-ref REF]
+ *                                                                         dry run by default; --apply records only missing origins (audited)
+ *   origin-correct --run <run id> --origin <origin> --reason-code <CODE> --approval-ref <ref>
+ *   platform-fee-accrue [--limit 200] [--apply]                           dry run by default; records what completed executions owe (no collection)
  *   studio-queue  [--limit 50]                                            reads pending Studio submissions for the selected tenant
  *   reconcile-history [--flow crosschain-universal] [--code A,B] [--limit 100] [--apply --approval-ref REF --reason TEXT]
  *                                                                         dry run by default; --apply queues read-only re-observation (no transaction)
@@ -42,6 +47,7 @@ import { parseArgs } from 'node:util';
 import { assertSchemaCompatible, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { deploymentEnvironment, deploymentTenant } from '../src/server/deployment.ts';
 import { ADMIN_COMMANDS, runAdminCommand, type AdminCommand } from '../src/admin/cli-commands.ts';
+import { installSourceResolution } from './source-resolution.ts';
 import { adminConfig } from '../src/admin/config.ts';
 import { assertDedicatedPreviewDatabase } from './preview-migration.ts';
 
@@ -65,6 +71,8 @@ function tenantOf(values: { tenant?: string | undefined; 'preview-branch'?: stri
 }
 
 async function main(): Promise<void> {
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: `platform-fee-accrue` loads the shared engine (bundler-style imports) on plain Node.
+  installSourceResolution();
   const [command, ...rest] = process.argv.slice(2);
   if (!command || !(ADMIN_COMMANDS as readonly string[]).includes(command)) throw new Error(`COMMAND_INVALID: one of the ${ADMIN_COMMANDS.length} commands listed at the top of backend/admin-cli.ts`);
   const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { tenant: { type: 'string' }, 'preview-branch': { type: 'string' },
@@ -72,10 +80,11 @@ async function main(): Promise<void> {
     policy: { type: 'string' }, days: { type: 'string' }, 'approval-ref': { type: 'string' }, scope: { type: 'string' }, value: { type: 'string' },
     'reason-code': { type: 'string' }, hold: { type: 'string' }, kind: { type: 'string' }, 'subject-kind': { type: 'string' }, request: { type: 'string' },
     decision: { type: 'string' }, code: { type: 'string' }, 'include-text': { type: 'boolean' }, 'wallet-stdin': { type: 'boolean' },
-    flow: { type: 'string' }, reason: { type: 'string' }, apply: { type: 'boolean' } } });
+    flow: { type: 'string' }, reason: { type: 'string' }, apply: { type: 'boolean' }, run: { type: 'string' }, origin: { type: 'string' },
+    'approvals-complete-since': { type: 'string' }, 'assert-approvals-never-purged': { type: 'boolean' } } });
   const migration = command === 'finops-migrate' || command === 'finops-sync-migrate' || command === 'position-purge-migrate'
     || command === 'single-step-runs-migrate' || command === 'workflow-run-purge-migrate' || command === 'developer-projects-migrate'
-    || command === 'studio-migrate' || command === 'studio-certification-migrate';
+    || command === 'studio-migrate' || command === 'studio-certification-migrate' || command === 'revenue-origins-migrate';
   const connection = migration ? 'DATABASE_MIGRATION_URL' : 'DATABASE_ADMIN_OPERATIONS_URL';
   const tenantId = tenantOf(values), databaseUrl = process.env[connection] ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error(`${connection}_REQUIRED`);

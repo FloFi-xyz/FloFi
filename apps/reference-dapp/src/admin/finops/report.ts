@@ -154,7 +154,7 @@ export const REPORT_LIMITATIONS = [
   'Recorded expenses include invoices and provider-reported costs. Usage and estimates are shown separately from recorded expenses.',
   'Workflow counts cover canonical multi-step mainnet workflow runs; one-step single-card runs are counted separately. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
   'Single-card attempts an owner deleted from History (never sent: ended before any wallet request, or rejected and proven unsent) leave the single-card counts, including for closed periods; completed runs and costs are unaffected.',
-  'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
+  'Collected revenue uses reconciled accounting records. Uncollected FloFi fee obligations and accrued estimates, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
   'The infrastructure-adjusted result excludes corporate expenses outside the available ledger and is an operating indicator.',
 ] as const;
 

@@ -1259,3 +1259,75 @@ decision before production use:
 - opaque `account:` and `project:` audience identifiers.
 
 None of them is returned by the public catalog.
+
+## 29. Certificate 0037_execution_origins_platform_fees
+
+0037 follows 0036 and adds the durable execution origin and the platform fee
+ledger (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001). The shipped schema
+remains 28. The exact SQL is in `packages/cloud-runtime/optional-migrations`.
+The release procedure is
+[RELEASE-REVENUE-ORIGINS-0037.md](RELEASE-REVENUE-ORIGINS-0037.md).
+
+Roll out the 0037 forward-compatibility certificate to every database consumer
+before the owner uses `revenue-origins-migrate`. This command requires schema
+36 and applies only 0037. A binary that recognizes only 0036 refuses schema 37.
+Until 0037 is applied, a build that carries this certificate serves schema 36
+with origin recording, the origin backfill and the fee ledger dormant (each
+checks the exact certified identity in `schema_migrations` first).
+
+**Objects and locks.** 0037 creates three tables (`execution_origins`,
+`execution_origin_corrections`, `platform_fee_ledger`), five explicit indexes
+(plus the indexes of their primary and unique keys) and three trigger functions
+with one trigger each. None is SECURITY DEFINER, so the least-privilege
+history-guard fingerprint is unchanged. It changes no existing object. Its
+foreign keys add internal referential-integrity triggers on `tenants`,
+`execution_runs` and `workflow_runs` and take a SHARE ROW EXCLUSIVE lock on
+each, in that order, while the migration runs. Readers are never blocked;
+writers to those tables wait. The 5 s lock timeout applies to each lock wait,
+so a writer to `tenants` can wait up to about 15 s and one to `execution_runs`
+about 10 s before 0037 rolls back; an application transaction that writes
+`workflow_runs` then `execution_runs` can deadlock with it (PostgreSQL then
+cancels one of the two). Apply it in a quiet window. If a timeout is hit the
+transaction rolls back and the database stays at 36.
+
+**Behaviour of the new rows.** An origin is inserted once and never updated
+(`EXECUTION_ORIGIN_IMMUTABLE`); corrections are append-only. A fee ledger row is
+unique per execution, is inserted only as DUE, NOT_APPLICABLE, WAIVED or
+UNSUPPORTED, and changes only through the compare-and-set transitions
+DUE → COLLECTION_PENDING → COLLECTED | COLLECTION_FAILED → COLLECTION_PENDING.
+COLLECTED requires its collection transactions in the row. A DELETE of a row
+that owes or collected something is refused (`PLATFORM_FEE_LEDGER_RETAINED`);
+TRUNCATE or DROP by the table owner is not a row operation and is not refused.
+
+**Owner deletion.** Every new foreign key cascades, so the 0016 and 0033 purge
+procedures delete an unstarted run or attempt together with its origin, its
+corrections and a waived or not-applicable fee row (proven for the 0016 permit
+mechanism in `certificate-0037.pg.test.ts`; the 0033 procedure is not exercised
+at schema 37). Owed rows exist only for completed workflow runs, which neither
+procedure can reach.
+
+**Privileges.** Apply the schema-37 least-privilege policy
+(`docs/deploy/database-privileges/policy.sql`) immediately after 0037: runtime
+`SI` on `execution_origins` and `execution_origin_corrections`; admin web `S`
+on the three tables; admin operations `SI` on the three tables and `S` on
+`workflow_run_steps`. Before that step, on a database enforcing the schema-36
+policy, the service logins have no grant on the new tables: origin writes fail
+quietly (savepoint or catch) and Admin fee and channel reads are unavailable.
+The schema-36 policy is the one at `ca62ace` (for audits before 0037).
+
+**Rollback.** A 0036-only binary refuses schema 37. Roll back to a build that
+carries this certificate. Emergency reversal on 0037 as head only:
+`docs/deploy/RELEASE-REVENUE-ORIGINS-0037.reversal.sql` (one transaction with
+the runner's advisory lock and lock timeout; it refuses while any fee row is
+owed or collected), then restart every database consumer and re-apply the
+schema-36 policy. `certificate-0037.pg.test.ts` proves it restores the exact
+schema-36 catalog. Recorded origins and waived fee rows are lost; executions,
+evidence and every pre-existing row are unaffected.
+
+**Retention.** Origins hold run identifiers, a closed channel code and closed
+evidence codes only (no address, account, label or URL). Corrections hold an
+approval reference and a closed reason code. Fee rows hold per-asset decimal
+amounts and token identities; linked to the run's owner they are pseudonymous
+financial data. All three follow their execution's lifecycle; a retention
+period, legal basis and data-subject-access treatment for the fee ledger are an
+open owner decision (LGPD/GDPR) before collection.

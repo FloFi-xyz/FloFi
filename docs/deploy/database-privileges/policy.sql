@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
--- BUILD-FLOFI-DATABASE-LEAST-PRIVILEGE-001. Transaction-local policy for the version 36 schema.
+-- BUILD-FLOFI-DATABASE-LEAST-PRIVILEGE-001. Transaction-local policy for the version 37 schema (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 adds 0037).
 -- Table flags are SELECT (S), INSERT (I), UPDATE (U), DELETE (D). Column grants follow separately.
 SET LOCAL search_path = pg_catalog, pg_temp;
 SELECT pg_catalog.set_config('flofi_acl.policy', (
@@ -55,6 +55,8 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('execution_log_segments',                        'SI',   'S',    'S',    ''),
       ('execution_logs',                                'SI',   'S',    'S',    ''),
       ('execution_nonce_conflicts',                     'SIU',  'S',    '',     ''),
+      ('execution_origin_corrections',                  'SI',   'S',    'SI',   ''),
+      ('execution_origins',                             'SI',   'S',    'SI',   ''),
       ('execution_purge_audit',                         'S',    '',     'S',    ''),
       ('execution_purge_permits',                       '',     '',     '',     ''),
       ('execution_runs',                                'SI',   'S',    'S',    ''),
@@ -109,6 +111,7 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('owner_history_events',                          'SI',   '',     '',     ''),
       ('owner_history_visibility',                      'SID',  '',     '',     ''),
       ('passkey_challenges',                            'SIU',  '',     '',     ''),
+      ('platform_fee_ledger',                           '',     'S',    'SI',   ''),
       ('passkey_credentials',                           'SIU',  '',     '',     ''),
       ('privacy_legal_holds',                           '',     '',     'SI',   ''),
       ('privacy_requests',                              '',     '',     'SI',   ''),
@@ -125,7 +128,7 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('workflow_run_groups',                           'SIU',  'S',    '',     ''),
       ('workflow_run_purge_audit',                      'S',    '',     'S',    ''),
       ('workflow_run_purge_permits',                    '',     '',     '',     ''),
-      ('workflow_run_steps',                            'SIU',  'S',    '',     ''),
+      ('workflow_run_steps',                            'SIU',  'S',    'S',    ''),
       ('workflow_runs',                                 'SIU',  'S',    'S',    ''),
       ('workflows',                                     'SI',   'S',    '',     '')
     ) AS acl(name, runtime, admin_web, admin_operations, finops_worker)),
@@ -175,7 +178,7 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('runtime', 'mcp_handoffs', 'UPDATE', 'status ended_at claimed_namespace claimed_address claimed_at claim_expires_at share_status applied_at signing_digest signing_expires_at run_ids'),
       ('runtime', 'workflows', 'UPDATE', 'last_seen_at')
     ) AS acl(role_key, table_name, privilege, columns)),
-    'ledger_sha256', 'e920810bd3783abbfde6bad6532946d897891151086fc33ed2fd7a58011370a3',
+    'ledger_sha256', 'f5e0eeefd10410e249019ef1668427737dda943bd98a91fa67a1362dddac7133',
     'purges', jsonb_build_array('purge_unstarted_execution(text,text,text)', 'purge_unsubmitted_workflow_run(text,text,text)'),
     -- PostgreSQL 18 catalog fingerprints. Role names are normalized to their keys before hashing.
     'history_guard_sha256', 'ad86c7e2322fc22248d4a79acbd52f9c3064fc88e2962552eb313e699a7be552',

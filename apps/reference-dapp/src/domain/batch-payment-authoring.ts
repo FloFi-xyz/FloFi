@@ -346,14 +346,16 @@ export type BatchPaymentDraftCheck = { readonly valid: boolean; readonly count: 
 const DRAFT_PROBLEM: Readonly<Record<string, string>> = {
   BATCH_PAYMENT_TOO_FEW_RECIPIENTS: 'Add at least 2 recipients.',
   BATCH_PAYMENT_TOO_MANY_RECIPIENTS: 'A Batch Payment pays at most 8 recipients.',
-  BATCH_PAYMENT_RECIPIENT_INVALID: 'Enter a valid 0x address for every recipient (a mixed-case address must match its checksum).',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R08): one short sentence; the invalid row is highlighted (`rows`, aria-invalid). The validation itself is
+  // unchanged: a mixed-case EVM address must still match its checksum, a Solana address is still exact base58 on the curve.
+  BATCH_PAYMENT_RECIPIENT_INVALID: 'Enter a valid address.',
   BATCH_PAYMENT_DUPLICATE_RECIPIENT: 'An address appears more than once. Remove the repeated recipient: payments are never merged.',
   BATCH_PAYMENT_AMOUNT_INVALID: 'Enter a positive amount for every recipient.',
   BATCH_PAYMENT_AMOUNT_ABOVE_MAXIMUM: 'An ETH amount is above the per-payment maximum FloFi sends on this network. Lower it or split the payment.',
   BATCH_PAYMENT_AMOUNT_TOO_PRECISE: 'An amount has more decimal places than this asset allows.',
   BATCH_PAYMENT_NETWORK_UNSUPPORTED: 'Batch Payment is available on Base, Arbitrum One, Ethereum, Robinhood Chain and Solana.',
   // KAN-20: Solana-only problems (the EVM copy above is unchanged).
-  BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID: 'Enter a valid Solana wallet address for every recipient (base58, exactly as written: letter case matters).',
+  BATCH_PAYMENT_SOLANA_RECIPIENT_INVALID: 'Enter a valid address.',
   BATCH_PAYMENT_SOLANA_RECIPIENT_RESERVED: 'A recipient is a Solana program, system account or token mint, which cannot receive a payment. Use the recipient\'s wallet address.',
   BATCH_PAYMENT_RECIPIENT_IS_SENDER: 'A recipient is the Solana wallet you are paying from. Remove it: a Batch Payment never pays your own wallet.',
   BATCH_PAYMENT_TOTAL_OUT_OF_RANGE: 'The amounts of this Batch Payment are larger than Solana can carry.',

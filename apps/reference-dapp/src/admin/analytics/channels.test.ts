@@ -21,7 +21,7 @@ vi.mock('next/headers', () => ({ headers: async () => new Headers({ host: 'flofi
   cookies: async () => ({ get: (name: string) => name === 'flofi_admin_session' && request.token ? { value: request.token } : undefined }) }));
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NOT_FOUND'); }, redirect: (path: string) => { throw new Error(path); } }));
 vi.mock('./channels.ts', async original => ({ ...await original<typeof import('./channels.ts')>(), loadChannelCounts: vi.fn(async () => { throw new Error('UNREACHABLE'); }) }));
-const { CHANNELS, channelOf, channelPeriod, completedExecutions, foldChannels, loadChannelCounts } = await import('./channels.ts');
+const { CHANNELS, channelOf, channelOfOrigin, channelPeriod, completedExecutions, foldChannels, loadChannelCounts } = await import('./channels.ts');
 type ChannelCounts = import('./channels.ts').ChannelCounts;
 const { ChannelCounts: Section } = await import('../../components/admin/channel-counts');
 
@@ -34,11 +34,11 @@ function run(over: Partial<LoadedRun>): LoadedRun {
     attentionRequired: false, hasEvidence: true, createdAt: new Date('2026-11-18T10:00:00Z'), updatedAt: new Date('2026-11-18T10:05:00Z'), attempts: [done],
     journalAuthorized: true, fact: null, ...over };
 }
-const NONE = { FLOFI_WEB: 0, CHATGPT_MCP: 0, CLAUDE_MCP: 0, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 0, UNKNOWN: 0 };
+const NONE = { FLOFI_WEB: 0, LEGACY_WEB: 0, CHATGPT_MCP: 0, CLAUDE_MCP: 0, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 0, UNKNOWN: 0 };
 
 describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution', () => {
   it('names a channel only from the requester kind and an exact CIMD client id', () => {
-    expect(CHANNELS).toEqual(['FLOFI_WEB', 'CHATGPT_MCP', 'CLAUDE_MCP', 'TELEGRAM', 'DEVELOPER_API', 'MCP_UNIDENTIFIED', 'UNKNOWN']);
+    expect(CHANNELS).toEqual(['FLOFI_WEB', 'LEGACY_WEB', 'CHATGPT_MCP', 'CLAUDE_MCP', 'TELEGRAM', 'DEVELOPER_API', 'MCP_UNIDENTIFIED', 'UNKNOWN']);
     expect(channelOf('EDITOR_SESSION', 'flofi-editor')).toBe('FLOFI_WEB');
     expect(channelOf('DEVELOPER_PROJECT', 'prj_abc')).toBe('DEVELOPER_API');
     expect(channelOf('AUTOMATION_RULE', 'flofi-automations')).toBe('AUTOMATION');
@@ -117,7 +117,7 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
     });
     // FloFi Web: the 3 Editor workflow runs and the Editor-bound one-step run of the rule above. Unknown: the run whose requester disagrees with its
     // handoff, the conflicting binding and the unbound single flow (never FloFi Web by absence of a record).
-    expect(folded.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 4, CHATGPT_MCP: 2, CLAUDE_MCP: 2, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
+    expect(folded.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 4, LEGACY_WEB: 0, CHATGPT_MCP: 2, CLAUDE_MCP: 2, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
       total: 12, automation: 5 });
     expect(folded.byEnvironment.TESTNET).toEqual({ counts: { ...NONE, DEVELOPER_API: 1, UNKNOWN: 1 }, total: 2, automation: 0 });
     expect(folded.unrecognizedEnvironment).toBe(3);
@@ -176,7 +176,8 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel attribution',
 const counts = (over: Partial<ChannelCounts> = {}): ChannelCounts => {
   const empty = { counts: NONE, total: 0, automation: 0 };
   return { period: channelPeriod('30d', new Date('2026-11-20T10:00:00Z')), byEnvironment: { MAINNET: { counts: { ...NONE, FLOFI_WEB: 2, CHATGPT_MCP: 1 }, total: 3, automation: 1 },
-    TESTNET: empty, MOCKED: empty }, unrecognizedEnvironment: 0, coverage: FULL_COVERAGE, workflowRunsTruncated: false, compositionsWithoutRecord: { MAINNET: 0, TESTNET: 0, MOCKED: 0 }, ...over };
+    TESTNET: empty, MOCKED: empty }, unrecognizedEnvironment: 0, coverage: FULL_COVERAGE, workflowRunsTruncated: false, compositionsWithoutRecord: { MAINNET: 0, TESTNET: 0, MOCKED: 0 },
+    originsRecorded: false, ...over };
 };
 const render = (result: Parameters<typeof Section>[0]['result'], language: 'EN' | 'PT' = 'EN', environment: 'MAINNET' | 'TESTNET' = 'MAINNET', channels = '30d') =>
   renderToStaticMarkup(createElement(Section, { result, period: channelPeriod(channels, new Date('2026-11-20T10:00:00Z')), environment, params: { range: '7d', env: environment, channels }, language }));
@@ -189,12 +190,13 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel section', () 
     expect(html).toMatch(/<nav class="admin-segmented" aria-label="Period">/);
     expect(html).toContain('href="/admin?range=7d&amp;env=MAINNET&amp;channels=today"');
     expect(html).toContain('href="/admin?range=7d&amp;env=MAINNET&amp;channels=30d" aria-current="true"');
-    expect([...html.matchAll(/<th scope="row">(?:<strong>)?([^<]+)</g)].map(m => m[1])).toEqual(['FloFi Web', 'ChatGPT MCP', 'Claude MCP', 'Telegram', 'Developer API',
-      'Unidentified MCP client', 'Unknown origin', 'Total']);
-    expect([...html.matchAll(/<td class="num">(?:<strong>)?([^<]+)</g)].map(m => m[1])).toEqual(['2', '1', '0', '0', '0', '0', '0', '3']);
+    expect([...html.matchAll(/<th scope="row">(?:<strong>)?([^<]+)</g)].map(m => m[1])).toEqual(['FloFi Web (Chat or Editor)', 'Legacy Web (recovered history)',
+      'ChatGPT MCP', 'Claude MCP', 'Telegram', 'Developer API', 'Unidentified MCP client', 'Unknown origin', 'Total']);
+    expect([...html.matchAll(/<td class="num">(?:<strong>)?([^<]+)</g)].map(m => m[1])).toEqual(['2', '0', '1', '0', '0', '0', '0', '0', '3']);
     expect(html).toContain('<th scope="col">Channel</th>');
     expect(body).toContain('A Batch Payment counts once');
-    expect(body).toContain('FloFi Web counts workflow runs started from the Editor, and combines Web Chat and the Editor');
+    expect(body).toContain('FloFi Web combines Web Chat and the Editor: they are the same app page and no server-side record says which of the two started a run.');
+    expect(body).toContain('FloFi Web in total: 2 (2 recorded when they started, 0 recovered from history).');
     expect(body).toContain('One-step runs started directly in the app have no origin record and are shown as Unknown origin.');
     expect(body.replaceAll('&#x27;', "'")).toContain("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at most "
       + '16 runs, and approvals may be removed by retention. Otherwise it is shown as Unknown origin.');
@@ -226,7 +228,7 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel section', () 
       + text(render({ ok: true, value: counts() }, 'PT', 'TESTNET'));
     for (const phrase of ['Execuções concluídas por canal', 'Canal', 'Origem desconhecida', 'Cliente MCP não identificado', 'API para desenvolvedores', 'Total', 'Hoje',
       'Últimos 7 dias', 'Últimos 30 dias', 'Todo o período', 'Pagamento em lote conta uma vez', 'Pelo menos 3', 'Nenhuma execução concluída neste período.',
-      'FloFi Web conta as execuções de fluxos iniciadas no Editor', 'iniciadas diretamente no app não têm registro de origem',
+      'FloFi Web reúne o Chat na web e o Editor', 'iniciadas diretamente no app não têm registro de origem',
       'uma aprovação registra no máximo 16 execuções, e aprovações podem ser removidas pela retenção',
       'Execuções de outros canais, como o WhatsApp, aparecem como Origem desconhecida.', 'As contagens de execuções concluídas estão indisponíveis.', 'O período solicitado não foi reconhecido'])
       expect(pt).toContain(phrase);
@@ -274,5 +276,43 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 channel counts access
     await expect(AdminOverviewPage({ searchParams })).rejects.toThrow('/admin/login'); // a sealed cookie whose session is not live
     expect(loadChannelCounts).not.toHaveBeenCalled();
     expect(query.mock.calls.every(([sql]) => !/workflow_runs|mcp_handoffs|execution_runs/.test(String(sql)))).toBe(true);
+  });
+});
+
+describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 recorded execution origins (0037)', () => {
+  it('a recorded origin wins over a binding except a web record an approval binding contradicts; Legacy Web is its own row', () => {
+    const execution = (runIds: string[]) => ({ environment: 'MAINNET' as const, runIds, workflowIds: ['wf'] });
+    const folded = foldChannels({ workflowRuns: [], steps: new Set(), executions: [execution(['web-run']), execution(['legacy-run']), execution(['bound-run']),
+      execution(['root', 'recovery']), execution(['unrecorded'])],
+      bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'flofi_dcr_x', runIds: ['web-run', 'bound-run', 'unrecorded'] }],
+      recorded: new Map([['web-run', { origin: 'web', basis: 'CREATION' }], ['legacy-run', { origin: 'legacy_web', basis: 'BACKFILL' }],
+        ['root', { origin: 'telegram', basis: 'APPROVAL_BINDING' }], ['recovery', { origin: 'mcp_claude', basis: 'APPROVAL_BINDING' }],
+        ['web-only', { origin: 'web', basis: 'CREATION' }], ['corrected', { origin: 'mcp_chatgpt', basis: 'CORRECTION' }]] as const) });
+    // web-run: created on an /app URL but bound by an MCP approval (exact reviewed hash after its claim): the approval's channel wins over the
+    // browser-chosen page. legacy-run: recovered history. root+recovery: two channels, Unknown. unrecorded: the binding as before.
+    expect(folded.byEnvironment.MAINNET.counts).toEqual({ ...NONE, LEGACY_WEB: 1, MCP_UNIDENTIFIED: 3, UNKNOWN: 1 });
+    expect(folded.byEnvironment.MAINNET.total).toBe(5);
+    const more = foldChannels({ workflowRuns: [], steps: new Set(), executions: [execution(['web-only']), execution(['corrected'])],
+      bindings: [{ requesterKind: 'MCP_ACCOUNT', clientId: 'flofi_dcr_x', runIds: ['corrected'] }],
+      recorded: new Map([['web-only', { origin: 'web', basis: 'CREATION' }], ['corrected', { origin: 'mcp_chatgpt', basis: 'CORRECTION' }]] as const) });
+    // An unbound web record stays FloFi Web; an approved correction wins over any binding.
+    expect(more.byEnvironment.MAINNET.counts).toEqual({ ...NONE, FLOFI_WEB: 1, CHATGPT_MCP: 1 });
+  });
+  it('maps every recorded origin to exactly one reported row (Chat and Editor are FloFi Web; automation stays in its note)', () => {
+    expect(['web', 'web_chat', 'web_editor'].map(o => channelOfOrigin(o as never))).toEqual(['FLOFI_WEB', 'FLOFI_WEB', 'FLOFI_WEB']);
+    expect(channelOfOrigin('legacy_web')).toBe('LEGACY_WEB');
+    expect(channelOfOrigin('mcp_chatgpt')).toBe('CHATGPT_MCP');
+    expect(channelOfOrigin('mcp_claude')).toBe('CLAUDE_MCP');
+    expect(channelOfOrigin('mcp_other')).toBe('MCP_UNIDENTIFIED');
+    expect(channelOfOrigin('telegram')).toBe('TELEGRAM');
+    expect(channelOfOrigin('developer_api')).toBe('DEVELOPER_API');
+    expect(channelOfOrigin('automation')).toBe('AUTOMATION');
+    expect(channelOfOrigin('unknown')).toBe('UNKNOWN');
+  });
+  it('with origins recorded, the obsolete "no origin record" notes are gone and the recovery rule is stated', () => {
+    const body = text(render({ ok: true, value: counts({ originsRecorded: true }) }));
+    expect(body).not.toContain('One-step runs started directly in the app have no origin record');
+    expect(body).toContain('New executions keep the channel they started from');
+    expect(text(render({ ok: true, value: counts({ originsRecorded: true }) }, 'PT'))).toContain('Novas execuções mantêm o canal de origem');
   });
 });

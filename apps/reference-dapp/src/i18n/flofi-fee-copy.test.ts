@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-UX-FIX-003: every FloFi fee disclosure on the universal bridge says the same thing in English and Portuguese — the 0.1% fee is
+ * BUILD-FLOFI-UX-FIX-003: every FloFi fee disclosure on the universal bridge says the same thing in English and Portuguese — the fee is
  * recorded as an obligation when the bridge completes and is not charged at this time (fee-obligation.ts: OBLIGATION_RECORDED, NOT_SETTLED).
  * The Portuguese Copilot note once said FloFi charged no fee at all, and the Review's fee line had no Portuguese text.
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the rate is 0.80% (80 bps); the 0.1% Review line stays only for Reviews made under that policy.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,19 +14,21 @@ import { translate } from './locale';
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 /** The universal surfaces' fee sentences, as they appear in the product source (Review line, Canvas panel). */
 const FEE_SENTENCES = [
-  '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.',
-  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.',
-  'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.',
-  '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.',
+  '0.80% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.',
+  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.80% fee obligation on each completed workflow; it is not charged at this time.',
+  'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.80% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.',
+  '0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.',
 ] as const;
 
 describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
-  it('the Copilot bridge note says the 0.1% fee is recorded and not charged now, in both languages', () => {
+  it('the Copilot bridge note says the 0.80% fee is recorded and not charged now, in both languages', () => {
     const en = COPILOT_COPY.EN.universalFundsNote('Base → Arbitrum One'), pt = COPILOT_COPY.PT.universalFundsNote('Base → Arbitrum One');
-    expect(en).toMatch(/0\.1% fee obligation/);
+    expect(en).toMatch(/0\.80% fee obligation/);
+    expect(en).not.toMatch(/0\.1%/);
     expect(en).toMatch(/completed bridge/);
     expect(en).toMatch(/not charged at this time/);
-    expect(pt).toMatch(/registra uma obrigação de taxa de 0,1%/);
+    expect(pt).toMatch(/registra uma obrigação de taxa de 0,80%/);
+    expect(pt).not.toMatch(/0,1%/);
     expect(pt).toMatch(/bridge concluída/);
     expect(pt).toMatch(/não é cobrada neste momento/);
     // Never the old contradiction: "FloFi does not charge a fee on this bridge".
@@ -39,15 +42,20 @@ describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
       expect(product, sentence).toContain(sentence);
       const pt = translate('PT', sentence);
       expect(pt, sentence).not.toBe(sentence);
-      expect(pt, sentence).toContain('0,1%');
+      expect(pt, sentence).toContain('0,80%');
       expect(pt, sentence).toMatch(/registr/i);
       expect(pt, sentence).toMatch(/não é cobrada neste momento/);
       expect(sentence).toMatch(/not charged at this time/);
       // One wording: never "not collected / settled on-chain" (which reads as if it might be charged elsewhere).
       expect(`${sentence} ${pt}`).not.toMatch(/on-chain/);
     }
-    expect(product).toContain("'FloFi fee (0.1% obligation)'");
+    expect(product).toContain("'FloFi fee (0.80% obligation)'");
+    expect(translate('PT', 'FloFi fee (0.80% obligation)')).toBe('Taxa do FloFi (obrigação de 0,80%)');
+    // A Review made under the earlier 10 bps policy keeps its own line (and its Portuguese text), in the compact Review and the panel's route review.
     expect(translate('PT', 'FloFi fee (0.1% obligation)')).toBe('Taxa do FloFi (obrigação de 0,1%)');
+    const legacyPanel = '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.';
+    expect(product).toContain(legacyPanel);
+    expect(translate('PT', legacyPanel)).toContain('0,1%');
     expect(translate('PT', 'FloFi fee')).toBe('Taxa do FloFi');
   });
 });

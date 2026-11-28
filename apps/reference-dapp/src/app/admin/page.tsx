@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ACTION_KINDS, ACTION_LABELS } from '../../admin/analytics/actions';
-import { channelPeriod, loadChannelCounts } from '../../admin/analytics/channels';
+import { CHANNEL_PERIOD_LABELS, channelPeriod, loadChannelCounts } from '../../admin/analytics/channels';
 import { ENVIRONMENT_LABELS, type NetworkInfo } from '../../admin/analytics/networks';
 import { param, withParams, workflowView, type AnalyticsParams } from '../../admin/analytics/view';
 import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/workflows';
@@ -14,6 +14,11 @@ import { loadExecutionAttention } from '../../admin/support/lifecycle';
 import { AnalyticsFilters } from '../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../components/admin/admin-shell';
 import { ChannelCounts } from '../../components/admin/channel-counts';
+import { PlatformFees } from '../../components/admin/platform-fees';
+import { loadFeeTotals } from '../../platform-fee/ledger';
+import { platformFeeActivation } from '../../platform-fee/activation';
+
+const LEDGER_ENVIRONMENT = { MAINNET: 'MAINNET', TESTNET: 'PUBLIC_TESTNET', MOCKED: 'MOCKED' } as const;
 import { DataNotes } from '../../components/admin/data-notes';
 import { AttentionList, Kpi, Section, StatusTile, TechnicalDetails } from '../../components/admin/admin-ui';
 import { Amount } from '../../components/admin/finops-views';
@@ -94,6 +99,9 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
     healthReport(process.env, page.host, page.now, fetch, shared).catch(() => null), copilotSettingsView(process.env, page.host).catch(() => null),
     readFinopsReport(page.host, finopsPeriod(page.now, {}).period, page.now).catch(() => null),
     loadChannelCounts(page.host, { period: channelsPeriod })]);
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the fee ledger of the channel period and the page's environment (bounded read; null on failure).
+  const fees = await page.host.db.transaction(async tx => { await tx.query("SET LOCAL statement_timeout = '4000'");
+    return loadFeeTotals(tx, page.host.tenantId, channelsPeriod, LEDGER_ENVIRONMENT[view.ok ? view.environment : 'MAINNET']); }).catch(() => null);
   const { copy, count } = finopsCopy(language);
   const glance = <Glance health={health} copilot={copilot} language={language}/>;
   const financial = <FinanceSummary report={finance} language={language}/>;
@@ -239,20 +247,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
           <a href="/admin/automations">Automations</a> page shows how many FloFi has linked to their proposal (a verified lower bound). Delegated executions are
           separate records and are not counted here. † attributed by flow only (no indexed canonical record), counted as executions but not as actions.</p>
       </section>
-      <section className="admin-card" aria-labelledby="admin-fees">
-        <header><h2 id="admin-fees">Platform fee observability</h2><p>Intended model: 0.1% per completed workflow</p></header>
-        <div className="admin-table-wrap"><table className="admin-table"><tbody>
-          <tr><th scope="row">Completed workflows eligible under the intended model</th><td className="num">{fmt(a.fees.eligibleCompleted)} <span className="admin-badge">{env}</span></td></tr>
-          <tr><th scope="row">Fee model</th><td>0.1% per completed workflow (obligation recorded; collection not settled)</td></tr>
-          <tr><th scope="row">Fees charged on-chain</th><td><span className="admin-badge" data-tone="warn">Not settled — owner decision required</span></td></tr>
-          <tr><th scope="row">Fees reconciled / collected</th><td><span className="admin-badge" data-tone="warn">Obligation only</span></td></tr>
-          <tr><th scope="row">Revenue by network and period</th><td><span className="admin-badge">Unavailable until collection settles</span></td></tr>
-        </tbody></table></div>
-        {a.fees.byNetwork.length ? <p className="admin-diff" style={{ marginTop: 8 }}>Eligible by first-action network: {a.fees.byNetwork.map((n, i) =>
-          <span key={n.network.chain}>{i ? ' · ' : ''}{n.network.name} {fmt(n.completed)}</span>)}</p> : null}
-        <p className="admin-diff">Completed workflows are eligible for the approved 0.1% obligation (universal bridge runs record it on reconciliation and waive FAILED/REFUNDED).
-          On-chain collection is not settled: Relay is still called without appFees; Jupiter refuses a platform fee. Owner settlement options are listed in the universal-bridge build report.</p>
-      </section>
+      <PlatformFees totals={fees} activation={platformFeeActivation(process.env)} period={copy(CHANNEL_PERIOD_LABELS[channelsPeriod.id])} environment={copy(env)} language={language}/>
     </div>
 
     <section className="admin-card" aria-labelledby="admin-errors">

@@ -12,6 +12,7 @@
  *                    authorization plan. A requester sees step outcomes only when the owner shares status (the existing consent rule)
  */
 import { externalOneStepPlan } from '../platform/external-single-step.ts';
+import { originOfRequester } from './execution-origins.ts';
 import type { ApprovalRequesterKind, HandoffRecord, WalletRef } from '../platform/handoff-store.ts';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
@@ -97,7 +98,7 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
   const now = deps.now();
   const run = await deps.store.create({ runId: deps.newId('wfr'), handoffId: h.handoffId, requester: { kind: h.requesterKind, ref: h.requesterRef }, owner, wallets: bound,
     strategy: workflow.strategy, workflowHash: workflow.workflowHash, engineVersion: ENGINE_VERSION, stepCount: workflow.steps.length,
-    expiresAt: new Date(now.getTime() + CONFIRM_RUN_SECONDS * 1000) }, now);
+    expiresAt: new Date(now.getTime() + CONFIRM_RUN_SECONDS * 1000), origin: originOfRequester(h.requesterKind, h.clientId) }, now);
   assertRunWallets(run, wallets);
   return run;
 }

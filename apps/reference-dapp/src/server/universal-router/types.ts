@@ -75,10 +75,11 @@ export type UniversalReview = {
     readonly recipientTokenAccount?: 'EXISTS' | 'MISSING' };
   readonly deadlines: { readonly reviewExpiresAt: string; readonly quoteExpiresAt: string; readonly orderDeadline: number };
   /**
-   * FloFi's approved 0.1% fee per completed workflow (disclosure at Review). Collection is recorded as an obligation only —
+   * FloFi's fee per completed workflow (disclosure at Review): 80 bps since BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001, 10 bps on earlier Reviews.
+   * Collection is recorded as an obligation only —
    * on-chain settlement requires an owner decision (see fee-obligation.ts and the build report). Provider fees are the route's itemized lines.
    */
-  readonly feePolicy: { readonly flofiFee: 'WORKFLOW_0_1_PCT'; readonly flofiFeeRateBps: 10; readonly flofiFeeBasis: 'COMPLETED_WORKFLOW_INPUT';
+  readonly feePolicy: { readonly flofiFee: 'WORKFLOW_0_1_PCT' | 'WORKFLOW_0_80_PCT'; readonly flofiFeeRateBps: 10 | 80; readonly flofiFeeBasis: 'COMPLETED_WORKFLOW_INPUT';
     readonly flofiFeeCollection: 'OBLIGATION_RECORDED'; readonly networkFeeUpperBound: string; readonly networkFeeSymbol: 'ETH' | 'SOL';
     readonly networkFeeDecimals: number };
   /** Owner signatures this route needs on the source chain, and whether anything is needed on the destination chain. */
@@ -93,7 +94,7 @@ export type DestinationDelivery = { readonly chainId: string; readonly transacti
   readonly orderBound: boolean; readonly orderProof?: 'RELAY_EVM_TOKEN_V1'; readonly discoveredBy: 'PROVIDER_HINT'; readonly contentHash: string; readonly final: boolean };
 export type RefundRecord = { readonly chainId: string; readonly transactionHash: string; readonly recipient: string; readonly token: string; readonly amount: string };
 export type UniversalFeeObligation = {
-  readonly rateBps: 10; readonly basis: 'COMPLETED_WORKFLOW_INPUT';
+  readonly rateBps: 10 | 80; readonly basis: 'COMPLETED_WORKFLOW_INPUT';
   readonly notional: { readonly chainId: string; readonly token: string; readonly symbol: string; readonly decimals: number; readonly amount: string };
   readonly feeAmount: string; readonly status: 'OBLIGATED' | 'WAIVED'; readonly collection: 'NOT_SETTLED'; readonly reason: string | null;
 };

@@ -28,7 +28,7 @@ import { REVIEW_EXPIRED_REFRESH } from './execution-result';
 import { boundRecipientOwned } from './destination-wallet';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
-import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
+import { flofiFeeAmount, reviewedFeeRate, type FloFiFeeRateBps } from '../server/universal-router/fee-obligation.ts';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
 import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
@@ -38,8 +38,8 @@ import { shellChainLabel } from './product-shell';
 import { networkIdentity } from './network-registry';
 import { stockTradingRefusal } from './catalog-swap-authoring';
 
-/** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
-const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
+/** The reviewed rate of the route input, for Review disclosure (obligation; not collected here). */
+const flofiFeeUnits = (inputAmount: string, rateBps: FloFiFeeRateBps): string => flofiFeeAmount(inputAmount, rateBps);
 
 type Snapshot<T> = Pick<T, Extract<keyof T, 'record' | 'run' | 'prepared' | 'status' | 'info' | 'retired' | 'recoveryOnly' | 'busy' | 'error' | 'available' | 'availabilityKnown' | 'verifyError' | 'verified' | 'quoteExpired'>>;
 export type SimulationSource =
@@ -600,8 +600,11 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (q.destination.recipientTokenAccount === 'MISSING') warn('info',
         'The recipient’s Solana wallet has no {0} account yet. The bridge provider creates it at delivery; its one-time cost is part of the provider’s destination fee, already included in the quote.'
           .replace('{0}', route.outputToken.symbol));
-      fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the rate this Review disclosed (80 bps; a Review made under the earlier policy keeps 10 bps).
+      if (reviewedFeeRate(q.feePolicy) === 10) fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount, 10), route.inputToken.decimals, route.inputToken.symbol,
         '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
+      else fee('FloFi fee (0.80% obligation)', flofiFeeUnits(route.inputAmount, 80), route.inputToken.decimals, route.inputToken.symbol,
+        '0.80% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
       // BUILD-FLOFI-MAINNET-EXEC-002: the owner's asset identity changes on the way (material, always visible): WETH is unwrapped 1:1 into ETH first.
       const unwrapping = route.source.ecosystem === 'EVM' && route.source.unwrap !== undefined;

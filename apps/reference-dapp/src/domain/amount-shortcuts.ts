@@ -173,8 +173,11 @@ export function shortcutFigure(units: bigint, decimals: number, symbol: string, 
   const digits = (units < 0n ? 0n : units).toString().padStart(decimals + 1, '0');
   const whole = digits.slice(0, digits.length - decimals);
   let fraction = decimals ? digits.slice(digits.length - decimals) : '';
-  const cut = short && fraction.length > SHORTCUT_DECIMALS && /[1-9]/.test(fraction.slice(SHORTCUT_DECIMALS));
-  if (short) fraction = fraction.slice(0, SHORTCUT_DECIMALS);
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06): below one whole unit, six SIGNIFICANT digits (the global rule), so a nonzero balance never reads as
+  // "0…" (2 wei of ETH was "0… ETH"); from one unit up, at most six decimals as before. Always rounded down: a shortcut never shows more than is held.
+  const keep = whole === '0' ? (/^0*/.exec(fraction)![0].length + SHORTCUT_DECIMALS) : SHORTCUT_DECIMALS;
+  const cut = short && fraction.length > keep && /[1-9]/.test(fraction.slice(keep));
+  if (short) fraction = fraction.slice(0, keep);
   fraction = fraction.replace(/0+$/, '');
   const [group, point] = language === 'PT' ? ['.', ','] : [',', '.'];
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, group);
