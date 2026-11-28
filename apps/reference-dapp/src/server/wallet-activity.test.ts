@@ -5,7 +5,7 @@ import { JUPITER_SOLANA_MAINNET, type AssetCatalog } from '@defi-workflow-engine
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { ACTIVITY_READS_PER_MINUTE, activityAccount, activityGate, decodeCursor, encodeCursor, readWalletActivity, type AlchemyCall, type WalletActivityCache, type WalletActivitySeams } from './wallet-activity';
 import type { cloudFlow } from './flow-runtime';
-import { activityRows, mergeCoverage, signedAmount, type ActivityCoverage, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
+import { activityRows, mergeCoverage, signedAmount, signedDisplayAmount, type ActivityCoverage, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog';
 
 const owner = '0x' + '1'.repeat(40), peer = '0x' + '2'.repeat(40), pool = '0x' + '3'.repeat(40);
@@ -41,6 +41,14 @@ describe('EVM wallet activity (Alchemy Transfers API on the existing key)', () =
       ['IN', 'TRANSFER', 'TOKEN', 'USDC', '1000000', peer], ['OUT', 'TRANSFER', 'NATIVE', 'ETH', '10000000000000000', peer]]);
     expect(base[0]).toMatchObject({ transaction: h(1), explorerUrl: `https://basescan.org/tx/${h(1)}`, status: 'CONFIRMED', timestamp: '2026-11-17T10:00:00.000Z', chain: 'eip155:8453' });
     expect(signedAmount(base[0]!)).toBe('+1 USDC'); expect(signedAmount(base[1]!)).toBe('−0.01 ETH');
+    // R06/R07: the History row reads six significant digits ("≈" before the sign when shortened), PT with its decimal comma; exact stays exact.
+    expect(signedDisplayAmount(base[0]!, 'EN')).toMatchObject({ text: '+1 USDC', approximate: false });
+    const long = { ...base[1]!, amount: '57923834925903535' };
+    expect(signedAmount(long)).toBe('−0.057923834925903535 ETH');
+    expect(signedDisplayAmount(long, 'EN')).toEqual({ text: '≈ −0.0579238 ETH', exactText: '−0.057923834925903535 ETH', exact: '0.057923834925903535 ETH', approximate: true });
+    expect(signedDisplayAmount({ ...long, direction: 'IN', amount: '39961699395000574' }, 'PT')?.text).toBe('≈ +0,0399617 ETH');
+    expect(signedDisplayAmount({ ...long, amount: '40000000000000000' }, 'EN')?.text).toBe('−0.04 ETH');
+    expect(signedDisplayAmount({ ...long, amount: '123456789' }, 'EN')?.text).toBe('≈ −0.000000000123457 ETH');
     // Bounded, read-only requests: one page per network and direction, newest first; "internal" only where the provider lists it (Ethereum).
     expect(calls.every(c => c.maxCount === '0x14' && c.order === 'desc' && c.excludeZeroValue === true)).toBe(true);
     expect(calls.find(c => c.network === 'ethereum')!.category).toEqual(['external', 'internal', 'erc20']);

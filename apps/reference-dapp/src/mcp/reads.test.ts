@@ -42,6 +42,16 @@ describe('BUILD-MCP-001 get_execution_status / get_evidence: owner-scoped reads'
       preparedAtBlock: '100', updatedAt: '2026-10-06T00:04:00.000Z' }]);
     expect(JSON.stringify(status)).not.toMatch(/tenantSecret|logName|namespace|"nonce"/);
     expect(readsAs).toEqual([A]);
+    expect(JSON.stringify(status.notes)).not.toMatch(/network finality/);
+  });
+
+  it('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): a delivery found on the destination is a finality wait in words, never a completion', async () => {
+    const { runtime } = store();
+    const observed: McpRuntime = { ...runtime, run: async (id, owner) => ({ ok: true, value: run(id, owner, { status: 'DESTINATION_OBSERVED', hasEvidence: false }) }) };
+    const status = (await session({ env, token: alice.token, runtime: observed }).callTool('get_execution_status', { executionId: 'xroute-' + 'a'.repeat(32) })).output;
+    expect(status).toMatchObject({ ok: true, status: 'DESTINATION_OBSERVED', lifecycle: { status: 'SETTLEMENT_PENDING', completed: false } });
+    expect(status.notes).toContain('The bridge delivery was found on the destination network and is waiting for network finality and reconciliation. FloFi checks it automatically; ' +
+      'no action or signature is needed. It is not completed until lifecycle.completed is true.');
   });
 
   it('treats another wallet\'s run, an unknown id and an ungranted credential identically: not found', async () => {

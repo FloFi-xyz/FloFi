@@ -10,6 +10,7 @@ import { ROUTER_MAXIMUM_SLIPPAGE_BPS, ROUTER_PHASES, type RouteChange, type Rout
 import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworkOfInput, ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS,
   ROUTER_ROUTING_LABEL, routerDisabledCode, type RouterBridgeInput, type RouterDestination, type RouterNetwork, type RouterRouting, type RouterSource } from '../domain/router-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
 import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
@@ -197,9 +198,15 @@ const changeLabel: Record<RouteChange, string> = { CHAIN_CHANGED: 'chain', TOKEN
   SLIPPAGE_CHANGED: 'slippage', APPROVAL_CHANGED: 'approval', TRANSACTION_TARGET_CHANGED: 'transaction target', TRANSACTION_FUNCTION_CHANGED: 'transaction function',
   VALUE_CHANGED: 'transaction value', BRIDGE_CONTRACT_CHANGED: 'bridge contracts', BRIDGE_MESSAGE_CHANGED: 'destination message', CALLDATA_CHANGED: 'calldata',
   QUOTE_CHANGED: 'quote', DEADLINE_CHANGED: 'deadlines' };
-/** A token amount of one side of the route (its own decimals and symbol). */
-const tokenAmount = (side: { decimals: number; symbol: string }) => (units: string | null | undefined) => units ? `${formatTokenAmount(units, side.decimals)} ${side.symbol}` : '--';
-const eth = (wei: string | null | undefined) => wei ? `${formatTokenAmount(wei, 18)} ETH` : 'not available';
+/**
+ * A token amount of one side of the route (its own decimals and symbol). BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): six significant
+ * digits in the reader's separators, rounded by purpose (a minimum down, a fee, ceiling or allowance up, anything else to the nearest, "≈");
+ * `exact` keeps every digit where the sentence says "exactly". Presentation only: the record keeps base units.
+ */
+const tokenAmount = (side: { decimals: number; symbol: string }, language: DisplayLanguage) => (units: string | null | undefined, rounding: DisplayRounding | 'exact' = 'nearest') => !units ? '--'
+  : rounding === 'exact' ? `${formatTokenAmount(units, side.decimals)} ${side.symbol}` : formatDisplayTokenAmount({ units, decimals: side.decimals }, { rounding, language, symbol: side.symbol, unavailable: '--' });
+/** A network-fee ceiling in wei: rounded up, never below itself. */
+const eth = (wei: string | null | undefined, language: DisplayLanguage) => wei ? formatDisplayTokenAmount({ units: wei, decimals: 18 }, { rounding: 'up', language, symbol: 'ETH', unavailable: 'not available' }) : 'not available';
 const providerLabel = (p: string) => p === 'lifi' ? 'LI.FI' : p === 'across' ? 'Across (direct)' : p;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
 const phaseLabel = (p: RouterPhase) => p.toLowerCase().replaceAll('_', ' ');
@@ -229,12 +236,13 @@ function WalletSessionBlock({ showRuns }: { showRuns: boolean }) {
 }
 
 export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   const { state } = useWorkflow(), router = useRouter();
   const node = state.workflow.nodes.find(n => routerDetails(n)), fields = node ? routerDetails(node) : null;
+  const lang: DisplayLanguage = language === 'PT' ? 'PT' : 'EN';
   const network = router.network, l = LABELS[network], messages = messagesFor(l), message = (code: string | null | undefined) => !code ? null : walletNonceMessage(code) ?? messages[code] ?? null;
   // Source-side amounts (input, fees, approvals, balance, refund) and destination-side amounts (outputs, fill) in their own tokens.
-  const { pair } = ROUTER_NETWORK_OPTIONS[network], usdc = tokenAmount(pair.source), out = tokenAmount(pair.destination);
+  const { pair } = ROUTER_NETWORK_OPTIONS[network], usdc = tokenAmount(pair.source, lang), out = tokenAmount(pair.destination, lang);
   const record = router.record, r = record?.review, route = r?.route, last = record?.attempts.at(-1);
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
@@ -249,7 +257,7 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
     !record.attempts.some(a => a.step === 'DEPOSIT' && a.state !== 'CANCELLED') && (record.requote || fresh === 0 || record.phase === 'PREPARED' && record.attempts.length > 0));
   const info = router.error ?? record?.error ?? router.notice;
   const evidenceName = network === 'testnet' ? 'flofi-crosschain-router-testnet' : network === 'mainnet' ? 'flofi-crosschain-router' : `flofi-crosschain-router-${network}`;
-  const stepLabel = (purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT') => purpose === 'APPROVAL' ? `Approve exactly ${usdc(route?.approval.amount)} to ${route?.routingProvider === 'lifi' ? 'the LI.FI Diamond' : 'the Across SpokePool'}`
+  const stepLabel = (purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT') => purpose === 'APPROVAL' ? `Approve exactly ${usdc(route?.approval.amount, 'exact')} to ${route?.routingProvider === 'lifi' ? 'the LI.FI Diamond' : 'the Across SpokePool'}`
     : `Deposit into the bridge (${providerLabel(route?.routingProvider ?? '')} → Across)`;
   return <section className="panel" aria-label={tr("Cross-chain bridge")}><h2>{tr(view === 'simulate' ? 'Simulate cross-chain bridge' : 'Review cross-chain bridge')}</h2>
     {fields && <p>{tr("Bridge ")}{tr(fields.amount)}{tr(fields.token === 'USDG' ? ' USDG from ' : ' USDC from ')}{tr(l.src)}{tr(" to ")}{tr(l.dst)}{tr(" for ")}{tr(fields.recipientLabel)}{tr(", routing: ")}{tr(ROUTER_ROUTING_LABEL[fields.routing])}.</p>}
@@ -270,21 +278,21 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
           : `Across bridge ${l.src} → ${l.dst}: ${usdc(s.amountIn)} → ${out(s.amountOut)}`)}</li>)}</ol></dd>
         <dt>{tr("Amount in")}</dt><dd>{tr(usdc(route.inputAmount))}{tr(" on ")}{tr(l.src)}</dd>
         <dt>{tr("Expected out")}</dt><dd>{tr(out(route.expectedOutput))}{tr(" on ")}{tr(l.dst)}</dd>
-        <dt>{tr("Minimum received")}</dt><dd>{tr(out(route.minimumOutput))}{tr(" — fixed in the reviewed deposit; a smaller fill is a mismatch")}</dd>
-        <dt>{tr("Fees")}</dt><dd>{route.fees.map((f, i) => <span key={i}>{tr(f.label)}: {tr(usdc(f.amount))}{tr(f.recipient ? ` (to ${f.recipient})` : '')}. </span>)}{tr("Total ")}{tr(usdc(route.feeTotal))}</dd>
-        <dt>{tr("Network fees (")}{tr(l.src)})</dt><dd>{tr("at most ")}{tr(eth(r.fees.totalUpperBoundWei ?? r.fees.executionFeeUpperBoundWei))}{tr(" for ")}{tr(r.calls.length)}{tr(" transaction")}{tr(r.calls.length > 1 ? 's' : '')}{tr(r.fees.l1FeeUpperBoundWei === null ? ' (L1 data fee not estimated)' : '')}</dd>
+        <dt>{tr("Minimum received")}</dt><dd>{tr(out(route.minimumOutput, 'down'))}{tr(" — fixed in the reviewed deposit; a smaller fill is a mismatch")}</dd>
+        <dt>{tr("Fees")}</dt><dd>{route.fees.map((f, i) => <span key={i}>{tr(f.label)}: {tr(usdc(f.amount, 'up'))}{tr(f.recipient ? ` (to ${f.recipient})` : '')}. </span>)}{tr("Total ")}{tr(usdc(route.feeTotal, 'up'))}</dd>
+        <dt>{tr("Network fees (")}{tr(l.src)})</dt><dd>{tr("at most ")}{tr(eth(r.fees.totalUpperBoundWei ?? r.fees.executionFeeUpperBoundWei, lang))}{tr(" for ")}{tr(r.calls.length)}{tr(" transaction")}{tr(r.calls.length > 1 ? 's' : '')}{tr(r.fees.l1FeeUpperBoundWei === null ? ' (L1 data fee not estimated)' : '')}</dd>
         <dt>{tr("Estimated duration")}</dt><dd>{tr("about ")}{tr(route.quote.estimatedDurationSeconds)}{tr(" s after the deposit confirms (provider estimate)")}</dd>
-        <dt>{tr("Approvals")}</dt><dd>{r.approvals.map((a, i) => <span key={i}>{tr(a.required ? `Exactly ${usdc(a.amount)} to ${a.spender} (never unlimited)` : `Existing allowance ${usdc(a.currentAllowance)} is sufficient`)}. </span>)}</dd>
+        <dt>{tr("Approvals")}</dt><dd>{r.approvals.map((a, i) => <span key={i}>{tr(a.required ? `Exactly ${usdc(a.amount, 'exact')} to ${a.spender} (never unlimited)` : `Existing allowance ${usdc(a.currentAllowance, 'up')} is sufficient`)}. </span>)}</dd>
         <dt>{tr("Recipient")}</dt><dd>{tr(r.recipient)}{tr(" on ")}{tr(l.dst)}{tr(r.recipientKind === 'CONNECTED_OWNER' ? ' (your wallet)' : '')}{tr(r.observation.destination.recipientHasCode ? ' · this address is a contract' : '')}</dd>
         <dt>{tr("Refund")}</dt><dd>{tr("If no relayer fills by ")}{tr(new Date(r.deadlines.fillDeadline * 1000).toISOString())}{tr(", Across refunds to ")}{tr(route.refundAddress)}{tr(" on ")}{tr(l.src)}</dd>
         <dt>{tr("Quote expiry")}</dt><dd>{tr(route.quote.expiresAt)}{tr(" · Review valid ")}{tr(fresh > 0 ? `for ${fresh}s` : 'no longer — get a fresh route')}</dd>
         <dt>{tr("Wallet requests")}</dt><dd>{tr(r.calls.map(c => stepLabel(c.purpose)).join(' → '))}{tr(" — each needs its own Execute click and wallet signature")}</dd>
-        <dt>{tr("Strategy Manifest")}</dt><dd>{tr("Owner ")}{tr(r.owner)}{tr(" · spends at most ")}{tr(usdc(route.inputAmount))}{tr(" · fixed provider ")}{tr(r.artifacts.manifest.providers.kind === 'FIXED' ? r.artifacts.manifest.providers.providerId : 'none')}{tr(" · hash ")}<code>{tr(r.artifacts.hashes.manifest)}</code></dd>
+        <dt>{tr("Strategy Manifest")}</dt><dd>{tr("Owner ")}{tr(r.owner)}{tr(" · spends at most ")}{tr(usdc(route.inputAmount, 'up'))}{tr(" · fixed provider ")}{tr(r.artifacts.manifest.providers.kind === 'FIXED' ? r.artifacts.manifest.providers.providerId : 'none')}{tr(" · hash ")}<code>{tr(r.artifacts.hashes.manifest)}</code></dd>
       </dl>
       <details><summary>{tr("Sources: provider quote, transaction simulation, chain observation")}</summary>
         <dl aria-label={tr("Evidence sources")}>
           <dt>{tr("Provider quote (not a simulation)")}</dt><dd>{tr(providerLabel(r.quote.provider))}{tr(" quote ")}{tr(r.quote.quoteId)}{tr(" · raw response ")}{tr(r.quote.rawHash)}</dd>
-          <dt>{tr("Alternatives considered")}</dt><dd>{tr(r.selection.considered.map(c => `${providerLabel(c.provider)}: ${c.outcome.toLowerCase()}${c.code ? ` (${c.code})` : ''}${c.minimumOutput ? `, minimum ${out(c.minimumOutput)}` : ''}`).join('; '))}</dd>
+          <dt>{tr("Alternatives considered")}</dt><dd>{tr(r.selection.considered.map(c => `${providerLabel(c.provider)}: ${c.outcome.toLowerCase()}${c.code ? ` (${c.code})` : ''}${c.minimumOutput ? `, minimum ${out(c.minimumOutput, 'down')}` : ''}`).join('; '))}</dd>
           <dt>{tr("Transaction simulation")}</dt><dd>{tr(r.simulation.method)}{tr(" of the exact ")}{tr(l.src)}{tr(" transactions at block ")}{tr(r.simulation.block)}{tr(": deposit to ")}{tr(r.simulation.deposit.recipient)}{tr(", output ")}{tr(out(r.simulation.deposit.outputAmount))}{tr(". Not simulated: the destination fill, relayer behaviour and refunds.")}</dd>
           <dt>{tr("Chain observation")}</dt><dd>{tr(l.src)}{tr(" block ")}{tr(r.observation.source.block.number)}, {tr(l.dstShort)}{tr(" block ")}{tr(r.observation.destination.block.number)}{tr("; balance ")}{tr(usdc(r.observation.source.usdcBalance))}{tr("; contracts match their pinned code.")}</dd>
           <dt>{tr("Route commitment")}</dt><dd><code>{tr(r.routeCommitment)}</code></dd>
@@ -307,7 +315,7 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
       {record.destination && <p>{tr("Fill observed on ")}{tr(l.dstShort)}{tr(record.destination.safe ? ' (safe head)' : '')}: {tr(out(record.destination.outputAmount))}{tr(" to ")}{tr(record.destination.recipient)} · <a
         href={explorerTx(network, 'destination', record.destination.transactionHash)} target="_blank" rel="noreferrer">{tr("view on ")}{tr(l.dstScan)}</a></p>}
       {record.evidence && <section aria-label={tr("Bridge result")} className="swap-result"><h3>{tr("Bridge reconciled")}</h3>
-        <p>{tr(out(record.evidence.destination.outputAmount))}{tr(" arrived at ")}{tr(record.evidence.recipient)}{tr(" on ")}{tr(l.dst)}{tr(" (minimum ")}{tr(out(record.evidence.minimumOutput))}{tr("). Independently reconciled on both chains.")}</p>
+        <p>{tr(out(record.evidence.destination.outputAmount))}{tr(" arrived at ")}{tr(record.evidence.recipient)}{tr(" on ")}{tr(l.dst)}{tr(" (minimum ")}{tr(out(record.evidence.minimumOutput, 'down'))}{tr("). Independently reconciled on both chains.")}</p>
         <p>{tr("Evidence: ")}{tr(record.evidence.evidenceClass)}{tr(" · bundle ")}{record.evidence.bundleHash}</p>
         <ul aria-label={tr("Evidence transactions")}>{record.evidence.transactions.map(t => <li key={t.transactionHash}>{tr(t.step.toLowerCase())} · <a href={t.explorer} target="_blank" rel="noreferrer">{t.transactionHash}</a></li>)}</ul>
         <a download={`${evidenceName}-evidence.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></section>}

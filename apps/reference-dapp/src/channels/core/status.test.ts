@@ -50,6 +50,15 @@ describe.each(['EN', 'PT'] as const)('truthful channel lifecycle (%s)', language
     expect(channelCopy(language).loaded).not.toMatch(/Nothing is signed yet|Nada foi assinado ainda/);
   });
 
+  it('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): a bridge delivery found on the destination says it waits for network finality, never completed', () => {
+    const observed: RunLine = { ...run, status: 'DESTINATION_OBSERVED', landed: 'Bridge deposit confirmed onchain' };
+    const text = channelCopy(language).run(observed);
+    expect(text).toBe(language === 'EN'
+      ? 'Delivery found on the destination network, waiting for network finality and reconciliation. FloFi checks it automatically; no action or signature is needed. No verified execution receipt is available yet.'
+      : 'Entrega encontrada na rede de destino, aguardando a confirmação definitiva da rede e a reconciliação. O FloFi verifica automaticamente; nenhuma ação ou assinatura é necessária. Ainda não há recibo de execução verificado.');
+    expect(text).not.toMatch(/reconciled ✅|reconciliada ✅|Do not start|Não a inicie/);
+  });
+
   it('BUILD-FLOFI-NATIVE-CHANNEL-SIGNING-001: a natively signed approval never sends the person to FloFi; from submission on it follows as every run', () => {
     const native = (runs: readonly Record<string, unknown>[]) => plannedNotifications(language, handoff, { ...progress, runs } as unknown as typeof progress, undefined, new Date(), true);
     // The Review is in the conversation: no "loaded in FloFi", no "waiting for your review and wallet authorization in FloFi" (refreshed runs included).

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { DIRECT_SWAP_MAXIMUM_SLIPPAGE_BPS, hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { jupiterSuggestSlippage } from '../app/jupiter-action';
-import { createSolanaSwapNode, formatTokenAmount, solanaSwapDetails, solanaSwapLabels, solanaTokenLabel, solanaTokensFor, type SolanaNetwork, type SolanaSwapInput,
+import { createSolanaSwapNode, solanaSwapDetails, solanaSwapLabels, solanaTokenLabel, solanaTokensFor, type SolanaNetwork, type SolanaSwapInput,
   type SolanaSwapSymbol } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
@@ -148,7 +149,8 @@ function message(code: string | null | undefined, devnet: boolean): string | nul
   return (devnet ? devnetMessages : mainnetMessages)[suffix] ?? (devnet ? devnetMessages[code] : undefined) ?? shared[suffix] ?? shared[code] ?? null;
 }
 export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
+  const lang: DisplayLanguage = language === 'PT' ? 'PT' : 'EN';
   const { state } = useWorkflow(), jupiter = useJupiter();
   const node = state.workflow.nodes.find(n => solanaSwapDetails(n)), fields = node ? solanaSwapDetails(node) : null;
   const record = jupiter.record, review = record?.review, attempt = record?.attempt;
@@ -157,8 +159,14 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const fresh = review ? Math.max(0, Math.round((Date.parse(review.expiresAt) - clock) / 1000)) : 0;
   const symbol = (side: 'input' | 'output') => review ? devnet ? solanaTokenLabel('Solana Devnet', review[side].symbol) : review[side].symbol : '';
-  const amount = (units: string | null | undefined, side: 'input' | 'output') => review && units ? `${formatTokenAmount(units, review[side].decimals)} ${symbol(side)}` : '--';
-  const sol = (lamports: string | null | undefined) => lamports ? `${formatTokenAmount(lamports, 9)} ${devnet ? 'Devnet SOL' : 'SOL'}` : '--';
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): amounts at six significant digits in the reader's separators, rounded by purpose
+// (a minimum down, a fee or a maximum up, anything else to the nearest, marked "≈"). Presentation only: the record keeps base units.
+  const amount = (units: string | null | undefined, side: 'input' | 'output', rounding: DisplayRounding = 'nearest') => review && units
+    ? formatDisplayTokenAmount({ units, decimals: review[side].decimals }, { rounding, language: lang, symbol: symbol(side), unavailable: '--' }) : '--';
+  const sol = (lamports: string | null | undefined, rounding: DisplayRounding = 'nearest') => lamports
+    ? formatDisplayTokenAmount({ units: lamports, decimals: 9 }, { rounding, language: lang, symbol: devnet ? 'Devnet SOL' : 'SOL', unavailable: '--' }) : '--';
+  const token = (fee: { amount: string; token: { decimals: number; symbol: string } }) => formatDisplayTokenAmount({ units: fee.amount, decimals: fee.token.decimals },
+    { rounding: 'up', language: lang, symbol: fee.token.symbol, unavailable: '--' });
   const mainnet = record?.provenance === 'PUBLIC_MAINNET';
   const canExecute = Boolean(record?.authorization && !jupiter.retired && !attempt && record.verdict === 'PENDING' && fresh > 0 && jupiter.executionEnabled);
   const observation = record?.observations.at(-1), info = jupiter.error ?? record?.error;
@@ -177,19 +185,19 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
         <dt>{tr("Swap")}</dt><dd>{tr(amount(review.amount, 'input'))}{tr(" → expected ")}{tr(amount(review.quote.outAmount, 'output'))}</dd>
         <dt>{tr("Network")}</dt><dd>{tr(labels.network)}</dd><dt>{tr("Provider")}</dt><dd>{tr(labels.provider)}</dd>
         <dt>{tr(devnet ? 'Expected output' : 'Quoted output')}</dt><dd>{tr(amount(review.quote.outAmount, 'output'))}</dd>
-        <dt>{tr("Minimum received")}</dt><dd>{tr(amount(review.quote.otherAmountThreshold, 'output'))}</dd>
+        <dt>{tr("Minimum received")}</dt><dd>{tr(amount(review.quote.otherAmountThreshold, 'output', 'down'))}</dd>
         <dt>{tr("Slippage")}</dt><dd>{tr((review.slippageBps / 100).toFixed(2))}%</dd>
         {/* ADR-0010 §4: with Pimlico's Kora fee payer the owner pays the network fee in a token, never in SOL. */}
-        {'gas' in review && review.gas ? <><dt>{tr("Network fee")}</dt><dd>{formatTokenAmount(review.gas.amount, review.gas.token.decimals)} {review.gas.token.symbol}
+        {'gas' in review && review.gas ? <><dt>{tr("Network fee")}</dt><dd>{token(review.gas)}
           <small>{tr('Paid from your {0} to Pimlico.', review.gas.token.symbol)}</small></dd></>
-          : <><dt>{tr("Estimated network fee")}</dt><dd>{tr(sol(review.estimatedFeeLamports))}</dd></>}
+          : <><dt>{tr("Estimated network fee")}</dt><dd>{tr(sol(review.estimatedFeeLamports, 'up'))}</dd></>}
         {review.simulationResult.accountCreationLamports !== '0' && <><dt>{tr("Token account deposit")}</dt><dd>{tr(sol(review.simulationResult.accountCreationLamports))}{tr(" (refundable)")}</dd></>}
         <dt>{tr("Quote freshness")}</dt><dd>{tr(fresh > 0 ? `Valid for ${fresh}s` : 'Expired — simulate again')}</dd>
       </dl>}
     </> : <>
       {review && <dl className="swap-summary" aria-label={tr("Swap review")}>
         <dt>{tr("Owner")}</dt><dd>{tr(review.owner)}</dd><dt>{tr("Network")}</dt><dd>{tr(labels.network)}</dd><dt>{tr("Pay")}</dt><dd>{tr(amount(review.amount, 'input'))}</dd>
-        <dt>{tr("Receive at least")}</dt><dd>{tr(amount(review.quote.otherAmountThreshold, 'output'))}</dd>
+        <dt>{tr("Receive at least")}</dt><dd>{tr(amount(review.quote.otherAmountThreshold, 'output', 'down'))}</dd>
         <dt>{tr("Route")}</dt><dd>{tr([...new Set(review.quote.routePlan.map(step => step.label))].join(' → '))}</dd>
         {!attempt && <><dt>{tr("Quote freshness")}</dt><dd>{tr(fresh > 0 ? `Valid for ${fresh}s` : 'Expired')}</dd></>}
       </dl>}
@@ -203,7 +211,7 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
       {record?.evidence && observation && <section aria-label={tr("Swap result")} className="swap-result">
         <h3>{tr("Success")}</h3>
         <p>{tr("Swap independently reconciled. Paid ")}{tr(amount(observation.inputSpent, 'input'))}{tr("; received ")}{tr(amount(observation.outputReceived, 'output'))}{tr("; fee ")}{observation.tokenFee
-          ? `${formatTokenAmount(observation.tokenFee.amount, observation.tokenFee.token.decimals)} ${observation.tokenFee.token.symbol}` : tr(sol(observation.feeLamports))}.</p>
+          ? token(observation.tokenFee) : tr(sol(observation.feeLamports))}.</p>
         <dl className="swap-summary"><dt>{tr("Transaction")}</dt><dd><code>{tr(observation.signature)}</code></dd>
           {observation.explorer && <><dt>{tr("Explorer")}</dt><dd><a href={observation.explorer} target="_blank" rel="noreferrer">{tr(devnet ? 'View on Solana Explorer (Devnet)' : 'View transaction')}</a></dd></>}
           <dt>{tr("Network")}</dt><dd>{tr(labels.network)}</dd><dt>{tr("Slot")}</dt><dd>{tr(observation.slot ?? '--')}</dd></dl>

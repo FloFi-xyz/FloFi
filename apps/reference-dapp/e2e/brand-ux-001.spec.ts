@@ -81,17 +81,20 @@ for (const width of [320, 375, 390, 430]) {
     expect(poolBox.width).toBeGreaterThanOrEqual(44);
     expect(poolBox.height).toBeGreaterThanOrEqual(44);
     expect(poolBox.x + poolBox.width).toBeLessThanOrEqual(width);
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11): the phone navigation is a Plan / Conversation switch (one pane at a time, both mounted).
     const shortcuts = page.getByRole('navigation', { name: 'Editor navigation' });
-    await shortcuts.getByRole('button', { name: 'Copilot', exact: true }).click();
+    await shortcuts.getByRole('tab', { name: 'Conversation', exact: true }).click();
+    await expect(shortcuts.getByRole('tab', { name: 'Conversation', exact: true })).toHaveAttribute('aria-selected', 'true');
     const input = page.getByLabel('Describe your flow');
+    await input.focus();
     await expect(input).toBeFocused();
     await expect(input).toHaveCSS('font-size', '16px');
     await input.fill('Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply).
     await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 2 USDC');
-    await shortcuts.getByRole('button', { name: 'Canvas', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeFocused();
+    await shortcuts.getByRole('tab', { name: 'Plan', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
     const cardBox = (await page.locator('.build-flow-surface .composer-card').boundingBox())!;
     expect(cardBox.width).toBeGreaterThanOrEqual(180);

@@ -9,6 +9,9 @@ import { projectExecutionStepEvidence } from '../domain/execution-step-evidence'
 import { projectExecutionEvidence } from '../domain/execution-evidence';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { reviewFixture } from '../test-utils/review-fixture';
+import { LocaleProvider } from '../i18n/locale';
+import { initialEditor } from '../domain/editor';
+import { createUniversalBridgeFromInput } from '../domain/universal-bridge-authoring';
 
 function render(state = 'CONFIRMED', outcome: unknown = null, restored = false) {
   const fixture = reviewFixture();
@@ -63,5 +66,58 @@ describe('per-step result presentation in the execution timeline', () => {
     expect(html).toContain(`title="${b}"`); expect(html).toContain('0xbbbbbb…bbbbbb'); expect(html).not.toMatch(/Retry|Known network cost|Actual received/);
     const technical = renderToStaticMarkup(createElement(ExecutionEvidenceDetails, { progress }));
     expect(technical).toContain(`>${b}</span>`); expect(technical).not.toContain('<pre');
+  });
+});
+
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): the owner's Ethereum → Robinhood Chain bridge, as its "Execution details" read while the
+// delivery awaits finality, once it is reconciled and once refunded. Every recorded amount reads at six significant digits; the exact value stays
+// one tap away and in the evidence itself.
+describe('six significant digits in the Execution details of a universal bridge', () => {
+  const deposit = `0x${'d'.repeat(64)}`, fill = `0x${'e'.repeat(64)}`, owner = `0x${'1'.repeat(40)}`;
+  const bridge = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createUniversalBridgeFromInput('bridge', { source: 'ethereum', destination: 'robinhood',
+    inputAsset: 'ETH', outputAsset: 'ETH', amount: '0.057923834925903535', recipient: '', slippage: '50', routing: 'RELAY' })] };
+  const nodeId = bridge.nodes[0]!.nodeId;
+  const eth = { kind: 'NATIVE', decimals: 18, symbol: 'ETH' };
+  function universal(over: Record<string, unknown> = {}) {
+    const record = { id: 'universal-run', workflow: bridge, provenance: 'PUBLIC_MAINNET', owner, phase: 'DESTINATION_OBSERVED', verdict: 'PENDING',
+      review: { nodeId, commitment: 'reviewed', source: { ecosystem: 'EVM', calls: [{ purpose: 'BRIDGE_DEPOSIT' }] },
+        route: { provider: 'relay', sourceChain: 'eip155:1', destinationChain: 'eip155:4663', order: { orderId: 'relay-order' }, inputToken: eth, outputToken: eth,
+          inputAmount: '57923834925903535', expectedOutput: '57900000000000000' } },
+      attempts: [{ step: 'DEPOSIT', ecosystem: 'EVM', state: 'CONFIRMED', transactionHash: deposit, reconciled: true, commitment: 'reviewed',
+        receipt: { transactionHash: deposit, gasCostWei: '39961699395000574', from: owner } }],
+      source: { ownerDebit: '57923834925903535', final: false }, destination: { transactionHash: fill, amount: '57923834925903535', final: false },
+      refund: null, observation: null, allowanceObservation: undefined, ...over };
+    const current = { kind: 'universal', state: { record, busy: false, signing: false, recovered: false } } as unknown as ExecutionLifecycleSource;
+    const progress = projectExecutionLifecycle(bridge, reviewFixture().context, current);
+    progress.evidence = projectExecutionEvidence(current, progress);
+    progress.stepEvidence = projectExecutionStepEvidence(current, progress);
+    return progress;
+  }
+  const html = (progress: ReturnType<typeof universal>, language: 'EN' | 'PT' = 'EN') => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language,
+    children: createElement(ExecutionTimeline, { progress, result: projectExecutionResult(progress), workflowName: 'Bridge', embedded: true }) }));
+  it('awaiting finality: the source debit, the observed delivery and the network fee read 0.0579238 / 0.0399617 ETH, never 18 recorded digits', () => {
+    const progress = universal();
+    // The evidence itself stays exact (Technical details, copy); only its presentation is shortened.
+    expect(progress.evidence!.operations.DEPOSIT!.values).toContainEqual({ label: 'Source debit confirmed · awaiting finality', value: '0.057923834925903535 ETH' });
+    const text = html(progress);
+    for (const label of ['Source debit confirmed · awaiting finality', 'Destination amount observed · awaiting reconciliation']) expect(text).toContain(label);
+    expect(text).toContain('>≈ 0.0579238 ETH</button>'); expect(text).toContain('>≈ 0.0399617 ETH</button>');
+    // The exact recorded value is one tap away (the disclosure's title), never the visible text.
+    expect(text).toContain('title="0.057923834925903535 ETH"'); expect(text).toContain('title="0.039961699395000574 ETH"');
+    expect(text).not.toMatch(/>0\.057923834925903535 ETH</); expect(text).not.toMatch(/>0\.039961699395000574 ETH</);
+  });
+  it('reconciled: "Actual received" and the planned/actual comparison follow the same rule, without trailing zeros; PT uses the decimal comma', () => {
+    const progress = universal({ phase: 'RECONCILED', verdict: 'RECONCILED', source: { ownerDebit: '57923834925903535', final: true },
+      destination: { transactionHash: fill, amount: '40000000000000000', final: true } });
+    const text = html(progress);
+    expect(text).toContain('Actual received'); expect(text).toMatch(/>0\.04 ETH</); expect(text).not.toMatch(/0\.0400000/);
+    expect(text).toContain('Planned and actual values'); expect(text).toContain('>≈ 0.0579238 ETH</button>');
+    const pt = html(progress, 'PT');
+    expect(pt).toContain('>≈ 0,0579238 ETH</button>'); expect(pt).toMatch(/>0,04 ETH</);
+  });
+  it('a verified refund and a tiny amount never read as zero', () => {
+    const progress = universal({ phase: 'REFUNDED', verdict: 'REFUNDED', destination: null, refund: { transactionHash: fill, chainId: 'eip155:1', amount: '123456789' } });
+    const text = html(progress);
+    expect(text).toContain('Verified refund'); expect(text).toContain('>≈ 0.000000000123457 ETH</button>');
   });
 });

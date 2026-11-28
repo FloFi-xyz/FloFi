@@ -10,6 +10,15 @@ import { shellChainLabel } from '../domain/product-shell';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 import type { EvidenceValue, OperationResultEvidence } from '../domain/execution-evidence';
 import { ExecutionIdentifier } from './execution-identifier';
+import { TokenAmountText } from './token-amount-text';
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): a recorded amount reads at six significant digits with the exact recorded value one tap
+ * away (`TokenAmountText`); anything that is not an amount ("Unknown · …", a raw liquidity figure) is shown exactly as recorded. An observed
+ * allowance is what a spender may still take, so it is never shown below itself. Presentation only: the evidence keeps its exact values.
+ */
+function RecordedValue({ label, value }: { label: string; value: string }) {
+  return <TokenAmountText value={value} rounding={label === 'Observed allowance' ? 'up' : 'nearest'}/>;
+}
 const marker = (state: LifecycleState) => state === 'confirmed' ? '✓' : ['failed', 'uncertain', 'cancelled', 'expired', 'not-submitted'].includes(state) ? '!' : state === 'waiting' ? '○' : '●';
 function Transaction({ operation }: { operation: LifecycleOperation }) {
   const hash = operation.hash;
@@ -25,11 +34,11 @@ function StepEvidence({ evidence, action, values, facts }: { evidence: Execution
     <div className="execution-evidence-heading"><span>{tr("Step outcome")}</span><div><strong>{tr(evidence.label, ...evidence.labelArgs ?? [])}</strong>{evidence.recovered && <span className="execution-evidence-recovered">{tr("Recovered")}</span>}</div></div>
     <p>{tr(message)}</p>
     {evidence.restored && !evidence.recovered && <p className="execution-evidence-restored">{tr("This step’s saved result was restored.")}</p>}
-    {values.length > 0 && <dl className="execution-actual-values">{values.map((item, index) => <div key={`${item.label}-${index}`}><dt>{tr(item.label)}</dt><dd>{tr(item.value)}</dd></div>)}</dl>}
+    {values.length > 0 && <dl className="execution-actual-values">{values.map((item, index) => <div key={`${item.label}-${index}`}><dt>{tr(item.label)}</dt><dd><RecordedValue label={item.label} value={item.value}/></dd></div>)}</dl>}
     {facts.filter(item => item.note).map((item, index) => <p key={index}>{tr(item.note, ...item.noteArgs ?? [])}</p>)}
     {comparisons.length > 0 && <div className="execution-evidence-comparison" role="group" aria-label={tr("Planned and actual values")}>
       <div className="execution-evidence-comparison-head"><span/><span>{tr("Planned")}</span><span>{tr("Actual")}</span></div>
-      {comparisons.map((comparison, index) => <div key={`${comparison.label}-${index}`} className="execution-evidence-comparison-row"><span>{tr(comparison.label)}</span><span>{tr(comparison.planned)}</span><strong>{tr(comparison.actual)}</strong></div>)}
+      {comparisons.map((comparison, index) => <div key={`${comparison.label}-${index}`} className="execution-evidence-comparison-row"><span>{tr(comparison.label)}</span><span><RecordedValue label={comparison.label} value={comparison.planned}/></span><strong><RecordedValue label={comparison.label} value={comparison.actual}/></strong></div>)}
       <p>{tr("Actual values come from recorded execution effects.")}</p>
     </div>}
   </section>;
@@ -63,8 +72,8 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
           <div className="execution-operation-heading"><span>{tr(operation.approval ? 'Wallet setup · ' : '')}{tr(operation.title)}</span><strong>{operation.id === checkingOperation ? tr('Checking status…') : tr(operation.label, ...operation.labelArgs ?? [])}</strong></div>
           {operation.chain && operation.hash && <p className="execution-operation-network">{tr(shellChainLabel(operation.chain))}</p>}
           {fact ? fact.identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} identifier={identifier}/>) : <Transaction operation={operation}/>}
-          {fact ? fact.fees.map((fee, index) => <p key={index} className="execution-operation-fee">{tr(fee.label)} · {tr(fee.value)}</p>) : operation.fee && <p className="execution-operation-fee">{tr("Actual network fee · ")}{tr(operation.fee)}</p>}
-          {!showEvidence && fact && fact.values.length > 0 && <dl className="execution-actual-values">{fact.values.map((value, index) => <div key={index}><dt>{tr(value.label)}</dt><dd>{tr(value.value)}</dd></div>)}</dl>}
+          {fact ? fact.fees.map((fee, index) => <p key={index} className="execution-operation-fee">{tr(fee.label)} · <TokenAmountText value={fee.value}/></p>) : operation.fee && <p className="execution-operation-fee">{tr("Actual network fee · ")}<TokenAmountText value={operation.fee}/></p>}
+          {!showEvidence && fact && fact.values.length > 0 && <dl className="execution-actual-values">{fact.values.map((value, index) => <div key={index}><dt>{tr(value.label)}</dt><dd><RecordedValue label={value.label} value={value.value}/></dd></div>)}</dl>}
           {!showEvidence && fact?.note && <p className="execution-context">{tr(fact.note, ...fact.noteArgs ?? [])}</p>}
         </li>; })}</ul>
       </div>

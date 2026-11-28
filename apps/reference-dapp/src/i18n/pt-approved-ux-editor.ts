@@ -33,6 +33,8 @@ export const portugueseApprovedUxEditor: Readonly<Record<string, string>> = {
   'Review the route in the simulation': 'Revise a rota na simulação', 'Select to review · non-atomic boundaries': 'Selecione para revisar · etapas sem atomicidade',
   // FloFi panel (board 04): header, plan line, composer.
   'FloFi Assistant': 'Assistente FloFi', 'Plan': 'Plano', 'Plan · {0} steps': 'Plano · {0} passos',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11): the one-column Plan / Conversation switch marks a reply that arrived while the Plan was shown.
+  'New reply': 'Nova resposta',
   'Ask or request a change': 'Pergunte ou peça uma mudança', 'Send message': 'Enviar mensagem', 'Interpreting your message…': 'Interpretando sua mensagem…',
   // Choosing the network in the chat (board 05).
   'Choose a network': 'Escolha uma rede', 'Your wallet': 'Sua carteira',

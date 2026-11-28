@@ -22,6 +22,7 @@ import { refreshableRun } from '../domain/canvas-lifecycle';
 import { STEPS_COMPLETED, type WorkflowProgressView } from '../domain/workflow-progress';
 import { SequenceContinuationPanel, WorkflowProgressList, type SequenceContinuation } from './workflow-progress-panel';
 import { ExecutionResultSummary } from './execution-result-summary';
+import { TokenAmountText } from './token-amount-text';
 
 export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   workflowName: string; backToBuild(): void; backToSimulate(): void; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
@@ -174,7 +175,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
             {result.networks.length > 0 && <div><dt>{tr("Networks")}</dt><dd>{result.networks.map(network => <span key={network} className="simulation-summary-network"><NetworkBrandIcon network={network.replace(/ \(\d+\)$/, '')}/>{network}</span>)}</dd></div>}
             {wallet.account && wallet.account !== live?.evidence?.wallet && <div><dt>{tr("Connected wallet")}</dt><dd title={wallet.account}>{wallet.account.slice(0, 6)}…{wallet.account.slice(-4)}</dd></div>}
             {live?.evidence?.wallet && <div><dt>{tr("Execution wallet")}</dt><dd title={tr(live.evidence.wallet)}>{tr(live.evidence.wallet.slice(0, 6))}…{tr(live.evidence.wallet.slice(-4))}</dd></div>}
-            {live?.evidence?.knownCosts.map(cost => <div key={cost.label} className="execution-result-cost"><dt>{tr(cost.label)}</dt><dd>{tr(cost.value)}</dd></div>)}
+            {live?.evidence?.knownCosts.map(cost => <div key={cost.label} className="execution-result-cost"><dt>{tr(cost.label)}</dt><dd><TokenAmountText value={cost.value}/></dd></div>)}
             {reconciledCount > 0 && <div><dt>{tr("Reconciliation")}</dt><dd>{tr(reconciledCount)} {tr(resultUnit)}{tr(reconciledCount === 1 ? '' : 's')}{tr(" reconciled")}</dd></div>}
             {recoveredCount > 0 && <div><dt>{tr("Recovery")}</dt><dd>{tr(recoveredCount)} {tr(resultUnit)}{tr(recoveredCount === 1 ? '' : 's')}{tr(" recovered")}</dd></div>}
           </> : <>
