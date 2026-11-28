@@ -32,7 +32,7 @@ import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-l
 import { createRouterNode, routerDetails } from './router-authoring';
 import { createUniversalBridgeFromInput, universalBridgeDetails } from './universal-bridge-authoring';
 import { createCryptoActionNode, canSelectCryptoAssets, cryptoSelectionOf, cryptoReviewContext } from './crypto-action-picker';
-import { nextDependencyBases, type DependencyBases } from './dependency-consistency';
+import { acknowledgeDependency, nextDependencyBases, type DependencyBases } from './dependency-consistency';
 
 export interface EditorState { readonly workflow: Workflow; readonly error: string | null;
   /**
@@ -62,7 +62,12 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   if (!next.error && next.workflow !== state.workflow && workflowMixesPositionManagement(next.workflow) && !workflowMixesPositionManagement(state.workflow))
     return withBases({ workflow: state.workflow, error: 'POSITION_WORKFLOW_HAS_OTHER_STEPS' }, state.dependencyBases);
   // A refused or empty change keeps the record; an accepted one updates it (a dependent step edited by hand follows its earlier step again).
-  return withBases(next, next.error || next.workflow === state.workflow ? state.dependencyBases : nextDependencyBases(state.workflow, next.workflow, state.dependencyBases));
+  if (next.error) return withBases(next, state.dependencyBases);
+  if (next.workflow !== state.workflow) return withBases(next, nextDependencyBases(state.workflow, next.workflow, state.dependencyBases));
+  // Setting a dependent step's amount again to the value it already has is the person's acknowledgement: it follows its earlier step as it is now.
+  const nodeId = (command as { nodeId?: unknown }).nodeId;
+  return withBases(next, command.type.startsWith('SET_') && command.type !== 'SET_SLIPPAGE' && typeof nodeId === 'string'
+    ? acknowledgeDependency(state.workflow, nodeId, state.dependencyBases) : state.dependencyBases);
 }
 function withBases(state: EditorState, bases: DependencyBases | undefined): EditorState {
   if (bases) return { ...state, dependencyBases: bases };

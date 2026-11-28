@@ -11,6 +11,7 @@
  */
 import { validateSavedWorkflow } from './saved-workflow';
 import type { Workflow } from './initial-workflow';
+import { validBasis, type DependencyBases } from './dependency-consistency';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 export const EDITOR_WORKFLOW_STORAGE_KEY = 'flofi:editor-workflow:v1';
@@ -28,7 +29,9 @@ type WriteStorage = Pick<Storage, 'setItem'> | null;
  * recovered from this browser is NOT brought back onto it (it stays in the Dashboard and History, and keeps being observed); its own runs (same
  * identity) still attach. Only the visit's own untouched initial draft may still receive a recovered run, as before.
  */
-export type PersistedEditor = { readonly workflowId: string; readonly workflow: SemanticWorkflow | null; readonly fresh?: true };
+export type PersistedEditor = { readonly workflowId: string; readonly workflow: SemanticWorkflow | null; readonly fresh?: true;
+  /** The Editor's dependency record (which earlier step each dependent amount was set against), only for exactly this workflow identity and revision. */
+  readonly dependencyBases?: DependencyBases };
 
 /** The browser's storage, or null where it is blocked (private modes, sandboxed frames). */
 export function editorStorage(): (Pick<Storage, 'getItem' | 'setItem'>) | null {
@@ -47,7 +50,7 @@ export function readPersistedEditor(storage: ReadStorage): PersistedEditor | nul
   let value: unknown;
   try { value = JSON.parse(storage.getItem(EDITOR_WORKFLOW_STORAGE_KEY) ?? 'null'); } catch { return null; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as { format?: unknown; workflowId?: unknown; workflow?: unknown; fresh?: unknown };
+  const record = value as { format?: unknown; workflowId?: unknown; workflow?: unknown; fresh?: unknown; dependencyBases?: unknown };
   if (record.format !== FORMAT || typeof record.workflowId !== 'string' || !WORKFLOW_ID.test(record.workflowId)) return null;
   // The empty draft is remembered as "nothing to restore": its identity is the visit's own (a run recovered from this browser may still be
   // brought back onto that untouched Canvas, exactly as before).
@@ -55,13 +58,25 @@ export function readPersistedEditor(storage: ReadStorage): PersistedEditor | nul
   if (record.workflow === null || record.workflow === undefined) return { workflowId: record.workflowId, workflow: null, ...fresh };
   try {
     const workflow = validateSavedWorkflow(record.workflow);
-    return workflow.workflowId === record.workflowId ? { workflowId: record.workflowId, workflow, ...fresh } : null;
+    if (workflow.workflowId !== record.workflowId) return null;
+    const bases = storedBases(record.dependencyBases, workflow);
+    return { workflowId: record.workflowId, workflow, ...fresh, ...bases ? { dependencyBases: bases } : {} };
   } catch { return null; }
 }
+/** The stored dependency record, only when it names exactly this workflow's identity and revision and each entry is one of this workflow's steps. */
+function storedBases(value: unknown, workflow: Workflow): DependencyBases | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as { workflowId?: unknown; revision?: unknown; bases?: unknown };
+  if (record.workflowId !== workflow.workflowId || record.revision !== workflow.revision || !record.bases || typeof record.bases !== 'object' || Array.isArray(record.bases)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [nodeId, basis] of Object.entries(record.bases)) if (workflow.nodes.some(node => node.nodeId === nodeId) && validBasis(basis)) out[nodeId] = basis;
+  return Object.keys(out).length ? Object.freeze(out) : undefined;
+}
 /** Remembers the Editor's current workflow (its identity alone while it has no action). Storage is optional: a failure changes nothing. */
-export function persistEditor(storage: WriteStorage, workflow: Workflow, fresh = false): void {
+export function persistEditor(storage: WriteStorage, workflow: Workflow, fresh = false, dependencyBases?: DependencyBases): void {
   if (!storage || !WORKFLOW_ID.test(workflow.workflowId)) return;
   const actionable = workflow.nodes.some(node => !node.actionType.startsWith('mock-'));
-  try { storage.setItem(EDITOR_WORKFLOW_STORAGE_KEY, JSON.stringify({ format: FORMAT, workflowId: workflow.workflowId, workflow: actionable ? workflow : null, ...fresh ? { fresh: true } : {} })); }
+  try { storage.setItem(EDITOR_WORKFLOW_STORAGE_KEY, JSON.stringify({ format: FORMAT, workflowId: workflow.workflowId, workflow: actionable ? workflow : null, ...fresh ? { fresh: true } : {},
+      ...actionable && dependencyBases && Object.keys(dependencyBases).length ? { dependencyBases: { workflowId: workflow.workflowId, revision: workflow.revision, bases: dependencyBases } } : {} })); }
   catch { /* storage is optional (quota, private mode); the Canvas stays as it is this visit */ }
 }

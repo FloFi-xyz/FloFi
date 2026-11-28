@@ -12,12 +12,12 @@
  * Execution never relied on either (every resolver spends min(cap, actual delivery) and never the wallet's other balance); this keeps the Canvas,
  * Simulation and Review from presenting a financially inconsistent workflow as valid. `bases` is the Editor's own record of which earlier step
  * each dependent amount was set against (not part of the canonical workflow, whose v1 IR is frozen): a record that is missing (a reopened or
- * restored workflow) is never guessed as stale; only the estimate check applies until the step is edited again.
+ * restored workflow) is recorded against the earlier step as it was before the next edit, so that edit is stale at once.
  *
  * Pure: no React, wallet, quote or network. The estimate reader is the caller's (the Canvas's live quotes); nothing here signs or simulates.
  */
 import type { Workflow } from './initial-workflow';
-import { compositionWorkflow, sameSequenceAsset, sequenceOrder, stepAssets, type WorkflowSequence } from './workflow-sequence';
+import { compositionWorkflow, sameSequenceAsset, sequenceOrder, stepAssets, type CompletedStep, type WorkflowSequence } from './workflow-sequence';
 
 type Node = Workflow['nodes'][number];
 /** By dependent step node id: the fingerprint of the earlier step's declaration when the dependent amount was set. */
@@ -50,26 +50,43 @@ export function fundingProducers(workflow: Workflow): ReadonlyMap<string, string
   return out;
 }
 
+/** A record that never equals a producer basis: the step that funds this dependent was replaced (deleted or reordered), so its amount must be set again. */
+export const SWITCHED_BASIS = 'producer-changed';
+/** The shape a persisted record entry may have (a basis fingerprint, or the switched marker). */
+export const validBasis = (value: unknown): value is string => typeof value === 'string' && (value === SWITCHED_BASIS || /^[0-9a-f]{16}$/.test(value));
 /**
- * The record after an accepted edit from `before` to `after`: a dependent step that is new, whose own declaration changed, that is now funded by
- * another step, or that has no record yet is recorded against its earlier step as it is now; every other record is kept (so an edit of the
- * earlier step alone leaves its dependents stale); steps that are no longer funded are dropped.
+ * The record after an accepted edit from `before` to `after`. A dependent step that is new, or whose own declaration changed, is recorded against
+ * its earlier step as it is now (the person set it). A dependent that is unchanged keeps its record; with no record yet (a reloaded, reopened or
+ * restored workflow) it is recorded against the earlier step as it was BEFORE this edit, so an edit of that step is stale at once; one that is now
+ * funded by a different step than before is marked stale. Steps that are no longer funded are dropped.
  */
 export function nextDependencyBases(before: Workflow, after: Workflow, bases: DependencyBases | undefined): DependencyBases | undefined {
-  const producers = fundingProducers(after), out: Record<string, string> = {};
-  const previous = fundingProducers(before);
+  const producers = fundingProducers(after), previous = fundingProducers(before), out: Record<string, string> = {};
   for (const [consumer, producer] of producers) {
     const node = after.nodes.find(item => item.nodeId === producer), was = before.nodes.find(item => item.nodeId === consumer);
     const now = after.nodes.find(item => item.nodeId === consumer);
     if (!node || !now) continue;
-    const kept = bases?.[consumer];
-    const unchanged = was !== undefined && producerBasis(was) === producerBasis(now) && previous.get(consumer) === producer;
-    out[consumer] = kept !== undefined && unchanged ? kept : producerBasis(node);
+    const earlier = previous.get(consumer), kept = bases?.[consumer];
+    if (was === undefined || producerBasis(was) !== producerBasis(now)) { out[consumer] = producerBasis(node); continue; }
+    if (earlier !== undefined && earlier !== producer) out[consumer] = SWITCHED_BASIS;
+    else if (kept !== undefined) out[consumer] = kept;
+    else {
+      const wasProducer = before.nodes.find(item => item.nodeId === producer);
+      out[consumer] = producerBasis(wasProducer ?? node);
+    }
   }
   return Object.keys(out).length ? Object.freeze(out) : undefined;
 }
+/** The record after the person set a dependent step's amount again to the value it already had: it follows its earlier step as it is now. */
+export function acknowledgeDependency(workflow: Workflow, nodeId: string, bases: DependencyBases | undefined): DependencyBases | undefined {
+  const producer = fundingProducers(workflow).get(nodeId), node = producer === undefined ? undefined : workflow.nodes.find(item => item.nodeId === producer);
+  if (!node) return bases;
+  const basis = producerBasis(node);
+  return bases?.[nodeId] === basis ? bases : Object.freeze({ ...bases, [nodeId]: basis });
+}
 
-export type ProducerEstimate = { readonly expected: string };
+/** The earlier step's live estimate: `minimum` is its own slippage floor, `expiresAt` when the answer stops holding (an expired one gives no verdict). */
+export type ProducerEstimate = { readonly expected: string; readonly minimum?: string | null; readonly expiresAt?: string };
 export type DependencyState =
   | { readonly kind: 'consistent' }
   | { readonly kind: 'stale'; readonly step: number; readonly from: number; readonly reason: 'UPSTREAM_CHANGED' | 'ABOVE_UPSTREAM' };
@@ -80,26 +97,35 @@ const unitsOf = (text: string, decimals: number): bigint | null => {
   // Never more precision than the asset carries (truncated down, as the Canvas proposes an inherited amount).
   return BigInt(whole! + fraction.slice(0, decimals).padEnd(decimals, '0'));
 };
-/** What the earlier step is estimated to deliver in the dependent step's units: its live estimate, or a Withdraw / Borrow's own exact amount. */
-function deliveredUnits(node: Node | undefined, decimals: number, estimate: ProducerEstimate | null): bigint | null {
+/**
+ * What the earlier step is judged to deliver, in the dependent step's units. Once it completed: only its reconciled delivery (never a live
+ * estimate; null when the record cannot prove it). Otherwise a Withdraw / Borrow's own exact amount, or the live estimate's expected output while it
+ * holds (an expired estimate gives no verdict).
+ */
+function deliveredUnits(node: Node | undefined, decimals: number, estimate: ProducerEstimate | null, done: CompletedStep | undefined, now: number): bigint | null {
+  if (done) return typeof done.received === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(done.received) ? BigInt(done.received) : null;
   if (node && (node.actionType === 'withdraw' || node.actionType === 'borrow')) {
     const limit = node.userConstraints.find(constraint => constraint.kind === 'MAXIMUM_INPUT') as { quantity?: { amount?: unknown } } | undefined;
     return typeof limit?.quantity?.amount === 'string' && /^[1-9][0-9]*$/.test(limit.quantity.amount) ? BigInt(limit.quantity.amount) : null;
   }
-  return estimate && typeof estimate.expected === 'string' ? unitsOf(estimate.expected, decimals) : null;
+  if (!estimate || typeof estimate.expected !== 'string') return null;
+  if (estimate.expiresAt !== undefined && !(Date.parse(estimate.expiresAt) > now)) return null;
+  // The expected output, as the owner's report requires (0.097076 against an arrival of 0.097075 is flagged); the minimum is the provider's floor.
+  return unitsOf(estimate.expected, decimals);
 }
 /**
  * Each funded step's dependency state, by node id (see the module comment). `estimateOf` is the earlier step's current live estimate (null: none
- * is known now, and only the record is judged). A step funded by two deliveries (a position) is not judged here.
+ * is known now, and only the record is judged); `completed` the steps already executed (their reconciled delivery replaces the estimate). A step
+ * funded by two deliveries (a position) is not judged here.
  */
 export function dependencyStates(workflow: Workflow, sequence: WorkflowSequence | null, bases: DependencyBases | undefined,
-  estimateOf: (nodeId: string) => ProducerEstimate | null): ReadonlyMap<string, DependencyState> {
+  estimateOf: (nodeId: string) => ProducerEstimate | null, completed: readonly CompletedStep[] = [], now: number = Date.now()): ReadonlyMap<string, DependencyState> {
   const out = new Map<string, DependencyState>();
   for (const step of sequence?.steps ?? []) {
     if (step.fundedBy === null || step.funding.length !== 1 || !step.input) continue;
     const producer = sequence!.steps[step.fundedBy]!, node = workflow.nodes.find(item => item.nodeId === producer.nodeId);
     const where = { step: step.index + 1, from: producer.index + 1 }, basis = bases?.[step.nodeId];
-    const delivered = deliveredUnits(node, step.input.decimals, estimateOf(producer.nodeId));
+    const delivered = deliveredUnits(node, step.input.decimals, estimateOf(producer.nodeId), completed[producer.index], now);
     if (basis !== undefined && node && basis !== producerBasis(node)) out.set(step.nodeId, { kind: 'stale', ...where, reason: 'UPSTREAM_CHANGED' });
     else if (delivered !== null && BigInt(step.input.amount) > delivered) out.set(step.nodeId, { kind: 'stale', ...where, reason: 'ABOVE_UPSTREAM' });
     else out.set(step.nodeId, { kind: 'consistent' });

@@ -16,6 +16,7 @@ import { defaultPoolRange, followOnSelection, lendingAction, validCryptoSelectio
 import { actionReviewValue } from './canvas-action-setup';
 import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
+import type { DependencyBases } from './dependency-consistency';
 import { freeze, type Workflow } from './initial-workflow';
 import { workflowMixesPositionManagement } from './liquidity-positions';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
@@ -25,7 +26,9 @@ import { checkRecipient, recipientPolicy } from './recipient-address';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import type { WalletEnvironment } from '../wallet/environment';
 
-type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections; readonly recipientInputs: CanvasRecipientInputs };
+type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections; readonly recipientInputs: CanvasRecipientInputs;
+  /** The Editor's dependency record at that point: an undo or redo restores it with the workflow (it never clears a stale dependent). */
+  readonly dependencyBases?: DependencyBases };
 export type EditorHistory = { readonly editor: EditorState; readonly layout: CanvasLayout;
   readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly setupSerial: number;
   readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs;
@@ -38,7 +41,8 @@ export type HistoryAction =
   | { readonly type: 'RESTORE_WORKFLOW'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'ADOPT_DRAFT_IDENTITY'; readonly workflowId: string }
   /** P0 hotfix (execution continuity): the Editor's Canvas this browser remembered (`editor-persistence.ts`), put back on the untouched initial Canvas. */
-  | { readonly type: 'RESTORE_PERSISTED_CANVAS'; readonly workflowId: string; readonly workflow: SemanticWorkflow | null; readonly layout: CanvasLayout }
+  | { readonly type: 'RESTORE_PERSISTED_CANVAS'; readonly workflowId: string; readonly workflow: SemanticWorkflow | null; readonly layout: CanvasLayout;
+    /** The dependency record this browser kept for exactly this workflow identity and revision (absent: none). */ readonly dependencyBases?: DependencyBases }
   /** UX-004: "Create new workflow": the empty initial draft under a fresh draft identity (no actions, drafts, layout or history). */
   | { readonly type: 'NEW_WORKFLOW'; readonly workflowId: string }
   | { readonly type: 'RESTORE_LENDING_CANVAS'; readonly workflow: SemanticWorkflow }
@@ -71,7 +75,8 @@ export type HistoryAction =
 export const initialEditorHistory = (): EditorHistory => ({ editor: initialEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
 /** Engineering fixture history that starts with the protected mock template at `node-001` (not the product empty canvas). */
 export const templateEditorHistory = (): EditorHistory => ({ editor: templateEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
-const snapshot = (state: EditorHistory): Snapshot => ({ workflow: state.editor.workflow, layout: state.layout, actionSetup: state.actionSetup, amountInputs: state.amountInputs, bridgeNetworkInputs: state.bridgeNetworkInputs, cryptoSelections: state.cryptoSelections, recipientInputs: state.recipientInputs });
+const snapshot = (state: EditorHistory): Snapshot => ({ workflow: state.editor.workflow, layout: state.layout, actionSetup: state.actionSetup, amountInputs: state.amountInputs, bridgeNetworkInputs: state.bridgeNetworkInputs, cryptoSelections: state.cryptoSelections, recipientInputs: state.recipientInputs,
+  ...state.editor.dependencyBases ? { dependencyBases: state.editor.dependencyBases } : {} });
 
 export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, nodeIds: readonly string[], context: ReviewContext) {
   const selected = new Set(nodeIds);
@@ -286,7 +291,9 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     try {
       const workflow = validateSavedWorkflow(action.workflow);
       if (workflow.workflowId !== action.workflowId) return state;
-      return { ...initialEditorHistory(), editor: { workflow: freeze(structuredClone(workflow)), error: null }, layout: action.layout };
+      const restored = freeze(structuredClone(workflow));
+      return { ...initialEditorHistory(), editor: { workflow: restored, error: null,
+        ...action.dependencyBases && Object.keys(action.dependencyBases).length ? { dependencyBases: action.dependencyBases } : {} }, layout: action.layout };
     } catch { return state; }
   }
   if (action.type === 'NEW_WORKFLOW') {
@@ -346,8 +353,9 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       || target.workflow.resourceEdges !== current.workflow.resourceEdges;
     if (semantic && current.workflow.revision === Number.MAX_SAFE_INTEGER) return state;
     const workflow = semantic ? freeze({ ...target.workflow, revision: current.workflow.revision + 1 }) : current.workflow;
-    // The dependency record stays: it names the earlier step each dependent amount was set against, which an undo of either step restores.
-    return { ...state, editor: { workflow, error: null, ...state.editor.dependencyBases ? { dependencyBases: state.editor.dependencyBases } : {} }, layout: target.layout, actionSetup: target.actionSetup, amountInputs: target.amountInputs, bridgeNetworkInputs: target.bridgeNetworkInputs, cryptoSelections: target.cryptoSelections, recipientInputs: target.recipientInputs,
+    // The dependency record travels with the workflow: an undo or redo restores the record of that point, so it can never clear a stale dependent.
+    const bases = semantic ? target.dependencyBases : current.dependencyBases;
+    return { ...state, editor: { workflow, error: null, ...bases ? { dependencyBases: bases } : {} }, layout: target.layout, actionSetup: target.actionSetup, amountInputs: target.amountInputs, bridgeNetworkInputs: target.bridgeNetworkInputs, cryptoSelections: target.cryptoSelections, recipientInputs: target.recipientInputs,
       past: action.type === 'UNDO' ? state.past.slice(0, -1) : [...state.past, current],
       future: action.type === 'REDO' ? state.future.slice(0, -1) : [...state.future, current] };
   }

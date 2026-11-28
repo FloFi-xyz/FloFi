@@ -78,6 +78,23 @@ describe('A01/A07: a dependent amount never stays silently stale', () => {
     expect(firstDependencyIssue(statesOf(built))).toBeNull();
   });
 
+  // flofi-workflow review: a reloaded or reopened Canvas has no record; the next edit of the earlier step must still be stale at once.
+  it('after a reload (no record), an upstream edit is stale at once', () => {
+    const built = canvasOf([SWAP('0.1'), SUPPLY('0.00004')]);
+    const reloaded: EditorState = { workflow: built.workflow, error: null };
+    const changed = editorReducer(reloaded, edited(reloaded, 0, SWAP('0.2')), context);
+    expect(changed.error).toBeNull();
+    expect(firstDependencyIssue(statesOf(changed))).toEqual({ kind: 'stale', step: 2, from: 1, reason: 'UPSTREAM_CHANGED' });
+  });
+  it('the current expected output decides; an expired estimate gives no verdict', () => {
+    const built = canvasOf([SWAP('0.1'), SUPPLY('0.00004')]);
+    const [swap] = built.workflow.nodes.filter(n => !n.actionType.startsWith('mock-'));
+    const judge = (estimate: ProducerEstimate | null, completed: Parameters<typeof dependencyStates>[4] = []) =>
+      firstDependencyIssue(dependencyStates(built.workflow, sequenceOf(built), built.dependencyBases, id => id === swap!.nodeId ? estimate : null, completed));
+    expect(judge({ expected: '0.0000399' })).toMatchObject({ reason: 'ABOVE_UPSTREAM' });
+    expect(judge({ expected: '0.0000401' })).toBeNull();
+    expect(judge({ expected: '0.00003', expiresAt: '2020-01-01T00:00:00.000Z' })).toBeNull();
+  });
   it('a step that spends another asset, and an independent step, are never judged', () => {
     const built = canvasOf([SWAP('0.1'), { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '5', slippageBps: 100 }]);
     expect(built.dependencyBases).toBeUndefined();
