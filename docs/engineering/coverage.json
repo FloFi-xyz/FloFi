@@ -5610,7 +5610,9 @@
         "apps/reference-dapp/src/domain/editor-stages.ts",
         "apps/reference-dapp/src/domain/product-areas.ts",
         "apps/reference-dapp/src/domain/workflow-propagation.ts",
-        "apps/reference-dapp/src/domain/batch-run-record.ts"
+        "apps/reference-dapp/src/domain/batch-run-record.ts",
+        "apps/reference-dapp/src/domain/dependency-consistency.ts",
+        "apps/reference-dapp/src/i18n/pt-dependency-modes.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",

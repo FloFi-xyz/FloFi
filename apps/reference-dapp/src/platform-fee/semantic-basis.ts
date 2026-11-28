@@ -47,4 +47,3 @@ export function semanticWorkflowFeeBasis(workflow: Composition['workflow'] | nul
     : [{ strategy: { action: actions[index] }, workflow: { ...workflow, nodes: [node] } } as unknown as Composition]);
   return workflowFeeBasis({ steps: compositions, bindings: [] }, options.assetClassOf ? { assetClassOf: options.assetClassOf } : {});
 }
-
