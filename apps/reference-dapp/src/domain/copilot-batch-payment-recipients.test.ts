@@ -196,7 +196,8 @@ describe('R09–R12: editing the same Batch Payment card in the chat (no model c
   });
   it('words that are not this payment\'s recipients are read as before (the interpretation decides)', () => {
     const { s } = withBatch();
-    for (const request of ['remova o segundo passo', 'troque 1 ETH por USDC na Base', 'mude o valor do swap para 25']) expect(() => s.say(request), request).toThrow('unexpected model call');
+    // "mude o valor do swap para 25" names a step kind: since A03 the step-reference resolver answers it locally (no swap here), never as a batch edit.
+    for (const request of ['remova o segundo passo', 'troque 1 ETH por USDC na Base']) expect(() => s.say(request), request).toThrow('unexpected model call');
     // Without a Batch Payment in the workflow an "add" is not an edit either.
     expect(() => session().say('Adicione mais 10 USDC para Pedro.')).toThrow('unexpected model call');
   });
