@@ -346,7 +346,8 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       || target.workflow.resourceEdges !== current.workflow.resourceEdges;
     if (semantic && current.workflow.revision === Number.MAX_SAFE_INTEGER) return state;
     const workflow = semantic ? freeze({ ...target.workflow, revision: current.workflow.revision + 1 }) : current.workflow;
-    return { ...state, editor: { workflow, error: null }, layout: target.layout, actionSetup: target.actionSetup, amountInputs: target.amountInputs, bridgeNetworkInputs: target.bridgeNetworkInputs, cryptoSelections: target.cryptoSelections, recipientInputs: target.recipientInputs,
+    // The dependency record stays: it names the earlier step each dependent amount was set against, which an undo of either step restores.
+    return { ...state, editor: { workflow, error: null, ...state.editor.dependencyBases ? { dependencyBases: state.editor.dependencyBases } : {} }, layout: target.layout, actionSetup: target.actionSetup, amountInputs: target.amountInputs, bridgeNetworkInputs: target.bridgeNetworkInputs, cryptoSelections: target.cryptoSelections, recipientInputs: target.recipientInputs,
       past: action.type === 'UNDO' ? state.past.slice(0, -1) : [...state.past, current],
       future: action.type === 'REDO' ? state.future.slice(0, -1) : [...state.future, current] };
   }
