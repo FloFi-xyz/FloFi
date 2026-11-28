@@ -9,6 +9,7 @@ import { isUniswapPositionRecord, liquidityPositionActionLabel, simulationAmount
 import { shellChainLabel } from './product-shell';
 import type { ExecutionStepEvidence } from './execution-step-evidence';
 import { EXECUTION_PHASE_LABEL, type ExecutionPhase } from './execution-phase';
+import { awaitsNetworkFinality, DESTINATION_FINALITY_MESSAGE } from './financial-observation';
 import type { ExecutionEvidence } from './execution-evidence';
 import type { useSupply } from '../state/supply-store';
 import type { useLending } from '../state/lending-store';
@@ -114,6 +115,8 @@ export function executionExplorer(chain: string, hash: string, local = false): s
 export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean; wallet: boolean;
   phase?: ExecutionPhase; labelArgs?: readonly string[];
   providerExplorer?: string;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): the delivery is verified on the destination and only network finality remains. */
+  awaitingFinality?: boolean;
   /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: why a request was not submitted (the attempt's closed refusal code), for the owner's sentence. */
   reason?: string };
 export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[];
@@ -232,6 +235,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): once the fill is verified on the destination (the record holds it) and only finality
       // and the definitive reconciliation remain, it reads "Transfer observed on <destination>" — still pending, never completed.
       if (destinationState === 'PENDING') phrase(operations.at(-1)!, r.destination ? 'DESTINATION_OBSERVED' : 'AWAITING_DESTINATION');
+      if (destinationState === 'PENDING' && r.destination && awaitsNetworkFinality(r.observation)) operations.at(-1)!.awaitingFinality = true;
       break;
     }
     case 'universal': {
@@ -260,7 +264,16 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       if (r.verdict === 'REFUNDED') op.label = 'Refunded';
       else if (r.verdict === 'DIVERGENT') op.label = 'Manual attention required';
       else if (r.verdict === 'PENDING' && r.lastHint?.status === 'REFUNDED') op.label = 'Refund pending verification';
-      else if (r.verdict === 'PENDING' && r.destination) op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
+      else if (r.verdict === 'PENDING' && r.destination) {
+        // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): the delivery is verified on the destination (never "Waiting for delivery", never a
+        // wallet request to confirm): the shared DESTINATION_OBSERVED phase, still pending, worded by what remains — finality, then reconciliation.
+        op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
+        // A recovery or reconciliation that needs attention is never worded as observed (the router's own rule).
+        if (destinationState === 'PENDING') {
+          op.phase = 'DESTINATION_OBSERVED'; delete op.labelArgs;
+          if (!r.destination.final || r.source?.final === false || awaitsNetworkFinality(r.observation)) op.awaitingFinality = true;
+        }
+      }
       else if (r.verdict === 'PENDING' && r.lastHint?.status === 'FILLED') {
         op.label = r.phase === 'RECOVERY_REQUIRED' ? 'Delivery needs attention · provider report still unverified'
           : 'Provider reports delivery · awaiting independent verification';
@@ -433,7 +446,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     : lifecycleState === 'idle' ? superseded ? source.kind === 'uniswap-pool' ? 'An earlier wallet request was not sent and the Review was refreshed. Check the updated Review and authorize it again.'
       : 'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.'
       : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.'
-    : deliveryObserved ? DESTINATION_OBSERVED_MESSAGE
+    : deliveryObserved ? operations.some(op => op.awaitingFinality) ? DESTINATION_FINALITY_MESSAGE : DESTINATION_OBSERVED_MESSAGE
     : approvalLanded ? `${completed} of ${steps.length} actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.`
     : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
   // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.

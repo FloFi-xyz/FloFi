@@ -13,7 +13,7 @@ import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from './review-presentation';
 import { projectSimulation, type SimulationLine, type SimulationSource, type SimulationWarning } from './simulation-presentation';
-import { DESTINATION_OBSERVED_LABEL, DESTINATION_OBSERVED_MESSAGE, type ExecutionLifecycle, type LifecycleOperation } from './execution-lifecycle';
+import { DESTINATION_OBSERVED_LABEL, type ExecutionLifecycle, type LifecycleOperation } from './execution-lifecycle';
 import { currentExecution, isFinalExecutionResult, projectExecutionResult } from './execution-result';
 import { shellChainLabel } from './product-shell';
 import type { Command } from './commands';
@@ -225,7 +225,8 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
       // The next request is being prepared (after Continue), or is reviewed and waits for the owner's answer to Continue.
       : preparing || wallet.some(op => op.state === 'preparing') ? c.signPreparing
       : open === 'CONFIRM_CONTINUE' || open === 'CONFIRM_CONTINUE_REVIEW' ? c.signContinue
-      : observed ? later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.signNext}` : translate(language, DESTINATION_OBSERVED_MESSAGE)
+      // §9.2: the observed message names what remains (network finality, or the definitive reconciliation), as the Execute panel says it.
+      : observed ? later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.signNext}` : translate(language, live.message)
       // A confirmed approval whose action was not sent yet: that action needs its own Review and confirmation (never requested automatically).
       : later || !done && wallet.some(op => op.state === 'waiting') && wallet.some(op => op.state === 'confirmed') ? c.signNext : c.signNone;
   } else if (phase === 'AWAITING_WALLET') text = c.statusWallet;
@@ -234,7 +235,7 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
   else if (done) text = c.statusDone;
   // With later steps left, the transfer is said with where the workflow stands (never "no signature needed": the next step needs its own).
   else if (observed) text = later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.statusInProgress(where)}`
-    : translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, DESTINATION_OBSERVED_MESSAGE));
+    : translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, live.message));
   // This step reconciled while the workflow has steps left: where the workflow stands, never "yes".
   else if (phase === 'COMPLETED') text = runDone ? c.statusInProgress(where) : c.statusConfirmedReconciling;
   else text = asked === 'RECEIVED' && operations.some(op => !op.wallet) ? `${c.statusDeliveryPending} ${c.statusInProgress(where)}` : c.statusInProgress(where);

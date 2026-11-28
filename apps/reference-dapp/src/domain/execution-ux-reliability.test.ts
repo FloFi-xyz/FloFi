@@ -14,12 +14,14 @@ import { adoptSettlementRead, settlementSyncDue, type SettlementRecord } from '.
 import { executionQuestion, executionStatusAnswer, lifecycleRequest, type LifecycleView } from './conversation-lifecycle';
 import { translate } from '../i18n/translate';
 import { bounded, universalSimulationWalletsCurrent } from '../state/universal-router-store';
+import { DESTINATION_FINALITY_MESSAGE } from './financial-observation';
+import { createUniversalBridgeFromInput } from './universal-bridge-authoring';
 
 const hash = `0x${'a'.repeat(64)}`, fill = `0x${'b'.repeat(64)}`;
 const workflow = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createRouterNode('bridge', { source: 'Base', destination: 'Arbitrum', token: 'USDC',
   amount: '1', recipient: '', slippage: '50', routing: 'AUTO' })] };
 const nodeId = workflow.nodes.find(node => node.actionType === 'asset.bridge')!.nodeId;
-type Over = { phase?: string; verdict?: string; destination?: unknown; attempts?: unknown[] };
+type Over = { phase?: string; verdict?: string; destination?: unknown; attempts?: unknown[]; observation?: unknown };
 /** The exact router store shape the lifecycle reads (the November 17 Base → Arbitrum run's facts, MOCKED). */
 const record = (over: Over = {}) => ({ id: 'xroute-' + 'c'.repeat(32), workflow, provenance: 'PUBLIC_MAINNET', phase: 'DESTINATION_OBSERVED', verdict: 'PENDING',
   destination: { transactionHash: fill, safe: false },
@@ -207,5 +209,63 @@ describe('CHAT-01: status questions about the current execution', () => {
   it('says the last read failed instead of presenting it as fresh, and answers nothing without an execution', () => {
     expect(executionStatusAnswer(view(lifecycle()), 'OUTCOME', 'EN', true)!.notes[0]).toMatch(/^The last “Check status” did not answer/);
     expect(executionStatusAnswer({ progress: null } as unknown as LifecycleView, 'OUTCOME', 'PT')).toBeNull();
+  });
+});
+
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): the owner's Ethereum → Robinhood Chain bridge runs on the universal router. Its three states read
+// distinctly on Execute, the Dashboard (the same lifecycle) and in chat: the delivery found and waiting for network finality, found and final but
+// still being reconciled, and reconciled. A delivery found on the destination is never "Waiting for delivery" nor a wallet request to confirm.
+describe('§9.2: a universal bridge delivery observed, awaiting network finality, reconciled', () => {
+  const universalNode = createUniversalBridgeFromInput('bridge', { source: 'ethereum', destination: 'robinhood', inputAsset: 'ETH', outputAsset: 'ETH',
+    amount: '0.05', recipient: '', slippage: '50', routing: 'RELAY' });
+  const bridge = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [universalNode] };
+  const eth = { kind: 'NATIVE', decimals: 18, symbol: 'ETH' };
+  const universal = (over: Record<string, unknown> = {}) => projectExecutionLifecycle(bridge, reviewFixture().context, { kind: 'universal', state: { record: {
+    id: 'universal-run', workflow: bridge, provenance: 'PUBLIC_MAINNET', owner: `0x${'1'.repeat(40)}`, phase: 'DESTINATION_OBSERVED', verdict: 'PENDING',
+    review: { nodeId: universalNode.nodeId, commitment: 'reviewed', source: { ecosystem: 'EVM', calls: [{ purpose: 'BRIDGE_DEPOSIT' }] },
+      route: { provider: 'relay', sourceChain: 'eip155:1', destinationChain: 'eip155:4663', order: { orderId: 'relay-order' }, inputToken: eth, outputToken: eth,
+        inputAmount: '50000000000000000', expectedOutput: '49900000000000000' } },
+    attempts: [{ step: 'DEPOSIT', ecosystem: 'EVM', state: 'CONFIRMED', transactionHash: hash, reconciled: true, commitment: 'reviewed', receipt: null }],
+    source: { ownerDebit: '50000000000000000', final: true }, destination: { transactionHash: fill, amount: '49900000000000000', final: false }, refund: null,
+    observation: { checkedAt: '2026-11-27T10:00:00Z', outcome: 'DESTINATION_OBSERVED', reason: 'UNIVERSAL_AWAITING_FINALITY' }, ...over },
+    busy: false, signing: false, recovered: false } } as unknown as ExecutionLifecycleSource);
+  it('awaiting finality: "Transfer observed", the network-finality sentence and nothing to sign (Execute, Dashboard, workflow progress)', () => {
+    const live = universal(), destination = live.steps[0]!.operations.at(-1)!;
+    expect(destination).toMatchObject({ state: 'pending', phase: 'DESTINATION_OBSERVED', label: 'Destination observed · awaiting finality', awaitingFinality: true, wallet: false });
+    expect(live).toMatchObject({ state: 'active', completed: 0, label: DESTINATION_OBSERVED_LABEL, message: DESTINATION_FINALITY_MESSAGE });
+    expect(live.message).not.toMatch(/wallet request requires your explicit confirmation/);
+    const progress = workflowProgressView({ sequence: null, live })!;
+    expect(progress).toMatchObject({ completed: 0, finished: false });
+    expect(progress.steps[0]).toMatchObject({ phase: 'DESTINATION_OBSERVED', text: { key: EXECUTION_PHASE_LABEL.DESTINATION_OBSERVED, args: ['Robinhood Chain'] } });
+    expect(translate('PT', live.message)).not.toBe(live.message);
+  });
+  it('final on both networks but not reconciled yet: observed, worded as awaiting reconciliation, still not completed', () => {
+    const live = universal({ destination: { transactionHash: fill, amount: '49900000000000000', final: true }, observation: null });
+    expect(live.steps[0]!.operations.at(-1)).toMatchObject({ phase: 'DESTINATION_OBSERVED', label: 'Destination observed · awaiting reconciliation' });
+    expect(live.steps[0]!.operations.at(-1)!.awaitingFinality).toBeUndefined();
+    expect(live).toMatchObject({ state: 'active', completed: 0, label: DESTINATION_OBSERVED_LABEL, message: DESTINATION_OBSERVED_MESSAGE });
+  });
+  it('reconciled: completed only now; a recovery that needs attention is never worded as observed', () => {
+    const done = universal({ phase: 'RECONCILED', verdict: 'RECONCILED', destination: { transactionHash: fill, amount: '49900000000000000', final: true },
+      observation: { checkedAt: '2026-11-27T10:05:00Z', outcome: 'RECONCILED', reason: 'UNIVERSAL_RECONCILED' } });
+    expect(done).toMatchObject({ state: 'complete', completed: 1, label: 'Execution confirmed' });
+    expect(done.steps[0]!.operations.at(-1)!.phase).not.toBe('DESTINATION_OBSERVED');
+    const recovery = universal({ phase: 'RECOVERY_REQUIRED' });
+    expect(recovery.label).not.toBe(DESTINATION_OBSERVED_LABEL); expect(recovery.steps[0]!.operations.at(-1)!.phase).not.toBe('DESTINATION_OBSERVED');
+  });
+  it('chat: "did it work?" and "do I need to sign?" name the network finality wait in EN and PT; reconciled is "yes"', () => {
+    const asked = view(universal());
+    const en = executionStatusAnswer(asked, 'OUTCOME', 'EN')!.text, pt = executionStatusAnswer(asked, 'OUTCOME', 'PT')!.text;
+    expect(en).toBe(`${DESTINATION_OBSERVED_LABEL}. ${DESTINATION_FINALITY_MESSAGE}`);
+    expect(pt).toBe('Transferência observada no destino. Uma entrega foi encontrada na rede de destino e aguarda a confirmação definitiva da rede. Esta espera é da própria rede, não um atraso da FloFi. A FloFi verifica de novo automaticamente; nenhuma ação ou assinatura é necessária.');
+    expect(executionStatusAnswer(asked, 'SIGNATURE', 'EN')!.text).toBe(DESTINATION_FINALITY_MESSAGE);
+    expect(en).not.toMatch(/completed|reconciled on-chain/i);
+    const reconciling = view(universal({ destination: { transactionHash: fill, amount: '49900000000000000', final: true }, observation: null }));
+    expect(executionStatusAnswer(reconciling, 'OUTCOME', 'EN')!.text).toBe(`${DESTINATION_OBSERVED_LABEL}. ${DESTINATION_OBSERVED_MESSAGE}`);
+  });
+  it('the router (Across) says the finality wait too when its service reports it', () => {
+    const live = lifecycle({ observation: { checkedAt: '2026-11-27T10:00:00Z', outcome: 'DESTINATION_OBSERVED', reason: 'ROUTER_AWAITING_FINALITY' } });
+    expect(live).toMatchObject({ label: DESTINATION_OBSERVED_LABEL, message: DESTINATION_FINALITY_MESSAGE });
+    expect(lifecycle().message).toBe(DESTINATION_OBSERVED_MESSAGE);
   });
 });
