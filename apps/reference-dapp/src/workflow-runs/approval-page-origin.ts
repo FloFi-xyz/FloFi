@@ -17,7 +17,6 @@
  */
 import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import type { Workflow } from '../domain/initial-workflow.ts';
-import { semanticWorkflowHash } from '../engine/strategy-engine.ts';
 import { originOfRequester, type ExecutionOrigin, type OriginWallet } from './execution-origins.ts';
 
 /** The workflow a flow record reviewed, wherever the flow keeps it (review, workflow, or the first of several reviews). */
@@ -25,7 +24,8 @@ export function reviewedWorkflows(record: unknown): unknown[] {
   const r = record && typeof record === 'object' ? record as { review?: { workflow?: unknown }; workflow?: unknown; reviews?: { workflow?: unknown }[] } : {};
   return [r.review?.workflow, r.workflow, Array.isArray(r.reviews) ? r.reviews[0]?.workflow : undefined].filter(w => w && typeof w === 'object');
 }
-const hashesOf = (record: unknown) => [...new Set(reviewedWorkflows(record).flatMap(w => { try { return [semanticWorkflowHash(w as Workflow)]; } catch { return []; } }))];
+const hashesOf = (record: unknown, semanticWorkflowHash: (workflow: Workflow) => string) =>
+  [...new Set(reviewedWorkflows(record).flatMap(w => { try { return [semanticWorkflowHash(w as Workflow)]; } catch { return []; } }))];
 const normalized = (namespace: OriginWallet['namespace'], address: string) => namespace === 'eip155' ? address.toLowerCase() : address;
 
 export type ApprovalPageRun = {
@@ -37,11 +37,14 @@ export type ApprovalPageRun = {
 
 /** The origin of an approval-page run, or null when no single live approval of this claimant proposed exactly this workflow. */
 export async function approvalPageOrigin(db: Queryable, tenantId: string, run: ApprovalPageRun): Promise<ExecutionOrigin | null> {
+  // The engine is written for bundler resolution: on the plain-Node API it loads through the backend's source-resolution hook, on first use only,
+  // so the API's startup never depends on it (the Next.js server resolves it natively).
+  const { semanticWorkflowHash } = await import('../engine/strategy-engine');
   if (!run.owner || !run.wallets.length) return null;
   const owner = run.owner.startsWith('0x') ? run.owner.toLowerCase() : run.owner;
   const claimant = run.wallets.find(w => normalized(w.namespace, w.address) === owner);
   if (!claimant) return null;
-  const hashes = hashesOf(run.record);
+  const hashes = hashesOf(run.record, semanticWorkflowHash);
   if (!hashes.length) return null;
   const { rows } = await db.query<{ requester_kind: string; client_id: string }>(`SELECT requester_kind, client_id FROM mcp_handoffs
     WHERE tenant_id = $1 AND claimed_namespace = $2 AND (CASE WHEN $2 = 'eip155' THEN lower(claimed_address) ELSE claimed_address END) = $3

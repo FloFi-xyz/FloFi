@@ -272,6 +272,7 @@ export function createBackend(options: BackendOptions) {
         const stored = (await options.db.query<{ owner_account: string | null }>('SELECT owner_account FROM execution_runs WHERE tenant_id = $1 AND run_id = $2',
           [tenantId, runId])).rows[0]?.owner_account ?? null;
         const recordOwner = FLOWS[flow].ownership?.ownerOf(record) ?? (record as { review?: { account?: unknown } } | null)?.review?.account;
+        installSourceResolution();
         const origin = await approvalPageOrigin(options.db, tenantId, { flow, runId, wallets: context.wallets ?? [], record, now: new Date(),
           owner: stored ?? (typeof recordOwner === 'string' ? recordOwner : null) });
         created = origin ? { origin, evidence: APPROVAL_PAGE_EVIDENCE } : null;
