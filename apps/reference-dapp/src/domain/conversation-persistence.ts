@@ -57,8 +57,8 @@ export function mayHoldSecret(text: string): boolean {
 
 /** A message as history: its answer buttons and open question are not restored (the question it asked is no longer open). */
 export function historical(message: ChatMessage): ChatMessage {
-  const { options: _options, question: _question, awaitingAmount: _awaiting, variants, ...rest } = message;
-  void _options; void _question; void _awaiting;
+  const { options: _options, question: _question, awaitingAmount: _awaiting, focus: _focus, variants, ...rest } = message;
+  void _options; void _question; void _awaiting; void _focus;
   if (!variants) return rest;
   const content = (value: ChatContent): ChatContent => { const { options: _o, question: _q, ...kept } = value; void _o; void _q; return kept; };
   return { ...rest, variants: { EN: content(variants.EN), PT: content(variants.PT) } };

@@ -34,6 +34,12 @@ import { conversationCopy } from '../domain/conversation-copy';
 import type { ChatContent, ChatMessage, Rendering } from '../domain/chat-message';
 import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, executionQuestion, executionStatusAnswer, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
   QUOTE_MOVED, reviewBinding, reviewChanges, type ConversationLanguage, type ConversationReview, type LifecycleView, type PendingQuestion, type ReviewBinding } from '../domain/conversation-lifecycle';
+import { chatChangeDependents, chatChangedSteps } from '../domain/conversation-lifecycle';
+import { batchChangeView, batchChatChange } from '../domain/batch-payment-chat';
+import { matchSavedRecipients } from '../domain/saved-recipients';
+import { workflowSequence } from '../domain/workflow-sequence';
+import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
+import { highlightCanvasSteps } from '../components/editor-overview-panel';
 /** BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a delivered amount in a chat message, at six significant digits (the record stays exact). */
 const shownAmount = (value: string, language: string) => displayAmountText(value, { language: language === 'PT' ? 'PT' : 'EN' })?.text ?? value;
 
@@ -118,7 +124,18 @@ const APPLY_INSTRUCTION = /\s*(?:Review (?:the proposal |it )?below: nothing cha
 const short = (value: string) => value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 /** Chat review L1: the Batch Payment a commit adds, and how many of the commit's notes come before its payment lines. */
 type CommitBatch = { readonly input: Extract<Command, { type: 'ADD_BATCH_PAYMENT' }>['input']; readonly at: number };
-const batchOf = (command: Command, at: number): { readonly batch?: CommitBatch } => command.type === 'ADD_BATCH_PAYMENT' ? { batch: { input: command.input, at } } : {};
+const batchOf = (command: Command, at: number): { readonly batch?: CommitBatch } => command.type === 'ADD_BATCH_PAYMENT' || command.type === 'SET_BATCH_PAYMENT'
+  ? { batch: { input: command.input, at } } : {};
+/**
+ * P1-03: the earlier steps each step of a sequence spends the delivery of (by node), so an edit can name the steps whose amount it changes. Empty when
+ * the workflow is not a sequence (or cannot be read as one).
+ */
+function sequenceFunding(workflow: Workflow, context: LifecycleView['context']): ReadonlyMap<string, readonly string[]> {
+  try {
+    const sequence = workflowSequence(workflow, candidate => lintWorkflow(candidate, context));
+    return new Map(sequence?.steps.map(step => [step.nodeId, step.funding.map(funding => sequence.steps[funding.fundedBy]?.nodeId ?? '')]) ?? []);
+  } catch { return new Map(); }
+}
 /**
  * A commit's notes in `language`. Chat review L1 / C4: a Batch Payment's payment lines and all-or-nothing rule are written in the language the message
  * is shown in (built per language, never reused from the commit's language); every other note is as given. Nothing else has them.
@@ -261,7 +278,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
    * (model notes the message carries).
    */
   const say = (scope: number, language: ConversationLanguage, build: (language: ConversationLanguage, c: Copy) => Rendering,
-    role: ChatMessage['role'] = 'flofi', fixed: Partial<ChatContent> = {}) => {
+    role: ChatMessage['role'] = 'flofi', fixed: Partial<ChatContent> & Pick<ChatMessage, 'focus'> = {}) => {
     const render = (l: ConversationLanguage): ChatContent => { const out = build(l, conversationCopy(l)); return typeof out === 'string' ? { text: out } : { text: out[0], ...out[1] ?? {} }; };
     const variants = { EN: render('EN'), PT: render('PT') };
     append(scope, { role, ...fixed, ...variants[language], language, variants });
@@ -376,11 +393,23 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const context = latest.current.context;
     // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after an execution, say whether what already executed stays completed or would be reviewed again.
     const executed = latest.current.bridge.executedActions, whole = finished.current?.workflowId === stored.workflowId && !finished.current.continuable;
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): a created or edited Batch Payment is said as what changed on its card (each recipient by
+    // saved name: display only, read from this page's own list), with the count, exact total, token and network, then every payment.
+    const batch = commit.summary ? null : batchChatChange(commit.before, stored), names = copilot.savedRecipients?.() ?? [];
+    // P1-03: the cards this change added or edited (highlighted on the Canvas, and "View in plan" brings the first into view), and the steps it affects.
+    const changed = commit.summary ? [] : chatChangedSteps(commit.before, stored), funding = sequenceFunding(stored, context);
     say(scope, commit.language, (language, c) => {
       const history = executed?.executed ? executed.executed > executed.carried ? [c.executedAgain] : [c.executedKept(executed.carried)] : whole ? [c.executedAgain] : [];
+      const after = [...chatChangeDependents(commit.before, stored, context, language, funding), ...commit.reviewed ? [c.changed] : [], ...history];
+      if (batch) {
+        const view = batchChangeView(batch.before, batch.after, names, language);
+        return [view.text, { notes: [view.summary, ...view.lines, view.atomic, ...commit.notes.slice(commit.batch?.at ?? 0), ...after], question: view.question,
+          options: [c.addRecipient, c.review, c.undo] }];
+      }
       return [commit.summary ? `${commit.summary}. ${c.positionPrepared}` : describeChatChange(commit.before, stored, context, language).join(' '),
-        { notes: [...commitNotes(commit, language), ...commit.reviewed ? [c.changed] : [], ...history], question: c.nextQuestion, options: commit.summary ? [c.addAnother, c.review] : [c.addAnother, c.review, c.undo] }];
-    }, commit.role);
+        { notes: [...commitNotes(commit, language), ...after], question: c.nextQuestion, options: commit.summary ? [c.addAnother, c.review] : [c.addAnother, c.review, c.undo] }];
+    }, commit.role, changed[0] ? { focus: changed[0] } : {});
+    if (changed.length) highlightCanvasSteps(changed);
     setQuestion({ open: { kind: 'NEXT_STEP', workflowId: stored.workflowId, revision: stored.revision }, language: commit.language });
   }
 
@@ -742,6 +771,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (request === 'REFRESH') { startReview(scope, language, true); return; }
     if (request === 'ROUTE') { say(scope, language, (_, c) => c.anotherRoute); startReview(scope, language, true); return; }
     if (request === 'ADD') { setQuestion(null); say(scope, language, (_, c) => c.addPrompt); return; }
+    if (request === 'ADD_RECIPIENT') { setQuestion(null); say(scope, language, (_, c) => c.addRecipientPrompt); return; }
     if (request === 'MODIFY') {
       setQuestion(null);
       const empty = !actionable(latest.current.state.workflow), interprets = copilot.mayInterpret;
@@ -1176,7 +1206,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review M2): a `pay` request FloFi read and refused (a repeated recipient, an invalid,
       // too precise or too large amount, an unsupported network or asset, two assets) says why; it is never handed to an interpretation that could
       // turn it into separate, non-atomic transfers.
-      if (cause instanceof Error && (['SWAP_NATIVE_ASSET_UNSUPPORTED', 'WRAP_NETWORK_REQUIRED', 'SWAP_AMOUNT_REQUIRED'].includes(cause.message) || /^BATCH_PAYMENT_[A-Z_]+$/.test(cause.message))) {
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): a `pay` list that names one of the account's saved recipients ("pay 20 USDC to Caio and
+      // 30 USDC to Dayane on Base") is resolved by the conversation engine (locally, by its exact saved-name rules); the grammar itself never resolves
+      // a name, and anything else is refused as before.
+      const savedNames = cause instanceof Error && cause.message === 'BATCH_PAYMENT_RECIPIENT_INVALID' && copilot.mayInterpret
+        && matchSavedRecipients(request, copilot.savedRecipients?.() ?? []).kind !== 'NONE';
+      if (cause instanceof Error && !savedNames && (['SWAP_NATIVE_ASSET_UNSUPPORTED', 'WRAP_NETWORK_REQUIRED', 'SWAP_AMOUNT_REQUIRED'].includes(cause.message) || /^BATCH_PAYMENT_[A-Z_]+$/.test(cause.message))) {
         const code = cause.message;
         dismissProposal(); say(scope, language, language => copilotRejection(code, language).message, 'system'); return;
       }

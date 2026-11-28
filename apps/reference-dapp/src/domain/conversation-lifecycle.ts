@@ -129,7 +129,12 @@ const NEXT_REVIEW = pattern(['review', 'review workflow', 'review my workflow', 
   'review it', 'simulate', 'simulate workflow', 'simulate my workflow', 'simulate the workflow', 'run simulation', 'revisar', 'revisar workflow', 'revisar o workflow',
   'revisar meu workflow', 'revisar fluxo', 'revisar o fluxo', 'revisar meu fluxo', 'revise', 'revise o workflow', 'revise meu workflow', 'vamos revisar', 'simular',
   'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo', 'simular o fluxo', 'revise o fluxo', 'revise meu fluxo',
-  'revisar este fluxo']);
+  'revisar este fluxo',
+  // R09–R12: "…or review the payment?" after a Batch Payment change.
+  'review payment', 'review the payment', 'review the batch payment', 'revisar pagamento', 'revisar o pagamento', 'revisar o pagamento em lote']);
+/** R09–R12: the Batch Payment confirmation's "add a recipient" answer (FloFi then asks who and how much). */
+const NEXT_ADD_RECIPIENT = pattern(['add a recipient', 'add recipient', 'add another recipient', 'add someone', 'add someone else', 'adicionar destinatário',
+  'adicionar destinatario', 'adicionar outro destinatário', 'adicionar outro destinatario', 'adicionar mais alguém', 'adicionar mais alguem', 'adicionar alguém', 'adicionar alguem']);
 // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: recovery after a refused start or an expired/changed quote is a fresh simulation, asked for in chat.
 const REFRESH_REQUEST = pattern(['simulate again', 'simulate it again', 'retry simulation', 'try again', 'refresh quote', 'refresh the quote', 'get a new quote',
   'get a fresh quote', 'new quote', 'requote', 'simular novamente', 'simular de novo', 'tentar novamente', 'tentar de novo', 'atualizar cotação', 'atualizar cotacao',
@@ -165,9 +170,10 @@ export function classifyAnswer(text: string, question: PendingQuestion['kind']):
   return yes?.test(value) ? 'YES' : 'UNCLEAR';
 }
 /** A lifecycle request the chat handles itself, with no model: Review, Add another action, Execute, Status or Undo. */
-export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' | 'ADD' | 'MODIFY' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
+export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' | 'ADD' | 'ADD_RECIPIENT' | 'MODIFY' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
   const value = normalize(text);
-  return NEXT_REVIEW.test(value) || CONTINUE_REQUEST.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
+  return NEXT_REVIEW.test(value) || CONTINUE_REQUEST.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD'
+    : NEXT_ADD_RECIPIENT.test(value) ? 'ADD_RECIPIENT' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : MODIFY_REQUEST.test(value) ? 'MODIFY' : null;
 }
 // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (CHAT-01): natural questions about the execution itself ("Deu certo?" was answered "Não há proposta
@@ -489,8 +495,64 @@ export function describeChatChange(before: Workflow, after: Workflow, context: R
   for (const node of composerActions(after)) {
     const old = before.nodes.find(item => item.nodeId === node.nodeId), action = label(language, composerSummary(after, node, context).action);
     if (!old) lines.push(c.added(action, detail(after, node)));
-    else if (JSON.stringify(old) !== JSON.stringify(node)) lines.push(c.updated(action, detail(after, node)));
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): an edit is said as what changed, before → after ("Supply: 0,1 → 0,2 USDC").
+    else if (JSON.stringify(old) !== JSON.stringify(node)) { const change = beforeAfter(before, old, after, node, context, language);
+      lines.push(change ? c.edited(action, change) : c.updated(action, detail(after, node))); }
   }
   for (const node of composerActions(before)) if (!after.nodes.some(item => item.nodeId === node.nodeId)) lines.push(c.removed(label(language, composerSummary(before, node, context).action)));
+  return lines;
+}
+/** An exact amount as the language writes it (Portuguese: decimal comma); a label that is not an amount is translated as it is. */
+const shownAmount = (value: string, language: ConversationLanguage) => /^\d/.test(value) ? language === 'PT' ? value.replace(/^(\d+)\.(\d+)/, '$1,$2') : value
+  : label(language, value);
+/**
+ * P1-03: what changed in an edited step, before → after, from its card (amount, pair, network, provider): "0,1 → 0,2 USDC" when only the amount of
+ * the same token changed. Null when nothing the card shows changed (e.g. only its slippage): the step is then said as updated.
+ */
+function beforeAfter(before: Workflow, old: Workflow['nodes'][number], after: Workflow, node: Workflow['nodes'][number], context: ReviewContext,
+  language: ConversationLanguage): string | null {
+  const parts = (workflow: Workflow, item: Workflow['nodes'][number]) => {
+    const card = composerSummary(workflow, item, context);
+    return { amount: card.amount === 'Amount not available' ? null : card.amount, pair: card.bridgePair ?? card.detail ?? null,
+      chain: card.chain.replace(/ \(\d+\)$/g, ''), provider: card.provider === 'Provider not specified' ? null : card.provider };
+  };
+  const was = parts(before, old), now = parts(after, node), changes: string[] = [];
+  if (was.amount && now.amount && was.amount !== now.amount) {
+    const unit = (value: string) => /^\d\S*\s+(\S+)$/.exec(value)?.[1] ?? null, same = unit(was.amount) !== null && unit(was.amount) === unit(now.amount);
+    changes.push(same ? `${shownAmount(was.amount.replace(/\s+\S+$/, ''), language)} → ${shownAmount(now.amount.replace(/\s+\S+$/, ''), language)} ${unit(now.amount)}`
+      : `${shownAmount(was.amount, language)} → ${shownAmount(now.amount, language)}`);
+  }
+  for (const key of ['pair', 'chain', 'provider'] as const) {
+    const from = was[key], to = now[key];
+    if (from && to && from !== to) changes.push(`${label(language, from)} → ${label(language, to)}`);
+  }
+  return changes.length ? changes.join(' · ') : null;
+}
+/** P1-03: the visible steps a chat change added or edited (the cards the Canvas highlights and "View in plan" brings into view), in plan order. */
+export function chatChangedSteps(before: Pick<Workflow, 'nodes'>, after: Workflow): string[] {
+  return composerActions(after).filter(node => { const old = before.nodes.find(item => item.nodeId === node.nodeId); return !old || JSON.stringify(old) !== JSON.stringify(node); })
+    .map(node => node.nodeId);
+}
+/**
+ * P1-03: the other steps an edit of existing steps affects, each named with what that means. A step that spends an edited step's output (its input
+ * references that output, a resource edge links them, or the sequence funds it with that step's delivery) is an enforceable financial dependency:
+ * its amount is recalculated at the next review. A step that only runs after it (an ordering dependency) is a temporal connection: its own values do
+ * not change. Added and removed steps are said by `describeChatChange` itself.
+ */
+export function chatChangeDependents(before: Workflow, after: Workflow, context: ReviewContext, language: ConversationLanguage, fundedBy: ReadonlyMap<string, readonly string[]> = new Map()): string[] {
+  const c = conversationCopy(language), ordered = composerActions(after);
+  const edited = new Set(ordered.filter(node => { const old = before.nodes.find(item => item.nodeId === node.nodeId); return old && JSON.stringify(old) !== JSON.stringify(node); })
+    .map(node => node.nodeId));
+  if (!edited.size) return [];
+  const lines: string[] = [];
+  for (const [index, node] of ordered.entries()) {
+    if (edited.has(node.nodeId)) continue;
+    const spends = [...edited].some(id => node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE' && input.value.nodeId === id)
+      || after.resourceEdges.some(edge => edge.fromNodeId === id && edge.toNodeId === node.nodeId) || (fundedBy.get(node.nodeId) ?? []).includes(id));
+    const waits = [...edited].some(id => node.dependencies.includes(id));
+    const action = label(language, composerSummary(after, node, context).action);
+    if (spends) lines.push(c.spendsOutput(index + 1, action));
+    else if (waits) lines.push(c.runsAfter(index + 1, action));
+  }
   return lines;
 }

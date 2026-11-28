@@ -1086,7 +1086,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       note: reviewExpiredHere ? 'Your review expired. Refresh the values to continue safely. Your workflow is still saved.' : null }
     : { placeholder: undefined, note: null };
   const chat = <CopilotPanel conversation={conversation} interactive={interactive} owner={owner} proof={proof} reviewInPanel={reviewBlock && groupedPrimary}
-    placeholder={assistantStage.placeholder} stageNote={assistantStage.note}
+    placeholder={assistantStage.placeholder} stageNote={assistantStage.note} showStep={showStep}
     overview={tab === 'Build' && chatFirst ? <EditorOverviewPanel overview={overview} showStep={showStep}/> : undefined}/>;
   // BUILD0-UX-001: a workflow restored or reopened, a run recovered from this browser, a live execution, a proposal or an unfinished Canvas card
   // is never held behind the entry the visit landed on: once the persisted-run read settles, the shell opens Build 1 (the stages keep their own

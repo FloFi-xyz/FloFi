@@ -19,7 +19,7 @@ import { conversationCopy } from '../domain/conversation-copy';
  */
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({ store: null as unknown as Record<string, unknown>, propose: [] as unknown[], respond: null as null | ((text: string) => Promise<unknown>),
-  floFi: false, canSign: true, clears: 0 }));
+  floFi: false, canSign: true, clears: 0, recipients: [] as unknown[] }));
 // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the person's FloFi wallet (Privy) readiness, as the Canvas Authorize reads it.
 vi.mock('../wallet/flofi-wallet-channel', () => ({ usesFloFiWallet: () => f.floFi }));
 vi.mock('../accounts/privy-context', () => ({ useFloFiPrivy: () => ({ ready: true, authenticated: true, embedded: [], canSign: () => f.canSign }),
@@ -30,7 +30,7 @@ vi.mock('./asset-catalog-store', () => ({ ensureNetworkCatalog: async () => unde
 vi.mock('../app/solana-asset-catalog-action', () => ({ loadSolanaAuthoringAssetCatalog: async () => ({ ok: false }) }));
 vi.mock('../components/copilot-ai', () => ({ copilotHelp: () => null,
   useCopilotInterpreter: () => ({ mode: f.respond ? 'replay' : 'off', enabled: Boolean(f.respond), busy: false, mayInterpret: Boolean(f.respond), reset: () => undefined, clear: () => { f.clears += 1; },
-    committed: () => undefined, language: () => 'EN', drafting: () => false, respond: (text: string) => f.respond!(text) }) }));
+    committed: () => undefined, language: () => 'EN', drafting: () => false, respond: (text: string) => f.respond!(text), savedRecipients: () => f.recipients }) }));
 const { useFlofiConversation } = await import('./flofi-conversation');
 
 const fixture = reviewFixture(), context = fixture.context;
@@ -81,7 +81,7 @@ beforeEach(() => {
   // The engines are certified on test networks (as the unit suites run); the public Mainnet-only refusal has its own case below.
   setActiveNetworkScope('ENGINEERING');
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(reviewNow);
-  editor = initialEditor(); past = []; f.propose = []; f.respond = null; direct = true; reviewedPatch = {};
+  editor = initialEditor(); past = []; f.propose = []; f.respond = null; f.recipients = []; direct = true; reviewedPatch = {};
   // Like the real controls, authorizing starts at the click (a start that never becomes active is reported by the chat).
   controls = { authorize: vi.fn(() => { controls.authorizing = true; return { started: true, issue: null }; }), request: vi.fn(), checkStatus: vi.fn() };
   harness.slots = []; store(); lifecycle(); simulate.mockClear();
@@ -189,7 +189,9 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     await say('No');
     const chat = await say(`set ${editor.workflow.nodes[0]!.nodeId} amount 5`);
     expect(editor.workflow.revision).toBe(2);
-    expect(last(chat).text).toMatch(/^Swap updated: 5 USDC/);
+    // P1-03: before → after, and the edited card is the message's "View in plan" target.
+    expect(last(chat).text).toBe('Swap: 10 → 5 USDC.');
+    expect(last(chat).focus).toBe(editor.workflow.nodes[0]!.nodeId);
     expect(last(chat).notes).toContain('Any earlier simulation or review of this workflow no longer applies.');
     // The Review of revision 1 does not bind revision 2: "review" simulates again instead of presenting it.
     await say('Review workflow');
@@ -1243,11 +1245,14 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment in the c
     const chat = await say(`pay 0.001 ETH to ${A} and 0.002 ETH to ${B} on Base`);
     expect(editor.workflow.revision).toBe(1); expect(f.propose).toEqual([]);
     expect(editor.workflow.nodes.at(-1)!.actionType).toBe('asset.transfer.batch');
-    expect(last(chat).notes).toEqual([`1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC]);
-    expect(last(chat).question).toBe('Would you like to add another action or review your workflow?');
+    // R09–R12: the batch is said as what was prepared (count, exact total, token, network), then every payment and the all-or-nothing rule.
+    expect(last(chat).text).toBe('I prepared a batch payment of 0.003 ETH to 0x2222…2222 and 0x3333…3333.');
+    expect(last(chat).notes).toEqual(['2 recipients · 0.003 ETH · Base', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC]);
+    expect(last(chat).question).toBe('Would you like to add another recipient and amount, or review the payment?');
+    expect(last(chat).options).toEqual(['Add a recipient', 'Review workflow', 'Undo this change']);
     // Chat review C4: switching the interface to Portuguese shows the all-or-nothing rule in Portuguese (never the English one reused), and back.
-    expect(shownMessage(last(chat), 'PT').notes).toEqual([`1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC_PT]);
-    expect(shownMessage(shownMessage(last(chat), 'PT'), 'EN').notes).toEqual([`1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC]);
+    expect(shownMessage(last(chat), 'PT').notes).toEqual(['2 destinatários · 0,003 ETH · Base', `1. 0,001 ETH → ${A}`, `2. 0,002 ETH → ${B}`, ATOMIC_PT]);
+    expect(shownMessage(shownMessage(last(chat), 'PT'), 'EN').notes).toEqual(['2 recipients · 0.003 ETH · Base', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC]);
   });
   it('chat review L1: an interpreted Batch Payment keeps its per-recipient lines and atomic sentence in the confirmation', async () => {
     const command = { type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0,
@@ -1256,10 +1261,10 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment in the c
       notes: ['Base uses real funds.'], options: [], sentence: 'batch payment of ETH to 2 recipients on Base', command });
     const chat = await say(`Send 0.001 ETH to ${A} and 0.002 ETH to ${B} on Base`);
     expect(editor.workflow.revision).toBe(1); expect(last(chat).role).toBe('ai');
-    expect(last(chat).notes).toEqual(['Interpreted as “batch payment of ETH to 2 recipients on Base”.', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC,
-      'Base uses real funds.']);
+    // R09–R12: the confirmation's text says the prepared batch, so the "Interpreted as" line is not repeated; the model's own notes stay.
+    expect(last(chat).notes).toEqual(['2 recipients · 0.003 ETH · Base', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`, ATOMIC, 'Base uses real funds.']);
     // Chat review C4: in Portuguese the payment lines keep their place and the all-or-nothing rule is the Portuguese one; the model's notes stay as written.
-    expect(shownMessage(last(chat), 'PT').notes).toEqual(['Interpreted as “batch payment of ETH to 2 recipients on Base”.', `1. 0.001 ETH → ${A}`, `2. 0.002 ETH → ${B}`,
+    expect(shownMessage(last(chat), 'PT').notes).toEqual(['2 destinatários · 0,003 ETH · Base', `1. 0,001 ETH → ${A}`, `2. 0,002 ETH → ${B}`,
       ATOMIC_PT, 'Base uses real funds.']);
   });
   it('chat review M2: a `pay` refusal says why in English and Portuguese and never reaches the interpretation', async () => {
@@ -1283,5 +1288,77 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment in the c
     }
     expect(asked).toEqual([]);
     expect(editor.workflow.revision).toBe(0); expect(f.propose).toEqual([]);
+  });
+});
+
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12, P1-03): the product chat confirms a Batch Payment built and edited with saved recipients on the
+ * SAME card (names from this page's own list, display only; count, exact total, token and network), retires an earlier Review, offers "View in plan"
+ * and marks the changed card on the Canvas. The engine's own resolution is covered in `domain/copilot-batch-payment-recipients.test.ts`.
+ */
+describe('R09–R12 / P1-03: Batch Payment with saved recipients in the product chat', () => {
+  const CAIO = '0x2222222222222222222222222222222222222222', DAYANE = '0x3333333333333333333333333333333333333333', PEDRO = '0x4444444444444444444444444444444444444444';
+  const saved = (label: string, address: string, id: string) => ({ id: `rcp_${id.padEnd(26, 'a')}`, label, address, ecosystem: 'EVM',
+    createdAt: '2026-11-15T12:00:00.000Z', updatedAt: '2026-11-15T12:00:00.000Z' });
+  const payments = (...list: readonly (readonly [string, string])[]) => list.map(([recipient, amount]) => ({ recipient, amount }));
+  const proposal = (command: Record<string, unknown>) => async () => ({ kind: 'PROPOSAL', text: 'x', notes: [], options: [], sentence: 'batch payment of ETH on Base', command });
+  beforeEach(() => { f.recipients = [saved('Caio', CAIO, 'b'), saved('Dayane', DAYANE, 'c'), saved('Pedro', PEDRO, 'd')]; });
+  it('creates the batch, adds Pedro to the same card, says count · total · token · network in both languages and offers "View in plan"', async () => {
+    f.respond = proposal({ type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0, input: { network: 'Base', asset: 'ETH', payments: payments([CAIO, '0.002'], [DAYANE, '0.003']) } });
+    let chat = await say('Envie 0.002 ETH para Caio e 0.003 ETH para Dayane pela Base.');
+    const card = editor.workflow.nodes.at(-1)!.nodeId;
+    expect(last(chat).text).toBe('I prepared a batch payment of 0.005 ETH to Caio and Dayane.');
+    expect(last(chat).focus).toBe(card);
+    const pt = shownMessage(last(chat), 'PT');
+    expect(pt.text).toBe('Preparei um pagamento em lote de 0,005 ETH para Caio e Dayane.');
+    expect(pt.question).toBe('Deseja adicionar outro destinatário e valor ou revisar o pagamento?');
+    expect(pt.notes!.slice(0, 3)).toEqual(['2 destinatários · 0,005 ETH · Base', `1. 0,002 ETH → Caio · ${CAIO}`, `2. 0,003 ETH → Dayane · ${DAYANE}`]);
+    expect(pt.options).toEqual(['Adicionar destinatário', 'Revisar fluxo', 'Desfazer esta alteração']);
+    chat = await say('Add a recipient');
+    expect(last(chat).text).toBe('Tell me who to add and how much, for example “add 10 USDC for Pedro”.');
+    f.respond = proposal({ type: 'SET_BATCH_PAYMENT', source: 'CHAT', baseRevision: 1, nodeId: card,
+      input: { network: 'Base', asset: 'ETH', payments: payments([CAIO, '0.002'], [DAYANE, '0.003'], [PEDRO, '0.001']) } });
+    chat = await say('Adicione mais 0.001 ETH para Pedro.');
+    expect(editor.workflow.nodes.filter(node => node.actionType === 'asset.transfer.batch').map(node => node.nodeId)).toEqual([card]);
+    expect(last(chat).text).toBe('Pedro was added. Now there are 3 recipients and a total of 0.006 ETH.');
+    expect(shownMessage(last(chat), 'PT').text).toBe('Pedro foi adicionado. Agora são 3 destinatários e um total de 0,006 ETH.');
+    expect(shownMessage(last(chat), 'PT').question).toBe('Deseja adicionar mais alguém ou revisar?');
+    expect(last(chat).notes).toContain(`3. 0.001 ETH → Pedro · ${PEDRO}`);
+    expect(last(chat).focus).toBe(card);
+  });
+  it('a recipient or amount change after a Review says the Review no longer applies, and "review" simulates the new list again', async () => {
+    f.respond = proposal({ type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0, input: { network: 'Base', asset: 'ETH', payments: payments([CAIO, '0.002'], [DAYANE, '0.003']) } });
+    await say('Envie 0.002 ETH para Caio e 0.003 ETH para Dayane pela Base.');
+    const card = editor.workflow.nodes.at(-1)!.nodeId;
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    await say('No');
+    f.respond = proposal({ type: 'SET_BATCH_PAYMENT', source: 'CHAT', baseRevision: 1, nodeId: card, input: { network: 'Base', asset: 'ETH', payments: payments([CAIO, '0.004'], [DAYANE, '0.003']) } });
+    const chat = await say('mude o Caio para 0.004');
+    expect(editor.workflow.revision).toBe(2);
+    expect(last(chat).text).toBe('Caio: 0.002 → 0.004 ETH. Now there are 2 recipients and a total of 0.007 ETH.');
+    expect(last(chat).notes).toContain('Any earlier simulation or review of this workflow no longer applies.');
+    await say('Review workflow');
+    expect(simulate).toHaveBeenCalledTimes(2);
+  });
+  it('an exact `pay` list naming a saved recipient reaches the interpretation; without that name it is refused as before', async () => {
+    const asked: string[] = [];
+    f.respond = async text => { asked.push(text); return { kind: 'CLARIFICATION', text: 'ok', notes: [], options: [] }; };
+    await say(`pay 0.001 ETH to Caio and 0.002 ETH to ${DAYANE} on Base`);
+    expect(asked).toEqual([`pay 0.001 ETH to Caio and 0.002 ETH to ${DAYANE} on Base`]);
+    f.recipients = [];
+    const { copilotRejection } = await import('../domain/copilot-authoring');
+    expect(last(await say(`pay 0.001 ETH to Caio and 0.002 ETH to ${DAYANE} on Base`)).text).toBe(copilotRejection('BATCH_PAYMENT_RECIPIENT_INVALID', 'EN').message);
+    expect(asked).toHaveLength(1);
+  });
+  it('the changed card is marked on the Canvas (one event with its id); nothing is selected or edited by it', async () => {
+    const dispatched: Event[] = [];
+    vi.stubGlobal('window', Object.assign(new EventTarget(), { dispatchEvent: (event: Event) => { dispatched.push(event); return true; } }));
+    try {
+      f.respond = proposal({ type: 'ADD_BATCH_PAYMENT', source: 'CHAT', baseRevision: 0, input: { network: 'Base', asset: 'ETH', payments: payments([CAIO, '0.002'], [DAYANE, '0.003']) } });
+      await say('Envie 0.002 ETH para Caio e 0.003 ETH para Dayane pela Base.');
+    } finally { vi.unstubAllGlobals(); }
+    const highlight = dispatched.filter(event => event.type === 'flofi:canvas-highlight') as CustomEvent<unknown>[];
+    expect(highlight.map(event => event.detail)).toEqual([[editor.workflow.nodes.at(-1)!.nodeId]]);
   });
 });
