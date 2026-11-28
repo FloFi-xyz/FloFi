@@ -1058,9 +1058,11 @@ export const STEP_REFUSAL: Readonly<Record<string, string>> = {
   SWAP_MINIMUM_NOT_MET: 'The swap in step {0} would deliver less than its signed minimum now. Review again for a fresh quote.',
 };
 const fmtTime = (iso: string, language: string) => new Date(iso).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-/** Native fee in wei as ETH with at most 6 decimals (a non-zero fee never reads 0). */
-const eth = (wei: string) => { const v = BigInt(wei), step = 10n ** 12n, shown = (v + step - 1n) / step * step; if (v > 0n && shown === 0n) return '< 0.000001 ETH';
-  const whole = shown / 10n ** 18n, frac = (shown % 10n ** 18n).toString().padStart(18, '0').slice(0, 6).replace(/0+$/, ''); return `${whole}${frac ? '.' + frac : ''} ETH`; };
+/**
+ * A native fee in wei as ETH by the shared rule of these fee sentences (`feeAmountText`): six significant digits rounded up, so an estimate or a
+ * ceiling never reads below itself and a non-zero fee never reads 0 (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001, R06; formerly cut to 6 decimals).
+ */
+const eth = (wei: string) => feeAmountText(wei, 'wei');
 /** An Aave health factor (1e18) truncated to 2 decimals: a value below 2 never reads as 2.00. */
 const healthFactor = (wad: string) => { const v = BigInt(wad); return v >= 10n ** 30n ? '∞' : (Number(v / 10n ** 16n) / 100).toFixed(2); };
 const amountText = (a: ReviewAmount | null | undefined) => a?.text ?? null;
