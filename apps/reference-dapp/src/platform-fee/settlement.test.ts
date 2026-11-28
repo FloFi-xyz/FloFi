@@ -146,10 +146,15 @@ describe('settlement transfer outcome (§3.6)', () => {
   it('an outcome that may still reach the network stays pending; proven failures fail; divergence needs attention', () => {
     for (const state of ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING', 'CONFIRMED', 'NOT_FOUND', 'RECONCILIATION_REQUIRED'])
       expect(transferOutcome({ ...base, attempt: { state, transactionHash: hash, reconciled: false } }, expected)).toEqual({ kind: 'PENDING' });
-    expect(transferOutcome(base, expected)).toEqual({ kind: 'UNSIGNED' });
+    expect(transferOutcome({ ...base, authorization: '0x' + '1'.repeat(64) }, expected)).toEqual({ kind: 'UNSIGNED' });
     expect(transferOutcome({ ...base, attempt: { state: 'PREPARED', transactionHash: null, reconciled: false } }, expected)).toEqual({ kind: 'UNSIGNED' });
     expect(transferOutcome({ ...base, notSubmitted: true, attempt: { state: 'CANCELLED' } }, expected)).toMatchObject({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REJECTED' });
-    expect(transferOutcome({ ...base, attempt: { state: 'REVERTED', transactionHash: hash } }, expected)).toMatchObject({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REVERTED' });
+    // The transfer flows record a revert with a DIVERGENT verdict: no asset moved, so it is retryable, never attention.
+    expect(transferOutcome({ ...base, verdict: 'DIVERGENT', attempt: { state: 'REVERTED', transactionHash: hash } }, expected)).toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REVERTED' });
+    // Invalidated before it was ever begun: it can never be signed, so it closes; a Smart Account refusal may still be relayed: attention.
+    expect(transferOutcome({ ...base, authorization: null }, expected)).toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_UNSIGNED_EXPIRED' });
+    expect(transferOutcome({ ...base, review: { ...base.review, state: { ownerDelegation: '0x' + '6'.repeat(40) } }, notSubmitted: true, attempt: { state: 'CANCELLED' } }, expected))
+      .toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REJECTED', attention: true });
     expect(transferOutcome({ ...base, verdict: 'NOT_EXECUTED' }, expected)).toMatchObject({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_NOT_EXECUTED' });
     expect(transferOutcome({ ...base, verdict: 'DIVERGENT' }, expected)).toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_DIVERGENT', attention: true });
     expect(transferOutcome(null, expected)).toEqual({ kind: 'PENDING' });

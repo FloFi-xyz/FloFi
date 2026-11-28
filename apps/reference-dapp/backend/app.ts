@@ -290,7 +290,9 @@ export function createBackend(options: BackendOptions) {
     load: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId, true).load(runId) : Promise.reject(new Error('FLOW_NOT_FOUND')),
     invalidate: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId).call('invalidate', [runId]).then(value => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, code: error instanceof Error && CODE.test(error.message) ? error.message : 'PLATFORM_FEE_SETTLEMENT_INVALIDATION_FAILED' }))
-      : Promise.resolve({ ok: false as const, code: 'FLOW_NOT_FOUND' }) });
+      : Promise.resolve({ ok: false as const, code: 'FLOW_NOT_FOUND' }),
+    observe: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId, true).observe(runId).then(value => ({ ok: true as const, value }),
+      () => ({ ok: false as const, code: 'PLATFORM_FEE_SETTLEMENT_OBSERVATION_FAILED' })) : Promise.resolve({ ok: false as const, code: 'FLOW_NOT_FOUND' }) });
 
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
     betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: OriginContext | null = null): Promise<FlowResult> {

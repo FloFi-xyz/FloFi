@@ -122,12 +122,18 @@ export function transferOutcome(record: unknown, expected: Pick<AttemptTransfer,
     const hash = typeof attempt?.transactionHash === 'string' ? attempt.transactionHash : typeof attempt?.signature === 'string' ? attempt.signature : '';
     return attempt?.reconciled === true && (EVM_HASH.test(hash) || SOLANA_SIGNATURE.test(hash)) ? { kind: 'COLLECTED', hash } : { kind: 'PENDING' };
   }
+  // A reverted transfer moves no asset (the transfer flows record it with a DIVERGENT verdict): retryable. Any other divergence needs attention.
+  if (state === 'REVERTED') return { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REVERTED' };
   if (verdict === 'DIVERGENT' || verdict === 'INCONCLUSIVE') return { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_DIVERGENT', attention: true };
   if (verdict === 'NOT_EXECUTED') return { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_NOT_EXECUTED' };
-  if (record.notSubmitted === true) return { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REJECTED' };
+  // A Smart Account (EIP-7702 DeleGator) wallet can still relay a call it reported as refused: never retried automatically (no second payment).
+  const delegated = object(review.state) && typeof review.state.ownerDelegation === 'string' && review.state.ownerDelegation !== '';
+  if (record.notSubmitted === true) return delegated ? { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REJECTED', attention: true }
+    : { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REJECTED' };
   if (state === 'CANCELLED' || state === 'EXPIRED') return { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_CANCELLED' };
-  if (state === 'REVERTED') return { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REVERTED' };
-  if (state === null || state === 'PREPARED') return { kind: 'UNSIGNED' };
+  // Never begun: signable only while its Review stays bound; once invalidated (no authorization) it can never be begun, so it is closed.
+  if (state === null) return record.authorization ? { kind: 'UNSIGNED' } : { kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_UNSIGNED_EXPIRED' };
+  if (state === 'PREPARED') return { kind: 'UNSIGNED' };
   return { kind: 'PENDING' };
 }
 
@@ -173,7 +179,7 @@ export async function startSettlement(db: Database, deps: SettlementDeps, tenant
   const row = await loadLedgerRow(db, tenantId, ref);
   if (!row) return { ok: false, code: 'PLATFORM_FEE_NOT_DUE' };
   if (row.state === 'COLLECTED') return { ok: true, state: 'COLLECTED', transfers: [] };
-  if (row.state === 'COLLECTION_PENDING') return { ok: true, state: 'COLLECTION_PENDING', transfers: row.collection?.transfers ?? [] };
+  if (row.state === 'COLLECTION_PENDING') return { ok: true, state: 'COLLECTION_PENDING', transfers: resumable(row, idOf(ref)) };
   if (row.state !== 'DUE' && row.state !== 'COLLECTION_FAILED') return { ok: false, code: 'PLATFORM_FEE_NOT_DUE' };
   if (row.network_environment !== 'MAINNET' && row.network_environment !== 'MOCKED') return { ok: false, code: 'PLATFORM_FEE_SETTLEMENT_NETWORK_UNSUPPORTED' };
   if (row.collection?.attention) return { ok: false, code: 'PLATFORM_FEE_SETTLEMENT_ATTENTION' };
@@ -184,7 +190,10 @@ export async function startSettlement(db: Database, deps: SettlementDeps, tenant
   const plan = planSettlement({ authorized, final: row.lines, collection: row.collection,
     treasury: { evm: deps.env.FLOFI_PLATFORM_FEE_TREASURY_EVM!.trim(), solana: deps.env.FLOFI_PLATFORM_FEE_TREASURY_SOLANA!.trim() } });
   if (!plan.ok) return plan;
-  const mine = plan.transfers.filter(t => t.namespace === owner.namespace);
+  // One EVM transfer per chain per attempt: every Review of an attempt is bound to the wallet's current nonce, so a second same-chain transfer would
+  // collide; the next attempt collects what remains.
+  const mine = plan.transfers.filter((t, i, all) => t.namespace === owner.namespace
+    && (t.namespace === 'solana' || all.findIndex(o => o.namespace === 'eip155' && o.chainId === t.chainId) === i));
   if (!mine.length) return { ok: false, code: plan.transfers.length ? 'PLATFORM_FEE_SETTLEMENT_OTHER_WALLET' : 'PLATFORM_FEE_NOT_DUE' };
   const created: (AttemptTransfer & { workflow: unknown })[] = [];
   for (const [index, transfer] of mine.entries()) {
@@ -204,10 +213,28 @@ export async function startSettlement(db: Database, deps: SettlementDeps, tenant
     // Another request opened the attempt first: these transfers are never offered and can never be signed.
     await invalidateAll(deps, created);
     const current = await loadLedgerRow(db, tenantId, ref);
-    return current?.state === 'COLLECTION_PENDING' ? { ok: true, state: 'COLLECTION_PENDING', transfers: current.collection?.transfers ?? [] }
+    return current?.state === 'COLLECTION_PENDING' ? { ok: true, state: 'COLLECTION_PENDING', transfers: resumable(current, idOf(ref)) }
       : { ok: false, code: 'PLATFORM_FEE_SETTLEMENT_BUSY' };
   }
   return { ok: true, state: 'COLLECTION_PENDING', transfers: created };
+}
+
+/**
+ * The open attempt's transfers with their server-composed workflows re-derived (a closed browser can resume an unsigned transfer). A transfer whose
+ * re-derived workflow does not hash to the recorded one is offered without it (never signable from here; the unsigned timeout closes it).
+ */
+function resumable(row: LedgerRow, executionId: string): (AttemptTransfer & { readonly workflow?: unknown })[] {
+  const collection = row.collection;
+  if (!collection) return [];
+  return collection.transfers.map((t, index) => {
+    const network = SETTLEMENT_NETWORKS[t.chainId], asset = settlementAsset(t);
+    if (!network || !asset) return t;
+    try {
+      const derived = settlementWorkflow({ ...t, network: network.network, namespace: network.namespace, asset, decimal: units(BigInt(t.amount), t.decimals) },
+        executionId, collection.attempt, index);
+      return derived.workflowHash === t.workflowHash ? { ...t, workflow: derived.workflow } : t;
+    } catch { return t; }
+  });
 }
 
 async function invalidateAll(deps: SettlementDeps, transfers: readonly Pick<AttemptTransfer, 'flow' | 'runId'>[]): Promise<boolean> {
@@ -241,7 +268,9 @@ export async function reconcileSettlements(db: Database, deps: Omit<SettlementDe
       if (outcome.kind !== 'UNSIGNED') return outcome;
       if (!expired) return { kind: 'PENDING' } as const;
       const t = collection.transfers[i]!;
-      try { await deps.invalidate(t.flow, 'invalidate', [t.runId]); } catch { return { kind: 'PENDING' } as const; }
+      // Invalidate the Review, then let the flow's own observation settle a PREPARED attempt (cancelled only when it proves nothing was sent).
+      try { await deps.invalidate(t.flow, 'invalidate', [t.runId]); await deps.invalidate(t.flow, 'observe', [t.runId]).catch(() => undefined); }
+      catch { return { kind: 'PENDING' } as const; }
       try { const after = transferOutcome(await deps.load(t.flow, t.runId), t); return after.kind === 'UNSIGNED' ? { kind: 'PENDING' } as const : after; }
       catch { return { kind: 'PENDING' } as const; }
     }));

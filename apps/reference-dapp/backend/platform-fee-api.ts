@@ -37,6 +37,8 @@ export type PlatformFeeApiDeps = {
   readonly load: (flow: string, runId: string) => Promise<unknown>;
   /** The server's own invalidation of an unsigned settlement transfer it created (reduces authority only). */
   readonly invalidate: (flow: string, runId: string) => Promise<FlowResult>;
+  /** The flow's own read-only observation of one transfer (chain reads; it never begins, signs or sends). */
+  readonly observe: (flow: string, runId: string) => Promise<FlowResult>;
 };
 
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, WORKFLOW_RUN_ID = /^wfr_[a-z2-7]{26}$/;
@@ -118,7 +120,7 @@ export function createPlatformFeeApi(deps: PlatformFeeApiDeps) {
       const report = await ledger.accruePlatformFees(db, tenantId, activation, { apply: true, limit: 200 });
       if (report.recorded || report.deferred) logger.info('platform_fee.accrued', { recorded: report.recorded, deferred: report.deferred });
     }
-    const reconciled = await settlement.reconcileSettlements(db, { env, load: deps.load, invalidate: (flow, _method, args) => deps.invalidate(flow, String(args[0])) }, tenantId);
+    const reconciled = await settlement.reconcileSettlements(db, { env, load: deps.load, invalidate: (flow, method, args) => method === 'observe' ? deps.observe(flow, String(args[0])) : deps.invalidate(flow, String(args[0])) }, tenantId);
     if (reconciled.collected || reconciled.failed) logger.info('platform_fee.reconciled', { collected: reconciled.collected, failed: reconciled.failed, pending: reconciled.pending });
   }
 

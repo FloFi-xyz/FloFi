@@ -77,6 +77,8 @@ export async function payEvmTransfer(wallet: EvmWallet, transfer: PlatformFeeTra
     const begin = unwrap(await transferBegin(record.id, session.account, workflow)); prepared = true;
     await validateSession();
     unwrap(await transferHandoff(record.id));
+    // As the transfer store: the session and provider are re-checked after the handoff, so a change is a refusal, never an unknown outcome.
+    await validateSession();
     diagnostic.invoked = true;
     const { from, to, value, data, chainId, gas, maxFeePerGas, maxPriorityFeePerGas } = begin.transaction;
     bindFloFiSigning(provider, signingContextOf(record.id, transfer.flow));
@@ -127,7 +129,9 @@ export async function paySolanaTransfer(session: SolanaSession | null, transfer:
     await solanaTransferWalletFailure('mainnet', record.id, { stage: 'SIGN', code: failure, error: bounded });
     throw new Error(failure, { cause });
   }
-  unwrap(await solanaTransferSubmit('mainnet', record.id, signed));
+  const submitted = unwrap(await solanaTransferSubmit('mainnet', record.id, signed)) as { notSubmitted?: boolean; verdict?: string; error?: string | null };
+  // Accepted by the API but not executed (changed bytes, expired Review, fee payer refusal): said, never shown as paid.
+  if (submitted.notSubmitted === true || submitted.verdict === 'NOT_EXECUTED') throw new Error(submitted.error && /^[A-Z][A-Z0-9_]{2,80}$/.test(submitted.error) ? submitted.error : 'SOLANA_TRANSFER_NOT_EXECUTED');
 }
 
 export type PlatformFeeSettlement = {
@@ -143,7 +147,8 @@ export function usePlatformFeeSettlement(execution: PlatformFeeExecution | null,
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const read = useCallback(async (): Promise<PlatformFeeStatus | null> => {
     if (!key) return null;
-    const result = await platformFeeStatus(JSON.parse(key)).catch(() => null);
+    let result = await platformFeeStatus(JSON.parse(key)).catch(() => null);
+    if (result && !result.ok && result.code === 'PLATFORM_FEE_EXECUTION_NOT_FOUND') result = await platformFeeStatus(JSON.parse(key), 'solana').catch(() => null);
     const value = result?.ok ? result.value : null;
     if (value && mounted.current) setStatus(value);
     return value;
@@ -154,8 +159,8 @@ export function usePlatformFeeSettlement(execution: PlatformFeeExecution | null,
     try {
       const ref = JSON.parse(key) as PlatformFeeExecution;
       let opened = await platformFeeSettle(ref);
-      // A workflow paid from the other namespace's wallet: the same request as that wallet's session.
-      if (!opened.ok && opened.code === 'PLATFORM_FEE_SETTLEMENT_OTHER_WALLET') opened = await platformFeeSettle(ref, 'solana');
+      // A Solana execution, or a workflow paid from the other namespace's wallet: the same request as the Solana session.
+      if (!opened.ok && (opened.code === 'PLATFORM_FEE_SETTLEMENT_OTHER_WALLET' || opened.code === 'PLATFORM_FEE_EXECUTION_NOT_FOUND')) opened = await platformFeeSettle(ref, 'solana');
       const settlement = unwrap(opened);
       for (const transfer of settlement.transfers) {
         if (transfer.chainId.startsWith('solana:')) await paySolanaTransfer(latest.current.jupiter?.session ?? null, transfer);

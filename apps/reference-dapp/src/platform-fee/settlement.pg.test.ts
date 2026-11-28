@@ -77,10 +77,11 @@ function transferFlows() {
     const record = records.get(String(args[0]));
     if (!record) return { ok: false, code: 'TRANSFER_RUN_MISSING' };
     if (method === 'review') { record.authorization = (record.review as { commitment: string }).commitment; return { ok: true, value: record }; }
-    if (method === 'invalidate') {
+    // As the transfer flows: `invalidate` only unbinds the Review; `observe` cancels a PREPARED attempt it proves unsent.
+    if (method === 'invalidate') { record.authorization = null; return { ok: true, value: record }; }
+    if (method === 'observe') {
       const attempt = record.attempt as { state: string } | null;
-      if (!attempt || attempt.state === 'PREPARED') record.attempt = { state: 'CANCELLED', transactionHash: null, reconciled: false };
-      record.authorization = null;
+      if (attempt?.state === 'PREPARED') Object.assign(record, { notSubmitted: true, attempt: { state: 'CANCELLED', transactionHash: null, reconciled: false } });
       return { ok: true, value: record };
     }
     return { ok: false, code: 'METHOD_NOT_FAKED' };
@@ -222,8 +223,8 @@ describe('fee collection (§3.1/§3.6/§3.7)', () => {
     expect((await ledger(runId))!.collection).toMatchObject({ attempt: 2 });
     expect(await reconcileSettlements(db, deps, 'default')).toMatchObject({ pending: 1 });
     expect(await reconcileSettlements(db, { ...deps, now: () => new Date(Date.now() + SETTLEMENT_UNSIGNED_TTL_MS + 60_000) }, 'default')).toMatchObject({ failed: 1 });
-    expect(flows.records.get(second.transfers[0]!.runId)).toMatchObject({ authorization: null, attempt: { state: 'CANCELLED' } });
-    expect(await ledger(runId)).toMatchObject({ state: 'COLLECTION_FAILED', collection: { code: 'PLATFORM_FEE_SETTLEMENT_CANCELLED' } });
+    expect(flows.records.get(second.transfers[0]!.runId)).toMatchObject({ authorization: null, attempt: null });
+    expect(await ledger(runId)).toMatchObject({ state: 'COLLECTION_FAILED', collection: { code: 'PLATFORM_FEE_SETTLEMENT_UNSIGNED_EXPIRED' } });
     const third = await startSettlement(db, { env: ENV, ...flows }, 'default', { runId }, owner);
     if (!third.ok) throw new Error(third.code);
     flows.settle(third.transfers[0]!.runId, 'RECONCILED');
