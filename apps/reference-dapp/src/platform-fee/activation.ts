@@ -25,6 +25,14 @@ const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/;
 const realInstant = (raw: string, date: Date) => Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === raw.slice(0, 10);
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const APPROVAL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/;
+const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+/** Decoded byte length of a base58 string (a Solana public key is exactly 32 bytes; base58 itself has no checksum). */
+function base58Length(text: string): number {
+  let value = 0n;
+  for (const char of text) value = value * 58n + BigInt(ALPHABET.indexOf(char));
+  let bytes = 0; while (value > 0n) { value >>= 8n; bytes++; }
+  return bytes + (text.match(/^1*/)?.[0].length ?? 0);
+}
 
 export function platformFeeActivation(env: Env): FeeActivation {
   const raw = env.FLOFI_PLATFORM_FEE_ACCOUNTING_FROM?.trim();
@@ -42,15 +50,17 @@ export function platformFeeActivation(env: Env): FeeActivation {
  * The first environment condition that keeps collection off, or null when every one is met (F17: a missing or invalid treasury can never collect).
  * The database condition (0038 present) is checked by the collector itself.
  */
-export function collectionBlocker(env: Env): string | null {
+export function collectionBlocker(env: Env, now = Date.now()): string | null {
   const raw = env.FLOFI_PLATFORM_FEE_ACCOUNTING_FROM?.trim(), from = raw && ISO.test(raw) ? new Date(raw) : null;
   if (!from || !realInstant(raw!, from)) return 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED';
+  // Before accounting starts nothing is accounted: no Review may say the fee is charged yet.
+  if (Math.max(from.getTime(), PLATFORM_FEE_POLICY_EFFECTIVE_FROM.getTime()) > now) return 'PLATFORM_FEE_ACCOUNTING_NOT_STARTED';
   if ((env.FLOFI_PLATFORM_FEE_COLLECTION ?? 'off').trim() !== 'on') return 'PLATFORM_FEE_COLLECTION_DISABLED';
   const evm = env.FLOFI_PLATFORM_FEE_TREASURY_EVM?.trim(), solana = env.FLOFI_PLATFORM_FEE_TREASURY_SOLANA?.trim();
   if (!evm || !solana) return 'PLATFORM_FEE_TREASURY_NOT_CONFIGURED';
   // A treasury must be exactly checksummed (EVM) or canonical base58 (Solana): never lower-cased, padded or guessed. The System Program id and
   // the zero address are never a treasury.
-  if (!/^0x[0-9a-fA-F]{40}$/.test(evm) || !isChecksumAddress(evm) || /^0x0{40}$/i.test(evm) || !BASE58.test(solana) || /^1{32}$/.test(solana)) return 'PLATFORM_FEE_TREASURY_INVALID';
+  if (!/^0x[0-9a-fA-F]{40}$/.test(evm) || !isChecksumAddress(evm) || /^0x0{40}$/i.test(evm) || !BASE58.test(solana) || /^1{32}$/.test(solana) || base58Length(solana) !== 32) return 'PLATFORM_FEE_TREASURY_INVALID';
   if (!APPROVAL.test(env.FLOFI_PLATFORM_FEE_POLICY_APPROVAL?.trim() ?? '')) return 'PLATFORM_FEE_POLICY_NOT_APPROVED';
   return null;
 }

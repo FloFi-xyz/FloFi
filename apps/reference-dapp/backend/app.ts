@@ -285,7 +285,8 @@ export function createBackend(options: BackendOptions) {
 
   // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the platform fee's authorized basis, owner status, collection start and worker pass.
   const platformFees = createPlatformFeeApi({ db: options.db, env, tenantId: options.tenantId, logger,
-    callFlow: (flow, method, args, principal, identity) => isFlowName(flow) ? callFlow(flow, method, args, options.tenantId, principal, identity as BetaRequestIdentity | null)
+    callFlow: (flow, method, args, principal, identity) => isFlowName(flow) ? callFlow(flow, method, args, options.tenantId, principal, identity as BetaRequestIdentity | null,
+      false, null, true)
       : Promise.resolve({ ok: false, code: 'FLOW_NOT_FOUND' }),
     load: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId, true).load(runId) : Promise.reject(new Error('FLOW_NOT_FOUND')),
     invalidate: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId).call('invalidate', [runId]).then(value => ({ ok: true as const, value }),
@@ -295,7 +296,7 @@ export function createBackend(options: BackendOptions) {
       () => ({ ok: false as const, code: 'PLATFORM_FEE_SETTLEMENT_OBSERVATION_FAILED' })) : Promise.resolve({ ok: false as const, code: 'FLOW_NOT_FOUND' }) });
 
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
-    betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: OriginContext | null = null): Promise<FlowResult> {
+    betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: OriginContext | null = null, feeCollector = false): Promise<FlowResult> {
     const refused = await betaMethodRefusal(tenantId, method, betaIdentity, principal);
     if (refused) return { ok: false, code: refused };
     const paused = isNewExecutionMethod(method) ? executionRefusal(env) : null;
@@ -312,6 +313,11 @@ export function createBackend(options: BackendOptions) {
     const runId = typeof args[0] === 'string' && definition.runId.test(args[0]) ? args[0] : undefined;
     const ownerRefusal = await betaFlowOwnerRefusal(flow, method, args, tenantId, principal, betaIdentity);
     if (ownerRefusal) return { ok: false, code: ownerRefusal };
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): a fee settlement transfer moves only inside the attempt the ledger opened.
+    if (/-mainnet-transfer$|^solana-transfer$/.test(flow)) {
+      const settlementCode = await platformFees.settlementRefusal(method, args, feeCollector);
+      if (settlementCode) return { ok: false, code: settlementCode };
+    }
     const ownership = definition.ownership;
     if (ownership) {
       try { await assertRunOwnership(ownership.policy, method, args, principal, async id => ownership.ownerOf(await service(flow, tenantId).load(id))); }
@@ -506,7 +512,8 @@ export function createBackend(options: BackendOptions) {
     try {
       const principal = indexPrincipal(request), identity = requestIdentity(request);
       const flowMatch = request.path.match(/^\/v1\/flows\/[a-z-]{1,40}\/([A-Za-z]{1,40})$/);
-      const recoveryPath = (flowMatch !== null && isFlightRecoveryMethod(flowMatch[1]!)) || request.path.startsWith('/v1/runs');
+      // An owner's read of a fee (and of an open collection) stays available like any run read.
+      const recoveryPath = (flowMatch !== null && isFlightRecoveryMethod(flowMatch[1]!)) || request.path.startsWith('/v1/runs') || request.path === '/v1/platform-fees/status';
       // Recovery surfaces need a live session only. Every other private route still rechecks the Flight grant.
       const checkAccess = () => recoveryPath
         ? betaSessionRefusal(options.tenantId, identity)

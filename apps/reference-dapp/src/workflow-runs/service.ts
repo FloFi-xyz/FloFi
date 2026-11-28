@@ -12,6 +12,7 @@
  *                    authorization plan. A requester sees step outcomes only when the owner shares status (the existing consent rule)
  */
 import { workflowFeeBasis } from '../platform-fee/principal';
+import { platformFeeActivation } from '../platform-fee/activation';
 import { externalOneStepPlan } from '../platform/external-single-step.ts';
 import { originOfRequester, type ExecutionOrigin } from './execution-origins.ts';
 import type { ApprovalRequesterKind, HandoffRecord, WalletRef } from '../platform/handoff-store.ts';
@@ -105,7 +106,9 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
   const now = deps.now();
   const run = await deps.store.create({ runId: deps.newId('wfr'), handoffId: h.handoffId, requester: { kind: h.requesterKind, ref: h.requesterRef }, owner, wallets: bound,
     strategy: workflow.strategy, workflowHash: workflow.workflowHash, engineVersion: ENGINE_VERSION, stepCount: workflow.steps.length,
-    expiresAt: new Date(now.getTime() + CONFIRM_RUN_SECONDS * 1000), ...runOrigin(deps, h), feeBasis: workflowFeeBasis(workflow) }, now);
+    expiresAt: new Date(now.getTime() + CONFIRM_RUN_SECONDS * 1000), ...runOrigin(deps, h),
+    // Recorded only while collection is active (the approval Review then showed the fee as charged): nothing authorized otherwise is collected.
+    ...platformFeeActivation(process.env).collection.active ? { feeBasis: workflowFeeBasis(workflow) } : {} }, now);
   assertRunWallets(run, wallets);
   return run;
 }

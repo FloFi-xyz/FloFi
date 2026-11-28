@@ -26,7 +26,7 @@ import { singleFlowFeeBasis } from './single-flow.ts';
 const NOW = new Date('2026-12-10T12:00:00.000Z'), DAY = 86_400_000, ago = (days: number) => new Date(NOW.getTime() - days * DAY);
 const OWNER = '0x' + 'ab'.repeat(20);
 const TREASURY_EVM = '0x8ba1f109551bD432803012645Ac136ddd64DBA72', TREASURY_SOLANA = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin';
-const ENV = { FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: ago(3).toISOString(), FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: TREASURY_EVM,
+const ENV = { FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: new Date(Date.now() - 3 * DAY).toISOString(), FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: TREASURY_EVM,
   FLOFI_PLATFORM_FEE_TREASURY_SOLANA: TREASURY_SOLANA, FLOFI_PLATFORM_FEE_POLICY_APPROVAL: 'FIN-2026-11-28' };
 const SWAP = { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'ETH', amount: '100', slippageBps: 100 };
 const BRIDGE = { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'robinhood', asset: 'ETH', amount: '0.04' };
@@ -70,13 +70,21 @@ function transferFlows() {
     if (method === 'simulate') {
       const workflow = args[0] as { nodes: { inputs: { name: string; value: unknown }[] }[] }, id = `ett-${(++n).toString(16).padStart(32, 'f')}`;
       const recipient = JSON.stringify(workflow).match(/0x[0-9a-f]{40}/g)!.find(a => a === TREASURY_EVM.toLowerCase());
-      const record = { id, review: { workflow, recipient, account: args[1], commitment: '0x' + '1'.repeat(64) }, authorization: null, attempt: null, verdict: 'PENDING' };
+      const record = { id, review: { workflow, recipient, account: args[1], commitment: '0x' + '1'.repeat(64), expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() },
+        authorization: null, attempt: null, verdict: 'PENDING' };
       records.set(id, record);
       return { ok: true, value: record };
     }
     const record = records.get(String(args[0]));
     if (!record) return { ok: false, code: 'TRANSFER_RUN_MISSING' };
     if (method === 'review') { record.authorization = (record.review as { commitment: string }).commitment; return { ok: true, value: record }; }
+    if (method === 'recoverReview') {
+      if (record.notSubmitted !== true) return { ok: false, code: 'TRANSFER_RECOVERY_NOT_ALLOWED' };
+      const next = `ett-${(++n).toString(16).padStart(32, 'f')}`;
+      const recovered = { ...structuredClone(record), id: next, recoveryOf: record.id, authorization: null, attempt: null, notSubmitted: undefined, verdict: 'PENDING' };
+      records.set(next, recovered);
+      return { ok: true, value: recovered };
+    }
     // As the transfer flows: `invalidate` only unbinds the Review; `observe` cancels a PREPARED attempt it proves unsent.
     if (method === 'invalidate') { record.authorization = null; return { ok: true, value: record }; }
     if (method === 'observe') {
@@ -128,7 +136,7 @@ describe('single-flow accounting and parent/child deduplication (§3.2/§3.3)', 
   });
 });
 
-async function workflowWithStep(childRunId: string): Promise<string> {
+async function workflowWithStep(childRunId: string, step1?: { readonly flow: string; readonly hash: string }): Promise<string> {
   const handoff = 'apr_' + b32(), id = 'wfr_' + b32();
   const strategy = { version: 2, steps: [SWAP, BRIDGE] }, w = compose(strategy);
   await db.query(`INSERT INTO mcp_handoffs (tenant_id, handoff_id, requester_kind, requester_id, requester_context, client_id, client_name, secret_digest, strategy,
@@ -142,10 +150,10 @@ async function workflowWithStep(childRunId: string): Promise<string> {
       $6, $7, $6, $6)`, [id, handoff, OWNER, JSON.stringify(strategy), w.workflowHash, ago(1), new Date(NOW.getTime() + DAY)]);
   const ETH = 'eip155:1/native:ETH';
   for (const [index, executionId] of [`ett-${tag()}`, childRunId].entries()) await db.query(`INSERT INTO workflow_run_steps (tenant_id, run_id, step_index, state, flow,
-      strategy, workflow_hash, outcome) VALUES ('default', $1, $2, 'RECONCILED', 'ethereum-swap', '{}', $3, $4)`, [id, index, w.workflowHash,
+      strategy, workflow_hash, outcome) VALUES ('default', $1, $2, 'RECONCILED', $5, '{}', $3, $4)`, [id, index, index && step1 ? step1.hash : w.workflowHash,
     { kind: 'OWNER_RUN', executionId, flow: index ? 'crosschain-universal' : 'ethereum-swap', status: 'RECONCILED', transactions: [],
       evidence: { environment: 'PUBLIC_MAINNET', outcome: 'RECONCILED', bundleHash: null }, spent: [], received: index ? [] : [{ asset: ETH, amount: '40000000000000000' }],
-      observedAt: ago(1).toISOString() }]);
+      observedAt: ago(1).toISOString() }, index && step1 ? step1.flow : 'ethereum-swap']);
   // The workflow's authorized basis: one fee for the swap's principal; the bridge spends what the swap delivered.
   expect(workflowFeeBasis(w).lines).toEqual([{ ...USDC, principal: '100000000', fee: '800000' }]);
   return id;
@@ -247,8 +255,19 @@ describe('fee collection (§3.1/§3.6/§3.7)', () => {
     expect(totals.byState.COLLECTED).toBe(2);
   });
 
+  it('a workflow step run not linked yet is never charged as a single flow; nothing authorized before activation is collected', async () => {
+    const flows = transferFlows(), record = reviewed(SWAP), runId = await due(SWAP);
+    const hash = semanticWorkflowHash(record.review.workflow as never);
+    // A step whose own run is this one, matched as the workflow observes it (same flow and reviewed workflow hash), linked to another id so far.
+    await workflowWithStep(`ett-${tag()}`, { flow: 'ethereum-swap', hash });
+    expect(await startSettlement(db, { env: ENV, ...flows }, 'default', { runId }, owner)).toEqual({ ok: false, code: 'PLATFORM_FEE_COVERED_BY_WORKFLOW' });
+    const later = { ...ENV, FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: new Date(Date.now() + 60_000).toISOString() };
+    expect(await startSettlement(db, { env: later, ...flows }, 'default', { runId }, owner)).toEqual({ ok: false, code: 'PLATFORM_FEE_ACCOUNTING_NOT_STARTED' });
+  });
+
   it('refuses another wallet, a test network row and a request for an execution without a ledger row', async () => {
-    const flows = transferFlows(), runId = await due();
+    // Another reviewed workflow than the step's above (an identical workflow of the same owner created after that step would be covered by it).
+    const flows = transferFlows(), runId = await due({ ...SWAP, amount: '101' });
     expect(await startSettlement(db, { env: ENV, ...flows }, 'default', { runId }, { namespace: 'solana', account: TREASURY_SOLANA }))
       .toEqual({ ok: false, code: 'PLATFORM_FEE_SETTLEMENT_OTHER_WALLET' });
     expect(await startSettlement(db, { env: ENV, ...flows }, 'default', { runId: 'ett-' + 'e'.repeat(32) }, owner)).toEqual({ ok: false, code: 'PLATFORM_FEE_NOT_DUE' });

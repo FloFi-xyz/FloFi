@@ -187,7 +187,7 @@ describe('platform fee ledger (schema 37)', () => {
   // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): collection is implemented now (settlement.ts), so activation can become
   // active once every condition holds; it still needs accounting first, and the database condition (0038) is checked by the collector.
   it('F17/F18: accounting needs an explicit start, collection needs every activation condition, and an unmigrated database accrues nothing', async () => {
-    const from = { FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: ago(3).toISOString() };
+    const from = { FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: new Date(Date.now() - 3 * DAY).toISOString() };
     expect(platformFeeActivation({}).accounting).toEqual({ active: false, from: null, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' });
     expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: 'tomorrow' }).accounting.code).toBe('PLATFORM_FEE_ACCOUNTING_FROM_INVALID');
     expect(platformFeeActivation({}).collection).toEqual({ active: false, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' });

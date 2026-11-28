@@ -184,7 +184,7 @@ async function accrueSingleFlows(db: Database, tenantId: string, activation: Fee
       if (!effective || !environment || !accountedExecution(activation, row.created_at)) continue;
       const outcome = singleFlowOutcome(effective.status, effective.has_evidence);
       if (!outcome) continue;
-      let state: LedgerState, reason: string | null = null, lines: readonly FeeLine[] = [];
+      let state: LedgerState, reason: string | null, lines: readonly FeeLine[] = [];
       if (outcome === 'WAIVED') { state = 'WAIVED'; reason = `EXECUTION_${effective.status}`; }
       else {
         let record: unknown;
@@ -243,7 +243,7 @@ export async function loadFeeTotals(db: Queryable, tenantId: string, period: { r
         d.fee += BigInt(line.fee); d.executions++; due.set(key, d); }
     }
     // Collected revenue is what the verified collection transactions moved (a settlement may collect less than the accrued line), never the line.
-    for (const t of row.state === 'COLLECTED' || row.state === 'COLLECTION_FAILED' ? row.collection?.transactions ?? [] : []) {
+    for (const t of row.collection?.transactions ?? []) {
       const key = `${t.chainId}|${t.address}|${t.decimals}`, c = collected.get(key) ?? { chainId: t.chainId, address: t.address, decimals: t.decimals, fee: 0n };
       c.fee += BigInt(t.amount); collected.set(key, c);
     }

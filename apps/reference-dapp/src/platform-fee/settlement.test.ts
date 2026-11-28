@@ -152,7 +152,10 @@ describe('settlement transfer outcome (§3.6)', () => {
     // The transfer flows record a revert with a DIVERGENT verdict: no asset moved, so it is retryable, never attention.
     expect(transferOutcome({ ...base, verdict: 'DIVERGENT', attempt: { state: 'REVERTED', transactionHash: hash } }, expected)).toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REVERTED' });
     // Invalidated before it was ever begun: it can never be signed, so it closes; a Smart Account refusal may still be relayed: attention.
-    expect(transferOutcome({ ...base, authorization: null }, expected)).toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_UNSIGNED_EXPIRED' });
+    const past = { ...base, review: { ...base.review, expiresAt: '2026-01-01T00:00:00.000Z' } };
+    expect(transferOutcome({ ...past, authorization: null }, expected)).toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_UNSIGNED_EXPIRED' });
+    // Before its Review's own deadline an unbound Review could be bound again: still open.
+    expect(transferOutcome({ ...base, authorization: null, review: { ...base.review, expiresAt: '2999-01-01T00:00:00.000Z' } }, expected)).toEqual({ kind: 'UNSIGNED' });
     expect(transferOutcome({ ...base, review: { ...base.review, state: { ownerDelegation: '0x' + '6'.repeat(40) } }, notSubmitted: true, attempt: { state: 'CANCELLED' } }, expected))
       .toEqual({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_REJECTED', attention: true });
     expect(transferOutcome({ ...base, verdict: 'NOT_EXECUTED' }, expected)).toMatchObject({ kind: 'FAILED', code: 'PLATFORM_FEE_SETTLEMENT_NOT_EXECUTED' });

@@ -20,21 +20,14 @@ const FEE_SENTENCES = [
 ] as const;
 
 describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
-  it('the Copilot bridge note says the 0.80% fee is recorded and not charged now, in both languages', () => {
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): the chat note no longer states a charging status of its own (collection can be
+  // active); it points to the Review, whose one fee line says whether the fee is charged.
+  it('the Copilot bridge note names the 0.80% fee and points to the Review, in both languages', () => {
     const en = COPILOT_COPY.EN.universalFundsNote('Base → Arbitrum One'), pt = COPILOT_COPY.PT.universalFundsNote('Base → Arbitrum One');
-    expect(en).toMatch(/0\.80% fee obligation/);
-    expect(en).not.toMatch(/0\.1%/);
-    expect(en).toMatch(/completed bridge/);
-    expect(en).toMatch(/not charged at this time/);
-    expect(pt).toMatch(/registra uma obrigação de taxa de 0,80%/);
-    expect(pt).not.toMatch(/0,1%/);
-    expect(pt).toMatch(/bridge concluída/);
-    expect(pt).toMatch(/não é cobrada neste momento/);
-    // Never the old contradiction: "FloFi does not charge a fee on this bridge".
-    expect(pt).not.toMatch(/não cobra taxa/);
-    expect(en).not.toMatch(/no fee|does not charge|doesn't charge/i);
+    expect(en).toMatch(/FloFi fee \(0\.80% of a completed workflow\)/);
+    expect(pt).toMatch(/taxa FloFi \(0,80% de um fluxo concluído\)/);
+    expect(`${en} ${pt}`).not.toMatch(/0[.,]1%|not charged|não é cobrada/);
   });
-
   it('every universal Review and panel fee sentence has Portuguese text with the same policy', () => {
     const product = source('../domain/simulation-presentation.ts') + source('../components/universal-bridge-panel.tsx');
     for (const sentence of FEE_SENTENCES) {

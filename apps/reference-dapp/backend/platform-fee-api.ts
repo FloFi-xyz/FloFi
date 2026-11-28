@@ -32,6 +32,7 @@ type FlowResult = { ok: true; value: unknown } | { ok: false; code: string };
 export type PlatformFeeApiDeps = {
   readonly db: Database; readonly env: Env; readonly tenantId: string; readonly logger: Logger;
   /** The API's own flow call as a given principal (same validation, ownership and refusal rules as any app request). */
+  /** The collector's own flow call as the owner (`internal`: the settlement guard lets the collector review and recover its own transfers). */
   readonly callFlow: (flow: string, method: string, args: readonly unknown[], principal: string | null, identity: unknown) => Promise<FlowResult>;
   /** A flow's durable record (read-only service). */
   readonly load: (flow: string, runId: string) => Promise<unknown>;
@@ -61,14 +62,20 @@ export function createPlatformFeeApi(deps: PlatformFeeApiDeps) {
     const runId = typeof (value as { id?: unknown } | null)?.id === 'string' ? (value as { id: string }).id : typeof args[0] === 'string' ? args[0] : null;
     if (!runId || !RUN_ID.test(runId)) return;
     try {
-      if (!await feeAuthorizationsActive(db)) return;
+      // Only while collection is active: the Review the owner saw then showed the fee as charged. Nothing authorized otherwise is ever collected.
+      if (!platformFeeActivation(env).collection.active || !await feeAuthorizationsActive(db)) return;
       const { settlement, singleFlow, strategy } = await loadEngine();
       const record = await deps.load(flow, runId), workflow = singleFlow.recordSemanticWorkflow(record);
       // A settlement transfer is never an execution of its own; a workflow step's run is covered by its workflow's authorization.
       if (!workflow || workflow.workflowId.startsWith(settlement.SETTLEMENT_WORKFLOW_PREFIX)) return;
+      const workflowHash = strategy.semanticWorkflowHash(workflow);
+      // A workflow step's own run (matched exactly as the workflow observes it: same flow and reviewed workflow hash) is covered by its workflow.
+      if ((await db.query(`SELECT 1 FROM workflow_run_steps s JOIN workflow_runs w ON w.tenant_id = s.tenant_id AND w.run_id = s.run_id
+        JOIN execution_runs r ON r.tenant_id = s.tenant_id AND r.run_id = $4 WHERE s.tenant_id = $1 AND s.flow = $2 AND s.workflow_hash = $3
+        AND (r.owner_account IS NULL OR w.wallets->>'eip155' = r.owner_account) AND w.created_at <= r.created_at LIMIT 1`, [tenant, flow, workflowHash, runId])).rowCount) return;
       const basis = singleFlow.singleFlowFeeBasis(record, { final: false, flow });
       await db.transaction(async tx => { await tx.query("SET LOCAL statement_timeout = '2000'");
-        await recordFeeAuthorization(tx, tenant, { runId }, basis, strategy.semanticWorkflowHash(workflow)); });
+        await recordFeeAuthorization(tx, tenant, { runId }, basis, workflowHash); });
     } catch { logger.warn('platform_fee.authorization_not_recorded', { flow, action: method, code: 'PLATFORM_FEE_AUTHORIZATION_NOT_RECORDED' }); }
   }
 
@@ -124,6 +131,23 @@ export function createPlatformFeeApi(deps: PlatformFeeApiDeps) {
     if (reconciled.collected || reconciled.failed) logger.info('platform_fee.reconciled', { collected: reconciled.collected, failed: reconciled.failed, pending: reconciled.pending });
   }
 
-  return { recordReviewedFee, status, settle, sweep };
+  /**
+   * A settlement transfer is driven only through the attempt the ledger opened: its Review, begin, handoff and recovery are refused on the generic flow
+   * route unless it is a transfer of an open attempt (`internal` calls are the collector's own). A client workflow may not take the reserved id.
+   */
+  async function settlementRefusal(method: string, args: readonly unknown[], internal: boolean): Promise<string | null> {
+    if (internal) return null;
+    const workflowId = (args[0] as { workflowId?: unknown } | null)?.workflowId;
+    if ((method === 'simulate' || method === 'prepare') && typeof workflowId === 'string' && workflowId.startsWith('flofi-fee-settlement.')) return 'WORKFLOW_ID_RESERVED';
+    if (!['review', 'begin', 'handoff', 'recoverReview'].includes(method) || typeof args[0] !== 'string' || !RUN_ID.test(args[0])) return null;
+    const run = (await db.query<{ workflow_id: string }>('SELECT workflow_id FROM execution_runs WHERE tenant_id = $1 AND run_id = $2', [tenantId, args[0]])).rows[0];
+    if (!run?.workflow_id.startsWith('flofi-fee-settlement.')) return null;
+    if (!await feeAuthorizationsActive(db)) return 'PLATFORM_FEE_SETTLEMENT_TRANSFER_CLOSED';
+    const open = await db.query(`SELECT 1 FROM platform_fee_ledger WHERE tenant_id = $1 AND state = 'COLLECTION_PENDING'
+      AND collection->'transfers' @> jsonb_build_array(jsonb_build_object('runId', $2::text))`, [tenantId, args[0]]);
+    return open.rowCount ? (method === 'begin' || method === 'handoff' ? null : 'PLATFORM_FEE_SETTLEMENT_TRANSFER_CLOSED') : 'PLATFORM_FEE_SETTLEMENT_TRANSFER_CLOSED';
+  }
+
+  return { recordReviewedFee, status, settle, sweep, settlementRefusal };
 }
 export type PlatformFeeApi = ReturnType<typeof createPlatformFeeApi>;
