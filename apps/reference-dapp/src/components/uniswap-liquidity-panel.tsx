@@ -3,6 +3,7 @@
 import { liquidityPositionActionLabel, requotedMessage, simulationError, uniswapPositionReviewLines } from '../domain/simulation-presentation';
 import { useOptionalUniswapPosition, useUniswapPosition } from '../state/uniswap-position-store';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createUniswapLiquidityNode, uniswapBandInput, uniswapLiquidityDetails, uniswapLiquidityInputOf, uniswapLiquidityProfileFor, UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE,
@@ -158,15 +159,20 @@ const messages: Record<string, string> = {
 };
 const message = (code: string | null | undefined) => !code ? null : walletNonceMessage(code) ?? messages[code] ?? null;
 /** An amount of one pool token in its own decimals (USDC and WETH on the testnet profiles; any catalog token on Robinhood Chain). */
-const tokenAmount = (token: Pick<UniswapTokenView, 'symbol' | 'decimals'>) => (units: string | null | undefined) => units ? `${formatTokenAmount(units, token.decimals)} ${token.symbol}` : '--';
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): amounts at six significant digits in the reader's separators, rounded by purpose
+// (a minimum down, a fee or a maximum up, anything else to the nearest, marked "≈"). Presentation only: the record keeps base units.
+const tokenAmount = (token: Pick<UniswapTokenView, 'symbol' | 'decimals'>, language: DisplayLanguage) => (units: string | null | undefined, rounding: DisplayRounding | 'exact' = 'nearest') => !units ? '--'
+  : rounding === 'exact' ? `${formatTokenAmount(units, token.decimals)} ${token.symbol}` : formatDisplayTokenAmount({ units, decimals: token.decimals }, { rounding, language, symbol: token.symbol, unavailable: '--' });
 const USDC_VIEW = { symbol: 'USDC', decimals: 6 }, WETH_VIEW = { symbol: 'WETH', decimals: 18 };
-const eth = (wei: string | null | undefined) => wei ? `${formatTokenAmount(wei, 18)} ETH` : 'not available';
+/** A network-fee ceiling in wei: rounded up, never below itself. */
+const eth = (wei: string | null | undefined, language: DisplayLanguage) => wei ? formatDisplayTokenAmount({ units: wei, decimals: 18 }, { rounding: 'up', language, symbol: 'ETH', unavailable: 'not available' }) : 'not available';
 const stepLabelOf = (token0: string, token1: string): Record<UniswapLiquidityStep, string> =>
   ({ APPROVE_TOKEN0: `Approve ${token0} (exact amount)`, APPROVE_TOKEN1: `Approve ${token1} (exact amount)`, MINT: 'Mint the position NFT' });
 const explorer = (hash: string, profile: { explorer: string }) => profile.explorer + 'tx/' + hash;
 
 export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
+  const lang: DisplayLanguage = language === 'PT' ? 'PT' : 'EN';
   const { state } = useWorkflow(), wallet = useBuild009Wallet(), lp = useUniswapLiquidity(), positionEngaged = Boolean(useOptionalUniswapPosition()?.engaged);
   const node = state.workflow.nodes.find(n => uniswapLiquidityDetails(n) || robinhoodLiquidityDetails(n)), fields = node ? uniswapLiquidityDetails(node) : null;
   const rhFields = node ? robinhoodLiquidityDetails(node) : null;
@@ -185,7 +191,7 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
   // BUILD-RH-002: a catalog network (real funds) names its pool's own tokens; the testnet profiles keep their USDC / WETH wording.
   // BUILD-BASE-001: every catalog network (Robinhood Chain, Base) by its own deployment; a mainnet position never falls back to a testnet profile.
   const { profile, network, realFunds, robinhood, evidenceSlug } = liquidityRunNetwork(r?.chainId ?? node?.chainId);
-  const t0 = r?.token0 ?? USDC_VIEW, t1 = r?.token1 ?? WETH_VIEW, amount0 = tokenAmount(t0), amount1 = tokenAmount(t1);
+  const t0 = r?.token0 ?? USDC_VIEW, t1 = r?.token1 ?? WETH_VIEW, amount0 = tokenAmount(t0, lang), amount1 = tokenAmount(t1, lang);
   const stepLabel = stepLabelOf(t0.symbol, t1.symbol);
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged (or attached) position operation is presented and executed by the position store, never as a deposit.
   if (positionEngaged) return <UniswapPositionPanel view={view}/>;
@@ -210,14 +216,14 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
       <dt>{tr("Current price")}</dt><dd>{tr(r.pool.price)}{tr(` ${t0.symbol} per ${t1.symbol} · tick `)}{tr(r.pool.tick)}</dd>
       <dt>{tr("Range")}</dt><dd>{tr(r.range.lowerPrice)}–{tr(r.range.upperPrice)}{tr(` ${t0.symbol} per ${t1.symbol} · exact ticks `)}{tr(r.range.tickLower)}{tr(" to ")}{tr(r.range.tickUpper)} · {tr(r.range.state.toLowerCase().replace('_', ' '))}</dd>
       <dd>{tr(r.range.description)}</dd>
-      <dt>{tr("Maximum inputs")}</dt><dd>{tr(amount0(r.intent.amount0Max))} · {tr(amount1(r.intent.amount1Max))}</dd>
+      <dt>{tr("Maximum inputs")}</dt><dd>{tr(amount0(r.intent.amount0Max, 'up'))} · {tr(amount1(r.intent.amount1Max, 'up'))}</dd>
       <dt>{tr("Expected deposit")}</dt><dd>{tr(amount0(r.expected.amount0))} + {tr(amount1(r.expected.amount1))}{tr(" · liquidity ")}{tr(r.expected.liquidity)}{tr(" (public simulation, not executed)")}</dd>
-      <dt>{tr("Minimum deposit")}</dt><dd>{tr(amount0(r.minimums.amount0Min))} + {tr(amount1(r.minimums.amount1Min))} ({tr(r.intent.slippageBps)}{tr(" bps); otherwise the mint reverts")}</dd>
-      <dt>{tr("Approvals")}</dt><dd>{r.approvals.length ? r.approvals.map(a => <span key={a.step}>{tr(a.symbol)}: {tr(a.required ? `exactly ${a.step === 'APPROVE_TOKEN0' ? amount0(a.amount) : amount1(a.amount)} to the Position Manager` : 'existing allowance is sufficient')}. </span>) : 'none'}</dd>
+      <dt>{tr("Minimum deposit")}</dt><dd>{tr(amount0(r.minimums.amount0Min, 'down'))} + {tr(amount1(r.minimums.amount1Min, 'down'))} ({tr(r.intent.slippageBps)}{tr(" bps); otherwise the mint reverts")}</dd>
+      <dt>{tr("Approvals")}</dt><dd>{r.approvals.length ? r.approvals.map(a => <span key={a.step}>{tr(a.symbol)}: {tr(a.required ? `exactly ${a.step === 'APPROVE_TOKEN0' ? amount0(a.amount, 'exact') : amount1(a.amount, 'exact')} to the Position Manager` : 'existing allowance is sufficient')}. </span>) : 'none'}</dd>
       <dt>{tr("Position Manager")}</dt><dd><code>{tr(r.contracts.positionManager)}</code></dd>
       <dt>{tr("Position NFT recipient")}</dt><dd>{tr(r.recipient)}{tr(" (your wallet)")}</dd>
       <dt>{tr("Deadline")}</dt><dd>{tr(new Date(Number(r.deadline) * 1000).toISOString())}{tr(" · Review valid ")}{tr(fresh > 0 ? `for ${fresh}s` : 'no longer — refresh')}</dd>
-      <dt>{tr("Estimated network fees")}</dt><dd>{tr("at most ")}{tr(eth(r.fees.totalUpperBoundWei ?? r.fees.executionFeeUpperBoundWei))}{tr(" for ")}{tr(r.calls.length)}{tr(" transaction")}{tr(r.calls.length > 1 ? 's' : '')}{tr(r.fees.l1FeeUpperBoundWei === null ? ' (L1 data fee not estimated)' : '')}</dd>
+      <dt>{tr("Estimated network fees")}</dt><dd>{tr("at most ")}{tr(eth(r.fees.totalUpperBoundWei ?? r.fees.executionFeeUpperBoundWei, lang))}{tr(" for ")}{tr(r.calls.length)}{tr(" transaction")}{tr(r.calls.length > 1 ? 's' : '')}{tr(r.fees.l1FeeUpperBoundWei === null ? ' (L1 data fee not estimated)' : '')}</dd>
       <dt>{tr("Wallet requests")}</dt><dd>{tr(r.calls.map(c => stepLabel[c.step]).join(' → '))}{tr(" — each needs its own Execute click and wallet signature")}</dd>
       <dt>{tr("Simulation")}</dt><dd>{tr(r.simulation.method)}{tr(" of the exact sequence at block ")}{tr(r.simulation.block)}{tr("; independent estimate ")}{tr(r.simulation.localEstimate.liquidity)}{tr(" liquidity")}</dd>
     </dl>}
@@ -234,7 +240,7 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
         {a.transactionHash && <> · <a href={explorer(a.replacementHash ?? a.transactionHash, profile)} target="_blank" rel="noreferrer">{tr("view transaction")}</a></>}{tr(a.note ? ` · ${message(a.note) ?? a.note}` : '')}</li>)}</ol>}
       {record.evidence && record.position && <section aria-label={tr("Liquidity result")} className="swap-result"><h3>{tr("Position created")}</h3>
         <p>{tr("Position NFT #")}{tr(record.position.tokenId)}{tr(" is owned by your wallet ")}{tr(record.position.owner)}{tr(". Deposited ")}{tr(amount0(record.position.amount0))}{tr(" and ")}{tr(amount1(record.position.amount1))}{tr("; liquidity ")}{tr(record.position.liquidity)}{tr("; ticks ")}{tr(record.position.tickLower)}{tr(" to ")}{tr(record.position.tickUpper)}{tr(". Independently reconciled.")}</p>
-        <p>{tr("Remaining allowances to the Position Manager: ")}{tr(amount0(record.evidence.residualAllowances.token0))} · {tr(amount1(record.evidence.residualAllowances.token1))}.</p>
+        <p>{tr("Remaining allowances to the Position Manager: ")}{tr(amount0(record.evidence.residualAllowances.token0, 'up'))} · {tr(amount1(record.evidence.residualAllowances.token1, 'up'))}.</p>
         <p>{tr("Evidence: ")}{tr(record.evidence.evidenceClass)}{tr(" · bundle ")}{record.evidence.bundleHash}</p>
         <a download={`flofi-${evidenceSlug}-liquidity-evidence.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></section>}
       {record.attempts.length > 0 && !record.evidence && <a download={`flofi-${evidenceSlug}-liquidity-execution-record.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record, null, 2))}>{tr("Download execution record")}</a>}

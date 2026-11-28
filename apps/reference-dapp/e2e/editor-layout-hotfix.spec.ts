@@ -12,7 +12,7 @@
  */
 import type { Page, TestInfo } from '@playwright/test';
 import { test, expect, installPassiveWallet, sendChatCommand } from './fixtures';
-import { editorSectionAction, openBuilder, openEditorSection, type EditorSection } from './build-entry-navigation';
+import { editorSectionAction, openBuilder, openEditorSection, showMobilePane, type EditorSection } from './build-entry-navigation';
 
 const VIEWPORTS = [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 768, height: 1024 }, { width: 375, height: 812 }] as const;
 /** The smallest rendered card width the read-only graph may show (a Simulate card is 224 px at 1×). */
@@ -49,7 +49,9 @@ async function chooseFromSettings(page: Page, control: RegExp) {
 async function usePortuguese(page: Page) {
   await chooseFromSettings(page, /^(Language|Idioma)$/);
   await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toMatch(/^pt/);
-  // The Canvas head names the workflow (its default name is "Meu fluxo" in Portuguese; the Build head is its rename button).
+  // The Canvas head names the workflow (its default name is "Meu fluxo" in Portuguese; the Build head is its rename button). On a phone it is
+  // in the Plan pane (E11, A10).
+  await showMobilePane(page, 'plan');
   await expect(page.getByRole('heading', { name: /(Meu fluxo|Your Workflow)$/ }).first()).toBeVisible();
 }
 async function useTheme(page: Page, theme: 'light' | 'dark') {
@@ -68,9 +70,20 @@ async function assertSection(page: Page, section: EditorSection, width: number, 
     // One column inside <main> (the stage); the Assistant is the stage's sibling, beside it above 1280 px, below it otherwise.
     const grid = page.locator(section === 'Simulate' ? '.simulate-workspace-grid' : '.execute-workspace-grid');
     expect((await grid.evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
-    const chat = (await page.locator('.stage-with-chat > .copilot').boundingBox())!, stage = (await page.locator('.stage-with-chat > .main').boundingBox())!;
-    expect(chat.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));
-    if (width > 1280) expect(chat.x).toBeGreaterThanOrEqual(stage.x + stage.width - 1); else expect(chat.y).toBeGreaterThanOrEqual(stage.y + stage.height - 1);
+    if (width > 800) {
+      const chat = (await page.locator('.stage-with-chat > .copilot').boundingBox())!, stage = (await page.locator('.stage-with-chat > .main').boundingBox())!;
+      expect(chat.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));
+      if (width > 1280) expect(chat.x).toBeGreaterThanOrEqual(stage.x + stage.width - 1); else expect(chat.y).toBeGreaterThanOrEqual(stage.y + stage.height - 1);
+    } else {
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10, intentional): up to 800 px the Assistant is the Conversation pane of the
+      // Plan / Conversation switch — never stacked below a tall stage. The Plan (the stage) is shown; the Assistant is its own full-width pane.
+      await expect(page.locator('.stage-with-chat > .copilot')).toBeHidden();
+      await showMobilePane(page, 'conversation');
+      const chat = (await page.locator('.stage-with-chat > .copilot').boundingBox())!;
+      expect(chat.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));
+      await expect(page.locator('.stage-with-chat > .main .simulate-flow-surface')).toBeHidden();
+      await showMobilePane(page, 'plan');
+    }
     // Every card is fully inside the graph at a readable size.
     const surface = (await page.locator('.simulate-flow-surface').boundingBox())!;
     for (const box of await cards.evaluateAll(nodes => nodes.map(node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }))) {

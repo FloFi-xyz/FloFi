@@ -236,3 +236,16 @@ describe('chat answers carry a presentational variant', () => {
     expect(desktop).not.toMatch(/\.chat-action[^{]*\{[^}]*(?:min-)?height/);
   });
 });
+
+/** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): a chat change's confirmation offers "View in plan" for its card, in the interface language. */
+describe('P1-03: "View in plan" on a chat change', () => {
+  const page = (language: 'EN' | 'PT', messages: ChatMessage[]) => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language,
+    children: createElement(CopilotPanel, { conversation: conversation(true, messages), showStep: vi.fn() }) }));
+  it('is shown only on a message that names its step', () => {
+    const change: ChatMessage = { id: 1, role: 'flofi', language: 'EN', text: 'Swap: 10 → 5 USDC.', focus: 'node-002' };
+    expect(page('EN', [change])).toContain('>View in plan</button>');
+    expect(page('PT', [change])).toContain('>Ver no plano</button>');
+    const { focus: _focus, ...plain } = change; void _focus;
+    expect(page('EN', [plain])).not.toContain('View in plan');
+  });
+});

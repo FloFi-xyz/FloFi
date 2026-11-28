@@ -11,6 +11,14 @@ export type AllowanceObservation = {
 };
 /** The bridge services' code for a verified delivery that waits only for the source and destination safe blocks. */
 const FINALITY_WAIT = /^(UNIVERSAL|ROUTER)_AWAITING_FINALITY$/;
+/** The finality wait in plain words (§9.2): delivery found, network finality pending, nothing for the owner to do. */
+export const DESTINATION_FINALITY_MESSAGE = 'A delivery was found on the destination network and is waiting for network finality. This wait is network finality, not a FloFi delay. FloFi checks it again automatically; no action or signature is needed.';
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): the recorded observation says the verified delivery waits only for network finality (the
+ * bridge services' own code). Wording only: it never decides completion, which stays with reconciliation.
+ */
+export const awaitsNetworkFinality = (observation: FinancialObservation | null | undefined) =>
+  observation?.outcome === 'DESTINATION_OBSERVED' && FINALITY_WAIT.test(observation.reason);
 export function financialObservationMessage(observation: FinancialObservation): string {
   switch (observation.outcome) {
     case 'APPROVAL_CONFIRMED': return 'The token approval is confirmed. Approval does not transfer your tokens. The source deposit needs its own wallet request.';
@@ -19,7 +27,7 @@ export function financialObservationMessage(observation: FinancialObservation): 
     // A delivery that only awaits each network's safe block is network finality, not a FloFi delay: the worker reconciles it on its own as soon
     // as both blocks are final (`backend/reconcile-pacing.ts`), and every open page follows the durable record (`domain/settlement-sync.ts`).
     case 'DESTINATION_OBSERVED': return FINALITY_WAIT.test(observation.reason)
-      ? 'A delivery was found on the destination network and is waiting for network finality. This wait is network finality, not a FloFi delay. FloFi checks it again automatically; no action or signature is needed.'
+      ? DESTINATION_FINALITY_MESSAGE
       : 'A destination transfer was verified on-chain. Finality and full reconciliation are still pending.';
     case 'REFUND_OBSERVED': return 'A refund was verified on-chain. Review its actual amount and the known transaction costs.';
     case 'CONFIRMED': return 'The source transaction is confirmed. Destination delivery and the final result are checked separately.';

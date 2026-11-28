@@ -46,8 +46,9 @@ for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes
   await page.locator('#mock-prompt').fill('Por favor, ' + c.pt);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
-  // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
-  await expect(answer).toContainText('Interpreted as “' + c.sentence + '”');
+  // A09 (intentional): a Portuguese request is understood and answered in Portuguese, whatever the interface language (English here); the
+  // canonical sentence stays the exact grammar.
+  await expect(answer).toContainText('Interpretado como “' + c.sentence + '”');
   await expect(answer).toContainText(CHAT_COMMITTED);
   const composed = composeStrategy(c.strategy); expect(composed.ok).toBe(true); if (!composed.ok) throw Error(composed.code);
   expectWorkspaceMeaning(JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow, before, structuredClone(composed.workflow) as SemanticWorkflow);

@@ -11,7 +11,8 @@ import { isFlightRecoveryMethod, requireFlightMethodAccess, requireFlightProduct
 import { guardFlowExecution } from '../server/execution-guard';
 import { readDeveloperConfig } from '../developer/config';
 import { issuesWalletRequest } from '../workflow-runs/external-step';
-import { surfaceOfPath, type ExecutionSurface } from '../workflow-runs/execution-origins';
+import { pageOfPath } from '../workflow-runs/action-page';
+import type { OriginContext } from '../workflow-runs/execution-origins';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
 // The record (with the account and request code it needs) loads on the first successful hosted simulation, never when an action module
@@ -55,11 +56,19 @@ export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
   const identity = !proven && !isFlightRecoveryMethod(method) && durableRuntime(env)
     ? await requireFlightProductAccess(env)
     : await requireFlightMethodAccess(method, proven ?? undefined, env);
-  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: where this server action was posted from, by the proxy's authoritative path (never a client field):
-  // a run the /app page creates records FloFi Web as its origin. Outside a request (tools, tests) there is no surface.
-  const surface = options?.surface !== undefined ? options.surface : await requestSurface();
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: where a creating call (simulate/prepare) came from, from server-held facts only (never a client field):
+  // the proxy's authoritative path, the Chat's verified initiation reference on the app page, the proven wallets on an approval page. Outside a
+  // request (tools, tests) there is no context; any other method needs none.
+  const surface = options?.surface !== undefined ? options.surface : CREATING.has(method) ? await requestOrigin(env) : null;
   return runtimeFlow<T>(flow, method, values, { ...options, principal, betaIdentity: identity, developerLive, surface });
 }
-async function requestSurface(): Promise<ExecutionSurface | null> {
-  try { const { headers } = await import('next/headers'); return surfaceOfPath((await headers()).get('x-flofi-pathname')); } catch { return null; }
+const CREATING: ReadonlySet<string> = new Set(['simulate', 'prepare']);
+async function requestOrigin(env: Readonly<Record<string, string | undefined>>): Promise<OriginContext | null> {
+  try {
+    const { headers } = await import('next/headers');
+    const page = pageOfPath((await headers()).get('x-flofi-pathname'));
+    if (page === 'APP') return { surface: await (await import('../server/chat-initiation')).requestWebSurface(env) };
+    if (page === 'APPROVAL') return { surface: 'APPROVAL_PAGE', wallets: await (await import('../server/session-principal')).currentWalletPrincipals() };
+    return null;
+  } catch { return null; }
 }

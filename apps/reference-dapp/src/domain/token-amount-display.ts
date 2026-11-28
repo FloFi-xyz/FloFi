@@ -197,3 +197,12 @@ export function displayAmountExpression(value: string, options: Omit<DisplayToke
   return { text: marked + shown.map(p => p.text).join(' + '), exactText: prefix + shown.map(p => p.exactText).join(' + '),
     exact: prefix + pieces.join(' + '), approximate: shown.some(p => p.approximate) };
 }
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): a movement's amount with its direction sign, for a history row ("≈ −0.0579238 ETH",
+ * "+25 USDC"). `shown` is the unmarked presentation (`marker: false`); one "≈" goes before the sign when it is shortened. The exact signed value
+ * is the disclosure's text and the exact unsigned amount with its symbol the copied one. Presentation only.
+ */
+export function signedAmountExpression(shown: DisplayTokenAmount, sign: '+' | '−' | '', symbol: string | null): DisplayAmountExpression {
+  return { text: `${shown.approximate ? '≈ ' : ''}${sign}${shown.text}`, exactText: `${sign}${shown.exactText}`, exact: `${shown.exact}${symbol ? ` ${symbol}` : ''}`,
+    approximate: shown.approximate };
+}

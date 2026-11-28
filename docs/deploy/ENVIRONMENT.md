@@ -65,7 +65,7 @@ This build configures no production variables, issues no live developer credenti
 
 | Variable | Purpose | Secret | Where | Dev | CI | Preview | Prod | Default / when missing |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `FLOFI_SESSION_SECRET` | MAC key for the HttpOnly EIP-4361 session cookies (≥ 32 chars, `openssl rand -hex 32`). Rotating it signs every wallet out; no funds or runs are affected. | **yes** | Vercel | optional | tests | **required** (unless `API_AUTH_TOKEN` is set) | optional (`API_AUTH_TOKEN` is used) | local: a per-process key; hosted: `WALLET_SESSION_NOT_CONFIGURED` |
+| `FLOFI_SESSION_SECRET` | MAC key for the HttpOnly EIP-4361 session cookies (≥ 32 chars, `openssl rand -hex 32`). Rotating it signs every wallet out; no funds or runs are affected. It also keys (HKDF, own purpose) the web Chat's 15-minute initiation references (RELEASE-REVENUE-ORIGINS-0037.md §2b): rotation only makes Chat executions in flight record as Web Editor. | **yes** | Vercel | optional | tests | **required** (unless `API_AUTH_TOKEN` is set) | optional (`API_AUTH_TOKEN` is used) | local: a per-process key; hosted: `WALLET_SESSION_NOT_CONFIGURED` |
 
 Sessions are bound to the host that issued them, so Production and every Preview reject each other's cookies even with a shared key.
 

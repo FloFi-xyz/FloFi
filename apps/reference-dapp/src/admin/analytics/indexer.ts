@@ -13,7 +13,7 @@
  * written with updated_at = created_at and only moves updated_at forward, so every run created (or composition grown) since `from` was
  * updated since then; the hour of slack absorbs transaction-start skew between concurrent writers.
  */
-import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { COMPOSITION_FLOWS } from './classify.ts';
 import { lastRecordLine, recordFacts } from './actions.ts';
 
@@ -30,7 +30,7 @@ const CANDIDATES = `FROM execution_runs r LEFT JOIN admin_run_facts f ON f.tenan
       AND a.state NOT IN ('PREPARED', 'CANCELLED')))
     AND (f.run_id IS NULL OR f.indexer_version < $4 OR (r.flow = ANY($5::text[]) AND f.indexed_log_version < r.log_version))`;
 
-async function readRecord(db: Database, tenantId: string, namespace: string, name: string): Promise<unknown> {
+export async function readRunRecord(db: Queryable, tenantId: string, namespace: string, name: string): Promise<unknown> {
   const last = await db.query<{ bytes: Buffer }>(`SELECT bytes FROM execution_log_segments WHERE tenant_id = $1 AND namespace = $2 AND name = $3
     ORDER BY seq DESC LIMIT 1`, [tenantId, namespace, name]);
   if (!last.rows[0]) throw new Error('RUN_LOG_MISSING');
@@ -51,7 +51,7 @@ export async function indexRunFacts(db: Database, tenantId: string, options: Ind
   for (const run of rows) {
     if (now() - started > options.budgetMs) { budgetExhausted = true; break; }
     let facts: ReturnType<typeof recordFacts>;
-    try { facts = recordFacts(run.flow, await readRecord(db, tenantId, run.namespace, run.log_name)); }
+    try { facts = recordFacts(run.flow, await readRunRecord(db, tenantId, run.namespace, run.log_name)); }
     catch (error) { facts = { ok: false, code: error instanceof Error && /^RUN_[A-Z_]+$/.test(error.message) ? error.message : 'RUN_RECORD_UNREADABLE' }; }
     await db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state, code, actions, skipped_nodes)
         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)

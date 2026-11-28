@@ -14,13 +14,14 @@ import { CopilotAutomationManager } from './copilot-automation-manager';
 import { AmountShortcuts } from './amount-shortcuts';
 import type { AwaitingAmount } from '../domain/amount-shortcuts';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
+import { focusCanvasStep } from './editor-overview-panel';
 
 /**
  * The FloFi chat. BUILD-FLOFI-CONVERSATIONAL-001: presentation only — the conversation lives in the workspace shell (`useFlofiConversation`), so
  * this panel can render beside any stage without losing it. Suggested answers appear only on FloFi's latest message: an older button can never
  * answer a newer question.
  */
-export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false, placeholder = 'Ask or request a change', stageNote = null }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false, placeholder = 'Ask or request a change', stageNote = null, showStep }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
   /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (section 10): the composer's hint for the Editor stage (Create, Simulate or Execute). */
   placeholder?: string | undefined;
   /** A local hint for the stage (e.g. C2: the Review expired): shown beside the conversation, never sent, stored or added to it. */
@@ -33,7 +34,9 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
    */
   reviewInPanel?: boolean;
   /** BUILD-FLOFI-BUILDER-UX-002: the Editor's live workflow summary (Canvas only), above the unchanged conversation and composer. */
-  overview?: ReactNode }) {
+  overview?: ReactNode;
+  /** P1-03: selects a Canvas step and brings its card into view (the plan's "Show step"); default: the Canvas focus event alone. */
+  showStep?: ((nodeId: string) => void) | undefined }) {
   const { t: tr, language } = useLocale();
   const { copilot, messages, busy, input, setInput, send } = conversation;
   const log = useFollowLatest(copilot.enabled || conversation.direct, messages.length, busy);
@@ -70,6 +73,8 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
         {(message.role === 'you' || showLabels) && <small className="sr-only">{tr(message.role === 'you' ? 'YOU' : message.role === 'flofi' || message.role === 'system' && !copilot.enabled ? 'FLOFI' : copilotLabel(message.role, copilot.mode))}</small>}
         {message.role === 'ai' || message.role === 'flofi' ? <>
           <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} link={message.link} verbatim={message.verbatim} disabled={busy} onPick={send}/>
+          {/* P1-03: the card this change is about, brought into view and focused (presentation only). */}
+          {message.focus && <button type="button" className="quiet chat-view-in-plan" onClick={() => (showStep ?? focusCanvasStep)(message.focus!)}>{tr('View in plan')}</button>}
           {message.review && !reviewInPanel && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
           {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}

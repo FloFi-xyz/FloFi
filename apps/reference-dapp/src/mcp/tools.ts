@@ -864,7 +864,10 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     const found = await findOwnedRun(ctx.runtime, ctx.principal.wallets, args.executionId);
     const view = await executionStatusView(ctx.runtime, found, args.executionId, accessBasis(ctx), { after: args.journalAfter, limit: args.journalLimit });
     return { ok: true, ...view, conversationState: executionState(view.lifecycle),
-      notes: ['FloFi\'s canonical durable state; a partner or agent display is only a projection of it.'] };
+      notes: ['FloFi\'s canonical durable state; a partner or agent display is only a projection of it.',
+        // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): the finality wait in words a host can quote (never a completion: see lifecycle.completed).
+        ...view.status === 'DESTINATION_OBSERVED' ? ['The bridge delivery was found on the destination network and is waiting for network finality and reconciliation. ' +
+          'FloFi checks it automatically; no action or signature is needed. It is not completed until lifecycle.completed is true.'] : []] };
   });
 
   register('get_evidence', 'Execution evidence', 'The reconciled Evidence Bundle of one FloFi execution with its own environment (MOCKED, TESTNET_EXECUTED, …) and outcome, ' +

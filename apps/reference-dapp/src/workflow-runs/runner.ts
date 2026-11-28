@@ -22,7 +22,7 @@
 import type { NetworkId, StrategySpec } from '../engine/strategy-spec';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { NETWORK_CHAINS } from '../engine/capability-catalog';
-import { boundAmount, boundStrategy } from '../engine/workflow-bindings';
+import { boundStrategy, consumption } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
 import type { DelegationStore, ExecutionRecord, StepRecord as DelegatedStepRecord } from '../delegation/pg-store.ts';
 import { evaluateGates, handoffFindings, type HandoffPolicy } from '../mcp/execution.ts';
@@ -127,10 +127,11 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
           const spent = facts.reduce((total, fact) => total + BigInt(fact.amount), 0n);
           return sum + (facts.length && spent < reserved ? spent : reserved);
         }, 0n);
-        const used = boundAmount(binding.cap, received > consumed ? received - consumed : 0n);
-        if (used <= 0n) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_NOTHING_RECEIVED');
         // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg pays exactly its amount, never less (a new Review is needed instead).
-        if (binding.exact && used < BigInt(binding.cap)) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
+        // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the binding's consumption mode (all, a share or a fixed amount of THIS delivery) is applied here.
+        const taken = consumption(binding, received, received > consumed ? received - consumed : 0n);
+        if (!taken.ok) return stopBefore(deps, run, steps, k, taken.code);
+        const used = taken.amount;
         strategy = boundStrategy(strategy, used, binding.asset.decimals, binding.inputAsset);
         resolutions.push({ amountFrom: binding.amountFrom, asset: binding.asset, cap: binding.cap, received: received.toString(), used: used.toString() });
       }

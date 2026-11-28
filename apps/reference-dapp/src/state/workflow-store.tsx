@@ -24,6 +24,8 @@ import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, t
 import { compositionWorkflow, fundingAllocations, sequenceCursor, sequenceOrder, stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 import { proveCompletions, SEQUENCE_RUN_STORAGE_KEY, storedCompletions, type StoredCompletion } from '../domain/sequence-restore';
 import { editorStorage, persistEditor, readPersistedEditor } from '../domain/editor-persistence';
+import { dependencyStates, heldDependencyIssue } from '../domain/dependency-consistency';
+import { knownLiveEstimate, useKnownEstimateVersion } from './build-estimate';
 import { publicStatus } from '../app/public-testnet-action';
 import { editorSingleRunRecord } from '../app/editor-workflow-execution-action';
 import { supplyStatus } from '../app/supply-action';
@@ -275,9 +277,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const batchRef = useRef({ setup: batchSetup, entries: batchEntries }); batchRef.current = { setup: batchSetup, entries: batchEntries };
   const clearBatchDrafts = useCallback(() => { setBatchSetupRaw(null); setBatchEntries({}); }, []);
   // The same gate every other unapplied Canvas draft uses: Simulate, Execute and saving wait while a Batch Payment draft exists.
-  const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs) || batchSetup !== null || Object.keys(batchDrafts).length > 0;
-  const incompleteRef = useRef(authoringIncomplete);
-  incompleteRef.current = authoringIncomplete;
+  const draftsIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs) || batchSetup !== null || Object.keys(batchDrafts).length > 0;
   // A public testnet swap's own chain selects the trusted context (Base Sepolia or Ethereum Sepolia); anything else keeps the initial one.
   const contextOf = useCallback((workflow: Workflow) => {
     const swapChain = workflow.nodes.find(n => n.actionType === 'asset.swap.exact-input' && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
@@ -310,7 +310,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     persistenceRead.current = true;
     const stored = readPersistedEditor(editorStorage());
     if (stored?.workflow) dispatchHistory({ type: 'RESTORE_PERSISTED_CANVAS', workflowId: stored.workflowId, workflow: stored.workflow,
-      layout: readCanvasLayout(stored.workflow as unknown as Workflow) });
+      layout: readCanvasLayout(stored.workflow as unknown as Workflow), ...stored.dependencyBases ? { dependencyBases: stored.dependencyBases } : {} });
     // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): a reload of a workflow the owner explicitly created — empty or already authored — stays
     // that new workflow (same identity; no recovered run of another workflow is brought onto it).
     else if (stored?.fresh) dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId: stored.workflowId });
@@ -320,7 +320,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   useLayoutEffect(() => {
     if (persistenceReady) delete document.documentElement.dataset.editorRestoring;
   }, [persistenceReady]);
-  useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow, newWorkflow); }, [persistCanvas, persistenceReady, state.workflow, newWorkflow]);
+  useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow, newWorkflow, state.dependencyBases); }, [persistCanvas, persistenceReady, state.workflow, state.dependencyBases, newWorkflow]);
   const moveCanvasNodes = useCallback((positions: Readonly<Record<string, { x: number; y: number }>>) => {
     // WS02: the Batch Payment card being set up is no step yet: where it is dragged is kept with it (the history moves steps only).
     setBatchSetupRaw(current => {
@@ -386,6 +386,32 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const [sequenceRun, setSequenceRun] = useState<{ readonly workflowId: string; readonly completed: readonly CompletedStep[] }>({ workflowId: '', completed: [] });
   const completed = useMemo(() => sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [],
     [sequenceRun, state.workflow, sequence]);
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A01/A07): a dependent amount set against an earlier step whose declaration changed since is not a
+  // consistent workflow: like an unapplied draft, it holds Simulate, Execute and saving back until the dependent step's amount is set again on the
+  // Canvas. A dependent amount above what the earlier step is estimated to deliver (ABOVE_UPSTREAM) holds them back only for a Batch Payment (exact
+  // amounts); any other consumer spends min(that amount, the delivery) — the reconciled one, or the earlier step's signed minimum inside one batch —
+  // never other wallet funds, as the Review says ("spends the smaller of …"). See `heldDependencyIssue`. An estimate that expired gives no verdict
+  // (the clock below re-reads at its expiry).
+  const knownEstimates = useKnownEstimateVersion();
+  const [clock, setClock] = useState(0);
+  const dependency = useMemo(() => {
+    let expiry: number | null = null;
+    const states = dependencyStates(state.workflow, sequence, state.dependencyBases, nodeId => {
+      const estimate = knownLiveEstimate(state.workflow, nodeId);
+      if (estimate) { const at = Date.parse(estimate.expiresAt); if (Number.isFinite(at) && (expiry === null || at < expiry)) expiry = at; }
+      return estimate;
+    }, completed);
+    return { issue: heldDependencyIssue(state.workflow, states), expiry };
+  }, [state.workflow, sequence, state.dependencyBases, completed, knownEstimates, clock]);
+  const dependencyIssue = dependency.issue;
+  useEffect(() => {
+    if (dependency.expiry === null) return;
+    const timer = setTimeout(() => setClock(value => value + 1), Math.min(Math.max(dependency.expiry - Date.now(), 0) + 50, 2_147_000_000));
+    return () => clearTimeout(timer);
+  }, [dependency.expiry]);
+  const authoringIncomplete = draftsIncomplete || dependencyIssue !== null;
+  const incompleteRef = useRef(authoringIncomplete);
+  incompleteRef.current = authoringIncomplete;
   // P0 hotfix (execution continuity): the cursor step is bound by the completions BEFORE it only, so a finished sequence keeps its last step exactly
   // as it executed (its reconciled record stays this workflow's final result instead of being retired as "Workflow changed").
   const position = useMemo(() => sequence ? sequenceCursor(sequence, completed) : null, [sequence, completed]);

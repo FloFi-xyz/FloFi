@@ -16,6 +16,8 @@ export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosyst
   readonly privacyNotice?: PrivacyNoticeChoice | 'UNANSWERED' | undefined;
   /** BUILD-FLOFI-UX-FIX-003: the deployment's learning tier (configuration, no database read), so Settings knows its rows at first paint. */
   readonly learningTier?: 'OFF' | 'SESSION' | 'ENABLED' | undefined;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): whether this deployment charges the FloFi fee (configuration only, no secret). */
+  readonly platformFeeCollection?: boolean | undefined;
   /**
    * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001: an opaque digest of the tenant and the signed-in FloFi account (`server/conversation-scope.ts`)
    * under which this tab keeps the FloFi chat; null or absent: no account session, the chat stays in memory only. Not authority for anything.

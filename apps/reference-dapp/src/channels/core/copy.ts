@@ -91,6 +91,8 @@ const RUN_EN: Readonly<Record<string, string>> = {
   PENDING: 'Waiting for chain observation and independent reconciliation. No verified execution receipt is available yet.',
   CONFIRMED: 'Transaction confirmed. Independent reconciliation is still pending.',
   RECONCILED: 'Checking reconciliation evidence. No verified execution receipt is available yet.',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (§9.2): a bridge delivery verified on the destination, waiting for network finality (never completed).
+  DESTINATION_OBSERVED: 'Delivery found on the destination network, waiting for network finality and reconciliation. FloFi checks it automatically; no action or signature is needed. No verified execution receipt is available yet.',
 };
 const RUN_PT: Readonly<Record<string, string>> = {
   SIMULATED: 'Simulação concluída (somente leitura). Aguardando sua revisão e autorização na carteira no FloFi.',
@@ -102,6 +104,7 @@ const RUN_PT: Readonly<Record<string, string>> = {
   PENDING: 'Aguardando observação na rede e reconciliação independente. Ainda não há recibo de execução verificado.',
   CONFIRMED: 'Transação confirmada. A reconciliação independente ainda está pendente.',
   RECONCILED: 'Verificando as evidências de reconciliação. Ainda não há recibo de execução verificado.',
+  DESTINATION_OBSERVED: 'Entrega encontrada na rede de destino, aguardando a confirmação definitiva da rede e a reconciliação. O FloFi verifica automaticamente; nenhuma ação ou assinatura é necessária. Ainda não há recibo de execução verificado.',
 };
 
 const EN = {
@@ -135,6 +138,8 @@ const EN = {
   run: (r: RunLine) => r.reconciled ? `Execution reconciled ✅ · evidence: ${r.evidenceEnvironment ?? 'unknown'} · outcome: ${r.evidenceOutcome ?? 'unknown'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nReceipt: ${r.receiptUrl}` : ''}`
     // A terminal run keeps its terminal sentence (never "continue"); the landed label only says what is confirmed onchain.
     : r.terminal ? `${r.landed ? `${r.landed}. ` : ''}Workflow ended without verified execution (${r.errorCode ?? r.status}). See FloFi for details.`
+    // §9.2: the finality wait is said as such, before what landed at the source (the delivery is already found on the destination).
+    : r.status === 'DESTINATION_OBSERVED' ? RUN_EN.DESTINATION_OBSERVED!
     : r.landed ? `${r.landed}. ${LANDED_EN[runLandedKind(r)!]}`
       : RUN_EN[r.status] ?? `Workflow status: ${r.status}. No verified execution receipt is available yet.`,
   loaded: 'Your proposal is loaded in FloFi for the connected wallet. Loading it does not authorize or submit a transaction. Check FloFi for the current workflow status.',
@@ -276,6 +281,7 @@ const PT: Copy = {
   runsUnknown: 'Alguns registros de execução desta proposta não puderam ser lidos agora, então o status deles é desconhecido — isso não é prova de que nada foi enviado. Envie ESTADO de novo em instantes.',
   run: r => r.reconciled ? `Execução reconciliada ✅ · evidência: ${r.evidenceEnvironment ?? 'desconhecida'} · resultado: ${r.evidenceOutcome ?? 'desconhecido'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nRecibo: ${r.receiptUrl}` : ''}`
     : r.terminal ? `${r.landed ? `${LANDED_LABELS_PT[r.landed] ?? r.landed}. ` : ''}Workflow terminou sem execução verificada (${r.errorCode ?? r.status}). Veja os detalhes no FloFi.`
+    : r.status === 'DESTINATION_OBSERVED' ? RUN_PT.DESTINATION_OBSERVED!
     : r.landed ? `${LANDED_LABELS_PT[r.landed] ?? r.landed}. ${LANDED_PT[runLandedKind(r)!]}`
       : RUN_PT[r.status] ?? `Estado do workflow: ${r.status}. Ainda não há recibo de execução verificado.`,
   loaded: 'Sua proposta foi carregada no FloFi para a carteira conectada. Carregá-la não autoriza nem envia uma transação. Confira o estado atual do workflow no FloFi.',

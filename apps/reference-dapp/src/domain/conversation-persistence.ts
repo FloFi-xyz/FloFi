@@ -57,8 +57,8 @@ export function mayHoldSecret(text: string): boolean {
 
 /** A message as history: its answer buttons and open question are not restored (the question it asked is no longer open). */
 export function historical(message: ChatMessage): ChatMessage {
-  const { options: _options, question: _question, awaitingAmount: _awaiting, variants, ...rest } = message;
-  void _options; void _question; void _awaiting;
+  const { options: _options, question: _question, awaitingAmount: _awaiting, focus: _focus, variants, ...rest } = message;
+  void _options; void _question; void _awaiting; void _focus;
   if (!variants) return rest;
   const content = (value: ChatContent): ChatContent => { const { options: _o, question: _q, ...kept } = value; void _o; void _q; return kept; };
   return { ...rest, variants: { EN: content(variants.EN), PT: content(variants.PT) } };
@@ -98,6 +98,7 @@ function storedMessage(value: unknown): ChatMessage | null {
   if (message.params !== undefined && !strings(message.params)) return null;
   if (message.language !== undefined && message.language !== 'EN' && message.language !== 'PT') return null;
   if (message.verbatim !== undefined && typeof message.verbatim !== 'boolean') return null;
+  if (message.fixedLanguage !== undefined && message.fixedLanguage !== true) return null;
   if (message.link !== undefined && (!message.link || typeof (message.link as { path?: unknown }).path !== 'string' || typeof (message.link as { label?: unknown }).label !== 'string')) return null;
   if (message.variants !== undefined) {
     const variants = message.variants as Record<string, unknown> | null;

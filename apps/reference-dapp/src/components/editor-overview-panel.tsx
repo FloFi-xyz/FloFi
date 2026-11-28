@@ -9,6 +9,15 @@ export const CANVAS_FOCUS_EVENT = 'flofi:canvas-focus';
 export function focusCanvasStep(nodeId: string) {
   window.dispatchEvent(new CustomEvent(CANVAS_FOCUS_EVENT, { detail: nodeId }));
 }
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): after FloFi applied a chat change, the Canvas marks the cards it added or edited for a moment
+ * (presentation only: nothing is selected, moved or edited). Outside a browser it does nothing.
+ */
+export const CANVAS_HIGHLIGHT_EVENT = 'flofi:canvas-highlight';
+export function highlightCanvasSteps(nodeIds: readonly string[]) {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof CustomEvent === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(CANVAS_HIGHLIGHT_EVENT, { detail: [...nodeIds] }));
+}
 
 /**
  * BUILD-FLOFI-BUILDER-UX-002 / P0 approved UX (board 04): the FloFi panel's plan of the workflow on the Canvas. With one step (or none) there is

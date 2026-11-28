@@ -4,7 +4,7 @@
  * script). Aggregate counts only, for the page's environment and the chosen period; what the figures leave out is said next to them, and a
  * read failure is a closed code, never an estimate. The counting and attribution rules are `admin/analytics/channels.ts`.
  */
-import { CHANNEL_LABELS, CHANNEL_PERIOD_LABELS, CHANNEL_PERIODS, CHANNELS, type ChannelCounts as Counts, type ChannelCountsResult,
+import { CHANNEL_LABELS, CHANNEL_PERIOD_LABELS, CHANNEL_PERIODS, CHANNELS, FLOFI_WEB_CHANNELS, type ChannelCounts as Counts, type ChannelCountsResult,
   type ChannelPeriod } from '../../admin/analytics/channels';
 import { ENVIRONMENT_LABELS, type AnalyticsEnvironment } from '../../admin/analytics/networks';
 import { withParams, type AnalyticsParams } from '../../admin/analytics/view';
@@ -15,17 +15,20 @@ import { finopsCopy } from './finops-copy';
 /** What the figures of one environment leave out, in reading order. */
 function channelNotes(data: Counts, environment: AnalyticsEnvironment, language: Language): string[] {
   const { copy, count, time } = finopsCopy(language), tally = data.byEnvironment[environment], compositions = data.compositionsWithoutRecord[environment];
+  const web = FLOFI_WEB_CHANNELS.reduce((n, channel) => n + tally.counts[channel], 0);
   return [
     copy('Each count is one unique workflow run that completed and reconciled. A Batch Payment counts once, however many recipients it pays; ' +
       'simulations, quotes, approval requests, retries and individual steps are never counted.'),
     copy('An execution belongs to the period it started in.'),
-    copy('FloFi Web combines Web Chat and the Editor: they are the same app page and no server-side record says which of the two started a run.'),
-    ...tally.counts.FLOFI_WEB || tally.counts.LEGACY_WEB ? [copy('FloFi Web in total: {0} ({1} recorded when they started, {2} recovered from history).',
-      count(tally.counts.FLOFI_WEB + tally.counts.LEGACY_WEB), count(tally.counts.FLOFI_WEB), count(tally.counts.LEGACY_WEB))] : [],
+    copy('Web Chat and Web Editor are the same app page: an execution counts as Web Chat only when the chat started it with its own server-issued, ' +
+      'account-bound reference, and as Web Editor otherwise. FloFi Web (Chat or Editor) holds web executions no record separates, such as those recorded ' +
+      'before the two were separated.'),
+    ...web ? [copy('FloFi Web in total: {0} ({1} Web Chat, {2} Web Editor, {3} Chat or Editor, {4} recovered from history).', count(web),
+      count(tally.counts.WEB_CHAT), count(tally.counts.WEB_EDITOR), count(tally.counts.FLOFI_WEB), count(tally.counts.LEGACY_WEB))] : [],
     ...data.originsRecorded ? [
       copy('New executions keep the channel they started from: a workflow run from its approval, a run created in the FloFi app when it is created, ' +
-        'and a run signed on an approval page once that approval records it (only when the owner shares its status). Legacy Web is earlier web history ' +
-        'recovered only where the approval records prove no approval page created it; anything else without evidence stays Unknown origin.'),
+        'and a run signed on an approval page when it is created, from that approval, whether or not the owner shares its status. Legacy Web is earlier ' +
+        'web history recovered only where the approval records prove no approval page created it; anything else without evidence stays Unknown origin.'),
     ] : [
       copy('One-step runs started directly in the app have no origin record and are shown as Unknown origin.'),
       copy("A one-step run started from an approval keeps its channel only while that approval's record of the run exists: an approval records at " +

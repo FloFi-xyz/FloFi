@@ -274,8 +274,9 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   }
   // Chat review C3: a request that is clearly a pay list ("(batch) pay <amount> <asset> to <x>, … on <network>", two or more payments, a network FloFi
   // knows) is only ever one Batch Payment. On a network Batch Payment does not pay (a test network, Solana, a network FloFi only names), or with a
-  // recipient that is not an explicit 0x address ("my wallet", a name: never resolved inside a batch), it is a closed refusal, never left to an
-  // interpretation that could author separate, non-atomic transfers.
+  // recipient that is not an explicit 0x address ("my wallet", a name: never resolved by this grammar), it is a closed refusal, never left to an
+  // interpretation that could author separate, non-atomic transfers. BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): the product chat hands a
+  // list naming one of the account's saved recipients to the conversation engine, which resolves it locally into ONE Batch Payment.
   const payList = /^(?:batch )?pay (.+) on (.+)$/i.exec(input);
   const payNetwork = payList ? namedNetwork(payList[2]!) : null;
   if (payList && payNetwork) {

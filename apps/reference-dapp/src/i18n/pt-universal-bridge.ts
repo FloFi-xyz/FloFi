@@ -80,6 +80,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   '— fixed in the provider order; a smaller delivery is a mismatch': '— fixado na ordem do provedor; uma entrega menor é uma divergência',
   'Provider fees': 'Taxas do provedor', '(included in the quote)': '(incluída na cotação)', '(paid separately)': '(paga à parte)', 'none listed': 'nenhuma listada',
   'FloFi fee': 'Taxa do FloFi',
+  'FloFi fee ({0})': 'Taxa FloFi ({0})',
+  'not charged': 'não cobrada',
   // BUILD-FLOFI-UX-FIX-003: the universal Review's FloFi fee line (simulation-presentation.ts) had no Portuguese text.
   'FloFi fee (0.1% obligation)': 'Taxa do FloFi (obrigação de 0,1%)',
   'FloFi fee (0.80% obligation)': 'Taxa do FloFi (obrigação de 0,80%)',

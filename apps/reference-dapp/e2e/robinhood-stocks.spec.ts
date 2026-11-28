@@ -139,13 +139,13 @@ test('the Copilot resolves a company name to its Stock Token: Tesla (EN and PT) 
     await expect(said).toContainText('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
     const english = await committedStep(page);
     await ask(page, 'Compre ações da Tesla com 50 USDG na Robinhood');
-    // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
-    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
-    await expect(conversation(page).locator('.message.ai').last()).toContainText('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
+    // A Portuguese request is understood. A09 (intentional): a Portuguese request gets a Portuguese answer, whatever the interface language.
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpretado como “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('“Tesla” é TSLA (Tesla) no catálogo oficial da Robinhood Chain.');
     const portuguese = await committedStep(page);
-    // Chat's exact grammar (no model) commits the very same step.
+    // Chat's exact grammar (no model) commits the very same step; an exact command tells no language, so the reply stays Portuguese (A09).
     await ask(page, 'Swap 50 USDG for TSLA on Robinhood Chain');
-    await expect(conversation(page).locator('.message.system').last()).toContainText('added to your workflow');
+    await expect(conversation(page).locator('.message.system').last()).toContainText('Adicionado ao seu fluxo');
     const exact = await committedStep(page);
     expect(portuguese).toBe(english);
     expect(exact).toBe(english);

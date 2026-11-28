@@ -49,8 +49,9 @@ describe('V2 request', () => {
       { version: '2', messages: [{ role: 'user', text: 'x'.repeat(1025) }] }, { version: '2', messages: Array.from({ length: 17 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: 'x' })) }])
       expect(() => validateCopilotRequestV2(input)).toThrow('COPILOT_INPUT_INVALID');
   });
-  // P0 approved UX (boards 01/02): the assistant replies in the interface language, whatever language the person typed in.
-  it('carries an optional, validated interface reply language as one developer note; the request is byte-identical without it', () => {
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09, replaces the P0 interface rule): the reply language is the person's conversational language,
+  // which the chat sends; the server keeps it (the interface language is resolved only when a turn names none).
+  it('carries an optional, validated conversational reply language as one developer note; the request is byte-identical without it', () => {
     expect(validateCopilotRequestV2({ ...request(), replyLanguage: 'PT' })).toHaveLength(3);
     for (const bad of ['pt', 'FR', 1, null]) expect(() => validateCopilotRequestV2({ ...request(), replyLanguage: bad })).toThrow('COPILOT_INPUT_INVALID');
     expect(replyLanguageOf(request())).toBeNull(); expect(replyLanguageOf({ ...request(), replyLanguage: 'EN' })).toBe('EN');
@@ -58,7 +59,15 @@ describe('V2 request', () => {
     expect(JSON.stringify(buildCopilotRequestV2(settings, messages, null, null, null))).toBe(JSON.stringify(buildCopilotRequestV2(settings, messages)));
     const input = buildCopilotRequestV2(settings, messages, null, null, 'PT').input as { role: string; content: string }[];
     expect(input[0]).toMatchObject({ role: 'developer' }); expect(input[0]!.content).toMatch(/Brazilian Portuguese \(PT\).*set "language" to PT/);
+    expect(input[0]!.content).toContain('the language of the user\'s conversation'); expect(input[0]!.content).not.toContain('interface');
     expect(input.slice(1).map(item => item.role)).toEqual(messages.map(message => message.role));
+  });
+  // A05: questions about the user's own current simulation (validity, outputs, costs, FloFi's fee, "is it worth it") are SIMULATION, answered by FloFi
+  // from the current revision's verified facts; the context tool is the only way the model sees them.
+  it('routes questions about the current simulation, its costs and its worth to FloFi\'s verified facts', () => {
+    expect(COPILOT_INSTRUCTIONS_V2).toContain('are topic SIMULATION: FloFi answers from the current revision\'s verified simulation, or offers to simulate');
+    expect(COPILOT_INSTRUCTIONS_V2).toContain('compensa fazer uma bridge de 0,1 USDC?');
+    expect(COPILOT_INSTRUCTIONS_V2).toContain('including the current revision\'s simulation as FloFi verified it');
   });
   it('asks for strict V2 structured output only: no tools, no storage, fixed instructions, explicit model settings', () => {
     const built = buildCopilotRequestV2(settings, validateCopilotRequestV2(request()));

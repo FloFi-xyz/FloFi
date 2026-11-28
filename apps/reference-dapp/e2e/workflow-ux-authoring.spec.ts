@@ -94,6 +94,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(conversation(page).locator('.message').last()).toContainText('Which wallet should I send it to?');
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
     await say(page, BAD);
+    // A09: an address tells no language; FloFi keeps the conversation's language (English here).
     await expect(conversation(page).locator('.message').last()).toContainText('That is not a valid address on this network.');
     await say(page, MIXED);
     // BUILD-FLOFI-CONVERSATIONAL-001: the completed request is committed at once (no proposal to apply).
@@ -282,7 +283,11 @@ test.describe('UX-007 fast live quote feedback', () => {
       const LONG = '0.123456789012345678';
       await replayQuotes(page, (_index, seen) => ({ delayMs: 20, expected: amountOf(seen) === '1000000' ? '0.04' : LONG }));
       await page.setViewportSize({ width: 390, height: 844 });
-      await open(page);
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, intentional): a phone-width screen shows Plan or Conversation, never both stacked.
+      await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
+      await page.getByRole('tab', { name: /^Conversation/ }).click();
+      await expect(conversation(page)).toContainText('Hi FloFier!');
+      await page.getByRole('tab', { name: 'Plan', exact: true }).click();
       await page.getByRole('button', { name: 'Add swap', exact: true }).click();
       const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
       await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('250');

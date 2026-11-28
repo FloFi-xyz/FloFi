@@ -39,7 +39,7 @@ import type { DelegationStore, ExecutionRecord, GrantRecord, RevisionRecord, Ste
 import { periodStarts, reservationViolation, stepPolicyViolation, type StepPlan } from './policy.ts';
 import type { ExecutionState } from './state-machine.ts';
 import { assetKey, narrowedStep, workflowRequirement, type StepRequirement, type WorkflowRequirement } from './steps.ts';
-import { boundAmount } from '../engine/workflow-bindings';
+import { consumption } from '../engine/workflow-bindings';
 import type { StrategyInput } from '../engine/strategy-spec';
 import type { Owner } from './pg-store.ts';
 
@@ -468,7 +468,8 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
 }
 /**
  * BUILD-CHAT-E2E-001: step `k`'s requirement and grant need, narrowed when the workflow binds its amount to an earlier step: min(cap, the
- * producer's reconciled received amount of exactly the bound asset). Unbound steps are returned unchanged. Nothing received stops the step.
+ * producer's reconciled received amount of exactly the bound asset), or the binding's consumption mode (a share, a fixed amount). Unbound steps
+ * are returned unchanged. Nothing received stops the step.
  */
 function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBinding, steps: readonly StepRecord[]):
   { readonly ok: true; readonly step: StepRequirement; readonly binding: StepBinding } | { readonly ok: false; readonly code: string } {
@@ -495,10 +496,11 @@ function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBind
     if (fixed <= 0n || available < fixed) return { ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_RECEIVED' };
     return { ok: true, step: narrowedStep(requirement, k, fixed), binding: pinned };
   }
-  const used = boundAmount(b.cap, available);
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg is never reduced (this retired mode never runs one; the rule holds regardless).
-  if (b.exact && used < BigInt(b.cap)) return { ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT' };
-  if (used <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the binding's consumption mode (all, a share or a fixed amount of the producer's delivery).
+  const taken = consumption(b, received, available);
+  if (!taken.ok) return { ok: false, code: taken.code };
+  const used = taken.amount;
   const need = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? { ...pinned.need, amountIn: used } : { ...pinned.need, amount: used };
   return { ok: true, step: narrowedStep(requirement, k, used), binding: { ...pinned, need } };
 }

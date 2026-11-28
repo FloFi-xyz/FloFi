@@ -17,6 +17,8 @@ export const portugueseApprovedUxEditor: Readonly<Record<string, string>> = {
   '1 step needs attention': '1 passo requer atenção', '{0} steps need attention': '{0} passos requerem atenção',
   'Step {0} needs attention': 'O passo {0} requer atenção', 'Show step': 'Mostrar passo', 'Show step {0}: {1}': 'Mostrar passo {0}: {1}',
   'Show step {0}: {1} ({2})': 'Mostrar passo {0}: {1} ({2})', 'Step {0}: {1}': 'Passo {0}: {1}', 'Your Workflow': 'Meu fluxo',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): a chat change's contextual action brings its card into view.
+  'View in plan': 'Ver no plano',
   // Action rail and the selected card's toolbar.
   'Show action names': 'Mostrar nomes das ações', 'Selected step actions': 'Ações do passo selecionado',
   'Add an action from the toolbar, then select its card to configure it.': 'Adicione uma ação na barra de ferramentas e selecione o cartão para configurá-la.',
@@ -33,6 +35,8 @@ export const portugueseApprovedUxEditor: Readonly<Record<string, string>> = {
   'Review the route in the simulation': 'Revise a rota na simulação', 'Select to review · non-atomic boundaries': 'Selecione para revisar · etapas sem atomicidade',
   // FloFi panel (board 04): header, plan line, composer.
   'FloFi Assistant': 'Assistente FloFi', 'Plan': 'Plano', 'Plan · {0} steps': 'Plano · {0} passos',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11): the one-column Plan / Conversation switch marks a reply that arrived while the Plan was shown.
+  'New reply': 'Nova resposta',
   'Ask or request a change': 'Pergunte ou peça uma mudança', 'Send message': 'Enviar mensagem', 'Interpreting your message…': 'Interpretando sua mensagem…',
   // Choosing the network in the chat (board 05).
   'Choose a network': 'Escolha uma rede', 'Your wallet': 'Sua carteira',

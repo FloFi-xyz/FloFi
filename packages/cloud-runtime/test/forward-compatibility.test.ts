@@ -139,12 +139,14 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
       { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' },
       { version: 36, name: 'studio_certification', sha256: '47d9ab5d5c1736cdfcd2b1110433e5caba9055ec2e90dfd313b7ed1a4e429aa3' },
       // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: execution origins and the platform fee ledger (certificate-0037.pg.test.ts).
-      { version: 37, name: 'execution_origins_platform_fees', sha256: '03e82a3120d3d71c32f5315dcaf39d86bbc2266d00264a024884e0b4eecd7074' }]);
+      { version: 37, name: 'execution_origins_platform_fees', sha256: '03e82a3120d3d71c32f5315dcaf39d86bbc2266d00264a024884e0b4eecd7074' },
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the authorized platform fee basis (certificate-0038.pg.test.ts).
+      { version: 38, name: 'platform_fee_authorizations', sha256: '1e6fe62635642fca5266c43e019193be6092fdba36d2e87abc3fae46438ee69f' }]);
   });
   it('classifies each FinOps-era certificate prefix and keeps the legacy refusal messages', async () => {
     const shipped = SHIPPED_MIGRATIONS.slice(0, 28);
     const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
-    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32, 33, 34, 35, 36, 37]);
+    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32, 33, 34, 35, 36, 37, 38]);
     expect(schemaCompatibilityState(shipped, shipped)).toBe('exact');
     for (const [index, migration] of certificate.migrations.entries()) {
       const ahead = [...shipped, ...certificate.migrations.slice(0, index + 1)];
@@ -155,7 +157,7 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
     const last = ahead.at(-1)!;
     const cases = [
       { ledger: shipped.slice(0, -1), state: 'behind', message: 'SCHEMA_NOT_MIGRATED' },
-      { ledger: [...ahead, { version: 38, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [...ahead, { version: 39, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...ahead.slice(0, -1), edit(last, { sha256: 'a'.repeat(64) })], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [edit(shipped[0]!, { name: 'edited' }), ...ahead.slice(1)], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...shipped, last], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },

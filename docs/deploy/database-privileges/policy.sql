@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
--- BUILD-FLOFI-DATABASE-LEAST-PRIVILEGE-001. Transaction-local policy for the version 37 schema (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 adds 0037).
+-- BUILD-FLOFI-DATABASE-LEAST-PRIVILEGE-001. Transaction-local policy for the version 38 schema (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 adds 0037
+-- and, in its completion, 0038: the runtime records authorized fee bases and drives fee collection on the ledger's checked transitions).
 -- Table flags are SELECT (S), INSERT (I), UPDATE (U), DELETE (D). Column grants follow separately.
 SET LOCAL search_path = pg_catalog, pg_temp;
 SELECT pg_catalog.set_config('flofi_acl.policy', (
@@ -111,7 +112,8 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('owner_history_events',                          'SI',   '',     '',     ''),
       ('owner_history_visibility',                      'SID',  '',     '',     ''),
       ('passkey_challenges',                            'SIU',  '',     '',     ''),
-      ('platform_fee_ledger',                           '',     'S',    'SI',   ''),
+      ('platform_fee_authorizations',                   'SI',   'S',    'S',    ''),
+      ('platform_fee_ledger',                           'SI',   'S',    'SI',   ''),
       ('passkey_credentials',                           'SIU',  '',     '',     ''),
       ('privacy_legal_holds',                           '',     '',     'SI',   ''),
       ('privacy_requests',                              '',     '',     'SI',   ''),
@@ -176,9 +178,10 @@ SELECT pg_catalog.set_config('flofi_acl.policy', (
       ('runtime', 'mcp_accounts', 'UPDATE', 'created_at'),
       ('runtime', 'flight_access_tokens', 'UPDATE', 'consumed_at code_attempts'),
       ('runtime', 'mcp_handoffs', 'UPDATE', 'status ended_at claimed_namespace claimed_address claimed_at claim_expires_at share_status applied_at signing_digest signing_expires_at run_ids'),
+      ('runtime', 'platform_fee_ledger', 'UPDATE', 'state collection version'),
       ('runtime', 'workflows', 'UPDATE', 'last_seen_at')
     ) AS acl(role_key, table_name, privilege, columns)),
-    'ledger_sha256', 'f5e0eeefd10410e249019ef1668427737dda943bd98a91fa67a1362dddac7133',
+    'ledger_sha256', '878aac68f866c991988ab65a8c8e3c64b8815c624b0af3a3edc324a02d9934dc',
     'purges', jsonb_build_array('purge_unstarted_execution(text,text,text)', 'purge_unsubmitted_workflow_run(text,text,text)'),
     -- PostgreSQL 18 catalog fingerprints. Role names are normalized to their keys before hashing.
     'history_guard_sha256', 'ad86c7e2322fc22248d4a79acbd52f9c3064fc88e2962552eb313e699a7be552',

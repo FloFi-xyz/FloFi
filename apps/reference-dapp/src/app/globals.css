@@ -633,6 +633,10 @@
 .composer-findings{border-left:2px solid var(--warning-line);padding:4px 12px;margin-bottom:14px;background:var(--amber-soft);color:var(--amber)}
 .composer-findings p{margin:4px 0}
 .build-flow-surface .react-flow__node:focus-visible .composer-card{outline:2px solid var(--blue);outline-offset:4px}
+/* BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): a card FloFi just added or edited from the chat is outlined for a moment; motion only when allowed. */
+.build-flow-surface .react-flow__node[data-chat-changed=true] .composer-card{outline:2px solid var(--blue);outline-offset:4px}
+@media(prefers-reduced-motion:no-preference){.build-flow-surface .react-flow__node[data-chat-changed=true] .composer-card{animation:chat-changed-pulse 2.4s ease-out both}}
+@keyframes chat-changed-pulse{0%{box-shadow:0 0 0 6px color-mix(in srgb,var(--blue) 28%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
 .build-flow-surface .react-flow__node.selected .composer-card:not(.active){border-style:dashed;background:var(--canvas-start)}
 
 /* UX-003A: shared composer language on the inspection surface only. */
@@ -791,7 +795,9 @@
 }
 /* BUILD UX POLISH 004 (UXA-02): the chat scrolls on its own at every width — at its end the wheel no longer moves the page behind it (the Canvas
    side is CanvasWheelNavigation). A chat without overflow is not a scroller, so the page still scrolls there. */
-.chat-messages{overscroll-behavior-y:contain}
+/* The chat log is the containing block of its screen-reader-only labels (absolutely positioned): they scroll and clip with the log instead of
+   extending the page below the viewport when the conversation is taller than its panel. */
+.chat-messages{overscroll-behavior-y:contain;position:relative}
 @media(min-width:801px) and (prefers-reduced-motion:no-preference){
   .app-shell:has(>.top-bar .navigation-layer){transition:padding-left 200ms ease-out}
   .app-shell:has(>.top-bar .navigation-layer)>.top-bar{transition:margin-left 200ms ease-out}
@@ -1752,6 +1758,17 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
   .canvas-head .canvas-utility-tools button { width: 44px; padding-inline: 0; }
   .canvas-head .canvas-utility-tools button span { display: none; }
 }
+/* BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10): where the existing phone navigation is shown (up to 800 px) its two shortcuts
+   become a Plan / Conversation switch that shows one pane at a time; both stay mounted, the other is only hidden. Wider screens are unchanged. */
+.mobile-pane-tabs { display: flex; gap: 8px; flex: 2 1 0; min-width: 0; }
+.mobile-build-navigation .mobile-pane-tabs [role="tab"][aria-selected="true"] { border-color: var(--accent-line); background: var(--blue-soft); color: var(--accent-ink); font-weight: 600; }
+.mobile-pane-unread { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--blue); vertical-align: middle; }
+@media (max-width: 800px) {
+  .app-shell[data-mobile-pane="conversation"] .build-workspace .build-grid > .canvas { display: none; }
+  .app-shell[data-mobile-pane="plan"] .build-workspace .build-grid > .copilot { display: none; }
+  .app-shell[data-mobile-pane="conversation"] .stage-with-chat > .main > :not(.mobile-build-navigation) { display: none; }
+  .app-shell[data-mobile-pane="plan"] .stage-with-chat > .copilot { display: none; }
+}
 
 /* BUILD-AUTOMATION-001: the Automations workspace (secondary workspace) and its in-app notice on the product stages. */
 .automation-list{display:grid;gap:16px}
@@ -1983,6 +2000,8 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .conversation-review-warnings [data-severity="blocking"]{color:var(--red)}
 .message p.conversation-review-note{margin-top:8px;color:var(--muted);font-size:12px}
 .message p.conversation-question{margin-top:10px}
+/* P1-03: the contextual "View in plan" of a chat change (the panel's quiet button style). */
+.message .chat-view-in-plan{display:inline-flex;margin-top:8px;min-height:32px;padding:0 10px;border-radius:6px;font-weight:700}
 
 /* BUILD0-UX-001: Build 0 (Chat) fills the workspace edge to edge (its own dotted field). */
 .main.build-entry-workspace{max-width:none;margin:0;padding:0}

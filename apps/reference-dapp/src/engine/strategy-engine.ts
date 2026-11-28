@@ -420,6 +420,15 @@ function collapseLending(steps: readonly StrategySpec[]): readonly StrategySpec[
   return [{ version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: supply.amount, borrowAmount: borrow.amount, outputAsset: 'WETH',
     ...swap.slippageBps === undefined ? {} : { slippageBps: swap.slippageBps }, owner: supply.beneficiary }];
 }
+/** What a bound step spends, in the engine's own words (one note per binding the caller wrote). */
+function bindingNote(b: WorkflowBindingInput): string {
+  const step = b.step + 1, from = b.amountFrom + 1;
+  if (b.consume === 'ALL') return `Step ${step} spends all of what step ${from} actually delivers (after reconciliation), never more than its own amount and never the wallet's other balance.`;
+  if (b.consume === 'PERCENT') return `Step ${step} spends ${(b.bps! / 100).toString()}% of what step ${from} actually delivers (after reconciliation), never more than its own amount.`;
+  if (b.consume === 'FIXED') return `Step ${step} spends exactly its own amount from what step ${from} actually delivers (after reconciliation); if step ${from} delivers less, ` +
+    'the step stops before anything is signed and a new Review is needed.';
+  return `Step ${step} spends what step ${from} actually delivers (after reconciliation), up to its own amount.`;
+}
 export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFailure {
   if (!isStrategyInput(input)) return { ok: false, code: 'STRATEGY_SCHEMA_INVALID', issues: strategyInputIssues(input) };
   const rawBindings = isStrategyWorkflow(input) ? input.bindings ?? [] : [];
@@ -458,8 +467,11 @@ export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFa
     if (batchAt(b.amountFrom)) return { ok: false, code: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED', issues: [{ path: `/bindings/${i}/amountFrom`, rule: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED' }] };
     const consumer = batchAt(b.step), producer = legStart[b.amountFrom], target = legStart[b.step];
     if (producer === undefined || target === undefined) return { ok: false, code: 'WORKFLOW_BINDING_INVALID', issues: [{ path: `/bindings/${i}`, rule: 'WORKFLOW_BINDING_INVALID' }] };
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: a Batch Payment always pays each recipient exactly (its own rule); it takes no consumption mode.
+    if (consumer && (b.consume !== undefined || b.bps !== undefined)) return { ok: false, code: 'WORKFLOW_BINDING_CONSUMPTION_INVALID',
+      issues: [{ path: `/bindings/${i}/consume`, rule: 'WORKFLOW_BINDING_CONSUMPTION_INVALID' }] };
     if (consumer) for (let leg = consumer.from; leg <= consumer.to; leg++) { legBindings.push({ step: leg, amountFrom: producer, exact: true }); rawIndexOf.push(i); }
-    else { legBindings.push({ step: target, amountFrom: producer }); rawIndexOf.push(i); }
+    else { legBindings.push({ step: target, amountFrom: producer, ...b.consume !== undefined ? { consume: b.consume } : {}, ...b.bps !== undefined ? { bps: b.bps } : {} }); rawIndexOf.push(i); }
   }
   const checked = validateBindings(steps, legBindings);
   // A refusal names the binding the caller wrote (`/bindings/<its index>`), never an index of the expanded legs.
@@ -470,7 +482,7 @@ export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFa
   const notes = [...semantic.flatMap((c, i) => c.notes.map(note => `Step ${i + 1}: ${note}`)),
     ...rawBindings.map(b => batchAt(b.step)
       ? `Step ${b.step + 1} pays each recipient exactly their amount from what step ${b.amountFrom + 1} actually delivers (after reconciliation); if that is not enough, nothing is paid and a new Review is needed.`
-      : `Step ${b.step + 1} spends what step ${b.amountFrom + 1} actually delivers (after reconciliation), up to its own amount.`)];
+      : bindingNote(b))];
   if (!batches.length) return { ok: true, strategy: { version: 2, steps: steps.map(c => c.strategy), ...bindings.length ? { bindings: canonicalBindings(bindings) } : {} },
     workflowHash: workflowSequenceHash(steps.map(c => c.workflowHash), bindings), steps, fundsClass, bindings, notes };
   return { ok: true, strategy: { version: 2, steps: semantic.map(c => c.strategy), ...rawBindings.length ? { bindings: canonicalBindings(rawBindings) } : {} },

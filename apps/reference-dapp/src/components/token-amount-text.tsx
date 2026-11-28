@@ -37,7 +37,8 @@ export function TokenUnitsText({ units, decimals, symbol, rounding = 'down', cla
   return <ShortAmount shown={{ text, exactText: amount.exactText, exact: `${amount.exact}${symbol ? ` ${symbol}` : ''}`, approximate: amount.approximate }}
     {...className ? { className } : {}}/>;
 }
-function ShortAmount({ shown, className }: { shown: DisplayAmountExpression; className?: string }) {
+/** An already shortened amount (`DisplayAmountExpression`) with its exact value one tap away: for a surface that composes its own text (a sign). */
+export function ShortAmount({ shown, className }: { shown: DisplayAmountExpression; className?: string }) {
   const { t } = useLocale();
   // A disclosure (aria-expanded) whose exact value follows the button in reading order; no generated id, so server and client markup match.
   const [open, setOpen] = useState(false);

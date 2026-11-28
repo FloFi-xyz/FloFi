@@ -13,9 +13,12 @@
  *                              cancelled execution owes nothing). A run that never started records nothing.
  *   PENDING/RUNNING/HALTED/    nothing yet: a partly executed workflow owes nothing before its remaining outcome is known (F10).
  *   ATTENTION
- * Accounting runs only from its explicit activation instant (`activation.ts`): nothing created before it is accounted (F13). Collection is not
- * implemented (`activation.ts`): this module never writes COLLECTION_PENDING or COLLECTED, and never moves funds.
- * Single-flow executions (`execution_runs` without a workflow run) are not accounted here; the universal bridge keeps its own obligation record.
+ * Accounting runs only from its explicit activation instant (`activation.ts`): nothing created before it is accounted (F13). This module never
+ * moves funds; collection (`settlement.ts`) drives COLLECTION_PENDING → COLLECTED from verified transfer evidence.
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, §3.2/§3.3): direct single-flow executions are accounted too (`run_id` rows), under the
+ * same policy: a root `execution_runs` run that no workflow run owns (its step runs are covered by the parent's row), that is not a recovery of
+ * another run (the root carries the execution) and that is not a fee settlement transfer. A universal bridge inside a workflow is therefore charged
+ * once, by its workflow; its own per-run obligation record is informational and never charged.
  */
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { composeWorkflowBound } from '../engine/strategy-engine';
@@ -25,6 +28,9 @@ import { effectiveOrigins, revenueOriginsActive, type ExecutionOrigin } from '..
 import { PLATFORM_FEE_BPS, PLATFORM_FEE_POLICY_ID } from './policy';
 import { workflowFeeBasis, type FeeLine } from './principal';
 import { accountedExecution, type FeeActivation } from './activation';
+import { readRunRecord } from '../admin/analytics/indexer.ts';
+import { singleFlowEnvironment, singleFlowFeeBasis, singleFlowOutcome } from './single-flow';
+import { SETTLEMENT_WORKFLOW_PREFIX, type Collection } from './settlement';
 
 export type LedgerState = 'DUE' | 'NOT_APPLICABLE' | 'WAIVED' | 'UNSUPPORTED' | 'COLLECTION_PENDING' | 'COLLECTED' | 'COLLECTION_FAILED';
 export type LedgerEntry = { readonly workflowRunId: string; readonly state: LedgerState; readonly reason: string | null; readonly lines: readonly FeeLine[];
@@ -86,6 +92,16 @@ export type AccrualReport = { readonly mode: 'DRY_RUN' | 'APPLY'; readonly exami
  * never hold later ones back.
  */
 export async function accruePlatformFees(db: Database, tenantId: string, activation: FeeActivation, options: { readonly apply: boolean; readonly limit: number }): Promise<AccrualReport> {
+  const workflows = await accrueWorkflowRuns(db, tenantId, activation, options);
+  if (workflows.code) return workflows;
+  const singles = await accrueSingleFlows(db, tenantId, activation, { ...options, limit: Math.max(1, options.limit) });
+  const byState: Partial<Record<LedgerState, number>> = { ...workflows.byState };
+  for (const [state, n] of Object.entries(singles.byState) as [LedgerState, number][]) byState[state] = (byState[state] ?? 0) + n;
+  return { mode: workflows.mode, examined: workflows.examined + singles.examined, recorded: workflows.recorded + singles.recorded,
+    deferred: workflows.deferred + singles.deferred, byState, code: singles.code };
+}
+
+async function accrueWorkflowRuns(db: Database, tenantId: string, activation: FeeActivation, options: { readonly apply: boolean; readonly limit: number }): Promise<AccrualReport> {
   const empty = (code: string) => ({ mode: options.apply ? 'APPLY' as const : 'DRY_RUN' as const, examined: 0, recorded: 0, deferred: 0, byState: {}, code });
   if (!activation.accounting.active || !activation.accounting.from) return empty(activation.accounting.code ?? 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED');
   if (!await revenueOriginsActive(db)) return empty('PLATFORM_FEE_LEDGER_NOT_MIGRATED');
@@ -128,6 +144,73 @@ export async function accruePlatformFees(db: Database, tenantId: string, activat
   return { mode: options.apply ? 'APPLY' : 'DRY_RUN', examined, recorded, deferred, byState, code: null };
 }
 
+type SingleRow = { run_id: string; flow: string; created_at: Date; provenance: string;
+  effective: { run_id: string; status: string; has_evidence: boolean; namespace: string; log_name: string; updated_at: string } | null };
+/**
+ * Accrues terminal direct single-flow executions (pure decisions in `single-flow.ts`). Same exactly-once guarantees as workflow runs: one row per
+ * root run, `ON CONFLICT DO NOTHING`, a keyset cursor, deferred rows retried by a later pass. A recovery run's outcome settles its root's row.
+ */
+async function accrueSingleFlows(db: Database, tenantId: string, activation: FeeActivation, options: { readonly apply: boolean; readonly limit: number }): Promise<AccrualReport> {
+  const byState: Partial<Record<LedgerState, number>> = {};
+  let recorded = 0, deferred = 0, examined = 0, after: { at: Date; id: string } | null = null;
+  while (examined < options.limit) {
+    const page: { readonly rows: SingleRow[] } = await db.query<SingleRow>(`
+      WITH RECURSIVE roots AS (
+        SELECT r.run_id, r.flow, r.created_at, r.provenance FROM execution_runs r
+        WHERE r.tenant_id = $1 AND r.created_at >= $2 AND r.recovery_of IS NULL AND r.workflow_id !~ '^wfr_' AND left(r.workflow_id, $6) <> $7
+          AND NOT EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.outcome->>'executionId' = r.run_id)
+          AND NOT EXISTS (SELECT 1 FROM platform_fee_ledger l WHERE l.tenant_id = r.tenant_id AND l.run_id = r.run_id)
+          -- Only runs that can produce a row now (a terminal outcome, or recoveries that may carry one): open runs never hold later ones back.
+          AND ((r.status IN ('RECONCILED', 'COMPLETED') AND r.has_evidence) OR r.status IN ('REVERTED', 'DIVERGENT', 'FAILED', 'REFUNDED')
+            OR EXISTS (SELECT 1 FROM execution_runs x WHERE x.tenant_id = r.tenant_id AND x.recovery_of = r.run_id))
+          AND ($4::timestamptz IS NULL OR (r.created_at, r.run_id) > ($4::timestamptz, $5::text))
+        ORDER BY r.created_at, r.run_id LIMIT $3),
+      chain AS (SELECT run_id AS root, run_id FROM roots UNION ALL
+        SELECT c.root, e.run_id FROM execution_runs e JOIN chain c ON e.tenant_id = $1 AND e.recovery_of = c.run_id)
+      SELECT o.run_id, o.flow, o.created_at, o.provenance, (SELECT jsonb_build_object('run_id', e.run_id, 'status', e.status, 'has_evidence', e.has_evidence,
+          'namespace', e.namespace, 'log_name', e.log_name, 'updated_at', e.updated_at) FROM chain c JOIN execution_runs e ON e.tenant_id = $1 AND e.run_id = c.run_id
+          WHERE c.root = o.run_id ORDER BY (e.status IN ('RECONCILED', 'COMPLETED') AND e.has_evidence) DESC,
+            (e.status IN ('REVERTED', 'DIVERGENT', 'FAILED', 'REFUNDED')) DESC, e.created_at DESC LIMIT 1) AS effective
+      FROM roots o ORDER BY o.created_at, o.run_id`,
+      [tenantId, activation.accounting.from, Math.min(100, options.limit - examined), after?.at ?? null, after?.id ?? null,
+        SETTLEMENT_WORKFLOW_PREFIX.length, SETTLEMENT_WORKFLOW_PREFIX]);
+    const rows = page.rows;
+    if (!rows.length) break;
+    examined += rows.length;
+    after = { at: rows.at(-1)!.created_at, id: rows.at(-1)!.run_id };
+    const origins = await effectiveOrigins(db, tenantId, { runIds: rows.map(r => r.run_id), workflowRunIds: [] });
+    for (const row of rows) {
+      const effective = row.effective, environment = singleFlowEnvironment(row.provenance);
+      if (!effective || !environment || !accountedExecution(activation, row.created_at)) continue;
+      const outcome = singleFlowOutcome(effective.status, effective.has_evidence);
+      if (!outcome) continue;
+      let state: LedgerState, reason: string | null, lines: readonly FeeLine[] = [];
+      if (outcome === 'WAIVED') { state = 'WAIVED'; reason = `EXECUTION_${effective.status}`; }
+      else {
+        let record: unknown;
+        // A log that is missing, too large or does not end in a record can never be accounted: UNSUPPORTED (never charged), not retried forever.
+        // Any other failure (the database) aborts the pass and is retried by the next one.
+        try { record = await readRunRecord(db, tenantId, effective.namespace, effective.log_name); }
+        catch (error) { if (!(error instanceof Error && /^RUN_[A-Z_]+$/.test(error.message))) throw error; record = null; }
+        const basis = record === null ? { status: 'UNSUPPORTED' as const, reason: 'PLATFORM_FEE_RECORD_UNREADABLE', lines: [] as readonly FeeLine[] }
+          : singleFlowFeeBasis(record, { final: true, flow: row.flow });
+        if (basis.status === 'UNSUPPORTED' && basis.reason === 'PLATFORM_FEE_ASSET_CLASS_UNKNOWN') { deferred++; continue; }
+        state = basis.status === 'FEEABLE' ? 'DUE' : basis.status === 'UNSUPPORTED' ? 'UNSUPPORTED' : 'NOT_APPLICABLE';
+        reason = state === 'DUE' ? null : basis.reason ?? 'PLATFORM_FEE_NO_FEEABLE_PRINCIPAL';
+        lines = basis.lines;
+      }
+      byState[state] = (byState[state] ?? 0) + 1;
+      if (!options.apply) continue;
+      const result = await db.query(`INSERT INTO platform_fee_ledger (tenant_id, run_id, policy_id, rate_bps, state, reason, lines, origin, network_environment,
+          execution_completed_at) SELECT $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::timestamptz WHERE EXISTS (SELECT 1 FROM execution_runs r WHERE r.tenant_id = $1 AND r.run_id = $2)
+        ON CONFLICT DO NOTHING`, [tenantId, row.run_id, PLATFORM_FEE_POLICY_ID, PLATFORM_FEE_BPS, state, reason, JSON.stringify(lines),
+        origins.runs.get(row.run_id)?.origin ?? null, environment, outcome === 'COMPLETED' ? effective.updated_at : null]);
+      recorded += result.rowCount ?? 0;
+    }
+  }
+  return { mode: options.apply ? 'APPLY' : 'DRY_RUN', examined, recorded, deferred, byState, code: null };
+}
+
 /** Admin read model: ledger rows whose execution completed (or, for a waived one, was accounted) in the period, aggregated per state, exact asset and
  * origin; no identifier leaves. Never converted to money. */
 export type FeeTotals = {
@@ -144,7 +227,7 @@ export type FeeTotals = {
 };
 export async function loadFeeTotals(db: Queryable, tenantId: string, period: { readonly from: Date; readonly to: Date }, environment: string): Promise<FeeTotals> {
   if (!await revenueOriginsActive(db)) return { migrated: false, byState: {}, dueByAsset: [], collectedByAsset: [], byOrigin: {} };
-  const { rows } = await db.query<{ state: LedgerState; origin: string | null; lines: FeeLine[] }>(`SELECT state, origin, lines FROM platform_fee_ledger
+  const { rows } = await db.query<{ state: LedgerState; origin: string | null; lines: FeeLine[]; collection: Collection | null }>(`SELECT state, origin, lines, collection FROM platform_fee_ledger
     WHERE tenant_id = $1 AND coalesce(execution_completed_at, created_at) >= $2 AND coalesce(execution_completed_at, created_at) < $3 AND network_environment = $4
     LIMIT 20001`, [tenantId, period.from, period.to, environment]);
   if (rows.length > 20_000) throw new Error('PLATFORM_FEE_TOTALS_TRUNCATED');
@@ -158,8 +241,11 @@ export async function loadFeeTotals(db: Queryable, tenantId: string, period: { r
       const key = `${line.chainId}|${line.address}|${line.decimals}`;
       if (row.state === 'DUE') { const d = due.get(key) ?? { chainId: line.chainId, address: line.address, decimals: line.decimals, fee: 0n, executions: 0 };
         d.fee += BigInt(line.fee); d.executions++; due.set(key, d); }
-      if (row.state === 'COLLECTED') { const c = collected.get(key) ?? { chainId: line.chainId, address: line.address, decimals: line.decimals, fee: 0n };
-        c.fee += BigInt(line.fee); collected.set(key, c); }
+    }
+    // Collected revenue is what the verified collection transactions moved (a settlement may collect less than the accrued line), never the line.
+    for (const t of row.collection?.transactions ?? []) {
+      const key = `${t.chainId}|${t.address}|${t.decimals}`, c = collected.get(key) ?? { chainId: t.chainId, address: t.address, decimals: t.decimals, fee: 0n };
+      c.fee += BigInt(t.amount); collected.set(key, c);
     }
   }
   return { migrated: true, byState, byOrigin: byOrigin as FeeTotals['byOrigin'],

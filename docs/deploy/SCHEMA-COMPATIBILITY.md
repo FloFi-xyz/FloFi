@@ -1331,3 +1331,48 @@ amounts and token identities; linked to the run's owner they are pseudonymous
 financial data. All three follow their execution's lifecycle; a retention
 period, legal basis and data-subject-access treatment for the fee ledger are an
 open owner decision (LGPD/GDPR) before collection.
+
+## 30. Certificate 0038_platform_fee_authorizations
+
+0038 follows 0037 and adds the authorized platform fee basis
+(BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001, completion): one table,
+`platform_fee_authorizations`, with its own non-SECURITY-DEFINER trigger
+function `platform_fee_authorization_immutable`. Nothing pre-existing changes.
+The certificate pins version 38, name `platform_fee_authorizations`, SHA-256
+`1e6fe62635642fca5266c43e019193be6092fdba36d2e87abc3fae46438ee69f`, in the
+base-28 certificate after 0037. Applied by `revenue-collection-migrate` on exact
+schema 37; never by default.
+
+**Contents.** One row per execution (an `execution_runs` root run or a
+`workflow_runs` run, exactly one), written once when the owner authorizes that
+revision (workflow run creation; a single flow's bound Review): policy id, rate,
+status (FEEABLE / NOT_APPLICABLE / UNSUPPORTED), per-asset lines (the cap a
+collector may charge), the SHA-256 of the disclosed basis and the reviewed
+workflow hash. FEEABLE needs lines; any other status has none. Updates are
+refused by the trigger.
+
+**Compatibility.** A v28 build without this certificate refuses schema 38. With
+it, the build serves 36, 37 or 38: without 0038 the collector refuses
+(`PLATFORM_FEE_AUTHORIZATIONS_NOT_MIGRATED`) and no basis is recorded; nothing
+else changes. Purges: the row cascades with an owner-deleted unstarted
+execution (proven for the 0016 permit mechanism in
+`certificate-0038.pg.test.ts`).
+
+**Privileges.** The least-privilege policy now pins schema 38
+(`docs/deploy/database-privileges/policy.sql`): runtime `SI` on
+`platform_fee_authorizations` and `SI` plus column `UPDATE (state, collection,
+version)` on `platform_fee_ledger` (the API records authorizations and drives
+collection through the ledger's checked transitions; the trigger still allows
+only DUE → COLLECTION_PENDING → COLLECTED | COLLECTION_FAILED and refuses every
+other change); admin web `S` and admin operations `S` on the new table. Apply
+0037, then 0038, then the policy, in that order.
+
+**Rollback.** A 0037-only build refuses schema 38. Emergency reversal on 0038
+as head only and while no ledger row has left DUE: drop the table and its
+function and delete the version-38 ledger row as the migration owner, then
+re-apply the schema-37 policy. Authorizations are lost: executions completed
+before the reversal can no longer be collected (fail closed).
+
+**Retention.** Same class of data as the fee ledger (per-asset decimal amounts
+and token identities, no address or label). It follows its execution's
+lifecycle; the fee ledger's retention decision (LGPD/GDPR) covers it.

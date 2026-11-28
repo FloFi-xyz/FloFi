@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { BUILD_ESTIMATE_STREAM, estimateMatchesNode, requestBuildEstimate, type BuildEstimate, type BuildEstimateResult } from '../domain/build-estimate';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
@@ -116,6 +116,16 @@ async function readEstimate(response: Response): Promise<BuildEstimateResult> {
 function remember(scope: string, estimate: BuildEstimate) {
   answered.delete(scope); answered.set(scope, estimate);
   while (answered.size > ANSWERED_LIMIT) answered.delete(answered.keys().next().value!);
+  knownVersion += 1;
+  for (const listener of knownListeners) listener();
+}
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A07): readers of `knownLiveEstimate` (a dependent card's consistency) re-read when an answer arrives.
+let knownVersion = 0;
+const knownListeners = new Set<() => void>();
+const subscribeKnown = (listener: () => void) => { knownListeners.add(listener); return () => { knownListeners.delete(listener); }; };
+/** A counter that changes whenever this tab learns a new live estimate (never requests anything). */
+export function useKnownEstimateVersion(): number {
+  return useSyncExternalStore(subscribeKnown, () => knownVersion, () => 0);
 }
 function recalled(scope: string): BuildEstimate | null {
   const estimate = answered.get(scope);

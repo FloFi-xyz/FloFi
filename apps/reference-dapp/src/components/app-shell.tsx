@@ -30,6 +30,7 @@ import { SolanaTransferPanel } from './solana-transfer-panel';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import type { ToolboxMode } from '../domain/canvas-layout';
 import { CowPanel } from './cow-panel';
 import { useCow } from '../state/cow-store';
@@ -59,7 +60,7 @@ import { CanvasLifecycleAction } from './canvas-lifecycle-action';
 import { ActionSettingsPopover } from './artifact-inspector';
 import { CopilotPanel } from './copilot-panel';
 import { useFlofiConversation } from '../state/flofi-conversation';
-import { MobileBuildNavigation } from './mobile-build-navigation';
+import { MobileBuildNavigation, useMobilePane } from './mobile-build-navigation';
 import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace, executeActionPlacement } from './execute-workspace';
@@ -151,6 +152,7 @@ import { isPristineDraft } from '../domain/initial-workflow';
 import { editorPersistencePath } from '../domain/editor-persistence';
 import { editorStageReasons } from '../domain/editor-stages';
 import { useProductBootstrap } from '../state/product-bootstrap';
+import { chatInitiated, ensureChatInitiation, forgetChatInitiation } from '../state/chat-initiation';
 
 /** `approvalSlot`/`approvalGate` (BUILD-FLOFI-UX-UI-002, `/approve` only): where the proposal's notice renders, and whether Simulate and
  * Execute stay closed until the proposal is loaded for the proven wallet.
@@ -219,7 +221,7 @@ function PublishedStudioMetadata() {
 function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi,
   onExecutionPhase }: ProductNavigation) {
   const { t: tr, language } = useLocale();
-  const { conversationScope = null } = useProductBootstrap();
+  const { conversationScope = null, platformFeeCollection = false } = useProductBootstrap();
   // Server HTML is visible before handlers and initial canvas preferences are ready.
   const [interactive, setInteractive] = useState(false);
   useEffect(() => { setInteractive(true); }, []);
@@ -1020,13 +1022,17 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : workflowRunHere.run && ['ATTENTION', 'HALTED'].includes(workflowRunHere.run.state) ? 'Execution needs attention'
     // Before its first status read answers: loading; once a read could not load it (e.g. the sign-in expired): what the run panel offers.
     : runUnloaded ? workflowRunHere.error ? 'Load workflow progress' : 'Loading…' : 'Execution in progress';
-  const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
+  const chatSurface = !approvalSlot && !autoPrepare && surface === 'workspace';
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (KAN-25 §8.1): the Review the chat itself starts runs with the Chat's server-issued initiation
+  // reference presented (`state/chat-initiation.ts`), so its run is recorded as Web Chat; the Editor's own controls never present it.
+  const chatSimulate = () => chatInitiated(() => simulateAgain());
+  const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: chatSurface,
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
     // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.
     persist: editorPersistencePath(pathname), accountScope: conversationScope,
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
-    bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
-      invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
+    bridge: { workflow: runtimeWorkflow, feeWorkflow: state.workflow, feeCollection: platformFeeCollection, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
+      invalidWorkflow: lifecycleState.invalidWorkflow, simulate: chatSimulate, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
       // BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: the destination's wallets are still being read (the chat waits and resumes by itself).
@@ -1044,6 +1050,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
           ?? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone || groupedSingleDone, blocker: blockerView, editingPaused,
       workflowProgress } });
+  // The reference is the signed-in account's (none without an account session); refreshed in the background as the person talks to the chat.
+  const personTurns = conversation.messages.filter(message => message.role === 'you').length;
+  useEffect(() => { if (chatSurface && conversationScope) void ensureChatInitiation(Date.now(), conversationScope); else forgetChatInitiation(); },
+    [chatSurface, conversationScope, personTurns]);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).
   const chatFirst = conversation.direct && !engineering;
@@ -1066,7 +1076,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   [overviewShown, state.workflow, state.error, reviewError, context, workflowReview, actionSetup, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs, batchSetup, batchDrafts]);
   // UX-02: the Simulate and Execute headers name the same networks as the Create header (the configured steps' own networks; presentation only).
   const headNetworks = useMemo(() => overviewShown ? overview.networks : editorOverview(state.workflow, context, null).networks, [overviewShown, overview, state.workflow, context]);
-  const showStep = (nodeId: string) => { selectAction(nodeId); focusCanvasStep(nodeId); };
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10): on a phone-width screen, one pane at a time (the stage's Plan or the
+  // Conversation), both mounted. A stage change shows its Plan; a reply that arrives while the Plan is shown marks the Conversation tab.
+  const mobile = useMobilePane(tab, conversation.messages.reduce((count, message) => message.role === 'you' ? count : count + 1, 0));
+  // "Show step" (the Assistant's plan overview) brings the card into view: the Plan pane is shown first, synchronously, so the Canvas can focus it.
+  const showStep = (nodeId: string) => { if (mobile.pane !== 'plan') flushSync(() => mobile.show('plan')); selectAction(nodeId); focusCanvasStep(nodeId); };
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): the Review's validity ends at a known time; the Editor re-renders then, so Execute, its footer and the
   // Assistant say "expired" at once (the panels keep their own timers too). Never a request: only this render.
   const reviewUntil = groupedPrimary ? workflowRunHere.review?.validUntil ? Date.parse(workflowRunHere.review.validUntil) : null : lifecycleControls.view.expiresAt;
@@ -1086,7 +1100,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       note: reviewExpiredHere ? 'Your review expired. Refresh the values to continue safely. Your workflow is still saved.' : null }
     : { placeholder: undefined, note: null };
   const chat = <CopilotPanel conversation={conversation} interactive={interactive} owner={owner} proof={proof} reviewInPanel={reviewBlock && groupedPrimary}
-    placeholder={assistantStage.placeholder} stageNote={assistantStage.note}
+    placeholder={assistantStage.placeholder} stageNote={assistantStage.note} showStep={showStep}
     overview={tab === 'Build' && chatFirst ? <EditorOverviewPanel overview={overview} showStep={showStep}/> : undefined}/>;
   // BUILD0-UX-001: a workflow restored or reopened, a run recovered from this browser, a live execution, a proposal or an unfinished Canvas card
   // is never held behind the entry the visit landed on: once the persisted-run read settles, the shell opens Build 1 (the stages keep their own
@@ -1252,7 +1266,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const footerAction = tab === 'Execute' ? chatFirst ? executeFooterAction : reviewBlock ? reviewFooterAction : undefined
     : tab === 'Build' ? createAction : undefined;
   const footerStatusSource = !chatFirst ? undefined : tab === 'Execute' ? executeSimulation : tab === 'Simulate' && groupedPrimary ? groupedSimulationFooter : footerSimulation;
-  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
+  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive} data-mobile-pane={mobile.pane}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     {/* Execution UX regression fixes: no previous-workflow banner here. Previous and ongoing executions are in My Workflows (and the Dashboard);
         their records keep being reconciled server-side, and a run of the shown workflow is followed in place. */}
@@ -1279,7 +1293,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
             invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason} sequenceNote={sequenceNote} technical={technical}/> : undefined}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
-      <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
+      <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'} pane={mobile.pane} onPane={mobile.show} unread={mobile.unread}/>
       {state.error && <div className="error-banner" role="alert"><strong>{tr("Edit not applied")}</strong><span>{tr(tab !== 'Build' ? 'Review the workflow configuration on the Canvas before simulating again.' : state.error)}</span></div>}
     </main>)}{/* BUILD-FLOFI-UX-EDITOR-FINOPS-001: one contextual footer on every stage of the public Editor (step count, the stage's status, ONE primary action). */}
     {(chatFirst || tab !== 'Execute' || reviewBlock) && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction primaryAction={footerAction ?? undefined} overview={overview} showStep={showStep}

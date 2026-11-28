@@ -20,6 +20,8 @@ import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-gro
 import { plannedGroupCode } from './owner-step-circle.ts';
 import type { TokenFeePaid } from '../user-funded/gas-payer.ts';
 import { revenueOriginsActive, type ExecutionOrigin } from './execution-origins.ts';
+import { feeAuthorizationsActive, recordFeeAuthorization } from '../platform-fee/authorization.ts';
+import type { FeeBasis } from '../platform-fee/principal';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
 /** How a bound step's amount was resolved (native units of `asset`). */
@@ -66,7 +68,11 @@ export type RunEvent = { readonly stepIndex: number | null; readonly kind: strin
 export type NewRun = { readonly runId: string; readonly handoffId: string; readonly requester: RequesterScope; readonly owner: WalletRef; readonly wallets: WalletSet;
   readonly strategy: StrategyInput; readonly workflowHash: string; readonly engineVersion: string; readonly stepCount: number; readonly expiresAt: Date;
   /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the channel the run started from (its handoff's requester), recorded once with the run (0037). */
-  readonly origin?: ExecutionOrigin };
+  readonly origin?: ExecutionOrigin;
+  /** The closed code of the server-side record that origin came from (default: the approval's requester). */
+  readonly originEvidence?: string;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the platform fee basis the approved Review disclosed (0038), recorded with the run. */
+  readonly feeBasis?: FeeBasis };
 export type RunPatch = { readonly currentStep?: number; readonly mode?: RunMode; readonly authorizationId?: string; readonly code?: string | null; readonly completedAt?: Date };
 export type StepPatch = { readonly flow?: string; readonly strategy?: StrategySpec; readonly workflowHash?: string; readonly bound?: BoundResolution;
   readonly claimedAt?: Date; readonly outcome?: StepOutcome; readonly code?: string | null };
@@ -146,6 +152,7 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     create: async (input: NewRun, now: Date) => {
       // Decided before the transaction: a failed check inside it would abort the run's own transaction.
       const recordOrigin = input.origin !== undefined && await revenueOriginsActive(db);
+      const recordFee = input.feeBasis !== undefined && await feeAuthorizationsActive(db);
       return db.transaction(async tx => {
       const inserted = (await tx.query(`INSERT INTO workflow_runs (tenant_id, run_id, handoff_id, requester_kind, requester_ref, owner_namespace, owner_account, wallets, strategy,
           workflow_hash, engine_version, step_count, state, expires_at, created_at, updated_at)
@@ -162,10 +169,19 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         if (input.origin && recordOrigin) {
           await tx.query('SAVEPOINT execution_origin');
           try {
-            await tx.query(`INSERT INTO execution_origins (tenant_id, workflow_run_id, origin, basis, evidence) VALUES ($1, $2, $3, 'CREATION', 'APPROVAL_REQUESTER')
-              ON CONFLICT DO NOTHING`, [tenantId, input.runId, input.origin]);
+            await tx.query(`INSERT INTO execution_origins (tenant_id, workflow_run_id, origin, basis, evidence) VALUES ($1, $2, $3, 'CREATION', $4)
+              ON CONFLICT DO NOTHING`, [tenantId, input.runId, input.origin, input.originEvidence ?? 'APPROVAL_REQUESTER']);
             await tx.query('RELEASE SAVEPOINT execution_origin');
           } catch { await tx.query('ROLLBACK TO SAVEPOINT execution_origin'); }
+        }
+        // The authorized fee basis, in the same transaction and its own savepoint: a basis that cannot be written never rolls the run back, and an
+        // execution without one is never charged (fail closed on the revenue side, never on the owner's execution).
+        if (input.feeBasis && recordFee) {
+          await tx.query('SAVEPOINT platform_fee_authorization');
+          try {
+            await recordFeeAuthorization(tx, tenantId, { workflowRunId: input.runId }, input.feeBasis, input.workflowHash);
+            await tx.query('RELEASE SAVEPOINT platform_fee_authorization');
+          } catch { await tx.query('ROLLBACK TO SAVEPOINT platform_fee_authorization'); }
         }
       }
       return runOf((await tx.query('SELECT * FROM workflow_runs WHERE tenant_id = $1 AND handoff_id = $2', [tenantId, input.handoffId])).rows[0]!);

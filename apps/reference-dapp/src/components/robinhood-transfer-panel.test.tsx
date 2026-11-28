@@ -43,9 +43,17 @@ describe('a reconciled Smart Account transfer', () => {
     expect(html).toContain('Transfer reconciled. Exactly one owner-signed transaction, nonce 7 → 8');
     expect(evidenceLink(html)?.[2]).toBe('Download Evidence Bundle'); expect(html).not.toContain('MetaMask relayed it');
   });
+  it('R06/R07: the reconciled cost and balances read six significant digits, never the 18 recorded digits; PT with its decimal comma', () => {
+    reconciled({ ...direct, fee: '39961699395000574', balanceBefore: '1057923834925903535', balanceAfter: '1017962135530902961' });
+    const html = page('EN');
+    expect(html).toContain('network cost ≈ 0.0399617 ETH; balance ≈ 1.05792 → ≈ 1.01796 ETH.');
+    expect(html).not.toContain('0.039961699395000574');
+    expect(page('PT')).toContain('≈ 0,0399617 ETH');
+  });
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R07): amounts in PT use the decimal comma (formerly the canonical decimal point).
   it('in Portuguese the relayed result says it is you who paid no network fee', () => {
     reconciled(relayed); const html = page('PT');
-    expect(html).toContain(`Transferência reconciliada. A MetaMask a retransmitiu pela sua Smart Account: o retransmissor ${RELAYER} pagou a taxa de rede (0.000042 ETH); você não pagou nenhuma taxa de rede e esta transferência não usou o seu nonce.`);
+    expect(html).toContain(`Transferência reconciliada. A MetaMask a retransmitiu pela sua Smart Account: o retransmissor ${RELAYER} pagou a taxa de rede (0,000042 ETH); você não pagou nenhuma taxa de rede e esta transferência não usou o seu nonce.`);
     expect(evidenceLink(html)).not.toBeNull();
   });
 });

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { composeStrategy, composeWorkflow, workflowSequenceHash, type WorkflowComposition } from './strategy-engine';
 import { strategyInputIssues } from './strategy-spec';
-import { boundAmount, boundStrategy, decimalOf } from './workflow-bindings';
+import { boundAmount, boundStrategy, canonicalBindings, consumption, decimalOf } from './workflow-bindings';
 
 const OWNER = '0x' + '1'.repeat(40);
 const ok = (input: unknown): WorkflowComposition => { const w = composeWorkflow(input); if (!w.ok) throw new Error(w.code + JSON.stringify(w.issues)); return w; };
@@ -122,5 +122,75 @@ describe('BUILD-CHAT-E2E-001 workflow bindings', () => {
     expect(() => boundStrategy(spec.strategy, 0n, 18)).toThrow('WORKFLOW_BINDING_AMOUNT_INVALID');
     // The resolved step is an ordinary strategy that composes on its own.
     expect(composeStrategy(boundStrategy(spec.strategy, 3_330_000_000_000_000n, 18))).toMatchObject({ ok: true });
+  });
+});
+
+describe('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 consumption modes (E02/E05)', () => {
+  const steps = [USDC_TO_WETH, WETH_TO_USDC];
+  it('is canonical and hashed only when present: every binding written before it keeps its exact form and hash', () => {
+    const plain = ok({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(plain.strategy).toMatchObject({ bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(Object.keys((plain.strategy as { bindings: object[] }).bindings[0]!)).toEqual(['step', 'amountFrom']);
+    expect(plain.workflowHash).toBe(workflowSequenceHash(plain.steps.map(c => c.workflowHash), [{ step: 1, amountFrom: 0 }]));
+    const hashes = new Set([plain.workflowHash]);
+    for (const extra of [{ consume: 'ALL' }, { consume: 'PERCENT', bps: 5000 }, { consume: 'PERCENT', bps: 2500 }, { consume: 'FIXED' }] as const) {
+      const w = ok({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, ...extra }] });
+      expect(w.bindings[0]).toMatchObject({ step: 1, amountFrom: 0, ...extra, cap: '10000000000000000' });
+      expect((w.strategy as { bindings: object[] }).bindings).toEqual([{ step: 1, amountFrom: 0, ...extra }]);
+      // Round trip: the canonical strategy composes to the same hash; each mode (and each share) is a different workflow.
+      expect(ok(w.strategy).workflowHash).toBe(w.workflowHash);
+      hashes.add(w.workflowHash);
+    }
+    expect(hashes.size).toBe(5);
+    expect(canonicalBindings([{ step: 1, amountFrom: 0, bps: 5000, consume: 'PERCENT' }])).toEqual([{ step: 1, amountFrom: 0, consume: 'PERCENT', bps: 5000 }]);
+  });
+
+  it('describes each mode in the engine notes', () => {
+    expect(ok({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, consume: 'ALL' }] }).notes.at(-1)).toMatch(/spends all of what step 1 actually delivers/);
+    expect(ok({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, consume: 'PERCENT', bps: 5000 }] }).notes.at(-1)).toMatch(/spends 50% of what step 1/);
+    expect(ok({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, consume: 'FIXED' }] }).notes.at(-1)).toMatch(/exactly its own amount.*stops before anything is signed/);
+  });
+
+  it('refuses malformed modes: a share without bps, bps without a share, out-of-range shares, unknown modes, a mode on a Batch Payment', () => {
+    for (const binding of [{ consume: 'PERCENT' }, { consume: 'ALL', bps: 5000 }, { bps: 5000 }, { consume: 'FIXED', bps: 1 }])
+      expect(composeWorkflow({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, ...binding }] }), JSON.stringify(binding))
+        .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_CONSUMPTION_INVALID' });
+    for (const bps of [0, 10_001, 50.5]) expect(strategyInputIssues({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, consume: 'PERCENT', bps }] }))
+      .toEqual([expect.objectContaining({ path: '/bindings/0/bps' })]);
+    expect(strategyInputIssues({ version: 2, steps, bindings: [{ step: 1, amountFrom: 0, consume: 'HALF' }] })).not.toEqual([]);
+    const batch = { action: 'batch_payment', network: 'base', asset: 'WETH', recipients: [{ recipient: '0x' + '2'.repeat(40), amount: '0.001' },
+      { recipient: '0x' + '3'.repeat(40), amount: '0.001' }] };
+    const swap = { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' };
+    expect(ok({ version: 2, steps: [swap, batch], bindings: [{ step: 1, amountFrom: 0 }] }).bindings.every(b => b.exact)).toBe(true);
+    expect(composeWorkflow({ version: 2, steps: [swap, batch], bindings: [{ step: 1, amountFrom: 0, consume: 'FIXED' }] }))
+      .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_CONSUMPTION_INVALID', issues: [{ path: '/bindings/0/consume' }] });
+  });
+
+  it('resolves each mode from the producer\'s own delivery only, never above the cap or what is left', () => {
+    const cap = '1000';
+    // No mode and ALL: min(cap, what is left of the delivery).
+    for (const rule of [{ cap }, { cap, consume: 'ALL' as const }]) {
+      expect(consumption(rule, 400n)).toEqual({ ok: true, amount: 400n });
+      expect(consumption(rule, 5000n)).toEqual({ ok: true, amount: 1000n });
+      expect(consumption(rule, 5000n, 300n)).toEqual({ ok: true, amount: 300n });
+      expect(consumption(rule, 0n)).toEqual({ ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' });
+    }
+    // PERCENT: floor(delivered × bps / 10 000), capped; a share of the delivery, not of what an earlier consumer left.
+    const half = { cap, consume: 'PERCENT' as const, bps: 5000 };
+    expect(consumption(half, 801n)).toEqual({ ok: true, amount: 400n });
+    expect(consumption(half, 5000n)).toEqual({ ok: true, amount: 1000n });
+    expect(consumption(half, 800n, 500n)).toEqual({ ok: true, amount: 400n });
+    expect(consumption(half, 800n, 100n)).toEqual({ ok: true, amount: 100n });
+    expect(consumption({ cap, consume: 'PERCENT', bps: 1 }, 9_999n)).toEqual({ ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' });
+    expect(consumption({ cap: '10', consume: 'PERCENT', bps: 10_000 }, 7n)).toEqual({ ok: true, amount: 7n });
+    // FIXED: exactly the cap or a refusal before signing (never topped up from anything else); a Batch Payment leg keeps its own code.
+    const fixed = { cap, consume: 'FIXED' as const };
+    expect(consumption(fixed, 1000n)).toEqual({ ok: true, amount: 1000n });
+    expect(consumption(fixed, 5000n)).toEqual({ ok: true, amount: 1000n });
+    expect(consumption(fixed, 999n)).toEqual({ ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT' });
+    expect(consumption(fixed, 5000n, 999n)).toEqual({ ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT' });
+    expect(consumption({ cap, exact: true }, 999n)).toEqual({ ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT' });
+    expect(() => consumption({ cap: '0' }, 1n)).toThrow('WORKFLOW_BINDING_AMOUNT_INVALID');
+    expect(() => consumption({ cap, consume: 'PERCENT' }, 1n)).toThrow('WORKFLOW_BINDING_AMOUNT_INVALID');
   });
 });

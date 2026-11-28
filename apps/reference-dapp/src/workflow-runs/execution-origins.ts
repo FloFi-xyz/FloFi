@@ -4,12 +4,17 @@
  *
  * Written once, from trusted server-side context only, into `execution_origins` (migration 0037; dormant until the database holds its exact
  * certified identity):
- *   - a workflow run, when it is created from its approval handoff: the handoff's immutable requester kind and client id;
- *   - a single flow created by FloFi's /app server actions: the proxy's authoritative request path (`x-flofi-pathname`, never a client field);
- *   - a single flow created on an approval page: when that approval binds the run (`HandoffStore.bindRuns`), the approval's requester.
+ *   - a workflow run, when it is created from its approval handoff: the handoff's immutable requester kind and client id (an Editor handoff is
+ *     `web_editor`, or `web_chat` when the in-place Authorize that created the run carried a verified Chat initiation reference);
+ *   - a single flow created by FloFi's /app server actions (the proxy's authoritative `x-flofi-pathname`, never a client field): `web_chat` when
+ *     the call carried a Chat initiation reference this server issued to the request's own FloFi account (`server/chat-initiation.ts`, verified
+ *     on the server, fail closed), `web_editor` otherwise;
+ *   - a single flow created on an approval page (`/approve`, `/mcp/approve`): the approval's requester, at creation, when the run's reviewed
+ *     workflow hashes exactly to that approval's and the request's authenticated wallet is its claimant (`approval-page-origin.ts`), whatever the
+ *     owner's sharing choice; and, as before, when that approval binds the run (`HandoffStore.bindRuns`).
  * The first record wins (the signing surface never overwrites where an execution started); nothing here ever updates or deletes an origin.
- * Chat and the Editor are the same /app page and call the same server actions: no server-side record tells them apart, so a new web execution is
- * `web`, never `web_chat` or `web_editor` (those values are reserved for a future trusted signal). Recording never blocks or fails an execution.
+ * `web` is the legacy value: FloFi Web rows recorded before Chat and the Editor were separated (or by a BFF of that build during a rolling
+ * deployment). Recording never blocks or fails an execution.
  */
 import type { Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
@@ -34,7 +39,8 @@ const TELEGRAM_CLIENT = /^telegram:[1-9][0-9]{4,15}$/;
 /** The origin of an approval handoff, from its immutable requester kind and client id only (pure). A self-declared client name is never read. */
 export function originOfRequester(requesterKind: string, clientId: string): ExecutionOrigin {
   switch (requesterKind) {
-    case 'EDITOR_SESSION': return 'web';
+    // The Editor's own handoff. A Chat-started run is told apart only by the verified reference of the request that created it (`ensureForClaim`).
+    case 'EDITOR_SESSION': return 'web_editor';
     case 'DEVELOPER_PROJECT': return 'developer_api';
     case 'AUTOMATION_RULE': return 'automation';
     case 'CHANNEL_CONVERSATION': return TELEGRAM_CLIENT.test(clientId) ? 'telegram' : 'unknown';
@@ -49,17 +55,53 @@ export function originOfRequester(requesterKind: string, clientId: string): Exec
   }
 }
 
-/** The surface of a server action request, from the proxy's authoritative path: the FloFi app page, or nothing recordable. */
-export type ExecutionSurface = 'WEB_APP';
-/** The BFF → API header carrying it (set only by FloFi's own server, on the API_AUTH_TOKEN-authenticated call; value `web-app`). */
-export const EXECUTION_SURFACE_HEADER = 'x-flofi-execution-surface';
+// The page a server action was posted to lives in `action-page.ts` (no database module), so client bundles that reach the server-action
+// modules never pull the cloud runtime in.
+export { pageOfPath, type ActionPage } from './action-page.ts';
 /**
- * flofi-security review: the path is the proxy's own (`x-flofi-pathname`, set on every product page and stripped from every pass-through request),
- * but the browser chooses which page a server action is posted to. A web record is therefore the weakest origin: an approval that later binds the
- * run (an exact reviewed workflow hash after its claim) takes precedence over it in the Admin counts (`channels.ts`).
+ * The server-derived surface of a creating call (`simulate`/`prepare`), as FloFi's own server tells its API. `WEB_APP` is the legacy value a BFF
+ * built before Chat and the Editor were separated sends (recorded as `web`); this build sends `WEB_CHAT` or `WEB_EDITOR` for the app page.
  */
-export const surfaceOfPath = (pathname: string | null | undefined): ExecutionSurface | null =>
-  typeof pathname === 'string' && (pathname === '/app' || pathname.startsWith('/app/')) ? 'WEB_APP' : null;
+export type ExecutionSurface = 'WEB_CHAT' | 'WEB_EDITOR' | 'WEB_APP' | 'APPROVAL_PAGE';
+export type OriginWallet = { readonly namespace: 'eip155' | 'solana'; readonly address: string };
+/** What the BFF tells the API about where a creating call came from: the surface and, on an approval page, the wallets the request proved. */
+export type OriginContext = { readonly surface: ExecutionSurface; readonly wallets?: readonly OriginWallet[] };
+/** The BFF → API headers carrying it (set only by FloFi's own server, on the API_AUTH_TOKEN-authenticated call; the browser never reaches the API). */
+export const EXECUTION_SURFACE_HEADER = 'x-flofi-execution-surface';
+export const ORIGIN_WALLETS_HEADER = 'x-flofi-origin-wallets';
+const SURFACE_VALUES: Readonly<Record<ExecutionSurface, string>> = { WEB_CHAT: 'web-chat', WEB_EDITOR: 'web-editor', WEB_APP: 'web-app', APPROVAL_PAGE: 'approval-page' };
+const EVM_WALLET = /^eip155:(0x[0-9a-fA-F]{40})$/, SOLANA_WALLET = /^solana:([1-9A-HJ-NP-Za-km-z]{32,44})$/;
+/** A wallet as `namespace:address` (EVM lower-cased, as run owners are stored), or null. */
+export function originWalletOf(value: string): OriginWallet | null {
+  const evm = EVM_WALLET.exec(value);
+  if (evm) return { namespace: 'eip155', address: evm[1]!.toLowerCase() };
+  const solana = SOLANA_WALLET.exec(value);
+  return solana ? { namespace: 'solana', address: solana[1]! } : null;
+}
+export function originContextHeaders(context: OriginContext | null | undefined): Record<string, string> {
+  if (!context || !Object.hasOwn(SURFACE_VALUES, context.surface)) return {};
+  const wallets = context.surface === 'APPROVAL_PAGE' ? (context.wallets ?? []).flatMap(w => { const valid = originWalletOf(`${w.namespace}:${w.address}`);
+    return valid ? [`${valid.namespace}:${valid.address}`] : []; }).slice(0, 2) : [];
+  return { [EXECUTION_SURFACE_HEADER]: SURFACE_VALUES[context.surface], ...wallets.length ? { [ORIGIN_WALLETS_HEADER]: wallets.join(',') } : {} };
+}
+/** The context of an API request (closed values only; anything else is no context, never an error: recording is best effort). */
+export function originContextOf(headers: Readonly<Record<string, unknown>>): OriginContext | null {
+  const raw = headers[EXECUTION_SURFACE_HEADER];
+  const surface = (Object.keys(SURFACE_VALUES) as ExecutionSurface[]).find(key => SURFACE_VALUES[key] === raw);
+  if (!surface) return null;
+  if (surface !== 'APPROVAL_PAGE') return { surface };
+  const listed = headers[ORIGIN_WALLETS_HEADER], parts = typeof listed === 'string' ? listed.split(',') : [];
+  const wallets = parts.length <= 2 ? parts.map(part => originWalletOf(part.trim())).filter((w): w is OriginWallet => w !== null) : [];
+  return { surface, wallets };
+}
+/** The FloFi Web origins: `web_chat`, `web_editor` and the legacy combined `web`. */
+export const WEB_ORIGINS: ReadonlySet<ExecutionOrigin> = new Set(['web_chat', 'web_editor', 'web']);
+/** The origin and evidence a web surface records at creation (the approval page has none of its own: its approval decides). */
+export const WEB_SURFACE_ORIGINS: Readonly<Record<Exclude<ExecutionSurface, 'APPROVAL_PAGE'>, { readonly origin: ExecutionOrigin; readonly evidence: string }>> = {
+  WEB_CHAT: { origin: 'web_chat', evidence: 'WEB_CHAT_INITIATION' }, WEB_EDITOR: { origin: 'web_editor', evidence: 'WEB_EDITOR_SERVER_ACTION' },
+  WEB_APP: { origin: 'web', evidence: 'WEB_APP_SERVER_ACTION' } };
+/** The evidence of a single flow attributed at creation to the approval whose page created it (§8.2). */
+export const APPROVAL_PAGE_EVIDENCE = 'APPROVAL_PAGE_CREATION';
 
 const active = new WeakMap<object, true>();
 /** Whether the database holds exactly the certified 0037 (version, name and SHA-256). Remembered once true; false on any doubt or error. */
@@ -97,8 +139,9 @@ export async function recordExecutionOrigin(db: Queryable, tenantId: string, tar
 
 /**
  * Records the origin of every listed single-flow run an approval bound (best effort, first record wins). Never throws. flofi-admin-analytics review:
- * a run recorded `web` at creation (the page a server action was posted to is the browser's choice) that an MCP, channel, developer or automation
- * approval binds is corrected durably, once, to that approval's channel (an append-only correction row), so a later approval purge never flips it.
+ * a run recorded as FloFi Web at creation (`web_chat`, `web_editor` or the legacy `web`: the page a server action was posted to is the browser's
+ * choice) that an MCP, channel, developer or automation approval binds is corrected durably, once, to that approval's channel (an append-only
+ * correction row naming the recorded value), so a later approval purge never flips it. The origin row itself never changes.
  */
 export async function recordBoundOrigins(db: Queryable, tenantId: string, runIds: readonly string[], requester: { readonly kind: string; readonly clientId: string },
   report: (code: string) => void = () => undefined): Promise<void> {
@@ -106,10 +149,10 @@ export async function recordBoundOrigins(db: Queryable, tenantId: string, runIds
   for (const runId of runIds) {
     try {
       const recorded = await recordExecutionOrigin(db, tenantId, { runId }, origin, 'APPROVAL_BINDING', 'APPROVAL_RUN_BINDING');
-      if (recorded !== 'EXISTS' || origin === 'web' || origin === 'unknown') continue;
+      if (recorded !== 'EXISTS' || WEB_ORIGINS.has(origin) || origin === 'unknown') continue;
       await db.query(`INSERT INTO execution_origin_corrections (tenant_id, correction_id, run_id, origin, previous_origin, approval_ref, reason_code)
-        SELECT $1, $2, $3, $4, 'web', 'auto:approval-binding', 'APPROVAL_BINDING_SUPERSEDES_WEB'
-        WHERE EXISTS (SELECT 1 FROM execution_origins o WHERE o.tenant_id = $1 AND o.run_id = $3 AND o.origin = 'web' AND o.basis = 'CREATION')
+        SELECT $1, $2, $3, $4, o.origin, 'auto:approval-binding', 'APPROVAL_BINDING_SUPERSEDES_WEB'
+        FROM execution_origins o WHERE o.tenant_id = $1 AND o.run_id = $3 AND o.origin IN ('web', 'web_chat', 'web_editor') AND o.basis = 'CREATION'
           AND NOT EXISTS (SELECT 1 FROM execution_origin_corrections c WHERE c.tenant_id = $1 AND c.run_id = $3)`, [tenantId, typedId('eoc'), runId, origin]);
     } catch { report('EXECUTION_ORIGIN_NOT_RECORDED'); }
   }

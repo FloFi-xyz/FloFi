@@ -55,6 +55,8 @@ import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
 import { BATCH_PAYMENT_MAX_RECIPIENTS, BATCH_PAYMENT_MIN_RECIPIENTS, BATCH_PAYMENT_NETWORKS, BATCH_PAYMENT_SOLANA_NETWORK, batchPaymentChain, createAuthoredBatchPayment,
   type BatchPaymentInput } from './batch-payment-authoring';
 import type { RobinhoodTransferInput } from './robinhood-transfer-authoring';
+import { amountReading, applyBatchEdit, bareAddress, BATCH_CHAT_COPY, batchChangeView, batchPaymentLines, batchViewOf, cleanPhrase, namedBatchWritten, readBatchEdit,
+  resolveBatchRecipient, writtenRecipient, type BatchAnswers, type BatchAsk, type BatchEdit, type BatchRefusal, type NamedPayment } from './batch-payment-chat';
 import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
 import { lendingProfileOfReserve } from './supply-authoring';
 import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
@@ -63,6 +65,10 @@ import { liquidityPositionChoiceValid, liquidityPositionKey, type LiquidityPosit
 import { assetNamed, closeNamed, describePosition, halfNamed, liquidityRemovalNamed, ordinalNamed, pairMatches, pairName, positionDetails, positionKey, positionLine,
   positionNetworksText, positionOptionLabel, positionSlippageBps, positionStepWallet, POSITION_FACT_LIMITS, protocolName, rangeFilterNamed, readPositionAnswer, shortPositionId,
   statedPercent, redactPositionIds, type CopilotLiquidityFacts } from './copilot-positions';
+import { readStepEdit, STEP_EDIT_COPY, type StepEdit } from './step-reference';
+import { detectLanguage } from './conversation-language';
+import { termAnswer, termQuestion } from './operation-terms';
+import { answerReadOnly, readOnlyQuestion, type ReadOnlyQuestion } from './assistant-answers';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
   NO_ADAPTATION, proposalReadings, type Adaptation, type AdaptationEvent, type LearningObservation, type ProposalReading, type ReadingField,
   type ReadingFields } from './copilot-adaptation';
@@ -128,7 +134,13 @@ type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: Swap
    */
   readonly capStep?: number;
   /** The (0-based) steps whose cap the user gave in answer to FloFi's `capStep` question: they must still be funded by the step before them. */
-  readonly capFunded?: readonly number[] };
+  readonly capFunded?: readonly number[];
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): the person's answers to FloFi's own questions about a Batch Payment written with names
+   * (the saved recipient they picked, the address they gave for a name that is not saved, the reading of an ambiguous amount), by written recipient.
+   */
+  readonly batch?: BatchAnswers;
+  /** The written recipient whose address FloFi asked for (a bare address answers it). */ readonly batchAsked?: string };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -163,7 +175,13 @@ export type CopilotConversation = {
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: every saved recipient this conversation has mentioned. Masking keeps using them even if the list is later
    * unavailable, renamed or removed, so a name once masked is never sent to a model in a later turn (local state only, never sent anywhere). */
   readonly recipientMasks?: readonly SavedRecipient[];
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): FloFi's open question about an edit of the Batch Payment ("which Pedro?", "Pedro's
+   * address?"): the edit, the answers so far and what was asked, bound to the context it was asked in. Anything but an answer drops it.
+   */
+  readonly batchHold?: BatchHold | null;
 };
+type BatchHold = { readonly edit: BatchEdit; readonly answers: BatchAnswers; readonly ask: BatchAsk; readonly snapshot: ContextSnapshot };
 export type RecipientOffer = { readonly address: string; readonly ecosystem: SavedRecipientEcosystem; readonly suggestion: string | null;
   /** True once the user accepted and FloFi asked for the name. */ readonly naming: boolean };
 /**
@@ -202,6 +220,11 @@ export type CopilotEnvironment = {
    * (sent as the turn's reply language) — whatever language the person typed in; their words are still understood in either language.
    */
   readonly interfaceLanguage?: CopilotLanguage;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09): the language this turn is answered in — the person's conversational language (their words,
+   * or the language they explicitly chose), which the web chat reads itself. It wins over `interfaceLanguage`, which is then only the screen's.
+   */
+  readonly replyLanguage?: CopilotLanguage;
   /**
    * BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients (public addresses with names), read by the surface from its verified
    * session. Absent: none are available here (signed out, unlinked channel, not migrated). A name selects an address only through the exact-name
@@ -285,6 +308,8 @@ type Result = { readonly reply: CopilotReply; readonly next: CopilotConversation
 /** Every Command the Copilot may hand to `propose`: new authoring, typed edits of existing steps, and removal. */
 export const COPILOT_V2_COMMANDS: ReadonlySet<string> = new Set([...COPILOT_AUTHORING_COMMANDS, 'SET_SUPPLY', 'SET_BORROW', 'SET_REPAY', 'SET_WITHDRAW',
   'SET_SOLANA_SWAP', 'SET_ROUTER_BRIDGE', 'SET_UNIVERSAL_BRIDGE', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'SET_SWAP_AMOUNT', 'SET_SLIPPAGE', 'REMOVE',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): an edit of the Batch Payment card (recipients and amounts), the command the Canvas card uses.
+  'SET_BATCH_PAYMENT',
   // BUILD-BASE-001: edits of catalog-network swaps, positions and transfers, with the same commands the Canvas uses.
   'SET_CRYPTO_ACTION', 'SET_RH_TRANSFER',
   // PR B: preparing a verified FloFi position for removal or exit (the owner still simulates, reviews and signs).
@@ -393,9 +418,15 @@ const suppressedPair = (state: CopilotConversation, entry: LexiconEntry) => (sta
 export const lexiconOf = (state: CopilotConversation, env: CopilotEnvironment): LexiconEntry[] => !env.learning ? []
   : mergeLexicon(parseLexicon(state.aliases ?? [], 'SESSION'), parseLexicon(state.adapted ?? [], 'ADAPTED'), parseLexicon(env.learning.private, 'PRIVATE'),
     parseLexicon(env.learning.learned ?? [], 'LEARNED'), parseLexicon(env.learning.global, 'GLOBAL')).filter(entry => statedSource(entry.source) || !suppressedPair(state, entry));
-/** The reply language the user chose (in this conversation, else saved); null = the language of their message, as before. */
+/**
+ * The reply language: the turn's conversational language (A09), else the one the user chose in this conversation, else the interface's, else a
+ * saved preference; null = the language of their message, as before.
+ */
 export const preferredLanguage = (state: CopilotConversation, env: CopilotEnvironment): CopilotLanguage | null =>
-  env.interfaceLanguage ?? (!env.learning ? null : state.languageSet ?? env.learning.language ?? null);
+  env.replyLanguage ?? state.languageSet ?? env.interfaceLanguage ?? (!env.learning ? null : env.learning.language ?? null);
+/** The language every reply of this turn must be written in, model text included (null: the model's own reading, as before). */
+const forcedLanguage = (state: CopilotConversation, env: CopilotEnvironment): CopilotLanguage | null =>
+  env.replyLanguage ?? (env.interfaceLanguage ? state.languageSet ?? env.interfaceLanguage : null);
 function withLearning(result: Result, env: CopilotEnvironment, signals: readonly LearningSignal[], used: readonly LexiconEntry[] = []): Result {
   if (!env.learning || (!signals.length && !used.length)) return result;
   const prior = result.reply.learning;
@@ -1159,7 +1190,13 @@ function assistTurn(state: CopilotConversation, text: string, env: CopilotEnviro
   // buttons ("Across", a saved name, "Arbitrum One"), or a bare amount for an amount question.
   if (draft && (answerDraftField(draft.intent, draft.expected ?? [], text) || [...draft.shown ?? [], ...draft.options.map(option => option.label)].some(label => normalize(label) === normalize(text))
     || ((draft.amountFill || draft.depositFill) && bareAmount(text)) || (draft.intent.kind === 'POSITION' && readPositionAnswer(text) !== null))) return null;
-  const followUp = state.concept ? conceptFollowUp(text) : null, asked = followUp ? null : conceptQuestion(text);
+  const followUp = state.concept ? conceptFollowUp(text) : null, term = followUp ? null : termQuestion(text), asked = followUp || term ? null : conceptQuestion(text);
+  // A04: what one of FloFi's own operations means ("O que significa supply?"): FloFi's short definition; the related concept keeps the follow-ups.
+  if (term) {
+    const defined = termAnswer(term, language), options = defined.concept ? answerConcept(defined.concept, { language, workflowSteps: env.facts.steps }).options : [];
+    return { kind: 'LOCAL', reply: withDraftReminder(reply('ANSWER', defined.text, { options: [...options], topic: 'CONCEPT' }), state, language),
+      next: aside(state, text, a.explained(term.toLowerCase(), 'STANDARD'), { concept: defined.concept ? { id: defined.concept, level: 'STANDARD', protocol: null } : null }) };
+  }
   if (!followUp && !asked) {
     const automated = automationTurn(state, text, env, language);
     if (automated) return automated;
@@ -1200,6 +1237,42 @@ function answerRecipientOffer(state: CopilotConversation, offer: RecipientOffer,
     aside({ ...state, recipientOffer: null }, text, 'Flofi saved the address under a name the user chose.'));
 }
 
+/** No change: the base of an edit FloFi reads itself (only the fields the user named are set). */
+const NO_CHANGES: CopilotChanges = { amount: null, slippageBps: null, network: null, destinationNetwork: null, inputAsset: null, outputAsset: null, recipient: null, routing: null,
+  deposits: [], rangeUnit: null, lower: null, upper: null };
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A03): an amount edit of a step the user named in their own words, resolved by the engine exactly as an
+ * interpreted EDIT (the same target rules, grounding, exact grammar and refusals) without a model. An amount that reads two ways is asked about;
+ * a token written after the amount that is not the step's own is not an amount change, so the normal flow reads it (null).
+ */
+function stepEditTurn(state: CopilotConversation, text: string, edit: StepEdit, env: CopilotEnvironment): TurnStart | null {
+  const language = preferredLanguage(state, env) ?? detectLanguage(text) ?? state.language, m = copilotCopy(language);
+  const next = { ...withUser(state, text), language };
+  const intent: Extract<CopilotIntentV2, { kind: 'EDIT' }> = { version: '2', language, kind: 'EDIT', target: edit.target, changes: NO_CHANGES };
+  if (edit.kind === 'AMBIGUOUS_AMOUNT')
+    return { kind: 'LOCAL', ...question(next, m, STEP_EDIT_COPY[language].amountReadsTwoWays(edit.written, edit.readings), edit.readings,
+      { intent, amountFill: false, snapshot: snapshotOf(env), options: edit.readings.map(value => ({ label: value, fill: { kind: 'ACTION', patch: { amount: value } } })) }) };
+  if (edit.asset) {
+    const resolution = resolveTarget(edit.target, 'EDIT', intent, next, env), base = resolution.ok ? stepAction(resolution.resolved.step) : null;
+    const action = base && !base.composition ? base.actions[0] : null;
+    const spent = action && 'inputAsset' in action ? action.inputAsset : action && 'asset' in action ? action.asset : null;
+    if (resolution.ok && (!spent || spent.toLowerCase() !== edit.asset)) return null;
+  }
+  return { kind: 'LOCAL', ...tallied(resolveIntent({ ...intent, changes: { ...NO_CHANGES, amount: edit.amount } }, next, env, null, {}), env) };
+}
+/**
+ * A05: a question the model classified about the simulation (or a cost or market value) is answered from the current revision's verified simulation
+ * facts when the surface knows them (`facts.simulation.details`); null otherwise (FloFi's general answer stands).
+ */
+function simulationAnswer(topic: CopilotQuestionTopic, latest: string, env: CopilotEnvironment, language: CopilotLanguage): { readonly text: string; readonly notes: readonly string[] } | null {
+  const details = env.facts.simulation.details;
+  if (!details || !['SIMULATION', 'MARKET_DATA', 'OTHER', 'EXECUTION_FLOW'].includes(topic)) return null;
+  const read: ReadOnlyQuestion | null = readOnlyQuestion(latest) ?? (topic === 'SIMULATION' ? { kind: 'SIMULATION', target: null, amount: null } : null);
+  if (!read || read.kind === 'WORKFLOW' || read.kind === 'STEP') return null;
+  const answered = answerReadOnly(read, details, env.facts.steps, language, env.now);
+  return { text: answered.text, notes: [...answered.notes, language === 'PT' ? 'Somente leitura: nada foi proposto, alterado, assinado ou executado.' : 'Read only: nothing was proposed, changed, signed or executed.'] };
+}
+
 // ── Turns ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** Starts a user turn: a local answer (input refused, secret, or a reply to Flofi's own question) or a request for the model. */
 export function startTurn(current: CopilotConversation, raw: string, env: CopilotEnvironment): TurnStart {
@@ -1225,19 +1298,26 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     }
     const statement = parseMemoryStatement(text);
     // FloFi answers in the language the statement was written in, unless the user chose a reply language (a language statement: the new one).
-    // P0 approved UX: with an interface language, a reply-language statement is answered in that language and points to the language setting —
-    // nothing is promised, set or learned that the screen's language would then override.
-    if (statement?.kind === 'LANGUAGE' && env.interfaceLanguage)
-      return { kind: 'LOCAL', reply: reply('ANSWER', learningCopy(env.interfaceLanguage).languageFollowsScreen), next: { ...state, offer: null } };
+    // A09 (replaces the P0 "follows the screen" answer): with an interface language, "reply in English" holds for this conversation, whatever the
+    // screen shows; it is not saved as a preference.
+    if (statement?.kind === 'LANGUAGE' && (env.interfaceLanguage || env.replyLanguage))
+      return { kind: 'LOCAL', reply: reply('ANSWER', learningCopy(statement.language).language(statement.language)),
+        next: { ...state, offer: null, languageSet: statement.language, language: statement.language } };
     if (statement) return { kind: 'LOCAL', ...memoryTurn(state, statement, env.learning, statement.kind === 'LANGUAGE' ? statement.language
       : preferredLanguage(state, env) ?? statement.said) };
   }
   // BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi's optional offer to save a typed address is answered by its buttons or words; anything else drops it.
-  const assistLanguage = env.interfaceLanguage ?? preferredLanguage(state, env) ?? messageLanguage(text) ?? questionLanguage(text) ?? state.language;
+  const assistLanguage = preferredLanguage(state, env) ?? messageLanguage(text) ?? questionLanguage(text) ?? state.language;
   if (state.recipientOffer) {
     const offered = answerRecipientOffer(state, state.recipientOffer, text, assistLanguage, env);
     if (offered) return offered;
     state = { ...state, recipientOffer: null };
+  }
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): FloFi's open question about a Batch Payment edit is answered locally; anything else drops it.
+  if (state.batchHold) {
+    const held = batchHoldTurn(state, text, env, assistLanguage);
+    if (held) return held;
+    state = { ...state, batchHold: null };
   }
   const answered = yesOrNo(state, text, env, m);
   if (answered && !('pick' in answered)) return answered;
@@ -1253,6 +1333,9 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     const changed = contextChange(draft.snapshot, snapshotOf(env));
     // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: an open position choice says which change ended it (another wallet's positions are read again on request).
     if (changed) return { kind: 'LOCAL', ...failedWith(closeSegment(state), m, draft.intent.kind === 'POSITION' ? m.lifecycle.stale(changed) : m.draftStale, 'COPILOT_CONTEXT_CHANGED') };
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): the address FloFi asked for a name that is not a saved recipient.
+    const addressed = batchAddressAnswer(state, draft, text, env, m);
+    if (addressed) return addressed;
     const positioned = positionTurn(state, draft, picked, env);
     if (positioned) return positioned;
     const ranged = rangeTurn(state, draft, picked, env, m);
@@ -1307,11 +1390,19 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
   }
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): "adicione mais 10 USDC para Pedro", "remova a Dayane", "mude o Caio para 25": an edit of
+  // the Batch Payment this workflow (or the visible proposal) holds, resolved here (saved names never reach a model) into the card's own command.
+  const batchEdited = batchEditTurn(state, text, env, assistLanguage);
+  if (batchEdited) return batchEdited;
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: "50%", "all of it", "only the fees", "yes, close it", "Arbitrum" right after FloFi prepared a position
   // operation change that choice (local, re-read from the verified facts, a new proposal every time).
   if (!state.draft) {
     const followed = positionFollowUp(state, text, env);
     if (followed) return followed;
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A03): "Altere a segunda etapa para 0,2", "Mude o supply para 0,2", "change the last card to 5" are read
+    // by FloFi itself — the step by kind and ordinal, the amount exactly as written — and resolved like any edit, never by a model.
+    const edit = readStepEdit(text);
+    if (edit) { const local = stepEditTurn(state, text, edit, env); if (local) return local; }
   }
   let next = withUser(state, text);
   // BUILD-FLOFI-INTELLIGENCE-001: FloFi's sanitized context card travels with the request; the model reads it only through a read-only tool.
@@ -1324,7 +1415,8 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   const maskWith = [...live, ...masks.filter(mask => !live.some(recipient => recipient.id === mask.id))];
   const messages = maskWith.length ? next.transcript.map(entry => ({ ...entry, text: maskSavedRecipients(entry.text, maskWith) })) : next.transcript;
   if (masks.length) next = { ...next, recipientMasks: masks };
-  return { kind: 'REMOTE', request: { version: '2', messages, context: card, contextKey: key, ...env.interfaceLanguage ? { replyLanguage: env.interfaceLanguage } : {} },
+  const forced = forcedLanguage(state, env);
+  return { kind: 'REMOTE', request: { version: '2', messages, context: card, contextKey: key, ...forced ? { replyLanguage: forced } : {} },
     turn: { before: state, state: next, snapshot: snapshotOf(env), contextKey: key } };
 }
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
@@ -1344,14 +1436,16 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   catch (cause) { return discarded(isCopilotIntentError(cause) && cause.message === TOO_MANY_ACTIONS ? cause.message : 'COPILOT_INTENT_INVALID'); }
   // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review M3): the interpretation may name up to a Batch Payment's recipients only for sends that
   // can be one; any other composition longer than a proposal's steps is discarded exactly as before.
-  if (intent.kind === 'COMPOSITION' && intent.actions.length > COPILOT_LIMITS.maxActions && !batchShaped(intent.actions)) return discarded(TOO_MANY_ACTIONS);
+  if (intent.kind === 'COMPOSITION' && intent.actions.length > COPILOT_LIMITS.maxActions && !batchShaped(intent.actions, newestNamedBatch(turn.state, env.recipients ?? [])))
+    return discarded(TOO_MANY_ACTIONS);
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
   // BUILD-P1: an interpreted answer that filled a slot the open request never had is progress: the clarification budget opens again for the next one.
   const progressed = filledSlots(turn.before, intent);
   // P0 approved UX: FloFi composes its reply in the interface language, not the language the model detected.
   // P0 hotfix (locale contract): a model text written in another language than the person's (a closed replay fixture, or a model that ignored the
   // reply-language note) is never shown; FloFi's own copy in the person's language stands instead. The values it offered (networks, assets) stay.
-  if (env.interfaceLanguage && 'language' in intent && intent.language !== env.interfaceLanguage) intent = { ...withoutForeignProse(intent), language: env.interfaceLanguage } as CopilotIntentV2;
+  const forced = forcedLanguage(turn.state, env);
+  if (forced && 'language' in intent && intent.language !== forced) intent = { ...withoutForeignProse(intent), language: forced } as CopilotIntentV2;
   // BUILD-FLOFI-INTELLIGENCE-001 (defense in depth): a model explanation shows only when every number in it is one of FloFi's facts — the user's words,
   // the workflow facts and context FloFi holds, and the numbers FloFi's tools returned this turn. Otherwise FloFi's own answer stands alone.
   if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) {
@@ -1363,7 +1457,7 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   // conversation; evidence for the identity's starting language only, never a setting, and only where persistent learning is permitted).
   // P0 approved UX: with an interface language the interpreter is told to answer in it, so its language is no independent evidence: nothing is
   // observed then (the screen's language governs, and a heuristic alone never becomes a learned preference).
-  const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
+  const said = !forced && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
     read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
   const answered = resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language, slots: progressed.slots, ...progressed.progress ? { clarifications: 0 } : {} }, env, null,
@@ -1390,7 +1484,8 @@ const operationsOf = (intent: CopilotIntentV2): string => intent.kind === 'ACTIO
  */
 function carriedOver(draft: Draft | null, intent: CopilotIntentV2): Extras {
   if (!draft?.extras) return {};
-  const { target, savedRecipient, capStep, capFunded, ...rest } = draft.extras;
+  const { target, savedRecipient, capStep, capFunded, batchAsked: _asked, ...rest } = draft.extras;
+  void _asked;
   const unnamed = (intent.kind === 'EDIT' || intent.kind === 'REPEAT') && intent.target.step === null && intent.target.ordinal === null;
   // BUILD-FLOFI-BETA-CRITICAL-RECOVERY-001 (workflow review): a cap question or answer belongs to the same steps only (never another request's).
   const same = operationsOf(draft.intent) === operationsOf(intent);
@@ -1499,6 +1594,7 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
       }
       const answer = (intent.topic === 'CAPABILITIES' || intent.topic === 'NETWORKS' ? scopedCapabilities(latest, language) : null)
         ?? (intent.topic === 'CONCEPT' ? conceptMenu(language) : null)
+        ?? simulationAnswer(intent.topic, latest, env, language)
         ?? answerQuestion(intent.topic, step, env.facts, language);
       const prose = intent.answer && intent.topic !== 'CONCEPT' ? publicText(safeCopilotProse(intent.answer)) : null;
       const value = withDraftReminder(reply('ANSWER', answer.text, { notes: [...prose ? [intelligenceCopy(language).explanation(prose)] : [], ...answer.notes],
@@ -1514,6 +1610,10 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
       if (intent.kind === 'ACTION' && intent.action.type === 'WITHDRAW' && liquidityRemovalNamed(segmentText(state)) && !tokenAmountWithdrawal(intent.action, segmentText(state)))
         return resolvePosition(positionIntentOf(intent, segmentText(state)), state, env, extras);
       let actions = intent.kind === 'ACTION' ? [intent.action] : intent.actions;
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12): sends the person wrote with saved names ("20 USDC para Caio e 30 USDC para Dayane",
+      // "10 USDC para Caio e Pedro") are ONE Batch Payment, each recipient resolved here from the person's own words (the model never saw them).
+      const named = namedBatchAuthoring(intent, actions, state, env, extras);
+      if (named) return named;
       // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 (chat review H2): one send read from a message that pairs several payments would drop a
       // recipient; FloFi lists what it read and asks instead.
       if (intent.kind === 'ACTION' && intent.action.type === 'TRANSFER' && !extras.target) {
@@ -1609,7 +1709,7 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
       const resolved = resolution.resolved, label = stepLabel(m, resolved.step, language);
       if (resolved.source === 'PENDING') return refused(state, m, m.pendingOnly);
       const plan = removeCommandFor(env.workflow, env.context, resolved.step.nodeId, env.workflow.revision);
-      if (!plan.ok) return refused(state, m, m.refusal[plan.code as keyof typeof m.refusal]?.(label) ?? m.rejectedCode(plan.code));
+      if (!plan.ok) return refused(state, m, m.refusal[plan.code as keyof typeof m.refusal]?.(label) ?? m.couldNotPrepare);
       return propose(state, env, plan.command, `remove ${stepLabel(copilotCopy('EN'), resolved.step, 'EN')}`, m.interpretedRemove(label), [], label);
     }
     case 'INSERT': {
@@ -1929,8 +2029,10 @@ export function batchPaymentConfirmation(input: BatchPaymentInput, language: Cop
  * Chat review M3: a composition longer than a sequence of steps may be (`COPILOT_LIMITS.maxActions`) is read only as one Batch Payment: sends of one
  * written asset on one Batch Payment network, each to its own explicit recipient. Anything else is answered exactly as before Batch Payment existed.
  */
-function batchShaped(actions: readonly CopilotAction[]): boolean {
-  if (!actions.every(action => action.type === 'TRANSFER' && action.recipient !== null)) return false;
+function batchShaped(actions: readonly CopilotAction[], named: ReturnType<typeof newestNamedBatch> = null): boolean {
+  // R09–R12: a recipient the person named (masked for the model, so the send carries none) is resolved by FloFi from their own words.
+  const written = named !== null && (named.payments.length === actions.length || named.clauses.length === actions.length);
+  if (!actions.every(action => action.type === 'TRANSFER' && (action.recipient !== null || written))) return false;
   const sends = actions as readonly CopilotTransferAction[], network = sends[0]?.network ?? null, asset = sends[0]?.asset ?? null;
   // Chat review C5: sends that name no network yet reach the sequence authoring (which asks for the network) only in the public, mainnet-only product;
   // in any other scope they are not a Batch Payment shape, so the request is discarded exactly as before Batch Payment existed.
@@ -1939,12 +2041,14 @@ function batchShaped(actions: readonly CopilotAction[]): boolean {
   return sends.every(send => send.network === network && (send.asset === asset || sameWrittenAsset(send.asset, asset)));
 }
 function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind: 'PLAN' }> | null, sequenceActions: readonly CopilotAction[], state: CopilotConversation,
-  env: CopilotEnvironment, notesIn: readonly string[], extras: Extras = {}): Result {
+  env: CopilotEnvironment, notesIn: readonly string[], extras: Extras = {}, named: readonly string[] | null = null): Result {
   const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language);
   // BUILD-FLOFI-UNIFIED-COPILOT-001: a saved recipient named for a plan fills its send or bridge destination exactly as for a single step (or asks,
   // or refuses a wrong ecosystem); it never silently falls back to the owner's wallet. Saved names never ground a network or token.
   const recipients = env.recipients ?? [], masked = (text: string) => recipients.length ? maskSavedRecipients(text, recipients) : text;
-  const saved = savedRecipientFor(sequenceActions, state, env, language, intent, extras, segmentText(state), new Set(), masked(segmentText(state)));
+  // R09–R12: a Batch Payment written with names arrives with every recipient already resolved from the person's words (`named`: those addresses).
+  const saved = named ? { actions: sequenceActions, addresses: named, notes: [] as readonly string[], id: null }
+    : savedRecipientFor(sequenceActions, state, env, language, intent, extras, segmentText(state), new Set(), masked(segmentText(state)));
   if ('result' in saved) return saved.result;
   const actions = saved.actions, notes = [...notesIn, ...saved.notes];
   const final = [...actions].reverse().find(action => action.type === 'TRANSFER' || action.type === 'BRIDGE');
@@ -1990,17 +2094,21 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     // Chat review H2: each send must be a payment the person paired in their own words (amount, asset and recipient together, in their order);
     // otherwise FloFi lists both readings and asks, never choosing which amount goes to which recipient.
     // Chat review C1: a written amount with several readings ("1.000") is asked about first; a send never pairs with a reading FloFi chose.
-    const { written, unsettled, stray } = settledPayments(state);
-    if (unsettled) return ambiguousPayment(state, m, language, written, unsettled);
-    if (stray || !paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends, batch.chain);
+    // R09–R12: a batch written with names was paired, clause by clause, before its recipients were resolved (`namedBatchAuthoring`).
+    if (!named) {
+      const { written, unsettled, stray } = settledPayments(state);
+      if (unsettled) return ambiguousPayment(state, m, language, written, unsettled);
+      if (stray || !paymentsPaired(batch.sends, written, batch.chain)) return unpairedPayments(state, m, language, written, batch.sends, batch.chain);
+    }
     const duplicate = duplicateRecipient(batch.sends);
     if (duplicate) return refused(state, m, BATCH_PAYMENT_COPY[language].duplicate(duplicate));
     if (batch.refusal) return failedWith(state, m, copilotRejection(batch.refusal, language).message, batch.refusal);
     const next = editorReducer({ workflow: env.workflow, error: null }, batch.command, env.context);
     if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
     const input = batch.command.input;
+    const lines = named ? [...batchPaymentLines(input, language, recipients), BATCH_PAYMENT_COPY[language].atomic] : batchPaymentConfirmation(input, language);
     return propose(state, env, batch.command, BATCH_PAYMENT_COPY[language].sentence(input.payments.length, input.asset, input.network),
-      [BATCH_PAYMENT_COPY[language].intro(input.payments.length, input.network), ...batchPaymentConfirmation(input, language)].join(' '), [...notes, ...stepNotes], m.subject.request);
+      [BATCH_PAYMENT_COPY[language].intro(input.payments.length, input.network), ...lines].join(' '), [...notes, ...stepNotes], m.subject.request);
   }
   // Chat review M3: more sends than a sequence may hold are only ever one Batch Payment. When they are not one, the request is answered exactly as
   // before Batch Payment existed (`finishTurn` gives the interpretation's "too many steps" reply for this code).
@@ -2033,6 +2141,183 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
   if (bound.size) notes.push(c.goalReasons.FUNDED_BY_PREVIOUS_STEP, ...[...bound.values()].some(Boolean) ? [c.goalReasons.CAP_IS_YOUR_AMOUNT] : []);
   const listed = sentences.map((sentence, index) => c.goalStep(index + 1, sentence));
   return propose(state, env, command, sentences.join(' then '), [c.goalIntro(steps.length), ...listed, c.sequenceInterpreted].join(' '), [...notes, ...stepNotes], m.subject.request);
+}
+
+// ── BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R09–R12, P1 §6): Batch Payment with saved recipients ──────────────────────────────────────
+/** Closed codes of FloFi's own Batch Payment questions (content-free turn metrics; the address question is answered by a bare address). */
+const BATCH_ADDRESS_CODE = 'BATCH_PAYMENT_RECIPIENT_ADDRESS', BATCH_CHOOSE_CODE = 'BATCH_PAYMENT_RECIPIENT_CHOOSE', BATCH_READING_CODE = 'BATCH_PAYMENT_AMOUNT_READING';
+const batchAskCode = (ask: BatchAsk) => ask.kind === 'CHOOSE' ? BATCH_CHOOSE_CODE : ask.kind === 'READING' ? BATCH_READING_CODE : BATCH_ADDRESS_CODE;
+/**
+ * The payments the newest paying turn of the open request writes with at least one name, or null: a newer turn written only with addresses keeps the
+ * address pairing above, and an answer to FloFi's own question (a picked name, an address) never replaces the turn that wrote the payments.
+ */
+function newestNamedBatch(state: CopilotConversation, recipients: readonly SavedRecipient[]): ReturnType<typeof namedBatchWritten> {
+  for (const entry of [...state.segment].reverse()) {
+    const named = namedBatchWritten(entry, recipients);
+    if (named) return named;
+    if (writtenPayments(entry).length) return null;
+  }
+  return null;
+}
+/** A Batch Payment refusal in the person's words (an invalid address is the short sentence the card uses too). */
+function batchRefusal(reason: BatchRefusal, language: CopilotLanguage, network: string): string {
+  const c = BATCH_CHAT_COPY[language], a = ASSIST_COPY[language];
+  switch (reason.code) {
+    case 'NOT_FOUND': return c.notFound(reason.phrase);
+    case 'ALREADY_IN': return c.alreadyIn(reason.name);
+    case 'ASSET': return c.asset(reason.asset);
+    case 'WRONG_ECOSYSTEM': return a.recipientWrongEcosystem(reason.label, reason.ecosystem === 'EVM' ? 'EVM' : 'Solana', network, false);
+    case 'SELF': return c.self;
+    case 'STALE': return a.recipientStale;
+    case 'AUTHORING': return /RECIPIENT_INVALID$/.test(reason.error) ? c.invalidAddress : copilotRejection(reason.error, language).message;
+  }
+}
+/** FloFi's question for a Batch Payment written with names: which saved recipient, the address of a name that is not saved, or an amount's reading. */
+function namedBatchQuestion(state: CopilotConversation, m: CopilotCopy, language: CopilotLanguage, intent: CopilotIntentV2, env: CopilotEnvironment, extras: Extras,
+  ask: BatchAsk): Result {
+  const answers = extras.batch ?? {}, answered = (next: BatchAnswers): DraftFill => ({ kind: 'EXTRAS', extras: { ...extras, batch: next } });
+  const draft = (options: Draft['options'], expected: DraftField, kept: Extras = extras): Draft => ({ intent, expected: [expected], options, amountFill: false, snapshot: snapshotOf(env), extras: kept });
+  const code = { code: batchAskCode(ask) };
+  if (ask.kind === 'CHOOSE') {
+    const labels = ask.candidates.map(recipient => recipient.label);
+    const asked = question(state, m, ASSIST_COPY[language].recipientChoose(labels), labels, draft(ask.candidates.map(recipient => ({ label: recipient.label,
+      fill: answered({ ...answers, picks: { ...answers.picks, [ask.key]: recipient.id } }) })), 'recipient'), [], code);
+    return { ...asked, reply: { ...asked.reply, verbatimOptions: true } };
+  }
+  if (ask.kind === 'READING') return question(state, m, intelligenceCopy(language).amountAmbiguous(ask.written, ask.readings), ask.readings,
+    draft(ask.readings.map(reading => ({ label: reading, fill: answered({ ...answers, readings: { ...answers.readings, [ask.key]: reading } }) })), 'amount'), [], code);
+  return question(state, m, BATCH_CHAT_COPY[language].askAddress(ask.phrase), [], draft([], 'recipient', { ...extras, batchAsked: ask.key }), [], code);
+}
+/** A bare address in answer to FloFi's address question fills that recipient; something shaped like an address that is not one is asked again. */
+function batchAddressAnswer(state: CopilotConversation, draft: Draft, text: string, env: CopilotEnvironment, m: CopilotCopy): TurnStart | null {
+  const key = draft.code === BATCH_ADDRESS_CODE ? draft.extras?.batchAsked : undefined;
+  if (!key || !draft.extras) return null;
+  const typed = bareAddress(text);
+  if (!typed) return /^(?:0x|[1-9A-HJ-NP-Za-km-z]{20,}$)/i.test(text.trim())
+    ? { kind: 'LOCAL', ...question(withUser(state, text), m, BATCH_CHAT_COPY[draft.intent.language].invalidAddress, [], draft, [], { code: BATCH_ADDRESS_CODE }) } : null;
+  const { batchAsked: _asked, ...extras } = draft.extras, answers = extras.batch ?? {};
+  void _asked;
+  const result = resolveIntent(draft.intent, withUser(state, text), env, null, { ...extras, batch: { ...answers, addresses: { ...answers.addresses, [key]: typed } } });
+  return { kind: 'LOCAL', ...withLearning(tallied(result, env), env, ['CLARIFICATION_ANSWERED']) };
+}
+/**
+ * R09–R12: sends the person wrote with names are ONE Batch Payment. Each amount is read exactly ("1.000" is asked about), each send must be the payment
+ * the person paired in their own words (amount and asset, in their order: one send per recipient, or one per clause when a clause names several), and
+ * each recipient is resolved here from those words: an explicit address, or a saved name by the exact rules of `saved-recipients.ts` (several matches
+ * ask which; no match asks for a valid address; a saved address of the other ecosystem than a network the person named is refused). A recipient the
+ * interpretation wrote for a name is never used (it never saw the name). Null when the request does not write such payments (read as before).
+ */
+function namedBatchAuthoring(intent: CopilotIntentV2, actions: readonly CopilotAction[], state: CopilotConversation, env: CopilotEnvironment, extras: Extras): Result | null {
+  // Saved recipients live in the web app's signed-in session only: chat channels and MCP keep their own recipient rules.
+  if ((env.surface ?? 'WEB') !== 'WEB' || extras.target || !actions.length || !actions.every(action => action.type === 'TRANSFER')) return null;
+  const recipients = env.recipients ?? [], written = newestNamedBatch(state, recipients);
+  if (!written) return null;
+  const language = intent.language, m = copilotCopy(language), answers = extras.batch ?? {}, { clauses, payments } = written;
+  const sends = actions as readonly CopilotTransferAction[], network = sends[0]!.network;
+  const chain = network && network !== 'OTHER' ? networkOfCopilot(network).chain : null;
+  // What the interpretation read is listed, but an address it wrote that the person never typed is never repeated back.
+  const unpaired = () => unpairedPayments(state, m, language, payments.map((payment): WrittenPayment => ({ written: payment.written, readings: clauses[payment.clause]!.readings,
+    asset: payment.asset ?? '…', recipient: cleanPhrase(payment.phrase) })), sends.map(send => ({ ...send,
+    recipient: send.recipient && groundedAddress(segmentText(state), send.recipient) ? send.recipient : null })), chain);
+  const amounts: string[] = [];
+  for (const [index, clause] of clauses.entries()) {
+    const reading = amountReading(`amount:${index}`, clause.written, clause.readings, answers);
+    if (!reading) return unpaired();
+    if ('ask' in reading) return namedBatchQuestion(state, m, language, intent, env, extras, reading.ask);
+    amounts.push(reading.amount);
+  }
+  const perPayment = sends.length === payments.length, perClause = !perPayment && sends.length === clauses.length;
+  const sendOf = (payment: NamedPayment, index: number) => perPayment ? sends[index] : perClause ? sends[payment.clause] : undefined;
+  const paired = (perPayment || perClause) && sends.every(send => send.network === network) && payments.every((payment, index) => {
+    const send = sendOf(payment, index), typed = writtenRecipient(payment.phrase, recipients);
+    if (!send || send.amount === null || canonicalDecimal(send.amount) !== amounts[payment.clause]) return false;
+    if (payment.asset && !sameWrittenAsset(payment.asset, send.asset)) return false;
+    return send.recipient === null || (typed.kind === 'ADDRESS' && recipientKey(typed.address) === recipientKey(send.recipient));
+  });
+  if (!paired) return unpaired();
+  // The ecosystem is enforced against a network the person named (never one only the interpretation guessed: that one is asked for instead).
+  const masked = recipients.length ? maskSavedRecipients(segmentText(state), recipients) : segmentText(state);
+  const ecosystem = network && network !== 'OTHER' && mentionedNetworks(masked).includes(network) ? networkOfCopilot(network).family === 'solana' ? 'SOLANA' as const : 'EVM' as const : null;
+  const filled: CopilotAction[] = [], addresses: string[] = [];
+  for (const [index, payment] of payments.entries()) {
+    const resolved = resolveBatchRecipient(payment.phrase, recipients, answers, ecosystem);
+    if (resolved.kind === 'ASK') return namedBatchQuestion(state, m, language, intent, env, extras, resolved.ask);
+    if (resolved.kind === 'REFUSE') return refused(state, m, batchRefusal(resolved.reason, language, network && network !== 'OTHER' ? COPILOT_NETWORK_LABEL[network] : ''));
+    if (addresses.some(address => recipientKey(address) === recipientKey(resolved.address))) return refused(state, m, BATCH_PAYMENT_COPY[language].duplicate(resolved.label ?? resolved.address));
+    filled.push({ ...sendOf(payment, index)!, amount: amounts[payment.clause]!, recipient: resolved.address });
+    addresses.push(resolved.address);
+  }
+  return authorSequence(intent, null, filled, state, env, [], extras, addresses);
+}
+/** The Batch Payment(s) an edit may apply to: the visible Batch Payment proposal, else every Batch Payment step of the workflow. */
+type BatchTarget = { readonly nodeId: string | null; readonly input: BatchPaymentInput };
+function batchTargets(env: CopilotEnvironment): BatchTarget[] {
+  const pending = env.pending?.command;
+  if (pending && (pending.type === 'ADD_BATCH_PAYMENT' || pending.type === 'SET_BATCH_PAYMENT')) {
+    const view = batchViewOf(pending.input);
+    return view ? [{ nodeId: pending.type === 'SET_BATCH_PAYMENT' ? pending.nodeId : null, input: { network: view.network, asset: view.asset, payments: view.payments } }] : [];
+  }
+  return workflowSteps(env.workflow, env.context).flatMap(step => step.detail.type === 'BATCH_PAYMENT' ? [{ nodeId: step.nodeId, input: step.detail.input }] : []);
+}
+function batchEditTurn(state: CopilotConversation, text: string, env: CopilotEnvironment, language: CopilotLanguage): TurnStart | null {
+  if ((env.surface ?? 'WEB') !== 'WEB') return null;
+  const edit = readBatchEdit(text, env.recipients ?? []);
+  return edit ? batchEditResult(state, text, env, language, edit, {}) : null;
+}
+/**
+ * An edit of the Batch Payment on its own card: one SET_BATCH_PAYMENT (or a revised Batch Payment proposal), every recipient resolved locally and the
+ * whole list re-authored. Null when the words name none of a Batch Payment's recipients (they are read as before).
+ */
+function batchEditResult(state: CopilotConversation, text: string, env: CopilotEnvironment, language: CopilotLanguage, edit: BatchEdit, answers: BatchAnswers): TurnStart | null {
+  const recipients = env.recipients ?? [], m = copilotCopy(language), c = BATCH_CHAT_COPY[language];
+  const applicable = batchTargets(env).flatMap(target => { const outcome = applyBatchEdit(edit, target.input, recipients, answers); return outcome ? [{ target, outcome }] : []; });
+  if (!applicable.length) return null;
+  const base: CopilotConversation = { ...withUser(state, text), language };
+  const chosen = applicable.length === 1 ? applicable[0] : applicable.find(item => item.target.nodeId !== null && item.target.nodeId === state.referents[0]?.step.nodeId);
+  if (!chosen) return { kind: 'LOCAL', ...refused(base, m, c.several) };
+  const { target, outcome } = chosen;
+  // A network the person names must be this payment's own (the words of a saved name never name one).
+  const own = networkIdentity(target.input.network)?.copilot ?? null;
+  if (mentionedNetworks(recipients.length ? maskSavedRecipients(text, recipients) : text).some(network => network !== own))
+    return { kind: 'LOCAL', ...refused(base, m, c.network(target.input.network)) };
+  if (outcome.kind === 'REFUSE') return { kind: 'LOCAL', ...refused(base, m, batchRefusal(outcome.reason, language, target.input.network)) };
+  if (outcome.kind === 'ASK') {
+    const ask = outcome.ask, options = ask.kind === 'CHOOSE' ? ask.candidates.map(recipient => recipient.label) : ask.kind === 'READING' ? [...ask.readings] : [];
+    const words = ask.kind === 'CHOOSE' ? ASSIST_COPY[language].recipientChoose(options) : ask.kind === 'READING' ? intelligenceCopy(language).amountAmbiguous(ask.written, ask.readings)
+      : c.askAddress(ask.phrase);
+    const asked = question(base, m, words, options, null, [], { code: batchAskCode(ask) });
+    return { kind: 'LOCAL', reply: { ...asked.reply, ...ask.kind === 'CHOOSE' ? { verbatimOptions: true as const } : {} },
+      next: asked.reply.kind === 'CLARIFICATION' ? { ...asked.next, batchHold: { edit, answers, ask, snapshot: snapshotOf(env) } } : asked.next };
+  }
+  const input = outcome.input, after = batchViewOf(input);
+  if (!after) return { kind: 'LOCAL', ...failed(base, m, copilotRejection('BATCH_PAYMENT_FIELDS_INVALID', language).message) };
+  const command: Command = target.nodeId ? { type: 'SET_BATCH_PAYMENT', nodeId: target.nodeId, input, source: 'CHAT', baseRevision: env.workflow.revision }
+    : { type: 'ADD_BATCH_PAYMENT', input, source: 'CHAT', baseRevision: env.workflow.revision };
+  const view = batchChangeView(batchViewOf(target.input), after, recipients, language);
+  return { kind: 'LOCAL', ...propose(base, env, command, BATCH_PAYMENT_COPY[language].sentence(after.payments.length, after.asset, after.network),
+    [view.text, ...view.lines, view.atomic].join(' '), [], m.subject.request) };
+}
+/** The person's answer to FloFi's open Batch Payment edit question, or null when the message is not one. */
+function batchHoldAnswer(ask: BatchAsk, answers: BatchAnswers, text: string): BatchAnswers | null {
+  if (ask.kind === 'CHOOSE') {
+    const chosen = ask.candidates.find(recipient => recipientLabelKey(recipient.label) === recipientLabelKey(text));
+    return chosen ? { ...answers, picks: { ...answers.picks, [ask.key]: chosen.id } } : null;
+  }
+  if (ask.kind === 'ADDRESS') { const typed = bareAddress(text); return typed ? { ...answers, addresses: { ...answers.addresses, [ask.key]: typed } } : null; }
+  const reading = bareAmount(text);
+  return reading && ask.readings.includes(reading) ? { ...answers, readings: { ...answers.readings, [ask.key]: reading } } : null;
+}
+function batchHoldTurn(state: CopilotConversation, text: string, env: CopilotEnvironment, language: CopilotLanguage): TurnStart | null {
+  const hold = state.batchHold!, m = copilotCopy(language), answers = batchHoldAnswer(hold.ask, hold.answers, text);
+  if (!answers) {
+    // Something shaped like an address that is not a valid one keeps FloFi's address question open.
+    if (hold.ask.kind !== 'ADDRESS' || !/^(?:0x|[1-9A-HJ-NP-Za-km-z]{20,}$)/i.test(text.trim())) return null;
+    const asked = question({ ...withUser(state, text), language }, m, BATCH_CHAT_COPY[language].invalidAddress, [], null, [], { code: BATCH_ADDRESS_CODE });
+    return { kind: 'LOCAL', reply: asked.reply, next: asked.reply.kind === 'CLARIFICATION' ? { ...asked.next, batchHold: hold } : asked.next };
+  }
+  const open = { ...state, batchHold: null };
+  if (contextChange(hold.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failedWith(closeSegment(open), m, m.draftStale, 'COPILOT_CONTEXT_CHANGED') };
+  return batchEditResult(open, text, env, language, hold.edit, answers) ?? { kind: 'LOCAL', ...failedWith(closeSegment(open), m, m.draftStale, 'COPILOT_CONTEXT_CHANGED') };
 }
 
 // ── PR B: the swap behind "these tokens", and FloFi-registered positions ─────────────────────────────────────────────
@@ -2477,7 +2762,7 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   if (editNodeId) {
     const edit = editCommandFor(env.workflow, env.context, editNodeId, command);
     if (!edit.ok) { const label = workflowSteps(env.workflow, env.context).find(step => step.nodeId === editNodeId);
-      return refused(state, m, m.refusal[edit.code as keyof typeof m.refusal]?.(label ? stepLabel(m, label, language) : editNodeId) ?? m.rejectedCode(edit.code)); }
+      return refused(state, m, m.refusal[edit.code as keyof typeof m.refusal]?.(label ? stepLabel(m, label, language) : m.sourcePending) ?? m.couldNotPrepare); }
     command = edit.command;
   }
   // Every learned entry that made the difference is named in the proposal, so the user reviews how their words were read.

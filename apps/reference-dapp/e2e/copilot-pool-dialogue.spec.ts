@@ -58,11 +58,12 @@ test('the captured sequence: "1usdc" → Lower → "180" keeps every value and a
 
 test('a percentage answer ("faixa de 10%") is computed from the verified mainnet pool price and the effective range is shown', async ({ page }) => {
   await ask(page, 'Quero adicionar liquidez na Orca na Solana com 0,1 SOL e 10 USDC');
-  await expect(copilotSays(page)).toContainText('Which price range should the position use?');
+  // A09 (intentional): a Portuguese conversation is answered in Portuguese, whatever the interface language.
+  await expect(copilotSays(page)).toContainText('Qual faixa de preço a posição deve usar?');
   await ask(page, 'faixa de 10%');
-  await expect(copilotSays(page)).toContainText('Interpreted as “add liquidity 0.1 SOL and 10 USDC from');
-  await expect(copilotSays(page)).toContainText(/Range: ±10% around the current verified pool price \([0-9.]+ USDC per SOL\)\./);
-  await expect(copilotSays(page)).toContainText('Effective range after aligning to the pool\'s ticks');
+  await expect(copilotSays(page)).toContainText('Interpretado como “add liquidity 0.1 SOL and 10 USDC from');
+  await expect(copilotSays(page)).toContainText(/Faixa: ±10% em torno do preço verificado atual do pool \([0-9.,]+ USDC por SOL\)\./);
+  await expect(copilotSays(page)).toContainText('Faixa efetiva após o alinhamento aos ticks do pool');
   await commits(page, 1);
   await publicAndUnderstood(page);
   expect(await signRequests(page)).toBe(0); expect(await mainnetSent()).toBe(0);

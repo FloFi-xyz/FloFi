@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 
 import { useState,type FormEvent } from 'react';
 import { isLendingComposition,type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -47,7 +48,10 @@ const messages:Record<string,string>={
   LENDING_WALLET_DID_NOT_SUBMIT:'The wallet never submitted the previous approval: its nonce, allowance and discovery window prove it is not on chain. Run a fresh Simulate and Review to continue.',
 };
 export function LendingPanel({view}:{view:'simulate'|'execute'}){
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): token amounts at six significant digits in the reader's separators, rounded by purpose
+  // (a minimum down, a fee maximum or an allowance up, anything else to the nearest, "≈"); exact authorizations keep every digit. Presentation only.
+  const amt=(units:string,decimals=6,rounding:DisplayRounding='nearest')=>formatDisplayTokenAmount({units,decimals},{rounding,language:language==='PT'?'PT' as DisplayLanguage:'EN'});
   const {state}=useWorkflow(),run=useLending(),record=run.record,review=record?.reviews.at(-1),fields=review?.fields;
   const authored=isLendingComposition(state.workflow)?lendingDetails(state.workflow as SemanticWorkflow):null;
   const pending=record?.attempts.find(a=>!a.reconciled&&!a.notSubmitted),hasBorrow=record?.attempts.some(a=>a.step==='BORROW'&&a.reconciled);
@@ -62,10 +66,10 @@ export function LendingPanel({view}:{view:'simulate'|'execute'}){
     {review&&<>
       <p>{tr("Complete path checked at block ")}{tr(review.route.block)}{tr(". Review expires ")}{tr(review.expiresAt)}.</p><details><summary>{tr("Data provenance")}</summary><p>{tr(record?.provenance==='MOCKED'?'MOCKED: synthetic data and fixture transactions.':'Public Base Sepolia reads; owner execution has not been demonstrated by this Review.')}</p></details>
       <table><caption>{tr("Position and wallet balances · original, completed checkpoints and remaining projections")}</caption><thead><tr><th>{tr("Economic state")}</th><th>{tr("Before workflow")}</th><th>{tr("After Supply")}</th><th>{tr("After Borrow")}</th><th>{tr("After Swap")}</th></tr></thead><tbody>
-        {(['Collateral USDC','Debt USDC','Health factor','Wallet USDC','Wallet WETH'] as const).map(label=><tr key={label}><th>{tr(label)}</th>{[review.rootState,checkpoint('SUPPLY')??review.projected.afterSupply,checkpoint('BORROW')??review.projected.afterBorrow,checkpoint('SWAP')??review.projected.afterSwap].map((s,i)=><td key={i}>{tr(label==='Health factor'?health(s.aave.borrow!.healthFactor):label==='Wallet WETH'?lendingHuman(s.wethBalance,18):lendingHuman(label==='Collateral USDC'?s.aave.position:label==='Debt USDC'?s.aave.borrow!.debt:s.aave.balance))}</td>)}</tr>)}
+        {(['Collateral USDC','Debt USDC','Health factor','Wallet USDC','Wallet WETH'] as const).map(label=><tr key={label}><th>{tr(label)}</th>{[review.rootState,checkpoint('SUPPLY')??review.projected.afterSupply,checkpoint('BORROW')??review.projected.afterBorrow,checkpoint('SWAP')??review.projected.afterSwap].map((s,i)=><td key={i}>{tr(label==='Health factor'?health(s.aave.borrow!.healthFactor):label==='Wallet WETH'?amt(s.wethBalance,18):amt(label==='Collateral USDC'?s.aave.position:label==='Debt USDC'?s.aave.borrow!.debt:s.aave.balance))}</td>)}</tr>)}
       </tbody></table>
-      <p>{tr("Borrow / exact Swap input: ")}{tr(lendingHuman(review.fields.borrowAmount))}{tr(" USDC. Expected output: ")}{tr(lendingHuman(review.route.expectedOut,18))}{tr(" WETH. Minimum output: ")}{tr(lendingHuman(review.route.minimumOut,18))}{tr(" WETH. Slippage: ")}{tr(review.fields.slippageBps)}{tr(" bps. Pool fee: 0.05% (included in output).")}</p>
-      <p>{tr("Current estimated L1 fee: ")}{tr(lendingHuman(review.l1FeeUpperBound,18))}{tr(" ETH (at simulation). Maximum owner-approved L1 fee: ")}{tr(lendingHuman(review.manifest.feeBudgets[0]!.maximumAmount,18))}{tr(" ETH. Maximum total network fee: ")}{tr(lendingHuman(review.manifest.gasBudgets[0]!.maximumAmount,18))}{tr(" ETH.")}</p>
+      <p>{tr("Borrow / exact Swap input: ")}{tr(lendingHuman(review.fields.borrowAmount))}{tr(" USDC. Expected output: ")}{tr(amt(review.route.expectedOut,18))}{tr(" WETH. Minimum output: ")}{tr(amt(review.route.minimumOut,18,'down'))}{tr(" WETH. Slippage: ")}{tr(review.fields.slippageBps)}{tr(" bps. Pool fee: 0.05% (included in output).")}</p>
+      <p>{tr("Current estimated L1 fee: ")}{tr(amt(review.l1FeeUpperBound,18,'up'))}{tr(" ETH (at simulation). Maximum owner-approved L1 fee: ")}{tr(amt(review.manifest.feeBudgets[0]!.maximumAmount,18,'up'))}{tr(" ETH. Maximum total network fee: ")}{tr(amt(review.manifest.gasBudgets[0]!.maximumAmount,18,'up'))}{tr(" ETH.")}</p>
       <p>{tr("These maximums stay fixed after Review acceptance. Higher fees require a new Simulate and Review. Variable borrowing rate: ")}{tr((Number(review.state.variableRateRay)/1e27*100).toFixed(3))}{tr("% estimated annual rate; future interest is not capped.")}</p>
       <p>{tr("Resulting exposure: USDC collateral, USDC variable debt and WETH in the owner wallet. Borrowed-funds linkage is accounting provenance for fungible tokens.")}</p>
       <p>{tr("Owner / all recipients: ")}{tr(review.fields.owner)}{tr(". Aave USDC: ")}{tr(p.asset)}{tr(". Output WETH: ")}{tr(u.weth)}{tr(". Compatible Uniswap pool: ")}{tr(review.route.pool)}.</p>
@@ -82,7 +86,7 @@ export function LendingPanel({view}:{view:'simulate'|'execute'}){
       {active.length?<button type="button" disabled={run.busy} onClick={()=>void run.observe()}>{tr("Observe existing execution")}</button>:null}
       {record&&!pending&&!finished&&!run.retired&&<button type="button" disabled={run.busy} onClick={()=>void run.refresh()}>{tr("Fresh Simulate and Review of remaining steps")}</button>}
       {hasBorrow&&!finished&&<p role="alert">{tr("Borrow has completed. Supply and Borrow will not repeat. Debt and remaining USDC stay explicit. Continuation needs fresh state and owner authority; no automatic second Swap attempt.")}</p>}
-      {current&&<p>{tr("Observed at block ")}{tr(current.aave.block)}{tr(". Current observed collateral: ")}{tr(lendingHuman(current.aave.position))}{tr(" USDC · debt: ")}{tr(lendingHuman(current.aave.borrow!.debt))}{tr(" USDC · HF: ")}{tr(health(current.aave.borrow!.healthFactor))}{tr(" · wallet USDC: ")}{tr(lendingHuman(current.aave.balance))}{tr(" · wallet WETH: ")}{tr(lendingHuman(current.wethBalance,18))}{tr(" · residual allowances: Aave ")}{tr(lendingHuman(current.aave.allowance))}{tr(" / router ")}{tr(lendingHuman(current.routerAllowance))}{tr(" USDC.")}</p>}
+      {current&&<p>{tr("Observed at block ")}{tr(current.aave.block)}{tr(". Current observed collateral: ")}{tr(amt(current.aave.position))}{tr(" USDC · debt: ")}{tr(amt(current.aave.borrow!.debt))}{tr(" USDC · HF: ")}{tr(health(current.aave.borrow!.healthFactor))}{tr(" · wallet USDC: ")}{tr(amt(current.aave.balance))}{tr(" · wallet WETH: ")}{tr(amt(current.wethBalance,18))}{tr(" · residual allowances: Aave ")}{tr(amt(current.aave.allowance,6,'up'))}{tr(" / router ")}{tr(amt(current.routerAllowance,6,'up'))}{tr(" USDC.")}</p>}
       {record?.evidence&&<><details><summary>{tr("Evidence classification")}</summary><p>{tr(record.evidence.bundle.environment)} / {tr(record.evidence.bundle.outcome)}</p></details><p>{tr(finished?'Composed economic outcome reconciled. Independent public verification is a separate read-only step.':'Partial execution evidence; no completed composed outcome is claimed.')}</p><a download="flofi-build013-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download composed Evidence Bundle")}</a></>}
       {record&&<a download="flofi-build013-run.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record,null,2))}>{tr("Download execution record")}</a>}
     </>}

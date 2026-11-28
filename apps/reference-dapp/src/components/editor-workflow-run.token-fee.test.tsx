@@ -229,3 +229,22 @@ describe('owner requirement: the Editor\'s step-by-step Review with FloFi Wallet
     expect(render(state({ review: swapBridgeReview({ circleOnApproval: true }) }))).not.toContain('data-circle-on-approval');
   });
 });
+
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06): a native fee in the Editor's Review reads at six significant digits rounded up, never the
+// former six-decimal cut ("0.057924 ETH", "< 0.000001 ETH"), so an estimate or a ceiling never reads below itself and a non-zero one never 0.
+describe('R06: the native network fee of a group at six significant digits', () => {
+  const review = (estimatedWei: string, maxWei: string) => {
+    const base = swapBridgeReview();
+    return swapBridgeReview({ groups: [{ ...base.groups[0]!, fee: { ...base.groups[0]!.fee!, estimatedWei, maxWei } }] });
+  };
+  it('rounds up the estimate and the ceiling at six significant digits', () => {
+    const html = render(state({ review: review('57923834925903535', '115847669851807070') }));
+    expect(html).toContain('about 0.0579239 ETH in network fees (up to 0.115848 ETH at today&#x27;s prices; your wallet sets the final fee)');
+    expect(html).not.toContain('0.057924 ETH');
+  });
+  it('a fee below a millionth of an ETH keeps its significant digits instead of "< 0.000001 ETH"', () => {
+    const html = render(state({ review: review('123456789', '987654321987') }));
+    expect(html).toContain('about 0.000000000123457 ETH in network fees (up to 0.000000987655 ETH');
+    expect(html).not.toContain('&lt; 0.000001 ETH');
+  });
+});

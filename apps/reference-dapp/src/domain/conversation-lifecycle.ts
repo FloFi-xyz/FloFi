@@ -13,7 +13,7 @@ import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from './review-presentation';
 import { projectSimulation, type SimulationLine, type SimulationSource, type SimulationWarning } from './simulation-presentation';
-import { DESTINATION_OBSERVED_LABEL, DESTINATION_OBSERVED_MESSAGE, type ExecutionLifecycle, type LifecycleOperation } from './execution-lifecycle';
+import { DESTINATION_OBSERVED_LABEL, type ExecutionLifecycle, type LifecycleOperation } from './execution-lifecycle';
 import { currentExecution, isFinalExecutionResult, projectExecutionResult } from './execution-result';
 import { shellChainLabel } from './product-shell';
 import type { Command } from './commands';
@@ -22,6 +22,9 @@ import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import { runReconciled, type WorkflowProgressView } from './workflow-progress';
 import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
+import { semanticWorkflowFeeBasis } from '../platform-fee/semantic-basis';
+import { feeAmountText } from '../platform-fee/disclosure';
+import { detectLanguage } from './conversation-language';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -31,6 +34,8 @@ export type ConversationPhase = 'AUTHORING' | 'AWAITING_MISSING_FIELDS' | 'READY
 export type LifecycleView = {
   readonly workflow: Workflow; readonly context: ReviewContext; readonly source: SimulationSource; readonly authorization: ReviewAuthorization;
   readonly wallet: ReviewWallet; readonly progress: ExecutionLifecycle | null | undefined; readonly invalidWorkflow: boolean;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the canonical workflow the FloFi fee is disclosed for (all steps), and whether it is charged. */
+  readonly feeWorkflow?: Workflow; readonly feeCollection?: boolean;
   /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: a workflow of several independent owner-wallet actions. `workflow` (and so the Review, binding and execution
    * record) is then the CURRENT step alone; this lists every canonical action with its state, how a funded step is funded, and why a step
@@ -129,7 +134,12 @@ const NEXT_REVIEW = pattern(['review', 'review workflow', 'review my workflow', 
   'review it', 'simulate', 'simulate workflow', 'simulate my workflow', 'simulate the workflow', 'run simulation', 'revisar', 'revisar workflow', 'revisar o workflow',
   'revisar meu workflow', 'revisar fluxo', 'revisar o fluxo', 'revisar meu fluxo', 'revise', 'revise o workflow', 'revise meu workflow', 'vamos revisar', 'simular',
   'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo', 'simular o fluxo', 'revise o fluxo', 'revise meu fluxo',
-  'revisar este fluxo']);
+  'revisar este fluxo',
+  // R09–R12: "…or review the payment?" after a Batch Payment change.
+  'review payment', 'review the payment', 'review the batch payment', 'revisar pagamento', 'revisar o pagamento', 'revisar o pagamento em lote']);
+/** R09–R12: the Batch Payment confirmation's "add a recipient" answer (FloFi then asks who and how much). */
+const NEXT_ADD_RECIPIENT = pattern(['add a recipient', 'add recipient', 'add another recipient', 'add someone', 'add someone else', 'adicionar destinatário',
+  'adicionar destinatario', 'adicionar outro destinatário', 'adicionar outro destinatario', 'adicionar mais alguém', 'adicionar mais alguem', 'adicionar alguém', 'adicionar alguem']);
 // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: recovery after a refused start or an expired/changed quote is a fresh simulation, asked for in chat.
 const REFRESH_REQUEST = pattern(['simulate again', 'simulate it again', 'retry simulation', 'try again', 'refresh quote', 'refresh the quote', 'get a new quote',
   'get a fresh quote', 'new quote', 'requote', 'simular novamente', 'simular de novo', 'tentar novamente', 'tentar de novo', 'atualizar cotação', 'atualizar cotacao',
@@ -165,9 +175,10 @@ export function classifyAnswer(text: string, question: PendingQuestion['kind']):
   return yes?.test(value) ? 'YES' : 'UNCLEAR';
 }
 /** A lifecycle request the chat handles itself, with no model: Review, Add another action, Execute, Status or Undo. */
-export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' | 'ADD' | 'MODIFY' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
+export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' | 'ADD' | 'ADD_RECIPIENT' | 'MODIFY' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
   const value = normalize(text);
-  return NEXT_REVIEW.test(value) || CONTINUE_REQUEST.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
+  return NEXT_REVIEW.test(value) || CONTINUE_REQUEST.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD'
+    : NEXT_ADD_RECIPIENT.test(value) ? 'ADD_RECIPIENT' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : MODIFY_REQUEST.test(value) ? 'MODIFY' : null;
 }
 // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (CHAT-01): natural questions about the execution itself ("Deu certo?" was answered "Não há proposta
@@ -225,7 +236,8 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
       // The next request is being prepared (after Continue), or is reviewed and waits for the owner's answer to Continue.
       : preparing || wallet.some(op => op.state === 'preparing') ? c.signPreparing
       : open === 'CONFIRM_CONTINUE' || open === 'CONFIRM_CONTINUE_REVIEW' ? c.signContinue
-      : observed ? later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.signNext}` : translate(language, DESTINATION_OBSERVED_MESSAGE)
+      // §9.2: the observed message names what remains (network finality, or the definitive reconciliation), as the Execute panel says it.
+      : observed ? later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.signNext}` : translate(language, live.message)
       // A confirmed approval whose action was not sent yet: that action needs its own Review and confirmation (never requested automatically).
       : later || !done && wallet.some(op => op.state === 'waiting') && wallet.some(op => op.state === 'confirmed') ? c.signNext : c.signNone;
   } else if (phase === 'AWAITING_WALLET') text = c.statusWallet;
@@ -234,18 +246,20 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
   else if (done) text = c.statusDone;
   // With later steps left, the transfer is said with where the workflow stands (never "no signature needed": the next step needs its own).
   else if (observed) text = later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.statusInProgress(where)}`
-    : translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, DESTINATION_OBSERVED_MESSAGE));
+    : translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, live.message));
   // This step reconciled while the workflow has steps left: where the workflow stands, never "yes".
   else if (phase === 'COMPLETED') text = runDone ? c.statusInProgress(where) : c.statusConfirmedReconciling;
   else text = asked === 'RECEIVED' && operations.some(op => !op.wallet) ? `${c.statusDeliveryPending} ${c.statusInProgress(where)}` : c.statusInProgress(where);
   return { text, notes: [...readFailed && !done ? [c.statusLastRead] : [], c.statusReadOnly] };
 }
 /**
- * P0 approved UX (boards 01/02, handoff §4): FloFi replies in the ACTIVE INTERFACE language, whatever language the message was typed in (a
- * Portuguese answer on an English screen mixed the two). The words are still understood in either language (`classifyAnswer`, `lifecycleRequest`).
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09, replaces the P0 "interface language" rule): FloFi replies in the language the person writes in,
+ * whatever language the interface shows; a message that tells nothing ("ok", "0,2") keeps the language already spoken (`previous`), else the
+ * interface's. The words are still understood in either language (`classifyAnswer`, `lifecycleRequest`). The chat itself also honours an explicit
+ * "reply in English" (`conversation-language.ts`, `replyLanguage`).
  */
-export function answerLanguage(_text: string, interfaceLanguage: ConversationLanguage): ConversationLanguage {
-  return interfaceLanguage;
+export function answerLanguage(text: string, interfaceLanguage: ConversationLanguage, previous: ConversationLanguage | null = null): ConversationLanguage {
+  return detectLanguage(text) ?? previous ?? interfaceLanguage;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -310,7 +324,7 @@ export type ConversationReview = {
   readonly totals: { readonly additional: readonly string[]; readonly ceilings: readonly string[];
     readonly excludes: readonly { readonly text: string; readonly parameters: readonly (string | number)[] }[] };
   /** FloFi's fee as this route actually accounts it: the recorded obligation line, or that nothing is charged or recorded. Never a guess. */
-  readonly flofiFee: { readonly value: string; readonly note: string; readonly recorded: boolean };
+  readonly flofiFee: { readonly value: string; readonly note: string; readonly recorded: boolean; readonly charged?: boolean };
 };
 /** Exact per-asset sums of decimal amounts written "<number> <symbol>"; a value that is not one is left out (and reported by the caller). */
 export function sumByAsset(values: readonly string[]): { readonly sums: readonly string[]; readonly unreadable: number } {
@@ -397,7 +411,11 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
       slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details, destination: step.destination ?? null,
       ...step.destinationOwned !== undefined ? { destinationOwned: step.destinationOwned } : {} };
   });
-  const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee } = payableCosts(fees);
+  const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee: obligation } = payableCosts(fees);
+  // One FloFi fee line for the whole execution, from the same basis the server records as the authorized cap (never a second, per-step fee).
+  const feeWorkflow = view.feeWorkflow ?? view.workflow, feeAmount = feeAmountText(semanticWorkflowFeeBasis(feeWorkflow as never), feeWorkflow);
+  const flofiFee = feeAmount ? { value: feeAmount, note: '', recorded: true, charged: view.feeCollection === true }
+    : obligation.recorded ? { ...obligation, note: '', charged: view.feeCollection === true } : { ...obligation, note: '' };
   const later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];
   const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...unclassified ? [{ text: 'Cost lines FloFi cannot classify', parameters: [] }] : [],
     ...later.length ? [{ text: later.length === 1 ? 'Step {0} (simulated after the steps before it)' : 'Steps {0} (simulated after the steps before them)', parameters: [later.join(', ')] }] : []];
@@ -489,8 +507,64 @@ export function describeChatChange(before: Workflow, after: Workflow, context: R
   for (const node of composerActions(after)) {
     const old = before.nodes.find(item => item.nodeId === node.nodeId), action = label(language, composerSummary(after, node, context).action);
     if (!old) lines.push(c.added(action, detail(after, node)));
-    else if (JSON.stringify(old) !== JSON.stringify(node)) lines.push(c.updated(action, detail(after, node)));
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): an edit is said as what changed, before → after ("Supply: 0,1 → 0,2 USDC").
+    else if (JSON.stringify(old) !== JSON.stringify(node)) { const change = beforeAfter(before, old, after, node, context, language);
+      lines.push(change ? c.edited(action, change) : c.updated(action, detail(after, node))); }
   }
   for (const node of composerActions(before)) if (!after.nodes.some(item => item.nodeId === node.nodeId)) lines.push(c.removed(label(language, composerSummary(before, node, context).action)));
+  return lines;
+}
+/** An exact amount as the language writes it (Portuguese: decimal comma); a label that is not an amount is translated as it is. */
+const shownAmount = (value: string, language: ConversationLanguage) => /^\d/.test(value) ? language === 'PT' ? value.replace(/^(\d+)\.(\d+)/, '$1,$2') : value
+  : label(language, value);
+/**
+ * P1-03: what changed in an edited step, before → after, from its card (amount, pair, network, provider): "0,1 → 0,2 USDC" when only the amount of
+ * the same token changed. Null when nothing the card shows changed (e.g. only its slippage): the step is then said as updated.
+ */
+function beforeAfter(before: Workflow, old: Workflow['nodes'][number], after: Workflow, node: Workflow['nodes'][number], context: ReviewContext,
+  language: ConversationLanguage): string | null {
+  const parts = (workflow: Workflow, item: Workflow['nodes'][number]) => {
+    const card = composerSummary(workflow, item, context);
+    return { amount: card.amount === 'Amount not available' ? null : card.amount, pair: card.bridgePair ?? card.detail ?? null,
+      chain: card.chain.replace(/ \(\d+\)$/g, ''), provider: card.provider === 'Provider not specified' ? null : card.provider };
+  };
+  const was = parts(before, old), now = parts(after, node), changes: string[] = [];
+  if (was.amount && now.amount && was.amount !== now.amount) {
+    const unit = (value: string) => /^\d\S*\s+(\S+)$/.exec(value)?.[1] ?? null, same = unit(was.amount) !== null && unit(was.amount) === unit(now.amount);
+    changes.push(same ? `${shownAmount(was.amount.replace(/\s+\S+$/, ''), language)} → ${shownAmount(now.amount.replace(/\s+\S+$/, ''), language)} ${unit(now.amount)}`
+      : `${shownAmount(was.amount, language)} → ${shownAmount(now.amount, language)}`);
+  }
+  for (const key of ['pair', 'chain', 'provider'] as const) {
+    const from = was[key], to = now[key];
+    if (from && to && from !== to) changes.push(`${label(language, from)} → ${label(language, to)}`);
+  }
+  return changes.length ? changes.join(' · ') : null;
+}
+/** P1-03: the visible steps a chat change added or edited (the cards the Canvas highlights and "View in plan" brings into view), in plan order. */
+export function chatChangedSteps(before: Pick<Workflow, 'nodes'>, after: Workflow): string[] {
+  return composerActions(after).filter(node => { const old = before.nodes.find(item => item.nodeId === node.nodeId); return !old || JSON.stringify(old) !== JSON.stringify(node); })
+    .map(node => node.nodeId);
+}
+/**
+ * P1-03: the other steps an edit of existing steps affects, each named with what that means. A step that spends an edited step's output (its input
+ * references that output, a resource edge links them, or the sequence funds it with that step's delivery) is an enforceable financial dependency:
+ * its amount is recalculated at the next review. A step that only runs after it (an ordering dependency) is a temporal connection: its own values do
+ * not change. Added and removed steps are said by `describeChatChange` itself.
+ */
+export function chatChangeDependents(before: Workflow, after: Workflow, context: ReviewContext, language: ConversationLanguage, fundedBy: ReadonlyMap<string, readonly string[]> = new Map()): string[] {
+  const c = conversationCopy(language), ordered = composerActions(after);
+  const edited = new Set(ordered.filter(node => { const old = before.nodes.find(item => item.nodeId === node.nodeId); return old && JSON.stringify(old) !== JSON.stringify(node); })
+    .map(node => node.nodeId));
+  if (!edited.size) return [];
+  const lines: string[] = [];
+  for (const [index, node] of ordered.entries()) {
+    if (edited.has(node.nodeId)) continue;
+    const spends = [...edited].some(id => node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE' && input.value.nodeId === id)
+      || after.resourceEdges.some(edge => edge.fromNodeId === id && edge.toNodeId === node.nodeId) || (fundedBy.get(node.nodeId) ?? []).includes(id));
+    const waits = [...edited].some(id => node.dependencies.includes(id));
+    const action = label(language, composerSummary(after, node, context).action);
+    if (spends) lines.push(c.spendsOutput(index + 1, action));
+    else if (waits) lines.push(c.runsAfter(index + 1, action));
+  }
   return lines;
 }

@@ -56,23 +56,25 @@ test('Portuguese and mainnet requests are committed with explicit notes, and the
   await installSupplyWallet(page);
   await openBuilder(page);
   await ask(page, 'Coloca 1 USDC na Aave na Base Sepolia');
-  // BUILD-COPILOT-002 / P0 approved UX: a Portuguese request is understood, and FloFi answers in the interface language (English here); the
-  // canonical sentence stays the exact grammar.
-  await expect(copilotSays(page)).toContainText('Supply added to your workflow:');
-  await expect(copilotSays(page)).toContainText('Interpreted as “supply 1 USDC to Aave on Base Sepolia”');
-  await expect(copilotSays(page)).toContainText('Would you like to add another action or review your workflow?');
+  // BUILD-COPILOT-002: a Portuguese request is understood; A09 (intentional): FloFi answers in Portuguese, whatever the interface language
+  // (English here); the canonical sentence stays the exact grammar.
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu fluxo: Depositar');
+  await expect(copilotSays(page)).toContainText('Interpretado como “supply 1 USDC to Aave on Base Sepolia”');
+  await expect(copilotSays(page)).toContainText('Quer adicionar outra ação ou revisar o seu fluxo?');
   await revision(page, 1); await expect(cards(page)).toHaveCount(1);
-  await undo(page, 'Undo this change');
+  await undo(page, 'Desfazer esta alteração');
   await expect(cards(page)).toHaveCount(0);
   // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH is a different asset than WETH. On Base it is now a native-ETH swap
   // of its own (the exact chat grammar, FloFi's own message), never authored as WETH; the chat's Undo reverts it.
+  // A09: an exact command (English grammar by design) tells no language, so the conversation stays in Portuguese.
   await ask(page, 'Swap 100 USDC to ETH on Base');
-  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 100 USDC · USDC → ETH');
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Adicionado ao seu fluxo: Trocar · 100 USDC · USDC → ETH');
   await revision(page, 3); await expect(cards(page)).toHaveCount(1);
   // An exact command is FloFi's own message (not the model's): its Undo is on that message.
-  await page.getByRole('log', { name: 'Conversation' }).locator('.message').last().getByRole('button', { name: 'Undo this change', exact: true }).click();
-  await expect(conversation(page).locator('.message').last()).toContainText('Undone.');
+  await page.getByRole('log', { name: 'Conversation' }).locator('.message').last().getByRole('button', { name: 'Desfazer esta alteração', exact: true }).click();
+  await expect(conversation(page).locator('.message').last()).toContainText('Desfeito.');
   await revision(page, 4); await expect(cards(page)).toHaveCount(0);
+  // A natural English request (not the exact grammar: no slippage) is answered in English again.
   await ask(page, 'Swap 100 USDC to WETH on Base');
   await expect(copilotSays(page)).toContainText('Swap added to your workflow: 100 USDC');
   await expect(copilotSays(page)).toContainText('Interpreted as “swap 100 USDC to WETH on Base slippage 100 bps”');
@@ -125,8 +127,8 @@ test('unsupported requests are explained, not invented', async ({ page }) => {
   await expect(copilotSays(page)).toContainText('Staking is not supported by Flofi.');
   await expect(copilotSays(page)).not.toContainText('Flofi Copilot can author:');
   await ask(page, 'Tenho 500 USDC. Coloca 300 na Aave e troca 200 por ETH.');
-  // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
-  await expect(copilotSays(page)).toContainText('Flofi can combine steps only as Supply USDC → Borrow USDC → Swap the borrowed USDC to WETH');
+  // A09 (intentional): a Portuguese request is understood and answered in Portuguese, whatever the interface language (English here).
+  await expect(copilotSays(page)).toContainText('O Flofi só combina passos como Supply de USDC → Borrow de USDC → Swap do USDC emprestado para WETH');
   await expect(proposal(page)).toHaveCount(0);
   await revision(page, 0);
 });

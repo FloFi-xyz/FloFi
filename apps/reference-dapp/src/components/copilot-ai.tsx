@@ -15,6 +15,8 @@ import type { AwaitingAmount } from '../domain/amount-shortcuts';
 import type { Workflow } from '../domain/initial-workflow';
 import { chainStatus } from '../domain/artifact-chain';
 import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type SimulationFlow } from '../domain/copilot-answers';
+import { assistantSimulation } from '../domain/assistant-facts';
+import type { LifecycleView } from '../domain/conversation-lifecycle';
 import { automationCreated, awaitingAmount as engineAwaitingAmount, closeSegment, contextChange, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn,
   type CopilotConversation, type CopilotEnvironment, type CopilotReply, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from '../domain/copilot-conversation';
 import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
@@ -83,8 +85,14 @@ const authorized = (value: unknown) => {
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
 };
 
-export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { direct?: boolean;
-  /** P0 approved UX: replies follow the interface language (absent: the language of the message, as before). */ interfaceLanguage?: 'EN' | 'PT' } = {}) {
+export function useCopilotInterpreter({ direct = false, interfaceLanguage, lifecycle }: { direct?: boolean;
+  /** P0 approved UX: the interface language (the fallback when a turn names no reply language; absent: the language of the message, as before). */
+  interfaceLanguage?: 'EN' | 'PT';
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A05): the chat's lifecycle view — the same selected-runtime simulation its Review card and the
+   * Simulate panel show. When present, the engine's simulation facts (status and the current revision's figures) are read from it.
+   */
+  lifecycle?: LifecycleView } = {}) {
   const workflow = useWorkflow();
   const wallet = useBuild009Wallet();
   const { environment, result: capability } = useWorkflowCapability();
@@ -157,20 +165,30 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   useSavedRecipients();
   const interfaceLanguageRef = useRef(interfaceLanguage);
   interfaceLanguageRef.current = interfaceLanguage;
+  const lifecycleRef = useRef(lifecycle);
+  lifecycleRef.current = lifecycle;
+  /** A09: the language the chat answers the current turn in (the person's conversational language), set by `respond`. */
+  const replyLanguageRef = useRef<'EN' | 'PT' | null>(null);
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the account's saved recipients as the store holds them right now (not the last render): any known list resolves
    * and masks names, even while a refresh failed; only a READY list may be written to (the save offer). */
   const recipientsNow = useCallback((): Pick<CopilotEnvironment, 'recipients' | 'recipientWrites'> => {
     const list = savedRecipientsSnapshot();
     return { ...list.recipients.length ? { recipients: list.recipients } : {}, ...list.status === 'READY' ? { recipientWrites: true } : {} };
   }, []);
+  const savedRecipientsNow = useCallback(() => savedRecipientsSnapshot().recipients, []);
   /** The workflow, proposal, wallet and facts a message is written against (everything but the saved recipients). */
   const contextNow = useCallback((): CopilotEnvironment => {
     const now = latest.current, store = now.workflow, current = store.state.workflow;
     const steps = workflowSteps(current, store.context), flow = simulationFlowOf(steps);
     const owner = flow === 'MOCKED_CHAIN' ? null : now.flows[flow];
     const record = owner ? owner.record ?? owner.run ?? null : null;
-    const chain = chainStatus(store.chain);
-    const simulation = flow === 'MOCKED_CHAIN' ? { flow, status: chain === 'CURRENT' ? 'CURRENT' as const : chain === 'INVALIDATED' || chain === 'EXPIRED' ? 'STALE' as const : 'NONE' as const, reviewed: false }
+    const chain = chainStatus(store.chain), lifecycleView = lifecycleRef.current;
+    // A05: the chat's own view of the selected runtime (every runtime the shell can select, the universal bridge included) when it is known; the
+    // per-flow records otherwise. A retired or expired simulation is STALE and carries no figure.
+    const details = lifecycleView ? assistantSimulation(lifecycleView, { workflow: current, context: store.context }) : null;
+    const simulation = details ? { flow, status: details.status === 'CURRENT' ? 'CURRENT' as const : details.status === 'EXPIRED' || details.status === 'CHANGED' ? 'STALE' as const : 'NONE' as const,
+      reviewed: details.status === 'CURRENT' && Boolean(lifecycleView!.authorization.accepted), details }
+      : flow === 'MOCKED_CHAIN' ? { flow, status: chain === 'CURRENT' ? 'CURRENT' as const : chain === 'INVALIDATED' || chain === 'EXPIRED' ? 'STALE' as const : 'NONE' as const, reviewed: false }
       : { flow, status: record ? owner!.retired ? 'STALE' as const : 'CURRENT' as const : 'NONE' as const, reviewed: Boolean(record && !owner!.retired && authorized(record)) };
     const facts: CopilotFacts = buildCopilotFacts({ workflow: current, context: store.context, pending: store.pending, findings: store.review?.findings ?? [], reviewError: store.reviewError,
       capability: { environment: now.environment, executionSupported: now.capability.executionSupported, executionReady: now.capability.executionReady,
@@ -186,8 +204,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       orcaPositions: engineering && solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
       remaining: engineering ? reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) : [], ...liquidity ? { liquidity } : {} };
     const view = learningView.current;
-    const interfaceLanguage = interfaceLanguageRef.current;
-    return { ...interfaceLanguage ? { interfaceLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
+    const interfaceLanguage = interfaceLanguageRef.current, replyLanguage = replyLanguageRef.current;
+    return { ...interfaceLanguage ? { interfaceLanguage } : {}, ...replyLanguage ? { replyLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
       verified, ...view?.enabled ? { learning: view.learning } : {}, surface: 'WEB', poolReads: true };
   }, []);
   const environmentNow = useCallback((): CopilotEnvironment => ({ ...contextNow(), ...recipientsNow() }), [contextNow, recipientsNow]);
@@ -413,7 +431,9 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     } finally { setBusy(false); }
   }, [contextNow, recipientsNow, environmentNow, show, settle, loadVerified, loadPositions]);
   /** The Copilot's reply, or null when it is not enabled on this server (the caller shows its exact-grammar guidance). */
-  const respond = useCallback(async (text: string): Promise<CopilotReply | null> => {
+  const respond = useCallback(async (text: string, language?: 'EN' | 'PT'): Promise<CopilotReply | null> => {
+    // A09: this turn is answered in the person's conversational language (absent: the interface language, as before).
+    replyLanguageRef.current = language ?? null;
     const resolved = await (status.current ?? Promise.resolve<CopilotMode>('off'));
     if (resolved === 'live' || resolved === 'replay') return interpret(text);
     // Off mode keeps the exact-grammar behaviour: unrecognized text discards the pending proposal.
@@ -423,7 +443,9 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
     reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining, automationCreated: automationCreatedNow,
-    awaitingAmount: awaitingAmountNow };
+    awaitingAmount: awaitingAmountNow,
+    // R09–R12: the account's saved recipients as this page holds them now (display only: the chat names a Batch Payment's recipients by label).
+    savedRecipients: savedRecipientsNow };
 }
 
 type Now = { readonly wallet: { readonly account: string | null }; readonly jupiter: { readonly session: { readonly chain: string; readonly account: { readonly address: string } } | null } };

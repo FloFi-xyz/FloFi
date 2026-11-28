@@ -7,7 +7,7 @@
  */
 import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, showMobilePane } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 
 type IrNode = { inputs: { name: string; value: { asset?: unknown } }[]; adapterConstraints: { protocols: string[] }; userConstraints: { kind: string }[] };
@@ -32,6 +32,8 @@ for (const [width, height] of VIEWPORTS) for (const language of width === 1440 |
     if (language === 'PT') await chooseLanguage(page.context(), 'PT');
     await page.setViewportSize({ width, height });
     await openBuilder(page);
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, A10, intentional): on a phone the Assistant is the Conversation pane (the Plan is shown first).
+    await showMobilePane(page, 'conversation');
     const assistant = page.locator('aside.copilot');
     const title = assistant.locator('.copilot-head .assistant-title');
     // P0 PT-BR copy: the panel's title is translated too ("Assistente FloFi").

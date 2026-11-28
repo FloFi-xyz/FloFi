@@ -12,6 +12,7 @@
  *   - a network the deployment cannot read history for is reported as such (`coverage`), never as an empty history
  */
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
+import { displayTokenAmount, signedAmountExpression, type DisplayAmountExpression, type DisplayLanguage } from './token-amount-display';
 
 export const ACTIVITY_NETWORKS = ['ethereum', 'base', 'arbitrum-one', 'robinhood', 'solana'] as const;
 export type ActivityNetworkId = (typeof ACTIVITY_NETWORKS)[number];
@@ -131,5 +132,14 @@ export function activityRows(transfers: readonly WalletTransfer[], filter: Activ
 export function signedAmount(t: Pick<WalletTransfer, 'amount' | 'direction' | 'asset'>): string {
   const value = `${formatAssetAmount(t.amount, t.asset.decimals)} ${t.asset.symbol}`;
   return t.direction === 'IN' ? `+${value}` : t.direction === 'OUT' ? `−${value}` : value;
+}
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): the signed amount as the History shows it — six significant digits ("≈" before the sign
+ * when shortened: "≈ +0.0579238 ETH"), the reader's separators, the exact signed value for the disclosure and the exact unsigned amount for copy.
+ * Presentation only (`signedAmount` stays the exact text); `null` for an amount that cannot be read, which the row then shows exactly.
+ */
+export function signedDisplayAmount(t: Pick<WalletTransfer, 'amount' | 'direction' | 'asset'>, language: DisplayLanguage): DisplayAmountExpression | null {
+  const shown = displayTokenAmount({ units: t.amount, decimals: t.asset.decimals }, { language, symbol: t.asset.symbol, marker: false });
+  return shown && signedAmountExpression(shown, t.direction === 'IN' ? '+' : t.direction === 'OUT' ? '−' : '', t.asset.symbol);
 }
 export const shortAddress = (address: string) => address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;

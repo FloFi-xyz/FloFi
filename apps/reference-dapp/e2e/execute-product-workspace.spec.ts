@@ -37,6 +37,10 @@ test.beforeAll(async () => {
       '../state/asset-catalog-store': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
       '../state/aave-reserve-reads': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
       '../app/solana-asset-catalog-action': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
+      // The fee line's server action (collection off in this acceptance: it renders nothing).
+      '../app/platform-fee-action': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
+      // The fee settlement hook signs through the transfer server actions (server-only modules): not part of this acceptance.
+      '../state/platform-fee-settlement': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
       'node:crypto': fileURLToPath(new URL('../node_modules/next/dist/compiled/crypto-browserify/index.js', import.meta.url)),
       buffer: fileURLToPath(new URL('../node_modules/next/dist/compiled/buffer/index.js', import.meta.url)),
       'node:buffer': fileURLToPath(new URL('../node_modules/next/dist/compiled/buffer/index.js', import.meta.url)),

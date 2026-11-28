@@ -267,8 +267,9 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(workspace).toContainText('1. Remove 50% of liquidity');
     await expect(workspace).toContainText(W.reconciled);
     // The reconciled effects as recorded: half the principal back, the recorded and accrued fees collected, no rent moved.
-    await expect(workspace).toContainText(/Actual withdrawn · Token 1\s*1\.655158611 SOL/);
-    await expect(workspace).toContainText(/Actual withdrawn · Token 2\s*39\.888944 USDC/);
+    // R06/R07 (intentional): six significant digits on the Execute timeline; the exact value stays one tap away.
+    await expect(workspace).toContainText(/Actual withdrawn · Token 1\s*≈ 1\.65516 SOL/);
+    await expect(workspace).toContainText(/Actual withdrawn · Token 2\s*≈ 39\.8889 USDC/);
     await expect(workspace).toContainText(/Fees collected · Token 1\s*0\.003334 SOL/);
     await expect(workspace).toContainText(/Fees collected · Token 2\s*1\.21 USDC/);
     await expect(workspace).toContainText(W.local);
@@ -303,7 +304,8 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(done).toContainText('1. Close position');
     await expect(done).toContainText(W.reconciled);
     // Everything that remained came back, and the position's three accounts were closed: their rent (0.00607568 SOL) refunded.
-    await expect(done).toContainText(/Actual withdrawn · Token 1\s*1\.655158611 SOL/);
+    // R06/R07 (intentional): six significant digits on the Execute timeline; the exact value stays one tap away.
+    await expect(done).toContainText(/Actual withdrawn · Token 1\s*≈ 1\.65516 SOL/);
     await expect(done).toContainText(/Fees collected · Token 1\s*0\.0005 SOL/);
     await expect(done).toContainText(/Fees collected · Token 2\s*0\.12 USDC/);
     await expect(done).toContainText(/Account rent refunded\s*0\.00607568 SOL/);

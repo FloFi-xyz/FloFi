@@ -351,7 +351,7 @@ describe('BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001 Batch Payment refusals
       'BATCH_PAYMENT_TOKEN_UNSUPPORTED', 'BATCH_PAYMENT_NETWORK_UNSUPPORTED', 'BATCH_PAYMENT_EXCEEDS_WORKFLOW_STEP_BUDGET', 'BATCH_PAYMENT_ASSET_MIXED'];
     for (const code of codes) {
       const en = copilotRejection(code, 'EN').message, pt = copilotRejection(code, 'PT').message;
-      for (const message of [en, pt]) expect(message, code).not.toMatch(/BATCH_PAYMENT|could not author|não conseguiu criar/);
+      for (const message of [en, pt]) expect(message, code).not.toMatch(/BATCH_PAYMENT|could not (?:author|prepare) this request|não conseguiu (?:criar|preparar) este pedido/);
       expect(en, code).not.toBe(pt);
     }
     expect(copilotRejection('BATCH_PAYMENT_TOO_MANY_RECIPIENTS', 'EN').message).toContain('at most 8 recipients');

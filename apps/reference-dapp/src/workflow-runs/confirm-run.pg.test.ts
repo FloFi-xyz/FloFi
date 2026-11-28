@@ -460,6 +460,44 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
     } finally { await t.drop(); }
   });
 
+  it('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: a PERCENT binding spends its share of the reconciled delivery; a FIXED one exactly its amount or nothing', async () => {
+    const weth = 'eip155:84532/erc20:0x4200000000000000000000000000000000000006';
+    const consumer = { action: 'swap', network: 'base-sepolia', inputAsset: 'WETH', outputAsset: 'USDC', amount: '1', slippageBps: 50 };
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['base-sepolia-swap'], delegation: false });
+      // Half of what step 1 actually delivered (0.333 WETH → 0.1665), never its 1 WETH cap and never the wallet's other WETH.
+      const half = await started(h, { version: 2, steps: [BASE_SWAP, consumer], bindings: [{ step: 1, amountFrom: 0, consume: 'PERCENT', bps: 5000 }] });
+      const run = await runOf(h, half.approval.approvalId);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, half.claimed.workflow, 'RECONCILED', { received: [{ asset: weth, amount: '333000000000000000' }] });
+      await h.drain(run.runId);
+      await continued(h, half.approval.approvalId);
+      expect((await h.store.steps(run.runId))[1]).toMatchObject({ state: 'AWAITING_OWNER', strategy: { amount: '0.1665' },
+        bound: { used: '166500000000000000', received: '333000000000000000', cap: '1000000000000000000' } });
+    } finally { await t.drop(); }
+    const u = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(u.db, { flows: ['base-sepolia-swap'], delegation: false });
+      // Exactly 0.2 WETH of what step 1 delivered: 0.333 covers it, so the step spends 0.2 (never min(cap, delivered) = 0.333 or anything else).
+      const fixed = { version: 2, steps: [BASE_SWAP, { ...consumer, amount: '0.2' }], bindings: [{ step: 1, amountFrom: 0, consume: 'FIXED' }] };
+      const enough = await started(h, fixed);
+      const run = await runOf(h, enough.approval.approvalId);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, enough.claimed.workflow, 'RECONCILED', { received: [{ asset: weth, amount: '333000000000000000' }] });
+      await h.drain(run.runId);
+      await continued(h, enough.approval.approvalId);
+      expect((await h.store.steps(run.runId))[1]).toMatchObject({ state: 'AWAITING_OWNER', strategy: { amount: '0.2' }, bound: { used: '200000000000000000' } });
+      // 0.15 WETH delivered is less than the fixed 0.2: the step stops before anything is asked of the wallet (never topped up from the wallet's balance).
+      const short = await started(h, fixed);
+      const halted = await runOf(h, short.approval.approvalId);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, short.claimed.workflow, 'RECONCILED', { received: [{ asset: weth, amount: '150000000000000000' }] });
+      await h.drain(halted.runId);
+      const stopped = await continued(h, short.approval.approvalId);
+      expect(stopped.workflow).toBeNull();
+      expect(await runOf(h, short.approval.approvalId)).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT' });
+      expect((await h.store.steps(halted.runId))[1]).toMatchObject({ state: 'BLOCKED' });
+    } finally { await u.drop(); }
+  });
+
   it('keeps the claimed EVM and Solana owners and uses reconciled amounts through ETH → USDC → Solana USDC → SOL', async () => {
     const t = await createTestDatabase();
     try {

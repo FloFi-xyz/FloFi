@@ -25,6 +25,7 @@ import { portugueseExecutionUx } from './pt-execution-ux';
 import { portugueseSmartAccountTransfer } from './pt-smart-account-transfer';
 import { portugueseWorkflowRuns } from './pt-workflow-runs';
 import { portugueseUserFunded } from './pt-user-funded';
+import { portugueseDependencyModes } from './pt-dependency-modes';
 import { portugueseMainnetProduct } from './pt-mainnet-product';
 import { portugueseConcurrency } from './pt-concurrency';
 import { portugueseUniversalBridge } from './pt-universal-bridge';
@@ -123,6 +124,8 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseSmartAccountTransfer,
   ...portugueseWorkflowRuns,
   ...portugueseUserFunded,
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: dependency consumption modes, stale dependent amounts, the bridge-fee minimum (new keys).
+  ...portugueseDependencyModes,
   ...portugueseConversation,
   ...portugueseChatE2eFix,
   ...portugueseE2eReliability,

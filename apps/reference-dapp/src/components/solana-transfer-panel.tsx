@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 import { useWorkflow } from '../state/workflow-store';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
-import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { shortSolanaAddress, solanaTransferDetails } from '../domain/solana-transfer-authoring';
 import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
 
@@ -13,12 +13,18 @@ import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurr
  * transaction and shows the receipt and Evidence Bundle.
  */
 export function SolanaTransferPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
+  const lang: DisplayLanguage = language === 'PT' ? 'PT' : 'EN';
   const { state } = useWorkflow(), transfer = useSolanaTransfer();
   const node = state.workflow.nodes.find(n => solanaTransferDetails(n)), fields = node ? solanaTransferDetails(node) : null;
   const record = transfer.record, review = record?.review, attempt = record?.attempt, observation = record?.observations.at(-1);
-  const devnet = transfer.network === 'Solana Devnet', sol = (lamports: string | null | undefined) => lamports ? `${formatTokenAmount(lamports, 9)} ${devnet ? 'Devnet SOL' : 'SOL'}` : '--';
-  const amount = review ? `${formatTokenAmount(review.amount, review.asset.decimals)} ${review.asset.symbol}` : fields ? `${fields.amount} ${fields.symbol}` : '--';
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): amounts at six significant digits in the reader's separators, rounded by purpose
+// (a minimum down, a fee or a maximum up, anything else to the nearest, marked "≈"). Presentation only: the record keeps base units.
+  const shown = (units: string | null | undefined, decimals: number, symbol: string, rounding: DisplayRounding = 'nearest') =>
+    formatDisplayTokenAmount(units ? { units, decimals } : null, { rounding, language: lang, symbol, unavailable: '--' });
+  const devnet = transfer.network === 'Solana Devnet', sol = (lamports: string | null | undefined, rounding: DisplayRounding = 'up') => shown(lamports, 9, devnet ? 'Devnet SOL' : 'SOL', rounding);
+  const tokenFee = (fee: { amount: string; token: { decimals: number; symbol: string } }) => shown(fee.amount, fee.token.decimals, fee.token.symbol, 'up');
+  const amount = review ? shown(review.amount, review.asset.decimals, review.asset.symbol) : fields ? `${fields.amount} ${fields.symbol}` : '--';
   const pending = Boolean(attempt && record?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(attempt.state));
   return <section className="panel" aria-label={tr(devnet ? 'Solana Devnet transfer' : 'Solana transfer')}><h2>{tr(view === 'simulate' ? 'Simulate transfer' : 'Transfer')}</h2>
     {fields && <p>{tr('Send {0} to {1} on {2}.', `${fields.amount} ${fields.symbol}`, shortSolanaAddress(fields.recipient), tr(transfer.network))}</p>}
@@ -30,7 +36,7 @@ export function SolanaTransferPanel({ view }: { view: 'simulate' | 'execute' }) 
       <dt>{tr("From")}</dt><dd><code>{review.owner}</code></dd><dt>{tr("Network")}</dt><dd>{tr(review.network)}</dd>
       {review.asset.mint && <><dt>{tr("Token mint")}</dt><dd><code>{review.asset.mint}</code> · {tr(review.asset.program === 'token-2022' ? 'Token-2022' : 'SPL Token')}</dd></>}
       {/* ADR-0010 §4: with Pimlico's Kora fee payer the owner pays the network fee (and any recipient account rent) in a token, never in SOL. */}
-      {review.gas ? <><dt>{tr("Network fee")}</dt><dd>{formatTokenAmount(review.gas.amount, review.gas.token.decimals)} {review.gas.token.symbol}
+      {review.gas ? <><dt>{tr("Network fee")}</dt><dd>{tokenFee(review.gas)}
         <small>{tr('Paid from your {0} to Pimlico.', review.gas.token.symbol)}</small></dd></> : <>
         <dt>{tr("Estimated network fee")}</dt><dd>{sol(review.estimatedFeeLamports)}</dd>
         {review.accountCreationLamports !== '0' && <><dt>{tr("Recipient token account deposit")}</dt><dd>{sol(review.accountCreationLamports)}</dd></>}
@@ -40,8 +46,8 @@ export function SolanaTransferPanel({ view }: { view: 'simulate' | 'execute' }) 
     {pending && <button type="button" disabled={transfer.busy} onClick={() => void transfer.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
     {record?.evidence && observation && <section aria-label={tr("Transfer result")} className="swap-result">
       <h3>{tr("Success")}</h3>
-      <p>{tr("Transfer independently reconciled. Sent {0}; the recipient received {1}; fee {2}.", amount, review ? `${formatTokenAmount(observation.amountReceived ?? '0', review.asset.decimals)} ${review.asset.symbol}` : '--',
-        observation.tokenFee ? `${formatTokenAmount(observation.tokenFee.amount, observation.tokenFee.token.decimals)} ${observation.tokenFee.token.symbol}` : sol(observation.feeLamports))}</p>
+      <p>{tr("Transfer independently reconciled. Sent {0}; the recipient received {1}; fee {2}.", amount, review ? shown(observation.amountReceived, review.asset.decimals, review.asset.symbol) : '--',
+        observation.tokenFee ? tokenFee(observation.tokenFee) : sol(observation.feeLamports, 'nearest'))}</p>
       <dl className="swap-summary"><dt>{tr("Transaction")}</dt><dd><code>{observation.signature}</code></dd>
         {observation.explorer && <><dt>{tr("Explorer")}</dt><dd><a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a></dd></>}
         <dt>{tr("Slot")}</dt><dd>{observation.slot ?? '--'}</dd></dl>

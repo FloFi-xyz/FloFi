@@ -65,6 +65,14 @@ describe('capabilities, assets, context and validation', () => {
     expect((await runCopilotTool('get_wallet_context', '{}', ctx())).output).toEqual({ ok: true, wallet: card.wallet });
     expect((await runCopilotTool('get_wallet_context', '{}', ctx({}, { card: null }))).outcome).toBe('WALLET_CONTEXT_UNAVAILABLE');
   });
+  it('BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A05): the workflow context carries the current revision\'s verified simulation the client sent', async () => {
+    const simulation = { status: 'CURRENT', revision: 3, expiresAt: '2026-11-28T12:05:00.000Z', steps: [{ step: 1, action: 'Bridge', input: '1 USDC', output: '0.98 USDC', minimum: '0.97 USDC' }],
+      costs: [{ label: 'Route fee', value: '0.02 USDC' }], platformFee: { rate: '0.80%', amounts: ['0.008 USDC'], recorded: null, charged: false as const } };
+    const output = (await runCopilotTool('get_workflow_context', '{}', ctx({}, { card: { ...card, simulation } }))).output;
+    expect(output).toEqual({ ok: true, revision: 3, steps: card.steps, pending: card.pending, request: card.request, simulation });
+    expect(JSON.stringify(output)).not.toMatch(ADDRESS);
+    expect(COPILOT_TOOL_DEFINITIONS.find(tool => tool.name === 'get_workflow_context')!.description).toMatch(/simulation as FloFi verified it/);
+  });
   it('validate_strategy is the platform\'s deterministic validation; a test network is refused in the public scope', async () => {
     const valid = await runCopilotTool('validate_strategy', JSON.stringify({ strategy: JSON.stringify({ action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }) }), ctx());
     expect(valid.output).toMatchObject({ ok: true, valid: true, workflowHash: expect.stringMatching(/^0x[0-9a-f]{64}$/), fundsClass: 'REAL_FUNDS' });

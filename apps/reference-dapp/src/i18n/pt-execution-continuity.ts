@@ -26,8 +26,8 @@ export const portugueseExecutionContinuity: Readonly<Record<string, string>> = {
     'Esta ponte paga outra carteira que não a conectada, então não pode ser agrupada. Ela passa pela própria revisão e pelas confirmações na carteira.',
   'The bridge provider did not answer with a route just now, so your wallet was not asked. Nothing was sent; try again.':
     'O provedor da ponte não respondeu com uma rota agora, então sua carteira não foi consultada. Nada foi enviado; tente novamente.',
-  'The bridge fee is above your slippage limit for this amount, so your wallet was not asked. Nothing was sent; raise the limit or bridge more.':
-    'A taxa da ponte está acima do seu limite de variação para este valor, então sua carteira não foi consultada. Nada foi enviado; aumente o limite ou transfira mais.',
+  'The bridge fee would leave less than the minimum you accepted to receive for this amount, so your wallet was not asked. Nothing was sent; bridge a larger amount or accept a lower minimum.':
+    'A taxa da ponte deixaria menos do que o mínimo que você aceitou receber por este valor, então sua carteira não foi consultada. Nada foi enviado; transfira um valor maior ou aceite um mínimo menor.',
   'The bridge quote would expire before the batch could execute, so your wallet was not asked. Nothing was sent; try again.':
     'A cotação da ponte expiraria antes de o lote poder ser executado, então sua carteira não foi consultada. Nada foi enviado; tente novamente.',
   'The bridge deadline leaves too little time for the delivery, so your wallet was not asked. Nothing was sent; try again.':

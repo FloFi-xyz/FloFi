@@ -187,7 +187,10 @@ for (const value of ['light', 'dark'] as const) test(`${value} long recorded amo
     await page.evaluate(value => { window.flofiRunDetailAcceptance.show(value); window.flofiRunDetailAcceptance.longTitle(); window.flofiRunDetailAcceptance.longValues(); }, mode);
     // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a one-step receipt is titled by its operation; the long workflow name stays in the record's timeline.
     await expect(detail.locator('.execution-plan h2')).toContainText('OwnerDefinedWorkflowName');
-    await expect(detail.locator('.execution-plan')).toContainText('9'.repeat(60));
+    // R06/R07 (intentional): a long recorded amount reads at six significant digits; its exact recorded value is one tap away (named and titled).
+    const short = detail.locator('.token-amount-short').filter({ visible: true }).first();
+    await expect(short).toBeVisible();
+    expect((await short.getAttribute('title'))!.replace(/\D/g, '')).toContain('9'.repeat(60));
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
