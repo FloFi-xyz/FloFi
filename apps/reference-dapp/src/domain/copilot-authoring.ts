@@ -1373,7 +1373,7 @@ const routerRanges = () => (publicScope() ? ['mainnet'] as const : ['testnet', '
 /** A closed rejection code with deterministic copy; unknown codes are named, never explained by the model. */
 export function copilotRejection(code: string, language: CopilotLanguage = 'EN'): Extract<CopilotOutcome, { kind: 'REJECTED' }> {
   const m = copilotCopy(language);
-  return { kind: 'REJECTED', code, message: m.rejection[code] ?? (code === 'ROUTER_AMOUNT_OUT_OF_RANGE' ? m.routerAmountRange(routerRanges()) : m.rejectedCode(code)) };
+  return { kind: 'REJECTED', code, message: m.rejection[code] ?? (code === 'ROUTER_AMOUNT_OUT_OF_RANGE' ? m.routerAmountRange(routerRanges()) : m.couldNotPrepare) };
 }
 
 const publicScope = () => activeNetworkScope() === 'PUBLIC_MAINNET';

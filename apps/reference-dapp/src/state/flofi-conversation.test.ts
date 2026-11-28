@@ -885,7 +885,10 @@ describe('P0 hotfix (execution continuity): the Assistant while the workflow exe
     for (const text of ['continue', 'Review workflow', 'continuar']) {
       render().send(text); await flush();
       const message = last(render());
-      expect(message.text).toBe('This workflow is executing: 1 of 2 steps completed · Step 2 (Swap): Not started. Its provider is not available here.');
+      // A09: "continuar" is Portuguese, so FloFi answers it in Portuguese on this English screen (the same message, its Portuguese rendering).
+      const shown = text === 'continuar' ? message.variants!.EN : message;
+      expect(message.language).toBe(text === 'continuar' ? 'PT' : 'EN');
+      expect(shown.text).toBe('This workflow is executing: 1 of 2 steps completed · Step 2 (Swap): Not started. Its provider is not available here.');
       expect(message.text).not.toMatch(/can’t start the review|Simulate/);
     }
     expect(simulate).not.toHaveBeenCalled(); expect(controls.authorize).not.toHaveBeenCalled();
@@ -1360,5 +1363,61 @@ describe('R09–R12 / P1-03: Batch Payment with saved recipients in the product 
     } finally { vi.unstubAllGlobals(); }
     const highlight = dispatched.filter(event => event.type === 'flofi:canvas-highlight') as CustomEvent<unknown>[];
     expect(highlight.map(event => event.detail)).toEqual([[editor.workflow.nodes.at(-1)!.nodeId]]);
+  });
+});
+
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the chat answers read-only questions from FloFi's own facts without changing anything (A04), reads the
+ * current revision's simulation the Review shows (A05) and replies in the language the person writes in, on any screen (A09).
+ */
+describe('read-only questions, the current simulation and the conversation language', () => {
+  const flofi = (chat: FlofiConversation) => chat.messages.filter(message => message.role === 'flofi').at(-1)!;
+  it('a Portuguese question on an English screen gets a Portuguese answer that stays Portuguese, and changes nothing', async () => {
+    const chat = await say('O que significa supply?');
+    const answer = last(chat);
+    expect(answer).toMatchObject({ role: 'flofi', language: 'PT', fixedLanguage: true });
+    expect(answer.text).toBe('Supply é depositar seus tokens em um protocolo de empréstimo, como a Aave, para render juros. Você pode sacá-los depois, e eles podem servir de colateral para um empréstimo.');
+    expect(shownMessage(answer, 'EN').text).toBe(answer.text);
+    expect(editor.workflow.revision).toBe(0); expect(f.propose).toEqual([]);
+  });
+  it('the simulation the Review shows answers "how much will I get" and "how much does it cost", bound to this revision; nothing is simulated or changed', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    const revision = editor.workflow.revision;
+    // The figures are the recorded quote's own (the fixture quotes 100 USDC); FloFi's fee is the authored workflow's basis (10 USDC → 0.08 USDC).
+    let chat = await say('Quanto vou receber?');
+    expect(flofi(chat).text).toBe('Etapa 1 (Trocar 100 USDC): cerca de 0,025 WETH, no mínimo 0,024875 WETH.');
+    chat = await say('What are the fees?');
+    expect(flofi(chat).text).toBe('The current simulation lists no cost lines. FloFi fee: 0.80% (0.08 USDC), not charged at this time.');
+    chat = await say('A simulação ainda está válida?');
+    expect(flofi(chat).text).toMatch(/^A simulação atual vale por mais cerca de 2 min\./);
+    expect(editor.workflow.revision).toBe(revision); expect(f.propose).toEqual([]); expect(simulate).not.toHaveBeenCalled(); expect(controls.authorize).not.toHaveBeenCalled();
+    // The quote expired: it is said so, with no figure, and FloFi offers to simulate again.
+    vi.setSystemTime(reviewNow + 121_000); lifecycle(reviewedPatch);
+    chat = await say('Quanto vou receber?');
+    expect(flofi(chat)).toMatchObject({ text: 'A última simulação expirou, então os números dela não valem mais. Quer simular de novo?', options: [conversationCopy('PT').review] });
+    vi.setSystemTime(reviewNow);
+  });
+  it('without a simulation FloFi offers to simulate; "is it worth it" about an operation the workflow does not have says so', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    let chat = await say('Is the simulation still valid?');
+    expect(flofi(chat)).toMatchObject({ text: 'There is no simulation of this workflow yet. Do you want to simulate it now?', options: ['Review workflow'] });
+    chat = await say('Compensa fazer uma bridge de 0,1 USDC?');
+    expect(flofi(chat).text).toBe('Este fluxo ainda não tem uma bridge. Adicione e simule para ver os custos.');
+    expect(editor.workflow.revision).toBe(1); expect(simulate).not.toHaveBeenCalled();
+  });
+  it('an explicit language choice holds: "reply in English" then a Portuguese message', async () => {
+    let chat = await say('Responda em inglês');
+    expect(last(chat)).toMatchObject({ text: 'From now on I’ll reply in English.', language: 'EN' });
+    chat = await say('O que significa supply?');
+    expect(last(chat)).toMatchObject({ language: 'EN', text: expect.stringMatching(/^Supply means depositing your tokens/) });
+  });
+  it('a question while FloFi waits for the workflow confirmation keeps that question\'s answers (nothing is confirmed by it)', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    const chat = await say('How much will I get?');
+    expect(flofi(chat)).toMatchObject({ text: 'Step 1 (Swap 100 USDC): about 0.025 WETH, at least 0.024875 WETH.' });
+    expect(controls.authorize).not.toHaveBeenCalled();
   });
 });

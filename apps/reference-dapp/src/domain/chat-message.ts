@@ -25,6 +25,11 @@ export type ChatMessage = {
    */
   readonly variants?: Readonly<Record<ConversationLanguage, ChatContent>>;
   /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09): written in the person's conversational language (`language`), not the interface's — FloFi
+   * answers in the language the person writes in — so it stays in that language whatever the interface shows.
+   */
+  readonly fixedLanguage?: true;
+  /**
    * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): this message is FloFi's structured question for an amount (the engine's open draft when it was
    * written). The panel offers balance shortcuts under it only while it is the latest message and the engine still waits for exactly this.
    */
@@ -37,10 +42,13 @@ export type ChatMessage = {
 };
 /** One rendering of a FloFi message. */
 export type ChatContent = Pick<ChatMessage, 'text' | 'notes' | 'options' | 'question' | 'review'>;
-/** The message as the interface shows it now: a message rendered in both languages follows the CURRENT language; any other stays as written. */
+/**
+ * The message as the interface shows it now: a message rendered in both languages follows the CURRENT language, unless it was written in the
+ * person's own conversational language (`fixedLanguage`), which it keeps; any other stays as written.
+ */
 export function shownMessage(message: ChatMessage, language: ConversationLanguage): ChatMessage {
-  const variant = message.variants?.[language];
-  return variant ? { ...message, ...variant, language } : message;
+  const shown = message.fixedLanguage && message.language ? message.language : language, variant = message.variants?.[shown];
+  return variant ? { ...message, ...variant, language: shown } : message;
 }
 /** How a deterministic message is written in one language: its text, and optionally its notes, options, question and Review. */
 export type Rendering = string | readonly [string, Partial<ChatContent>?];

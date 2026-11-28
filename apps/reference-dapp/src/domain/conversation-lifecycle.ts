@@ -24,6 +24,7 @@ import { runReconciled, type WorkflowProgressView } from './workflow-progress';
 import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
 import { semanticWorkflowFeeBasis } from '../platform-fee/semantic-basis';
 import { feeAmountText } from '../platform-fee/disclosure';
+import { detectLanguage } from './conversation-language';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -252,11 +253,13 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
   return { text, notes: [...readFailed && !done ? [c.statusLastRead] : [], c.statusReadOnly] };
 }
 /**
- * P0 approved UX (boards 01/02, handoff §4): FloFi replies in the ACTIVE INTERFACE language, whatever language the message was typed in (a
- * Portuguese answer on an English screen mixed the two). The words are still understood in either language (`classifyAnswer`, `lifecycleRequest`).
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09, replaces the P0 "interface language" rule): FloFi replies in the language the person writes in,
+ * whatever language the interface shows; a message that tells nothing ("ok", "0,2") keeps the language already spoken (`previous`), else the
+ * interface's. The words are still understood in either language (`classifyAnswer`, `lifecycleRequest`). The chat itself also honours an explicit
+ * "reply in English" (`conversation-language.ts`, `replyLanguage`).
  */
-export function answerLanguage(_text: string, interfaceLanguage: ConversationLanguage): ConversationLanguage {
-  return interfaceLanguage;
+export function answerLanguage(text: string, interfaceLanguage: ConversationLanguage, previous: ConversationLanguage | null = null): ConversationLanguage {
+  return detectLanguage(text) ?? previous ?? interfaceLanguage;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

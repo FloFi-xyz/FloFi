@@ -32,7 +32,14 @@ import type { ExecutionControls } from './execution-controls';
 import { conversationStorage, forgetConversations, historical, pruneConversations, readConversation, writeConversation } from '../domain/conversation-persistence';
 import { conversationCopy } from '../domain/conversation-copy';
 import type { ChatContent, ChatMessage, Rendering } from '../domain/chat-message';
-import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, executionQuestion, executionStatusAnswer, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
+import { languageRequest, replyLanguage, type ConversationLanguageState } from '../domain/conversation-language';
+import { assistantSimulation } from '../domain/assistant-facts';
+import { answerReadOnly, readOnlyQuestion } from '../domain/assistant-answers';
+import { termAnswer, termQuestion } from '../domain/operation-terms';
+import { answerConcept, conceptQuestion } from '../domain/intelligence/concepts';
+import { learningCopy } from '../domain/copilot-learning-copy';
+import { workflowSteps } from '../domain/workflow-steps';
+import { aboutNextRequest, bindingIssue, classifyAnswer, continuationReason, conversationExecution, executionQuestion, executionStatusAnswer, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
   QUOTE_MOVED, reviewBinding, reviewChanges, type ConversationLanguage, type ConversationReview, type LifecycleView, type PendingQuestion, type ReviewBinding } from '../domain/conversation-lifecycle';
 import { chatChangeDependents, chatChangedSteps } from '../domain/conversation-lifecycle';
 import { batchChangeView, batchChatChange } from '../domain/batch-payment-chat';
@@ -191,7 +198,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (issue === 'FLOFI_WALLET_NOT_READY') return continuing ? c.walletNotReadyToContinue : c.walletNotReady;
     return translate(language, floFiWalletMessage(issue) ?? issue);
   };
-  const copilot = useCopilotInterpreter({ direct, interfaceLanguage });
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A05): the Copilot reads the same simulation the chat's Review shows (this view), never its own guess.
+  const copilot = useCopilotInterpreter({ direct, interfaceLanguage, lifecycle: bridge });
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant's short welcome (the panel shows the Copilot mode's own variant when one is configured).
   const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? FLOFI_WELCOME_COMMANDS : 'Review each proposed change before applying it.' });
   /**
@@ -216,6 +224,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const [, setTick] = useState(0);
   const ids = useRef(1), session = useRef(0), lock = useRef(false);
   const questionRef = useRef<Question | null>(null);
+  /** A09: the language this conversation is written in (the person's own words, or the language they explicitly chose), per conversation. */
+  const spoken = useRef<ConversationLanguageState>(null);
   const latest = useRef({ bridge, state, context, workflow }); latest.current = { bridge, state, context, workflow };
   const pendingCommit = useRef<Commit | null>(null), lastCommit = useRef<{ readonly before: Workflow; readonly expected: Workflow } | null>(null);
   /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the workflow FloFi last reported a final completed result for, and whether it continues as steps. */
@@ -281,8 +291,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     role: ChatMessage['role'] = 'flofi', fixed: Partial<ChatContent> & Pick<ChatMessage, 'focus'> = {}) => {
     const render = (l: ConversationLanguage): ChatContent => { const out = build(l, conversationCopy(l)); return typeof out === 'string' ? { text: out } : { text: out[0], ...out[1] ?? {} }; };
     const variants = { EN: render('EN'), PT: render('PT') };
-    append(scope, { role, ...fixed, ...variants[language], language, variants });
+    // A09: written in the person's conversational language rather than the interface's: it stays in that language after a switch.
+    append(scope, { role, ...fixed, ...variants[language], language, variants, ...language !== interfaceLanguage ? { fixedLanguage: true } : {} });
   };
+  /** A catalog message in the conversation's language: as before (the interface translates it) when that is the interface's, else written in it. */
+  const system = (scope: number, language: ConversationLanguage, text: string, params: readonly string[] = []) =>
+    append(scope, language === interfaceLanguage ? { role: 'system', text, ...params.length ? { params: [...params] } : {} } : { role: 'system', text: translate(language, text, ...params), language });
   /** The offered network switch, answered in either language (its label is offered in the language each message is shown in). */
   const offeredNetwork = (text: string) => {
     const offer = bridge.networkAction;
@@ -303,6 +317,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (clearInput) setInput('');
     copilot.clear(); pendingCommit.current = null; lastCommit.current = null; reviewLock.current = null; watch.current = null; restored.current = null;
     resume.current = null; handover.current = null; lastReview.current = null; requote.current = null; declined.current = new Set(); finished.current = null;
+    spoken.current = null;
   }
   /**
    * HOTFIX-P1-CHAT-RECOVERY: the Editor's conversation is the signed-in account's (its opaque scope) about this workflow — never a wallet's. A
@@ -837,7 +852,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // After a reload, an unresolved run restored from its durable record is announced once; its state is that record's, never this chat's.
     if (!watch.current && live?.restored && !isFinalExecutionResult(live) && restored.current !== live.runKey && direct) {
       restored.current = live.runKey;
-      const language = interfaceLanguage, check = bridge.controls.canCheck;
+      const language = spoken.current?.language ?? interfaceLanguage, check = bridge.controls.canCheck;
       say(session.current, language, (_, c) => [c.restored, check ? { options: [c.checkStatus] } : {}]);
       watch.current = { scope: session.current, language, phase: null, runKey: live.runKey, continued: null, inPlace: requotedOf(bridge.source.state) };
     }
@@ -1081,7 +1096,16 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     try { await handle(scope, text); } finally { lock.current = false; setSending(false); }
   }
   async function handle(scope: number, text: string) {
-    const language = answerLanguage(text, interfaceLanguage), open = questionRef.current;
+    // A09: the person's conversational language (their words, or an explicit choice), whatever the interface shows; the interface's only as a fallback.
+    const turn = replyLanguage(text, interfaceLanguage, spoken.current), chose = languageRequest(text) !== null;
+    spoken.current = turn.state;
+    const language = turn.language, open = questionRef.current;
+    if (direct && chose) {
+      // "Reply in English" / "responda em português": confirmed in the chosen language; an open question keeps its answer buttons.
+      const kind = open && open.open.kind !== 'NEXT_STEP' ? open.open.kind : null;
+      say(scope, language, (shown, c) => [learningCopy(shown).language(language), kind ? { options: questionOptions(kind, c) } : {}]);
+      return;
+    }
     if (direct) {
       // P0 approved UX (board 07): while a blocker is active, "explain / why? / não entendi" explains THAT blocker, with the same facts as the panel.
       // It changes nothing else: an open question keeps its answer buttons, a promised auto-continue stays promised, and a clarification the model
@@ -1110,6 +1134,17 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
             return [answered.text, { notes: answered.notes, ...kind ? { options: questionOptions(kind, c) } : check ? { options: [c.checkStatus] } : {} }]; });
           return;
         }
+      }
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A04/A05/A08): a question about this workflow, its current simulation, its costs, what it delivers
+      // or whether it is worth it is answered from FloFi's own facts (the current revision's simulation only), read only: nothing is proposed or
+      // changed. An open question keeps its answer buttons; without a current simulation FloFi offers to simulate (the existing Review answer).
+      const read = copilot.drafting() ? null : readOnlyQuestion(text);
+      if (read) {
+        const kind = open && open.open.kind !== 'NEXT_STEP' ? open.open.kind : null, now = latest.current;
+        const facts = assistantSimulation(now.bridge, { workflow: now.state.workflow, context: now.context }), steps = workflowSteps(now.state.workflow, now.context);
+        say(scope, language, (language, c) => { const answered = answerReadOnly(read, facts, steps, language);
+          return [answered.text, { ...answered.notes.length ? { notes: answered.notes } : {}, ...kind ? { options: questionOptions(kind, c) } : answered.offerSimulation ? { options: [c.review] } : {} }]; });
+        return;
       }
       // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.
       if (!offeredNetwork(text)) resume.current = null;
@@ -1172,7 +1207,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     let request = text;
     if (destination && /^\S+$/.test(text)) {
       const completed = completeSendDestination(destination.request, destination.network, text);
-      if (!completed) { append(scope, { role: 'system', text: SEND_DESTINATION_INVALID }); return; }
+      if (!completed) { system(scope, language, SEND_DESTINATION_INVALID); return; }
       request = completed;
     }
     setDestination(null);
@@ -1182,7 +1217,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (issue) {
         dismissProposal();
         if (issue.kind === 'MISSING') setDestination({ request, network: issue.network });
-        append(scope, { role: 'system', text: issue.kind === 'MISSING' ? SEND_DESTINATION_QUESTION : SEND_DESTINATION_INVALID });
+        system(scope, language, issue.kind === 'MISSING' ? SEND_DESTINATION_QUESTION : SEND_DESTINATION_INVALID);
         return;
       }
       // BUILD-FLOFI-MAINNET-PRODUCT-001: a test network named in chat is refused in the public product, never moved to a mainnet for the owner.
@@ -1190,7 +1225,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (introduced.length) {
         dismissProposal(); copilot.reset();
         const [template, ...values] = testNetworkTemplate(introduced);
-        append(scope, { role: 'system', text: template, params: values });
+        system(scope, language, template, values);
         return;
       }
       copilot.reset();
@@ -1217,12 +1252,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       }
       // BUILD-COPILOT-002: the Copilot keeps the pending proposal visible while it interprets ("make it 2", questions about it).
       if (copilot.mayInterpret) {
-        const reply = await copilot.respond(text);
+        const reply = await copilot.respond(text, language);
         // The conversation (or the wallet's Copilot state) this message was written in ended while it was interpreted: nothing is said or done.
         if (scope !== session.current || reply?.code === 'COPILOT_CONVERSATION_ENDED') return;
         if (reply?.automation) setAutomation(reply.automation);
         if (reply?.manage) setManage(reply.manage);
-        if (!reply) { append(scope, { role: 'system', text: guidance }); return; }
+        if (!reply) { system(scope, language, guidance); return; }
         if (direct && reply.command) {
           const spoken: ConversationLanguage = copilot.language() === 'PT' ? 'PT' : 'EN';
           const read = APPLY_INSTRUCTION.test(reply.text) ? reply.text.replace(APPLY_INSTRUCTION, '')
@@ -1242,8 +1277,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
         return;
       }
+      // A04: without the Copilot, the meaning of an operation or a DeFi concept is still answered from FloFi's own copy (never a model).
+      const term = termQuestion(text), concept = term ? null : conceptQuestion(text);
+      if (term || concept) { say(scope, language, shown => term ? termAnswer(term, shown).text : answerConcept(concept!, { language: shown }).text); return; }
       dismissProposal();
-      append(scope, { role: 'system', text: guidance });
+      system(scope, language, guidance);
     }
   }
   const phase = direct ? conversationPhase(bridge, question?.open ?? null, Boolean(destination) || copilot.drafting() || question?.open.kind === 'RESOLVE_EDIT' || question?.open.kind === 'RESOLVE_PROPOSAL') : null;
