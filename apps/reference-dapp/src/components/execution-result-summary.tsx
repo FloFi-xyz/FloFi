@@ -11,6 +11,7 @@ import { useLocale } from '../i18n/locale';
 import type { ExecutionLifecycle } from '../domain/execution-lifecycle';
 import { projectLiveExecutionResult } from '../domain/execution-receipt';
 import { Amount, TransactionLink } from './dashboard/execution-receipt';
+import { PlatformFeeLine } from './platform-fee-line';
 
 const SENT = ['You sent', 'You supplied', 'Configured amount'];
 
@@ -39,6 +40,7 @@ export function ExecutionResultSummary({ live, fees = true }: { live: ExecutionL
     {costs.length > 0 && <dl className="execution-receipt-facts">
       {costs.map(fee => <div key={`${fee.label}:${fee.args?.join() ?? ''}`}><dt>{t(fee.label, ...fee.args ?? [])}</dt><dd><Amount row={fee}/></dd></div>)}
     </dl>}
+    {live.state === 'complete' && live.runKey && <PlatformFeeLine runKey={live.runKey}/>}
     {result.transaction?.explorer && <div className="execution-receipt-actions"><TransactionLink link={result.transaction}/></div>}
   </div>;
 }

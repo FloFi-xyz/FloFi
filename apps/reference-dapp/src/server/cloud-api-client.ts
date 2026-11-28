@@ -97,6 +97,48 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
 }
 
 /**
+ * The owner's platform-fee read (`status`) and the start of its collection (`settle`): `POST /v1/platform-fees/<path>` as `principal`. No idempotency
+ * key: the ledger's compare-and-set opens at most one attempt, so a repeat is safe. Only `status` retries (502/503/504 and transport errors);
+ * `settle` makes at most two attempts, and none after the caller's deadline.
+ */
+export async function callCloudPlatformFee<T>(path: 'status' | 'settle', execution: { readonly runId: string } | { readonly workflowRunId: string }, options: {
+  env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; principal?: string | null;
+  timeoutMs?: number; maxAttempts?: number; betaIdentity?: BetaRequestIdentity | null; signal?: AbortSignal } = {}): Promise<FlowResult<T>> {
+  const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;
+  const sleep = pauseFor(options.sleep, signal);
+  let base: URL | null;
+  try { base = cloudApiBaseUrl(env); } catch (error) { return { ok: false, code: (error as Error).message }; }
+  if (!base) return { ok: false, code: 'CLOUD_API_NOT_CONFIGURED' };
+  const target = new URL(`v1/platform-fees/${path}`, base.href.endsWith('/') ? base : new URL(base.href + '/'));
+  const traceparent = currentTraceparent() ?? `00-${randomBytes(16).toString('hex')}-${randomBytes(8).toString('hex')}-01`;
+  const attempts = Math.max(1, Math.min(path === 'settle' ? 2 : 4, options.maxAttempts ?? 4));
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (signal?.aborted) return DEADLINE;
+    let response: Response;
+    try {
+      response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 60_000, signal),
+        headers: { 'content-type': 'application/json', traceparent, ...betaIdentityHeaders(options.betaIdentity ?? currentBetaIdentity()),
+          ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, ...options.principal ? { [WALLET_PRINCIPAL_HEADER]: options.principal } : {} },
+        body: JSON.stringify({ execution }) });
+    } catch (error) {
+      if (deadlineEnded(error, signal)) return DEADLINE;
+      if (path === 'status' && attempt < attempts - 1) { await sleep(500 * 2 ** attempt); continue; }
+      return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
+    }
+    let body: unknown = null;
+    try { body = await response.json(); } catch (error) { if (deadlineEnded(error, signal)) return DEADLINE; }
+    const result = body as { ok?: unknown; value?: unknown; code?: unknown; correlationId?: unknown } | null;
+    if (path === 'status' && [502, 503, 504].includes(response.status) && attempt < attempts - 1) { await sleep(500 * 2 ** attempt); continue; }
+    // A settle that came back 5xx is retried once (the ledger's compare-and-set makes the repeat safe).
+    if (path === 'settle' && [502, 503, 504].includes(response.status) && attempt < attempts - 1) { await sleep(500); continue; }
+    if (response.ok && result?.ok === true && 'value' in result) return { ok: true, value: result.value as T };
+    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {} };
+    return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
+  }
+  return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
+}
+
+/**
  * BUILD-MCP-001: a read-only simulation preview on the API (`POST /v1/previews/:flow`). Nothing durable happens there, so the
  * call carries no idempotency key and no principal; a transport failure is simply retried.
  */
