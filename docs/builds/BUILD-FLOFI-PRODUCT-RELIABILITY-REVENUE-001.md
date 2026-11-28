@@ -138,3 +138,39 @@ unchanged; nothing was partially wired.
 ## 9. Status by item
 
 See the PR description for the full matrix (A01–A10, R01–R12, F01–F20, attribution tests).
+
+## 10. Completion (continuation of KAN-26, after PR #262)
+
+Previously delivered (PR #262, unchanged): canonical 80 bps policy, principal rules, ledger (0037), accrual, Nitro payout proof, durable
+origins, backfill and corrections, read-only Canvas formatting, exact-value normalization, Batch Payment address message.
+
+Newly completed (evidence `MOCKED` / unit / PostgreSQL 18; nothing signed or submitted):
+
+| Area | What |
+|---|---|
+| Fee collection (§3.1/3.6) | Owner-signed settlement transfer per fee asset after completion through the existing transfer flows (EVM native/ERC-20 on Ethereum, Base, Arbitrum One, Robinhood Chain; SOL/USDC/USDT on Solana); server-composed recipient and amount; `settledFee(authorized, final)` cap; ledger compare-and-set, one attempt at a time; COLLECTED only from a reconciled transfer to the recorded treasury; unknown outcomes pending; abandoned attempts close after invalidation and Review expiry; refusals retried through the flow's recovery Review; Smart Account refusals and divergence need attention |
+| Authorized basis (§3.5) | 0038 `platform_fee_authorizations`, recorded once per execution while collection is active (workflow run creation; a single flow's bound Review); immutable; SHA-256 of the disclosed basis |
+| Single flows (§3.2) | Root single-flow executions accrue in the 0037 ledger; recoveries settle their root; settlement transfers and workflow step runs never accrue or collect as single flows |
+| Parent/child (§3.3) | A universal bridge inside a workflow is charged once, by the workflow; a step run not linked yet is matched as the workflow observes it |
+| Disclosure | One line "FloFi fee (0.80%)" / "Taxa FloFi (0,80%)" in the Review cost summary, from the same basis; "not charged" while collection is off; Pay action on the completed summary only while collection is active |
+| Dependencies (§4) | Binding modes ALL / PERCENT / FIXED enforced by every resolver (hashed only when present); stale dependent amounts block Simulate/Execute/Save (reload and undo safe); E08 message names the accepted minimum |
+| Assistant (§5) | Read-only questions never mutate; deterministic step references; current simulation facts bound to the revision; cost guidance; reply language of the message |
+| Batch Payment (§6) | One card created and edited from Chat with saved recipients; ambiguity asks; unknown name asks for an address; Review retired on change |
+| Formatting (§7) | Six significant digits on Execute timeline (Ethereum → Robinhood panel), costs, history and legacy panels |
+| Attribution (§8.1/8.2) | Web Chat vs Web Editor from a server-verified Chat initiation reference; approval-page origins at creation regardless of sharing |
+| Finality (§9.2) | Delivered / awaiting finality / reconciled distinct on Execute, Dashboard, chat, channels and MCP; no-signature message |
+| Narrow screen (§10) | Plan / Conversation switch at ≤ 800 px, both panes mounted |
+
+Operational dependencies (owner): apply 0037, 0038 and the schema-38 policy (`docs/deploy/RELEASE-REVENUE-ORIGINS-0037.md`; rehearsed on a Neon
+branch of production on 2026-11-28); treasury addresses (EVM checksummed; EOA if native ETH fees on Base or Robinhood Chain are collected;
+Solana on-curve wallet); approved financial policy reference; activation variables on Railway and Vercel; the rehearsal branch holds production
+data and should be deleted.
+
+Owner decisions: borrow, repay, withdraw, liquidity, lending composition and Stock Token swaps stay NOT_APPLICABLE; Editor/Chat authoring of
+binding modes needs a new Semantic Workflow IR version (today only strategies: MCP, Developer API); LGPD/GDPR retention for fee data.
+
+Remaining verified blockers and gaps: the Base → Arbitrum One delivery (KAN-21) still needs the fill receipt read on Arbitrum (blocked in
+this environment by the session's permission check); dependency phrases in Chat ("todo o WETH recebido") not wired (IR); no card-level stale
+indicator (no new UI text); a v2 strategy with PERCENT/FIXED opened on the Canvas degrades to the default rule; PERCENT shares above 100% are not
+refused at composition; Admin "due" includes executions without an authorized basis; browser suites for the new chat and narrow-screen
+behaviour pass only against a local dev server.
