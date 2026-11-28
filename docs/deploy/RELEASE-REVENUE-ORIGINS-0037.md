@@ -21,16 +21,31 @@ DATABASE_MIGRATION_URL=… node apps/reference-dapp/backend/admin-cli.ts revenue
 
 Expected: `{"applied":[37]}`; a rerun applies nothing. A lock timeout (5 s) rolls back completely; retry later.
 
-## 2. Apply the schema-37 least-privilege policy
+## 1b. Apply 0038 (authorized fee basis)
+
+```bash
+DATABASE_MIGRATION_URL=… node apps/reference-dapp/backend/admin-cli.ts revenue-collection-migrate --tenant default
+```
+
+Expected: `{"applied":[38]}` on exact schema 37; a rerun applies nothing. One table, `platform_fee_authorizations`
+([SCHEMA-COMPATIBILITY.md §30](SCHEMA-COMPATIBILITY.md#30-certificate-0038_platform_fee_authorizations)). From here on every new execution records
+the fee basis its Review disclosed; an execution without one is never charged.
+
+## 2. Apply the schema-38 least-privilege policy
 
 Apply `docs/deploy/database-privileges/apply.sql` with the updated `policy.sql` as described in
-[DATABASE-LEAST-PRIVILEGE.md](DATABASE-LEAST-PRIVILEGE.md), then run `verify.sql`. The policy pins the schema-37 ledger, so it must be applied
-after step 1, never before. New grants: runtime `SI` on `execution_origins`; admin web `S` on the three new tables; admin operations `SI` on
-the three new tables and `S` on `workflow_run_steps` (read-only step facts the backfill and the accrual need).
+[DATABASE-LEAST-PRIVILEGE.md](DATABASE-LEAST-PRIVILEGE.md), then run `verify.sql`. The policy pins the schema-38 ledger, so it must be applied
+after steps 1 and 1b, never before. Grants added by 0037: runtime `SI` on `execution_origins`; admin web `S` on the three new tables; admin
+operations `SI` on the three new tables and `S` on `workflow_run_steps`. Added by 0038: runtime `SI` on `platform_fee_authorizations` and `SI`
+plus column `UPDATE (state, collection, version)` on `platform_fee_ledger` (collection runs in the API and worker through the ledger's checked
+transitions); admin web and admin operations `S` on `platform_fee_authorizations`.
 
-Run step 2 immediately after step 1. In between, on a database enforcing the schema-36 policy, origin writes fail quietly (nothing breaks;
-those executions keep no origin) and the Admin fee and channel panels are unavailable. From step 2 on, new executions record their origin
-(approval-page runs once their approval records them).
+Run step 2 immediately after step 1b. In between, on a database enforcing the schema-36 policy, origin and authorization writes fail quietly
+(nothing breaks; those executions keep no origin and can never be charged) and the Admin fee and channel panels are unavailable.
+
+Rehearsal (2026-11-28, Neon branch `revenue-0037-rehearsal-20261128` of production): 0037 and 0038 applied in the runner's transaction shape
+(advisory lock, exact-head guard, lock timeout); the resulting 38-entry history hashes to the schema-38 policy's `ledger_sha256`. The branch holds
+a copy of production data: delete it when no longer needed.
 
 ## 3. Recover historical origins (dry run first)
 
@@ -68,20 +83,36 @@ rewritten):
   --reason-code <CODE> --approval-ref <ref>
 ```
 
-## 4. Fee accounting (optional, owner decision)
+## 4. Fee accounting and collection (owner decision; off until approved)
 
-Set `FLOFI_PLATFORM_FEE_ACCOUNTING_FROM` to the instant accounting starts (never in the past: anything created before it is never
-accounted). Then:
+Collection is a separate owner-authorized transfer after completion (`src/platform-fee/settlement.ts`): for each fee asset the owner signs one plain
+transfer from their own wallet to the FloFi treasury through FloFi's existing reviewed transfer flows (EVM native/ERC-20 on Ethereum, Base,
+Arbitrum One and Robinhood Chain; SOL/USDC/USDT on Solana). The amount is at most what the Review disclosed (0038) and at most the final basis.
+Nothing is collected without a reconciled transfer to the recorded treasury; nothing is charged for a failed, rejected, expired or cancelled
+execution; nothing is charged twice (one open attempt at a time, compare-and-set on the ledger).
+
+Activation needs ALL of these on the API and worker (Railway) and on the web deployment (Vercel, for the Review's line):
+
+| Variable | Value |
+|---|---|
+| `FLOFI_PLATFORM_FEE_ACCOUNTING_FROM` | the instant accounting starts (never in the past; nothing earlier is accounted) |
+| `FLOFI_PLATFORM_FEE_COLLECTION` | `on` |
+| `FLOFI_PLATFORM_FEE_TREASURY_EVM` | the owner-verified EVM treasury, checksummed. Must be an EOA if native ETH fees on Base or Robinhood Chain are to be collected (those transfer profiles refuse contract recipients) |
+| `FLOFI_PLATFORM_FEE_TREASURY_SOLANA` | the owner-verified Solana treasury (on-curve wallet, not a PDA) |
+| `FLOFI_PLATFORM_FEE_POLICY_APPROVAL` | the approved financial policy reference |
+
+With collection active the worker accrues completed executions each minute and reconciles open collection attempts. Without it, the operator
+command still accrues on demand:
 
 ```bash
 DATABASE_ADMIN_OPERATIONS_URL=… FLOFI_PLATFORM_FEE_ACCOUNTING_FROM=… node apps/reference-dapp/backend/admin-cli.ts platform-fee-accrue --tenant default
 … platform-fee-accrue --tenant default --apply
 ```
 
-It records what terminal workflow runs owe (DUE / NOT_APPLICABLE / WAIVED / UNSUPPORTED), one row per run. Collection is not implemented and
-stays off: the Admin fee panel shows `PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED` (or an earlier missing condition). Rows are accrued estimates of
-what the policy would charge, not amounts any owner authorized: no workflow Review discloses or records a fee basis yet. Activating collection needs
-a separate, reviewed build with an approved collection rail, a verified treasury and an approved accounting policy.
+Monitoring: logs `platform_fee.accrued`, `platform_fee.settlement_open`, `platform_fee.settlement_refused`, `platform_fee.reconciled`,
+`platform_fee.sweep_failed`; the Admin fee panel (states, accrued per asset, collected per asset from transactions). Kill switch:
+`FLOFI_PLATFORM_FEE_COLLECTION=off` stops new attempts immediately; open attempts keep being reconciled. A divergent transfer stops automatic
+retries for that execution (attention) until reviewed.
 
 ## Before any fee policy change
 
@@ -90,7 +121,7 @@ of the earlier policy that were never accrued are not accounted afterwards.
 
 ## Rollback
 
-- Accounting: unset `FLOFI_PLATFORM_FEE_ACCOUNTING_FROM`; nothing new is accrued, existing rows stay.
+- Collection: `FLOFI_PLATFORM_FEE_COLLECTION=off`. Accounting: unset `FLOFI_PLATFORM_FEE_ACCOUNTING_FROM`; nothing new is accrued, existing rows stay.
 - Code: roll back to a build that carries this certificate; it serves schema 37. A 0036-only binary refuses schema 37.
 - Emergency schema reversal (0037 as head only): `docs/deploy/RELEASE-REVENUE-ORIGINS-0037.reversal.sql` as the migration owner (refuses
   while any fee is owed or collected), then restart every consumer and re-apply the schema-36 policy (`ca62ace`). Origins are lost; nothing
