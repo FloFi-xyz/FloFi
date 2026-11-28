@@ -29,15 +29,14 @@ test('Copilot keeps a destination question without buttons and resolves one toke
   await openBuilder(page);
   const before = await counters();
   await ask(page, 'quero bridge de 1 USDT da Solana para Robinhood Chain');
-  // A Portuguese request is understood; P0 approved UX: FloFi answers in the interface language (English here).
-  // A09 (intentional): a Portuguese request gets a Portuguese answer, whatever the interface language.
+  // A Portuguese request is understood. A09 (intentional): a Portuguese request gets a Portuguese answer, whatever the interface language.
   await expect(copilotSays(page)).toContainText('Qual ativo você quer receber na Robinhood Chain?');
   await ask(page, 'USDG');
   await expect(copilotSays(page)).toContainText('receive USDG');
   await expect(copilotSays(page)).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG via best slippage 100 bps');
   // BUILD-FLOFI-CONVERSATIONAL-001: once every required field is valid the step is committed at once; nothing is quoted, signed or sent by the chat.
-  // The request was in Portuguese; FloFi confirms in the interface language (English).
-  await expect(copilotSays(page)).toContainText('Bridge added to your workflow: 1 USDT');
+  // The conversation is in Portuguese (a bare token reply keeps it): FloFi confirms in Portuguese (A09).
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu fluxo: Transferir entre redes · 1 USDT');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   expect(await counters()).toEqual(before);
 });

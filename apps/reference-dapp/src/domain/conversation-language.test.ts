@@ -13,6 +13,16 @@ describe('the conversation language', () => {
       expect(detectLanguage(text), text).toBe('EN');
     for (const text of ['ok', '0,2', 'Base', 'USDC', 'swap', 'status', ''])
       expect(detectLanguage(text), text).toBeNull();
+    // FloFi's exact command grammar (English by design) tells no language: a typed command keeps the conversation's, else the interface's.
+    const portuguese = replyLanguage('O que significa supply?', 'EN', null).state;
+    expect(replyLanguage('swap 10 USDC to WETH on Base Sepolia', 'PT', null, true)).toEqual({ language: 'PT', state: null });
+    expect(replyLanguage('swap 10 USDC to WETH on Base Sepolia', 'EN', portuguese, true).language).toBe('PT');
+    expect(replyLanguage('Buy Salesforce with 20 USDG on Robinhood Chain', 'EN', portuguese).language).toBe('EN');
+    // An address or hash is not words: its letters ("e", "a") never read as Portuguese or English.
+    for (const text of ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', '0x5aaeb6053F3E94C9b9A09f33669435E7Ef1BeAed', '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'])
+      expect(detectLanguage(text), text).toBeNull();
+    expect(detectLanguage('Send 5 USDC on Arbitrum to 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed')).toBe('EN');
+    expect(detectLanguage('Envie 5 USDC na Arbitrum para 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed')).toBe('PT');
   });
   it('reads an explicit request for a reply language', () => {
     expect(languageRequest('Reply in English')).toBe('EN'); expect(languageRequest('Please answer in Portuguese.')).toBe('PT');

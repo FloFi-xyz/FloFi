@@ -24,7 +24,7 @@ import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, t
 import { compositionWorkflow, fundingAllocations, sequenceCursor, sequenceOrder, stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 import { proveCompletions, SEQUENCE_RUN_STORAGE_KEY, storedCompletions, type StoredCompletion } from '../domain/sequence-restore';
 import { editorStorage, persistEditor, readPersistedEditor } from '../domain/editor-persistence';
-import { dependencyStates, firstDependencyIssue } from '../domain/dependency-consistency';
+import { dependencyStates, heldDependencyIssue } from '../domain/dependency-consistency';
 import { knownLiveEstimate, useKnownEstimateVersion } from './build-estimate';
 import { publicStatus } from '../app/public-testnet-action';
 import { editorSingleRunRecord } from '../app/editor-workflow-execution-action';
@@ -386,10 +386,12 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const [sequenceRun, setSequenceRun] = useState<{ readonly workflowId: string; readonly completed: readonly CompletedStep[] }>({ workflowId: '', completed: [] });
   const completed = useMemo(() => sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [],
     [sequenceRun, state.workflow, sequence]);
-  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A01/A07): a dependent amount set against an earlier step that changed since, or above what that step
-  // delivers, is not a consistent workflow: like an unapplied draft, it holds Simulate, Execute and saving back until the dependent step's amount is
-  // set again on the Canvas. Judged against the live estimate's own slippage floor, or (once that step executed) its reconciled delivery; an estimate
-  // that expired gives no verdict (the clock below re-reads at its expiry).
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A01/A07): a dependent amount set against an earlier step whose declaration changed since is not a
+  // consistent workflow: like an unapplied draft, it holds Simulate, Execute and saving back until the dependent step's amount is set again on the
+  // Canvas. A dependent amount above what the earlier step is estimated to deliver (ABOVE_UPSTREAM) holds them back only for a Batch Payment (exact
+  // amounts); any other consumer spends min(that amount, the delivery) — the reconciled one, or the earlier step's signed minimum inside one batch —
+  // never other wallet funds, as the Review says ("spends the smaller of …"). See `heldDependencyIssue`. An estimate that expired gives no verdict
+  // (the clock below re-reads at its expiry).
   const knownEstimates = useKnownEstimateVersion();
   const [clock, setClock] = useState(0);
   const dependency = useMemo(() => {
@@ -399,7 +401,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       if (estimate) { const at = Date.parse(estimate.expiresAt); if (Number.isFinite(at) && (expiry === null || at < expiry)) expiry = at; }
       return estimate;
     }, completed);
-    return { issue: firstDependencyIssue(states), expiry };
+    return { issue: heldDependencyIssue(state.workflow, states), expiry };
   }, [state.workflow, sequence, state.dependencyBases, completed, knownEstimates, clock]);
   const dependencyIssue = dependency.issue;
   useEffect(() => {

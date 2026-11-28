@@ -304,7 +304,8 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(done).toContainText('1. Close position');
     await expect(done).toContainText(W.reconciled);
     // Everything that remained came back, and the position's three accounts were closed: their rent (0.00607568 SOL) refunded.
-    await expect(done).toContainText(/Actual withdrawn · Token 1\s*1\.655158611 SOL/);
+    // R06/R07 (intentional): six significant digits on the Execute timeline; the exact value stays one tap away.
+    await expect(done).toContainText(/Actual withdrawn · Token 1\s*≈ 1\.65516 SOL/);
     await expect(done).toContainText(/Fees collected · Token 1\s*0\.0005 SOL/);
     await expect(done).toContainText(/Fees collected · Token 2\s*0\.12 USDC/);
     await expect(done).toContainText(/Account rent refunded\s*0\.00607568 SOL/);

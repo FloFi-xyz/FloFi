@@ -8,7 +8,7 @@
  * "Plan · n steps", shown from two steps on.
  */
 import { test, expect, sendChatCommand, readWorkflowIr } from './fixtures';
-import { closeNavigation, openBuilder, editorSectionAction, editorSteps, expectEditorSection, navigationDrawer, navigationLink, openNavigation } from './build-entry-navigation';
+import { closeNavigation, openBuilder, editorSectionAction, editorSteps, expectEditorSection, navigationDrawer, navigationLink, openNavigation, showMobilePane } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 
 test('the stepper opens the Editor sections in order, marks only where the owner is, and keeps the global navigation', async ({ page }) => {
@@ -108,8 +108,12 @@ test('Portuguese and phone widths: the same truthful labels, no horizontal overf
     await expect(editorSteps(page).getByRole('button', { name: 'Criar', exact: true })).toHaveAttribute('aria-current', 'step');
     // BUILD-FLOFI-UX-EDITOR-FINOPS-001: closed (and saying why) until the workflow has an action.
     await expect(editorSteps(page).getByRole('button', { name: /^Simular ?: Adicione uma ação ao seu fluxo primeiro$/ })).toBeVisible();
+    // E11 (A10, intentional): on a phone the chat is the Conversation pane and the Canvas the Plan pane, one at a time.
+    await showMobilePane(page, 'conversation');
     await page.getByLabel('Descreva o seu fluxo').fill('Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
     await page.getByRole('button', { name: 'Enviar mensagem', exact: true }).click();
+    await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+    await showMobilePane(page, 'plan');
     // Board 04: the configured state is the header's (translated), not repeated on the card; one step has no Plan to summarise.
     await expect(page.locator('.build-canvas-head .editor-state-pill')).toContainText('Pronto para simular');
     await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);

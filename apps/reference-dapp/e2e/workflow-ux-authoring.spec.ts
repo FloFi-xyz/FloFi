@@ -94,8 +94,8 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(conversation(page).locator('.message').last()).toContainText('Which wallet should I send it to?');
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
     await say(page, BAD);
-    // A09 (intentional): FloFi replies in the language of the conversation (Portuguese here), whatever the interface language.
-    await expect(conversation(page).locator('.message').last()).toContainText('Esse não é um endereço válido nesta rede.');
+    // A09: an address tells no language; FloFi keeps the conversation's language (English here).
+    await expect(conversation(page).locator('.message').last()).toContainText('That is not a valid address on this network.');
     await say(page, MIXED);
     // BUILD-FLOFI-CONVERSATIONAL-001: the completed request is committed at once (no proposal to apply).
     await expect(conversation(page).locator('.message').last()).toContainText('Send added to your workflow: 5 USDC');
@@ -113,7 +113,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(answer()).toContainText('Which wallet should I send it to?');
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
     await say(page, MIXED);
-    await expect(answer()).toContainText(`Interpretado como “transfer 5 USDC on Arbitrum One to ${MIXED.toLowerCase()}”`);
+    await expect(answer()).toContainText(`Interpreted as “transfer 5 USDC on Arbitrum One to ${MIXED.toLowerCase()}”`);
     await expect(answer()).toContainText(CHAT_COMMITTED);
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
     await expectCanonicalSend(page, MIXED.toLowerCase());

@@ -11,7 +11,7 @@ import { accountHost, currentAccountSession } from '../accounts/account-host';
 import { withFlightAccess } from '../server/flight-access';
 import { chatInitiationKey, issueChatInitiation, type ChatInitiation } from '../server/chat-initiation';
 import { platformStateHost } from '../server/platform-state-host';
-import { pageOfPath } from '../workflow-runs/execution-origins';
+import { pageOfPath } from '../workflow-runs/action-page';
 
 export async function chatInitiationReference(): Promise<ChatInitiation | null> {
   try {

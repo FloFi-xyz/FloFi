@@ -1097,7 +1097,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   }
   async function handle(scope: number, text: string) {
     // A09: the person's conversational language (their words, or an explicit choice), whatever the interface shows; the interface's only as a fallback.
-    const turn = replyLanguage(text, interfaceLanguage, spoken.current), chose = languageRequest(text) !== null;
+    // An exact command (the deterministic grammar, English by design) is no evidence of the person's language: the conversation keeps its own.
+    const exactCommand = (() => {
+      const now = latest.current;
+      try { parseLocalCommand(text, now.state.workflow, now.context, wallet.account); return true; } catch { return false; }
+    })();
+    const turn = replyLanguage(text, interfaceLanguage, spoken.current, exactCommand), chose = !exactCommand && languageRequest(text) !== null;
     spoken.current = turn.state;
     const language = turn.language, open = questionRef.current;
     if (direct && chose) {

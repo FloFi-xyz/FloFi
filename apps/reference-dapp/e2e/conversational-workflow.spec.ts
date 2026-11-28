@@ -10,7 +10,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, showMobilePane } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
@@ -23,6 +23,8 @@ const cards = (page: Page) => page.locator('.build-flow-surface .composer-card')
 /** BUILD0-UX-001: the removed execution report card (steps, operations, networks, hashes); the chat keeps FloFi's short messages only. */
 const executionCard = (page: Page) => chat(page).locator('.conversation-execution');
 async function say(page: Page, text: string) {
+  // E11 (A10): on a phone the chat is the Conversation pane.
+  await showMobilePane(page, 'conversation');
   await page.locator('#mock-prompt').fill(text);
   await page.locator('.chat-form button[type=submit]').click();
 }
@@ -167,7 +169,8 @@ test('a correction retires the Review; a second action keeps the first; an unsup
   // Correcting the reviewed step through the chat changes the revision and retires that Review.
   const nodeId = (JSON.parse(await readWorkflowIr(page)) as { nodes: { nodeId: string; actionType: string }[] }).nodes.find(node => node.actionType === 'asset.swap.exact-input')!.nodeId;
   await say(page, `set ${nodeId} amount 3`);
-  await expect(flofi(page)).toContainText('Swap updated: 3 USDC');
+  // P1-03 (intentional): an edit is said as what changed, before → after.
+  await expect(flofi(page)).toContainText('Swap: 1 → 3 USDC.');
   await expect(flofi(page)).toContainText('Any earlier simulation or review of this workflow no longer applies.');
   const corrected = JSON.parse(await readWorkflowIr(page)) as { revision: number; nodes: { nodeId: string }[] };
   expect(corrected.revision).toBe(2);
@@ -270,6 +273,8 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
   // Criar → Simular → Executar stepper, which replaced the footer's section buttons with the same target.
   // P0 approved UX (board 03b): the stepper sits in the top bar (the former tabs are gone).
   await openEditorSection(page, 'Simulate');
+  // E11 (A10, intentional): on a phone the chat is the Conversation pane of the Plan / Conversation switch.
+  await showMobilePane(page, 'conversation');
   await expect(page.locator('.stage-with-chat #mock-prompt')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   networkGuard.assertClean();

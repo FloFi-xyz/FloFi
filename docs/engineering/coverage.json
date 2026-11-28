@@ -9401,7 +9401,8 @@
         "apps/reference-dapp/src/workflow-runs/worker.ts",
         "apps/reference-dapp/src/workflow-runs/testdata/evm-batch-plans.fed320e.json",
         "apps/reference-dapp/src/workflow-runs/execution-origins.ts",
-        "apps/reference-dapp/src/workflow-runs/approval-page-origin.ts"
+        "apps/reference-dapp/src/workflow-runs/approval-page-origin.ts",
+        "apps/reference-dapp/src/workflow-runs/action-page.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",

@@ -33,10 +33,13 @@ const EN_WORDS: ReadonlySet<string> = new Set(['the', 'what', 'which', 'how', 'i
   'work', 'done', 'sign', 'again', 'there', 'any', 'be', 'result']);
 const ACCENTED = /[ãõçâêôáéíóúà]/i;
 
-/** The language a message is clearly written in (more words of one language than of the other), or null when it tells nothing. */
+/**
+ * The language a message is clearly written in (more words of one language than of the other), or null when it tells nothing. Only whole words
+ * count: a token with a digit (an address, a hash, an amount like "0x5aAe…", "2USDC") is never split into letters ("e", "a") that read as words.
+ */
 export function detectLanguage(text: string): ReplyLanguage | null {
   if (typeof text !== 'string') return null;
-  const words = fold(text.slice(0, 600)).split(/[^a-z]+/).filter(Boolean);
+  const words = fold(text.slice(0, 600)).split(/[\s,.;:!?¿¡()[\]{}"'“”‘’«»/]+/).filter(word => /^[a-z]+(?:-[a-z]+)*$/.test(word)).flatMap(word => word.split('-'));
   const en = words.filter(word => EN_WORDS.has(word)).length, pt = words.filter(word => PT_WORDS.has(word)).length + (ACCENTED.test(text) ? 1 : 0);
   return pt > en ? 'PT' : en > pt ? 'EN' : null;
 }
@@ -66,12 +69,16 @@ export type ConversationLanguageState = { readonly language: ReplyLanguage; read
  * The language FloFi answers `text` in, and the conversation's language after it: an explicit choice holds; otherwise the message's own language,
  * else the language the person was already writing in, else the interface language.
  */
-export function replyLanguage(text: string, interfaceLanguage: ReplyLanguage, state: ConversationLanguageState):
-  { readonly language: ReplyLanguage; readonly state: ConversationLanguageState } {
-  const requested = languageRequest(text);
+export function replyLanguage(text: string, interfaceLanguage: ReplyLanguage, state: ConversationLanguageState,
+  /**
+   * The message is one of FloFi's exact commands ("swap 10 USDC to WETH on Base"): that grammar is English by design, so it tells nothing about the
+   * person's language and the conversation keeps its own (else the interface's).
+   */
+  exactCommand = false): { readonly language: ReplyLanguage; readonly state: ConversationLanguageState } {
+  const requested = exactCommand ? null : languageRequest(text);
   if (requested) return { language: requested, state: { language: requested, chosen: true } };
   if (state?.chosen) return { language: state.language, state };
-  const detected = detectLanguage(text);
+  const detected = exactCommand ? null : detectLanguage(text);
   if (detected) return { language: detected, state: { language: detected, chosen: false } };
   return { language: state?.language ?? interfaceLanguage, state };
 }

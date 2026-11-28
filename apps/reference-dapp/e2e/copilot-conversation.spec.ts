@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
 import { test, expect, CHAT_COMMITTED } from './fixtures';
-import { installSupplyWallet, resetSupplyHarness, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
+import { installSupplyWallet, resetSupplyHarness, supplySendCount } from './supply-fixtures';
 import { openBuilder } from './build-entry-navigation';
 
 // BUILD-COPILOT-002: conversational journeys on committed replay answers (e2e/copilot/replay-v2.json). No model is called, the network guard
@@ -37,32 +37,31 @@ test('Portuguese conversation: network question, a correction of the committed s
   await installSupplyWallet(page);
   await openBuilder(page);
   await ask(page, 'Quero colocar 5 USDC na Aave.');
-  // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
-  await expect(copilotSays(page)).toContainText('Which network should Flofi use for Aave V3?');
+  // A09 (intentional): a Portuguese conversation is answered in Portuguese, whatever the interface language (English here).
+  await expect(copilotSays(page)).toContainText('Em qual rede? O Flofi precisa saber a rede para a Aave V3.');
   await expect(proposal(page)).toHaveCount(0);
   // Flofi's own button: a deterministic answer, no model call.
   await copilotSays(page).getByRole('button', { name: 'Base Sepolia' }).click();
-  await expect(copilotSays(page)).toContainText('Interpreted as “supply 5 USDC to Aave on Base Sepolia”');
-  await expect(copilotSays(page)).toContainText('Supply added to your workflow:');
+  await expect(copilotSays(page)).toContainText('Interpretado como “supply 5 USDC to Aave on Base Sepolia”');
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu fluxo: Depositar');
   await commits(page, 1); await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('5');
   await ask(page, 'Na verdade muda para 2.');
-  // A correction of the committed step: the same network, token and beneficiary, only the amount changes.
-  await expect(copilotSays(page)).toContainText('Supply updated:');
+  // A correction of the committed step: the same network, token and beneficiary, only the amount changes (P1-03: said as before → after).
+  await expect(copilotSays(page)).toContainText('Depositar: 5 → 2 USDC.');
   await commits(page, 2);
   await revision(page, 2);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
   await expect(node(page, 'node-002')).toContainText('Base Sepolia');
   await ask(page, 'O que esse fluxo faz?');
-  await expect(copilotSays(page)).toContainText('This workflow (revision 2) has 1 step.');
-  await expect(copilotSays(page)).toContainText(`Supplies 2 USDC to Aave V3 on Base Sepolia for ${SUPPLY_OWNER}`);
-  await expect(copilotSays(page)).toContainText('Read only: nothing was proposed, changed, signed or executed.');
+  // A03/A04 (intentional): FloFi answers what the workflow does from its own plan, in the conversation's language (no model, no internal revision).
+  await expect(conversation(page).locator('.message').last()).toContainText('Seu fluxo tem 1 etapa: 1. Supply 2 USDC · Aave V3 · Base Sepolia.');
   await expect(proposal(page)).toHaveCount(0);
   await revision(page, 2);
   await ask(page, 'Remove o primeiro passo.');
-  await expect(copilotSays(page)).toContainText('Interpreted as removing step 1 (Supply 2 USDC · Aave V3 · Base Sepolia)');
-  await expect(copilotSays(page)).toContainText('Supply removed from your workflow.');
+  await expect(copilotSays(page)).toContainText('Interpretado como remover o passo 1');
+  await expect(copilotSays(page)).toContainText('Removido do seu fluxo: Depositar.');
   await revision(page, 3);
   await expect(node(page, 'node-002')).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);
@@ -73,7 +72,8 @@ test('a conversational edit of a committed step changes that step only, and Undo
   await author(page, 'swap 3 USDC to WETH on Base Sepolia slippage 50 bps', 1);
   await ask(page, 'change it to 2');
   await expect(copilotSays(page)).toContainText('Interpreted as a change to step 1 (Swap 3 USDC → WETH · Base Sepolia)');
-  await expect(copilotSays(page)).toContainText('Swap updated: 2 USDC');
+  // P1-03 (intentional): an edit is said as what changed, before → after.
+  await expect(copilotSays(page)).toContainText('Swap: 3 → 2 USDC.');
   await expect(copilotSays(page)).toContainText('Base Sepolia');
   await revision(page, 2);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
@@ -91,7 +91,8 @@ test('an ambiguous reference becomes a question with concrete step buttons, neve
   await expect(proposal(page)).toHaveCount(0);
   await copilotSays(page).getByRole('button', { name: 'Step 2 · Swap 3 USDC → WETH · Base' }).click();
   await expect(copilotSays(page)).toContainText('Interpreted as a change to step 2 (Swap 3 USDC → WETH · Base)');
-  await expect(copilotSays(page)).toContainText('Swap updated: 2 USDC');
+  // P1-03 (intentional): an edit is said as what changed, before → after.
+  await expect(copilotSays(page)).toContainText('Swap: 3 → 2 USDC.');
   // Only the chosen step changed; the other step is untouched.
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
   await expect(node(page, 'node-003').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
@@ -103,24 +104,28 @@ test('an ambiguous reference becomes a question with concrete step buttons, neve
 });
 
 test('read-only questions are answered from Flofi state: no proposal, no change, no invented market data', async ({ page }) => {
+  // A03–A05 (intentional): FloFi answers questions about its own state itself (no model): the latest answer is the last message, whoever wrote it.
+  const answer = () => conversation(page).locator('.message').last();
   await openBuilder(page);
   await author(page, 'swap 3 USDC to WETH on Base Sepolia slippage 50 bps', 1);
   await ask(page, 'What does this workflow do?');
-  await expect(copilotSays(page)).toContainText('This workflow (revision 1) has 1 step.');
-  await expect(copilotSays(page)).toContainText('Swaps 3 USDC for WETH on Base Sepolia through Uniswap v3, with at most 50 bps slippage.');
+  // A03/A04 (intentional): FloFi answers what the workflow does from its own plan (no model, no internal revision number).
+  await expect(answer()).toContainText('Your workflow has 1 step: 1. Swap 3 USDC → WETH · Base Sepolia.');
   await ask(page, 'Which protocol am I using?');
-  await expect(copilotSays(page)).toContainText('Protocols in this workflow: Uniswap v3.');
+  await expect(answer()).toContainText('Protocols in this workflow: Uniswap v3.');
   await ask(page, 'What did the simulation show?');
-  await expect(copilotSays(page)).toContainText('There is no simulation result for this workflow yet. Run Simulate first.');
+  // A05: nothing was simulated, and this workflow cannot be simulated here (PUBLIC_MAINNET scope): FloFi says why, never "the last simulation".
+  await expect(answer()).toContainText('Simulation is not available for this workflow on the current network.');
+  await expect(answer()).not.toContainText('last simulation');
   await ask(page, "Why can't I execute this?");
-  await expect(copilotSays(page)).toContainText('Execution is blocked by:');
-  await expect(copilotSays(page)).toContainText('There is no simulation result for this workflow yet. Run Simulate first.');
+  await expect(answer()).toContainText('Execution is blocked by:');
+  await expect(answer()).toContainText('There is no simulation result for this workflow yet. Run Simulate first.');
   // PUBLIC_MAINNET product scope: Base Sepolia Uniswap is environment-blocked (not ACTION_TEMPLATE_ONLY).
-  await expect(copilotSays(page)).toContainText('This adapter is not available in this environment.');
-  await expect(copilotSays(page)).toContainText('Output is an unquoted placeholder. Execution is unavailable.');
+  await expect(answer()).toContainText('This adapter is not available in this environment.');
+  await expect(answer()).toContainText('Output is an unquoted placeholder. Execution is unavailable.');
   await ask(page, 'What is the APY on Aave right now?');
-  await expect(copilotSays(page)).toContainText('Flofi has no live prices, APY, balances, gas prices, bridge times or health factors');
-  await expect(copilotSays(page)).toContainText('Read only: nothing was proposed, changed, signed or executed.');
+  await expect(answer()).toContainText('Flofi has no live prices, APY, balances, gas prices, bridge times or health factors');
+  await expect(answer()).toContainText('Read only: nothing was proposed, changed, signed or executed.');
   await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('3');

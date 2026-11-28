@@ -125,7 +125,19 @@ export const editorSectionAction = (page: Page, section: Exclude<EditorSection, 
  * Opens an Editor section the way an owner does where the former Simulate or Execute tab was clicked: outside the Editor the drawer's "Editor"
  * opens the Canvas; inside it the stepper opens the Canvas, the simulation or the execution section. Nothing is simulated, accepted or signed.
  */
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10): on a phone-width screen (up to 800 px) the Editor shows its Plan or its
+ * Conversation, one at a time, through the Plan / Conversation switch. Selects the named pane when that switch is shown; a no-op on wider screens.
+ */
+export async function showMobilePane(page: Page, pane: 'plan' | 'conversation'): Promise<void> {
+  const tab = page.locator(`.mobile-pane-tabs [role="tab"][data-pane="${pane}"]`).filter({ visible: true });
+  if (!(await tab.count())) return;
+  if (await tab.first().getAttribute('aria-selected') !== 'true') await tab.first().click();
+  await expect(tab.first()).toHaveAttribute('aria-selected', 'true');
+}
 export async function openEditorSection(page: Page, section: EditorSection): Promise<void> {
+  // The stepper is in the Plan's header: on a phone the Plan is shown first.
+  await showMobilePane(page, 'plan');
   if (await editorSectionWorkspace(page, section).count()) return;
   if (!(await editorSteps(page).count())) {
     await openEditor(page);

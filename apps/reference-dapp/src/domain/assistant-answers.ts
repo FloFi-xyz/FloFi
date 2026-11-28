@@ -112,7 +112,8 @@ const EN: Copy = {
   expired: 'The last simulation expired, so its figures no longer apply. Do you want to simulate again?',
   changed: 'The workflow changed after the last simulation, so its figures no longer apply. Do you want to simulate again?',
   running: 'The simulation is running. Its figures appear as soon as it finishes.',
-  blocked: reason => `The last simulation cannot be used: ${reason}`,
+  // BLOCKED is a workflow that cannot be simulated here (no simulation is implied): the reason alone says why.
+  blocked: reason => reason,
   none: 'There is no simulation of this workflow yet. Do you want to simulate it now?',
   empty: 'Your workflow has no actions yet. Add one, then simulate it.',
   stepFigure: (step, action, input, output, minimum) => `Step ${step} (${action} ${input}): ${output ? `about ${output}` : 'no estimated output'}${minimum ? `, at least ${minimum}` : ''}.`,
@@ -138,7 +139,7 @@ const PT: Copy = {
   expired: 'A última simulação expirou, então os números dela não valem mais. Quer simular de novo?',
   changed: 'O fluxo mudou depois da última simulação, então os números dela não valem mais. Quer simular de novo?',
   running: 'A simulação está em andamento. Os números aparecem assim que ela terminar.',
-  blocked: reason => `A última simulação não pode ser usada: ${reason}`,
+  blocked: reason => reason,
   none: 'Ainda não há simulação deste fluxo. Quer simular agora?',
   empty: 'Seu fluxo ainda não tem ações. Adicione uma e depois simule.',
   stepFigure: (step, action, input, output, minimum) => `Etapa ${step} (${action} ${input}): ${output ? `cerca de ${output}` : 'sem resultado estimado'}${minimum ? `, no mínimo ${minimum}` : ''}.`,

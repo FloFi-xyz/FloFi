@@ -11,7 +11,8 @@ import { isFlightRecoveryMethod, requireFlightMethodAccess, requireFlightProduct
 import { guardFlowExecution } from '../server/execution-guard';
 import { readDeveloperConfig } from '../developer/config';
 import { issuesWalletRequest } from '../workflow-runs/external-step';
-import { pageOfPath, type OriginContext } from '../workflow-runs/execution-origins';
+import { pageOfPath } from '../workflow-runs/action-page';
+import type { OriginContext } from '../workflow-runs/execution-origins';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
 // The record (with the account and request code it needs) loads on the first successful hosted simulation, never when an action module

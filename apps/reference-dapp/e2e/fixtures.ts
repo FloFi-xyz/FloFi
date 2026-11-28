@@ -2,7 +2,7 @@
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { returningVisitor, E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
 import type { Language } from '../src/i18n/language';
-import { editorSectionWorkspace, openEditorSection } from './build-entry-navigation';
+import { editorSectionWorkspace, openEditorSection, showMobilePane } from './build-entry-navigation';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
 
@@ -219,7 +219,9 @@ export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
 
 /** Apply a reviewed authoring proposal through the visible contextual popover. This grants no financial authority. */
 /** BUILD-FLOFI-CONVERSATIONAL-001: FloFi's confirmation that the chat committed a change to the workflow (English or Portuguese). */
-export const CHAT_COMMITTED = /added to your workflow|updated: |removed from your workflow|Prepared for simulation\. Nothing is removed|Adicionado ao seu fluxo|Etapa atualizada|Removido do seu fluxo|Preparado para a simulação/;
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: an edit is confirmed as what changed, before → after ("Supply: 0.1 → 0.2 USDC.", P1-03); a Batch
+// Payment as the payment it prepared or updated (R09–R12).
+export const CHAT_COMMITTED = /added to your workflow|updated: |removed from your workflow|Prepared for simulation\. Nothing is removed|Adicionado ao seu fluxo|Etapa atualizada|Removido do seu fluxo|Preparado para a simulação|\p{L}: [^\s:]+ → [^\s:]+|I prepared a batch payment|Batch payment updated|Preparei um pagamento em lote|Pagamento em lote atualizado/u;
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: a valid chat request is committed to the canonical workflow at once — no proposal to accept — and FloFi confirms
  * in the chat what the stored workflow now holds. Waits for that one new confirmation.
@@ -227,6 +229,8 @@ export const CHAT_COMMITTED = /added to your workflow|updated: |removed from you
 export async function sendChatCommand(page: Page, text: string): Promise<void> {
   const committed = page.getByRole('log', { name: 'Conversation' }).locator('.message', { hasText: CHAT_COMMITTED });
   const before = await committed.count();
+  // E11 (A10): on a phone the chat is the Conversation pane.
+  await showMobilePane(page, 'conversation');
   await page.getByLabel('Describe your flow').fill(text);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   // Catalog reads and interpretation can take a moment on a cold server (the proposal flow allowed the click timeout).

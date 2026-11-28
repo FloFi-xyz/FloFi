@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { composeWorkflow, dappReviewContext, operationSteps, reviewContextOf } from '../engine/strategy-engine';
 import type { Command } from './commands';
-import { dependencyStates, firstDependencyIssue, producerBasis, type ProducerEstimate } from './dependency-consistency';
+import { dependencyStates, firstDependencyIssue, heldDependencyIssue, producerBasis, type DependencyState, type ProducerEstimate } from './dependency-consistency';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { workflowSequence } from './workflow-sequence';
@@ -110,5 +110,25 @@ describe('A01/A07: a dependent amount never stays silently stale', () => {
     expect(firstDependencyIssue(statesOf(history.editor))).toBeNull();
     history = editorHistoryReducer(history, { type: 'REDO' });
     expect(firstDependencyIssue(statesOf(history.editor))).toMatchObject({ reason: 'UPSTREAM_CHANGED' });
+  });
+});
+
+/**
+ * What the Editor holds back (`heldDependencyIssue`): a dependent amount set before its earlier step changed, always; a dependent amount above the
+ * earlier step's estimate only for a Batch Payment, which pays exact amounts (every other consumer spends min(its amount, the delivery), as its
+ * Review says, and never other wallet funds).
+ */
+describe('the dependency issues that hold Simulation and Review back', () => {
+  const workflow = (consumer: string) => ({ nodes: [{ nodeId: 'node-002', actionType: 'swap' }, { nodeId: 'node-003', actionType: consumer }] }) as unknown as Parameters<typeof heldDependencyIssue>[0];
+  const stale = (reason: 'UPSTREAM_CHANGED' | 'ABOVE_UPSTREAM'): ReadonlyMap<string, DependencyState> => new Map([['node-003', { kind: 'stale', step: 2, from: 1, reason }]]);
+  it('holds an amount set before its earlier step changed, whatever the consumer', () => {
+    expect(heldDependencyIssue(workflow('swap'), stale('UPSTREAM_CHANGED'))).toEqual({ kind: 'stale', step: 2, from: 1, reason: 'UPSTREAM_CHANGED' });
+    expect(heldDependencyIssue(workflow('asset.transfer.batch'), stale('UPSTREAM_CHANGED'))?.reason).toBe('UPSTREAM_CHANGED');
+  });
+  it('holds an amount above the earlier step only for an exact Batch Payment', () => {
+    expect(heldDependencyIssue(workflow('swap'), stale('ABOVE_UPSTREAM'))).toBeNull();
+    expect(heldDependencyIssue(workflow('aave.supply'), stale('ABOVE_UPSTREAM'))).toBeNull();
+    expect(heldDependencyIssue(workflow('asset.transfer.batch'), stale('ABOVE_UPSTREAM'))).toEqual({ kind: 'stale', step: 2, from: 1, reason: 'ABOVE_UPSTREAM' });
+    expect(heldDependencyIssue(workflow('swap'), new Map([['node-003', { kind: 'consistent' }]]))).toBeNull();
   });
 });

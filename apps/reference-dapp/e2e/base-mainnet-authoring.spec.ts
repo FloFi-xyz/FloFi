@@ -127,8 +127,8 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     await expect(copilotSays(page)).toContainText('Your wallet signs every transaction on Base after your Review; Flofi never signs.');
     await expect(copilotSays(page)).not.toContainText('Real funds on Base');
     await ask(page, 'Quero colocar 100 USDC e 50 Aerodrome num pool da Uniswap na Base com taxa de 0,3%');
-    // FloFi answers in the interface language (English here), whatever language the request is written in.
-    await expectProposal(page, 'Interpreted as “add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps”', 'AERO');
+    // A09 (intentional): FloFi answers in the language the request is written in (Portuguese here), whatever the interface language.
+    await expectProposal(page, 'Interpretado como “add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps”', 'AERO');
     await ask(page, `Please lend 25 USDC on Aave on Base for ${recipient}`);
     await expectProposal(page, `Interpreted as “supply 25 USDC to Aave on Base beneficiary ${recipient}”`, 'Supply added to your workflow: 25 USDC');
     await ask(page, `Please send 0.01 ETH on Base over to ${recipient}`);

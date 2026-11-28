@@ -9,13 +9,16 @@
  *   ABOVE_UPSTREAM    the dependent amount is above what the earlier step is now estimated to deliver (its live estimate, or a Withdraw / Borrow's
  *                     exact amount): the card would claim to spend more than arrives
  *
- * Execution never relied on either (every resolver spends min(cap, actual delivery) and never the wallet's other balance); this keeps the Canvas,
- * Simulation and Review from presenting a financially inconsistent workflow as valid. `bases` is the Editor's own record of which earlier step
+ * Neither ever spends the wallet's other balance: a resolver spends min(cap, delivered) — the reconciled delivery, or inside one signed batch the
+ * earlier step's signed minimum — and a Batch Payment pays exact amounts or is refused. The Editor holds Simulation and Review back on
+ * UPSTREAM_CHANGED, and on ABOVE_UPSTREAM only for a Batch Payment (`heldDependencyIssue`); for any other consumer ABOVE_UPSTREAM is the disclosed
+ * cap ("spends the smaller of …"). `bases` is the Editor's own record of which earlier step
  * each dependent amount was set against (not part of the canonical workflow, whose v1 IR is frozen): a record that is missing (a reopened or
  * restored workflow) is recorded against the earlier step as it was before the next edit, so that edit is stale at once.
  *
  * Pure: no React, wallet, quote or network. The estimate reader is the caller's (the Canvas's live quotes); nothing here signs or simulates.
  */
+import { isBatchPaymentNode } from '@defi-workflow-engine/workflow-contracts';
 import type { Workflow } from './initial-workflow';
 import { compositionWorkflow, sameSequenceAsset, sequenceOrder, stepAssets, type CompletedStep, type WorkflowSequence } from './workflow-sequence';
 
@@ -132,7 +135,17 @@ export function dependencyStates(workflow: Workflow, sequence: WorkflowSequence 
   }
   return out;
 }
-/** The first stale step (in sequence order), or null: Simulation and Review are held back until it is resolved. */
+/**
+ * The first stale step that holds Simulation and Review back (in sequence order), or null. UPSTREAM_CHANGED always does. ABOVE_UPSTREAM does only
+ * for a consumer that spends EXACT amounts (a Batch Payment pays each recipient exactly, never min(cap, delivered)): an earlier step estimated to
+ * deliver less would stop the run before it; any other consumer spends min(its amount, the reconciled delivery), as its Review says.
+ */
+export function heldDependencyIssue(workflow: Workflow, states: ReadonlyMap<string, DependencyState>): Extract<DependencyState, { kind: 'stale' }> | null {
+  const held = new Map([...states].filter(([nodeId, state]) => state.kind === 'stale' && (state.reason === 'UPSTREAM_CHANGED'
+    || workflow.nodes.some(node => node.nodeId === nodeId && isBatchPaymentNode(node)))));
+  return firstDependencyIssue(held);
+}
+/** The first stale step (in sequence order), or null. */
 export function firstDependencyIssue(states: ReadonlyMap<string, DependencyState>): Extract<DependencyState, { kind: 'stale' }> | null {
   let first: Extract<DependencyState, { kind: 'stale' }> | null = null;
   for (const state of states.values()) if (state.kind === 'stale' && (!first || state.step < first.step)) first = state;

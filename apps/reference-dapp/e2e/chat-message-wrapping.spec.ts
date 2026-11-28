@@ -10,7 +10,7 @@
  */
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, showMobilePane } from './build-entry-navigation';
 import { selectSettingsTheme } from './settings-fixtures';
 
 const SHORT = ['Continuar', 'Deu certo?', '123456789', '0.990877', '100 USDC'];
@@ -61,6 +61,8 @@ test('short owner messages never wrap a character; long sentences and addresses 
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     for (const [width, height] of [[1440, 1000], [1280, 900], [390, 844]] as const) {
       await page.setViewportSize({ width, height });
+      // E11 (A10, intentional): on a phone the chat is the Conversation pane (the Plan is shown first).
+      await showMobilePane(page, 'conversation');
       for (const zoom of ['1', '0.9', '0.8', '1.1', '1.25']) {
         await page.evaluate(value => { document.documentElement.style.zoom = value; }, zoom);
         await expect.poll(() => page.evaluate(() => document.documentElement.style.zoom)).toBe(zoom);
@@ -71,6 +73,7 @@ test('short owner messages never wrap a character; long sentences and addresses 
   }
   // The row and avatar layout is unchanged: the owner's avatar sits beside (right of) its own bubble, and nothing scrolls the page sideways.
   await page.setViewportSize({ width: 390, height: 844 });
+  await showMobilePane(page, 'conversation');
   const row = log(page).locator('.chat-row-you').first();
   const [bubble, avatar] = [await row.locator('.message.you').boundingBox(), await row.locator('.user-avatar').boundingBox()];
   expect(avatar!.x).toBeGreaterThanOrEqual(bubble!.x + bubble!.width - 1);

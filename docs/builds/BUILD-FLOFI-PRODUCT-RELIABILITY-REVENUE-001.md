@@ -153,7 +153,7 @@ Newly completed (evidence `MOCKED` / unit / PostgreSQL 18; nothing signed or sub
 | Single flows (§3.2) | Root single-flow executions accrue in the 0037 ledger; recoveries settle their root; settlement transfers and workflow step runs never accrue or collect as single flows |
 | Parent/child (§3.3) | A universal bridge inside a workflow is charged once, by the workflow; a step run not linked yet is matched as the workflow observes it |
 | Disclosure | One line "FloFi fee (0.80%)" / "Taxa FloFi (0,80%)" in the Review cost summary, from the same basis; "not charged" while collection is off; Pay action on the completed summary only while collection is active |
-| Dependencies (§4) | Binding modes ALL / PERCENT / FIXED enforced by every resolver (hashed only when present); stale dependent amounts block Simulate/Execute/Save (reload and undo safe); E08 message names the accepted minimum |
+| Dependencies (§4) | Binding modes ALL / PERCENT / FIXED enforced by every resolver (hashed only when present); a dependent amount set before its earlier step was edited (UPSTREAM_CHANGED) blocks Simulate/Execute/Save (reload and undo safe); E08 message names the accepted minimum |
 | Assistant (§5) | Read-only questions never mutate; deterministic step references; current simulation facts bound to the revision; cost guidance; reply language of the message |
 | Batch Payment (§6) | One card created and edited from Chat with saved recipients; ambiguity asks; unknown name asks for an address; Review retired on change |
 | Formatting (§7) | Six significant digits on Execute timeline (Ethereum → Robinhood panel), costs, history and legacy panels |
@@ -174,3 +174,27 @@ this environment by the session's permission check); dependency phrases in Chat 
 indicator (no new UI text); a v2 strategy with PERCENT/FIXED opened on the Canvas degrades to the default rule; PERCENT shares above 100% are not
 refused at composition; Admin "due" includes executions without an authorized basis; browser suites for the new chat and narrow-screen
 behaviour pass only against a local dev server.
+
+Certification fixes after the first full run (CircleCI run f900380c, head c8a84a6, 8 browser shards red; each verified with the guarded profiles
+locally against a production build, MOCKED loopback only):
+
+| Failure | Decision |
+|---|---|
+| Reply language read an address as Portuguese (the `e` in `0x5aAe…`) | Fixed in `detectLanguage`: only whole words count, never letters inside a token with a digit. The earlier e2e expectation that codified the bug was reverted |
+| A Portuguese request answered in English in 11 approved specs | A09 replaces the former "interface language" rule (owner requirement): expectations now read the Portuguese reply; English requests still get English. An exact command (the deterministic grammar, English by design) is no evidence of language: it keeps the conversation's language, else the interface's (a Portuguese interface typing "swap 10 USDC to WETH on Base Sepolia" is answered in Portuguese) |
+| Review blocked ("Check this workflow on the Canvas") on a funded Swap → Swap whose second amount exceeds the first's estimate | `ABOVE_UPSTREAM` no longer holds Simulate/Review back, except for a Batch Payment (exact amounts; flofi-workflow review): every other consumer spends min(amount, delivery) — the reconciled one, or the earlier step's signed minimum inside one batch — never other funds, and the Review discloses it ("spends the smaller of …"). Holding it back refused that disclosed cap with no reason on the Canvas. `UPSTREAM_CHANGED` still blocks; a funded step whose delivery is unproven, zero or refused stays unavailable (`sequenceIssue`). The owner's 0.097076 → 0.097075 example is now enforced at execution (cap), not by holding the Review. **Owner review requested** |
+| "The last simulation cannot be used" when nothing was ever simulated | A blocked (unavailable) simulation is answered with its reason only (A05: missing vs invalid context) |
+| Page 35 px taller than a desktop viewport | Screen-reader-only labels of a tall chat extended the page; the chat log is now their containing block (`position: relative`) |
+| Narrow-screen specs typed into a hidden chat | Specs select the Conversation / Plan pane (`showMobilePane`); the layout specs assert the switch up to 800 px instead of "chat below" |
+| Edit confirmations, read-only answers | P1-03 ("Swap: 3 → 2 USDC.") and A03/A04 (FloFi answers from its plan, no revision number) expectations; the commit matcher accepts the before → after form |
+| Standalone browser bundles pulled `pg` | `pageOfPath` moved to a module without database imports (`workflow-runs/action-page.ts`), so server-action modules no longer pull the cloud runtime into client bundles; the Execute acceptance also stubs the fee settlement hook |
+| Orca close position; Dashboard run detail stress amount | Six significant digits on the Execute timeline and run detail (R06/R07): the specs read the short value and the exact recorded value from its one-tap disclosure |
+| Batch Payment created from the chat | The specs' commit matcher accepts the R09–R12 confirmation ("I prepared a batch payment of …" / "Preparei um pagamento em lote de …") |
+
+Local verification of these fixes (guarded profiles, production build, MOCKED loopback, local PostgreSQL and the digest-verified Anvil): every
+profile that failed or did not run in f900380c was run locally. `default-product-1` still differs here only in visual baselines (font rendering of
+this machine; text glyphs differ on every line) and in `build009` (a live LI.FI read the network policy of this machine blocks); neither path is
+touched by this PR and both passed on `main` in CircleCI. The chat-log containment does not change certified full-page heights (same height
+with and without it on this machine). Scope frozen at the owner's instruction: a mixed-language display of answer buttons and "View in plan" when
+the reply language differs from the interface stays as certified (not changed here); `narrow-conversation-plan.spec.ts` is still local-only.
+CircleCI remains the certification authority.

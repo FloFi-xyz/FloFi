@@ -13,7 +13,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr, AUTHORIZE_IN_WALLET } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel, reloadBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel, reloadBuilder, showMobilePane } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(180_000);
@@ -23,6 +23,8 @@ const chat = (page: Page) => page.locator('.chat-messages[role="log"]');
 const flofi = (page: Page) => chat(page).locator('.message:not(.you):not(.conversation-execution-message)').last();
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
 async function say(page: Page, text: string) {
+  // E11 (A10): on a phone the chat is the Conversation pane.
+  await showMobilePane(page, 'conversation');
   await page.locator('#mock-prompt').fill(text);
   await page.locator('.chat-form button[type=submit]').click();
 }
@@ -238,12 +240,12 @@ test('independent steps: an unapplied Canvas amount is resolved in the chat, the
   await expect(flofi(page)).toContainText('Should I apply it before reviewing the workflow?');
   await pick(page, 'Apply it');
   await expect(flofi(page)).toContainText('That amount cannot be applied: Enter a valid amount greater than 0.');
-  // A Portuguese request is understood; P0 approved UX: FloFi answers in the interface language (English here).
+  // A Portuguese request is understood. A09 (intentional): it is answered in Portuguese, whatever the interface language (English here).
   await say(page, 'revisar workflow');
-  await expect(flofi(page)).toContainText('Step 2 (Swap) has an amount you typed but did not apply: 0 USDC.');
-  await pick(page, 'Discard it');
-  await expect(chat(page)).toContainText('Discarded. The step keeps its previous amount.');
-  await expect(flofi(page)).toContainText('Here is the review of step 1 of 2.', { timeout: 30_000 });
+  await expect(flofi(page)).toContainText('A etapa 2 (Trocar) tem um montante digitado que não foi aplicado: 0 USDC.');
+  await pick(page, 'Descartar');
+  await expect(chat(page)).toContainText('Descartado. A etapa mantém o montante anterior.');
+  await expect(flofi(page)).toContainText('Esta é a revisão da etapa 1 de 2.', { timeout: 30_000 });
   // Independent steps: step 2 is not funded by step 1, and both keep exactly their authored amounts.
   await expect(flofi(page).locator('[data-sequence-state="NEXT"]')).not.toContainText('Funded by step');
   const workflow = JSON.parse(await readWorkflowIr(page)) as { nodes: { userConstraints: { kind: string; quantity?: { amount: string } }[] }[] };
@@ -316,14 +318,21 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
     // BUILD0-UX-001: Execute shows its short status panel instead of collapsed details (and no technical disclosure).
     if (details) { await expect(page.locator(summary)).toBeHidden(); await openSimulationReviewPanel(page); await expect(page.locator(`${details} > summary`)).toBeVisible(); }
     else { await expect(page.locator(summary)).toBeVisible(); await expect(page.locator('.execution-details, .execute-technical')).toHaveCount(0); }
-    const chatBox = (await page.locator('.stage-with-chat > .copilot').boundingBox())!, stageBox = (await page.locator('.stage-with-chat > .main').boundingBox())!;
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10, intentional): up to 800 px the chat is the Conversation pane of the Plan /
+    // Conversation switch (never stacked below the stage); the stage is the Plan pane.
+    if (width <= 800) { await expect(page.locator('.stage-with-chat > .copilot')).toBeHidden(); await showMobilePane(page, 'conversation'); }
+    const chatBox = (await page.locator('.stage-with-chat > .copilot').boundingBox())!;
     expect(chatBox.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));
     // Wide screens keep the chat beside the stage; narrower screens stack it below, at full width.
-    if (width > 1280) expect(chatBox.x).toBeGreaterThanOrEqual(stageBox.x + stageBox.width - 1); else expect(chatBox.y).toBeGreaterThanOrEqual(stageBox.y + stageBox.height - 1);
+    if (width > 800) {
+      const stageBox = (await page.locator('.stage-with-chat > .main').boundingBox())!;
+      if (width > 1280) expect(chatBox.x).toBeGreaterThanOrEqual(stageBox.x + stageBox.width - 1); else expect(chatBox.y).toBeGreaterThanOrEqual(stageBox.y + stageBox.height - 1);
+    } else await expect(page.locator(grid)).toBeHidden();
     await page.locator('.stage-with-chat #mock-prompt').scrollIntoViewIfNeeded();
     await expect(page.locator('.stage-with-chat #mock-prompt')).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(0);
     await page.screenshot({ path: testInfo.outputPath(`${name.toLowerCase()}-${width}.png`), fullPage: true });
+    await showMobilePane(page, 'plan');
     // The details stay one click away, and opening them never adds a column or overflows.
     if (details) {
       await page.locator(`${details} > summary`).click();

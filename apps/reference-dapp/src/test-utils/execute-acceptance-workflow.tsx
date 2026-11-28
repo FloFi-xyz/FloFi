@@ -25,3 +25,5 @@ export async function loadSolanaAssetCatalog() { return { ok: false as const, co
 /** The platform fee server actions in this acceptance: collection is off, so the fee line renders nothing. */
 export async function platformFeeStatus() { return { ok: false as const, code: 'PLATFORM_FEE_COLLECTION_DISABLED' }; }
 export async function platformFeeSettle() { return { ok: false as const, code: 'PLATFORM_FEE_COLLECTION_DISABLED' }; }
+/** The fee settlement hook in this acceptance: no status (collection off), so the fee line renders nothing. */
+export function usePlatformFeeSettlement() { return { status: null, busy: false, error: null, pay: async () => undefined }; }

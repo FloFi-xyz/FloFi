@@ -795,7 +795,9 @@
 }
 /* BUILD UX POLISH 004 (UXA-02): the chat scrolls on its own at every width — at its end the wheel no longer moves the page behind it (the Canvas
    side is CanvasWheelNavigation). A chat without overflow is not a scroller, so the page still scrolls there. */
-.chat-messages{overscroll-behavior-y:contain}
+/* The chat log is the containing block of its screen-reader-only labels (absolutely positioned): they scroll and clip with the log instead of
+   extending the page below the viewport when the conversation is taller than its panel. */
+.chat-messages{overscroll-behavior-y:contain;position:relative}
 @media(min-width:801px) and (prefers-reduced-motion:no-preference){
   .app-shell:has(>.top-bar .navigation-layer){transition:padding-left 200ms ease-out}
   .app-shell:has(>.top-bar .navigation-layer)>.top-bar{transition:margin-left 200ms ease-out}
