@@ -112,7 +112,7 @@ const counts = async (period: 'today' | '7d' | '30d' | 'all', tenantId = 'defaul
   if (!result.ok) throw new Error(result.code);
   return result.value;
 };
-const zero = { FLOFI_WEB: 0, LEGACY_WEB: 0, CHATGPT_MCP: 0, CLAUDE_MCP: 0, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 0, UNKNOWN: 0 };
+const zero = { WEB_CHAT: 0, WEB_EDITOR: 0, FLOFI_WEB: 0, LEGACY_WEB: 0, CHATGPT_MCP: 0, CLAUDE_MCP: 0, TELEGRAM: 0, DEVELOPER_API: 0, MCP_UNIDENTIFIED: 0, UNKNOWN: 0 };
 
 describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions by channel (PostgreSQL)', () => {
   it('counts each completed and reconciled run once, by the channel its trusted records name', async () => {
@@ -173,7 +173,7 @@ describe('BUILD-FLOFI-ADMIN-ANALYTICS-AND-SOLANA-BATCH-001 completed executions 
     // FloFi Web: the five Editor workflow runs of the period (two-step, 8-step, one-step, today's and yesterday's), never an unbound single flow.
     // Unknown origin: the conflicting binding and both unbound single flows.
     const month = await counts('30d');
-    expect(month.byEnvironment.MAINNET).toEqual({ counts: { FLOFI_WEB: 5, LEGACY_WEB: 0, CHATGPT_MCP: 3, CLAUDE_MCP: 2, TELEGRAM: 2, DEVELOPER_API: 1, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
+    expect(month.byEnvironment.MAINNET).toEqual({ counts: { ...zero, FLOFI_WEB: 5, LEGACY_WEB: 0, CHATGPT_MCP: 3, CLAUDE_MCP: 2, TELEGRAM: 2, DEVELOPER_API: 1, MCP_UNIDENTIFIED: 1, UNKNOWN: 3 },
       total: 17, automation: 2 });
     expect(month.byEnvironment.TESTNET).toEqual({ counts: { ...zero, FLOFI_WEB: 1, UNKNOWN: 1 }, total: 2, automation: 0 });
     expect(month.byEnvironment.MOCKED).toEqual({ counts: zero, total: 0, automation: 0 });
