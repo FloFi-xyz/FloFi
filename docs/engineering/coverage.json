@@ -2265,6 +2265,34 @@
     "app.backend.execution-origins-cloud.pg": {
       "path": "apps/reference-dapp/backend/execution-origins-cloud.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.platform-fee.settlement": {
+      "path": "apps/reference-dapp/src/platform-fee/settlement.test.ts",
+      "stage": "unit"
+    },
+    "app.platform-fee.settlement.pg": {
+      "path": "apps/reference-dapp/src/platform-fee/settlement.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.certificate-0038.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0038.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.domain.conversation-fee": {
+      "path": "apps/reference-dapp/src/domain/conversation-fee.test.ts",
+      "stage": "unit"
+    },
+    "app.app.platform-fee-action": {
+      "path": "apps/reference-dapp/src/app/platform-fee-action.test.ts",
+      "stage": "unit"
+    },
+    "app.state.platform-fee-settlement": {
+      "path": "apps/reference-dapp/src/state/platform-fee-settlement.test.ts",
+      "stage": "unit"
+    },
+    "app.components.platform-fee-line": {
+      "path": "apps/reference-dapp/src/components/platform-fee-line.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -5193,7 +5221,13 @@
         "apps/reference-dapp/src/domain/relative-amount.ts",
         "apps/reference-dapp/src/domain/approval-notice.ts",
         "apps/reference-dapp/src/domain/run-outcome-amounts.ts",
-        "apps/reference-dapp/src/domain/chat-initiation.ts"
+        "apps/reference-dapp/src/domain/chat-initiation.ts",
+        "apps/reference-dapp/src/domain/assistant-answers.ts",
+        "apps/reference-dapp/src/domain/assistant-facts.ts",
+        "apps/reference-dapp/src/domain/conversation-language.ts",
+        "apps/reference-dapp/src/domain/operation-terms.ts",
+        "apps/reference-dapp/src/domain/step-reference.ts",
+        "apps/reference-dapp/src/domain/batch-payment-chat.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -9707,17 +9741,35 @@
         "apps/reference-dapp/src/platform-fee/policy.ts",
         "apps/reference-dapp/src/platform-fee/principal.ts",
         "packages/cloud-runtime/optional-migrations/0037_execution_origins_platform_fees.sql",
-        "docs/deploy/RELEASE-REVENUE-ORIGINS-0037.reversal.sql"
+        "docs/deploy/RELEASE-REVENUE-ORIGINS-0037.reversal.sql",
+        "apps/reference-dapp/src/platform-fee/authorization.ts",
+        "apps/reference-dapp/src/platform-fee/disclosure.ts",
+        "apps/reference-dapp/src/platform-fee/semantic-basis.ts",
+        "apps/reference-dapp/src/platform-fee/settlement.ts",
+        "apps/reference-dapp/src/platform-fee/single-flow.ts",
+        "apps/reference-dapp/backend/platform-fee-api.ts",
+        "apps/reference-dapp/src/app/platform-fee-action.ts",
+        "apps/reference-dapp/src/state/platform-fee-settlement.ts",
+        "apps/reference-dapp/src/components/platform-fee-line.tsx",
+        "apps/reference-dapp/src/domain/platform-fee-execution.ts",
+        "packages/cloud-runtime/optional-migrations/0038_platform_fee_authorizations.sql"
       ],
       "suites": [
         "app.platform-fee.principal",
         "app.platform-fee.revenue-origins.pg",
         "cloud-runtime.certificate-0037.pg",
-        "app.server.universal-router.fee-obligation"
+        "app.server.universal-router.fee-obligation",
+        "app.platform-fee.settlement",
+        "app.platform-fee.settlement.pg",
+        "cloud-runtime.certificate-0038.pg",
+        "app.domain.conversation-fee",
+        "app.app.platform-fee-action",
+        "app.state.platform-fee-settlement",
+        "app.components.platform-fee-line"
       ],
       "gaps": [
-        "Fee collection is not implemented: no treasury, approved accounting policy or collection rail exists (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001); the ledger records what completed workflow runs owe and collection stays fail-closed.",
-        "Single-flow executions without a workflow run are not accounted in the ledger; the universal bridge keeps its own per-run obligation record."
+        "Collection is implemented as an owner-signed settlement transfer per fee asset after completion; production activation needs the owner's treasury configuration, approved financial policy and release authorization (BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001). Settlement is exercised with a contract double of the transfer flows; no public-network collection was run.",
+        "Borrow, repay, withdraw, liquidity, the lending composition and Stock Token swaps stay NOT_APPLICABLE pending an approved policy."
       ]
     }
   ],
@@ -9808,6 +9860,8 @@
     "app.editor.editor-solana-batch-run.pg",
     "app.platform-fee.revenue-origins.pg",
     "cloud-runtime.certificate-0037.pg",
-    "app.backend.execution-origins-cloud.pg"
+    "app.backend.execution-origins-cloud.pg",
+    "app.platform-fee.settlement.pg",
+    "cloud-runtime.certificate-0038.pg"
   ]
 }
