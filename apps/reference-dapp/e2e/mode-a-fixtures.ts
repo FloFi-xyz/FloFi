@@ -160,6 +160,9 @@ export async function readyForVisualCapture(page: Page): Promise<void> {
     await expect(page.locator('.shell-technical, .fork-badge')).toHaveCount(0);
   }
   await page.evaluate(() => document.fonts.ready);
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): a card FloFi just added or edited from the chat is outlined for a moment; a capture
+  // waits for the steady Canvas so a baseline never depends on how fast the run reached it.
+  await expect(page.locator('.react-flow__node[data-chat-changed]')).toHaveCount(0, { timeout: 5_000 });
   const graph = page.getByRole('region', { name: 'Simulation workflow graph' });
   if (await graph.isVisible()) await expect(graph).toHaveAttribute('data-viewport', 'fitted');
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

@@ -190,6 +190,7 @@ locally against a production build, MOCKED loopback only):
 | Standalone browser bundles pulled `pg` | `pageOfPath` moved to a module without database imports (`workflow-runs/action-page.ts`), so server-action modules no longer pull the cloud runtime into client bundles; the Execute acceptance also stubs the fee settlement hook |
 | Orca close position; Dashboard run detail stress amount | Six significant digits on the Execute timeline and run detail (R06/R07): the specs read the short value and the exact recorded value from its one-tap disclosure |
 | Batch Payment created from the chat | The specs' commit matcher accepts the R09–R12 confirmation ("I prepared a batch payment of …" / "Preparei um pagamento em lote de …") |
+| Visual baselines (CircleCI run 657f7182, `default-product-1`) | P1-03 adds "View in plan" and the before → after summary under a chat change (both explicitly required): the seven affected baselines are the CI's own candidate renders; the two Build captures wait for the 2.4 s card highlight to end (`readyForVisualCapture`), so their baseline is the steady Canvas (the CI candidate with the card area of the previous CI baseline: only the transient ring differed) |
 
 Local verification of these fixes (guarded profiles, production build, MOCKED loopback, local PostgreSQL and the digest-verified Anvil): every
 profile that failed or did not run in f900380c was run locally. `default-product-1` still differs here only in visual baselines (font rendering of
