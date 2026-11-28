@@ -9,6 +9,7 @@ import { networkChoiceOptions, networkOfOption } from '../domain/approved-ux';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { walletChainRef } from '../wallet/evm-networks';
 import { NetworkBrandIcon } from './brand-icon';
+import { PLATFORM_FEE_PERCENT_LABEL, PLATFORM_FEE_PERCENT_LABEL_PT } from '../platform-fee/policy';
 import { loadSavedRecipients, savedRecipientForAddress, useSavedRecipients } from '../state/saved-recipients-store';
 
 export { networkChoiceOptions };
@@ -152,6 +153,7 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
     : review.totals.ceilings.length ? t('Up to {0}', review.totals.ceilings.join(' + ')) : review.unknown.length ? t('Not available from this simulation') : t('None beyond the amount sent');
   // Review round 2: only an evidence-limit caveat (`technical`) moves under Technical details; every other warning, of any severity, stays visible.
   const visibleWarnings = review.warnings.filter(warning => warning.technical !== true);
+  const feePercent = language === 'PT' ? PLATFORM_FEE_PERCENT_LABEL_PT : PLATFORM_FEE_PERCENT_LABEL;
   const technicalWarnings = review.warnings.filter(warning => warning.technical === true);
   return <section className="conversation-review" aria-label={t('Workflow review')}>
     {/* BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence lists every canonical action in order; only the current step is simulated now. */}
@@ -171,7 +173,8 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
       {sharedFee && <div data-shared-fee="true"><dt>{t('Network fee')}</dt><dd>{sharedFee}</dd></div>}
       {onTop.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd title={line.value}>{line.treatment === 'CEILING' ? t('at most {0}', shortAmount(line.value, 'up')) : t('≈ {0}', shortAmount(line.value, 'up'))}</dd></div>)}
       {/* Review round 2: FloFi's own fee, when this route records it, is a visible line; its note and the whole breakdown stay under Technical details. */}
-      {review.flofiFee.recorded && <div data-flofi-fee="obligation"><dt>{t('FloFi fee')}</dt><dd title={review.flofiFee.value}>{t(shortAmount(review.flofiFee.value, 'up'))}</dd></div>}
+      {review.flofiFee.recorded && <div data-flofi-fee={review.flofiFee.charged ? 'charged' : 'obligation'}><dt>{t('FloFi fee ({0})', feePercent)}</dt>
+        <dd title={review.flofiFee.value}>{t(shortAmount(review.flofiFee.value, 'up'))}{review.flofiFee.charged ? null : ` · ${t('not charged')}`}</dd></div>}
       {/* A token permission is material: always visible, exact amount and spender. Its value already names the token ("Exactly 2 USDC"); the symbol
           is added only to a value that does not ("Unlimited approval"). */}
       {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.spender}`} data-permission="true"><dt>{t('Permission')}</dt>
@@ -186,7 +189,8 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
         {costs.map(line => <div key={`${line.label}:${line.value}`} data-treatment={line.treatment ?? 'UNCLASSIFIED'}><dt>{t(line.label)}</dt>
           <dd>{line.value}<small>{line.treatment && line.treatment in treatment ? t(treatment[line.treatment as keyof typeof treatment]) : null}{line.note ? `${line.treatment && line.treatment in treatment ? ' · ' : ''}${t(line.note)}` : ''}</small></dd></div>)}
         {review.unknown.map(name => <div key={name} data-unknown="true"><dt>{t(name)}</dt><dd>{t('Not provided by this simulation')}</dd></div>)}
-        <div data-treatment="OBLIGATION" data-flofi-fee={review.flofiFee.recorded ? 'obligation' : 'not-charged'}><dt>{t('FloFi fee')}</dt><dd>{t(review.flofiFee.value)}<small>{t(review.flofiFee.note)}</small></dd></div>
+        <div data-treatment="OBLIGATION" data-flofi-fee={review.flofiFee.recorded ? review.flofiFee.charged ? 'charged' : 'obligation' : 'not-charged'}><dt>{t('FloFi fee ({0})', feePercent)}</dt>
+          <dd>{t(review.flofiFee.value)}{review.flofiFee.recorded && !review.flofiFee.charged ? ` · ${t('not charged')}` : null}</dd></div>
         {review.expiresAt !== null && <div><dt>{t('Quote expiry')}</dt><dd><time dateTime={new Date(review.expiresAt).toISOString()}>{new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US')}</time></dd></div>}
         <div className="conversation-review-total"><dt>{t('Total additional payable costs')}</dt><dd>{total}</dd></div>
       </dl>

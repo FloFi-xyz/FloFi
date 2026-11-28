@@ -14,7 +14,6 @@ import { translate } from './locale';
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 /** The universal surfaces' fee sentences, as they appear in the product source (Review line, Canvas panel). */
 const FEE_SENTENCES = [
-  '0.80% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.',
   'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.80% fee obligation on each completed workflow; it is not charged at this time.',
   'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.80% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.',
   '0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.',
@@ -49,7 +48,10 @@ describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
       // One wording: never "not collected / settled on-chain" (which reads as if it might be charged elsewhere).
       expect(`${sentence} ${pt}`).not.toMatch(/on-chain/);
     }
-    expect(product).toContain("'FloFi fee (0.80% obligation)'");
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): the Review's universal line is the concise "FloFi fee (0.80%)", without
+    // a sentence; the engineering panel keeps its own notes.
+    expect(product).toContain("'FloFi fee (0.80%)'");
+    expect(translate('PT', 'FloFi fee ({0})')).toBe('Taxa FloFi ({0})');
     expect(translate('PT', 'FloFi fee (0.80% obligation)')).toBe('Taxa do FloFi (obrigação de 0,80%)');
     // A Review made under the earlier 10 bps policy keeps its own line (and its Portuguese text), in the compact Review and the panel's route review.
     expect(translate('PT', 'FloFi fee (0.1% obligation)')).toBe('Taxa do FloFi (obrigação de 0,1%)');

@@ -19,6 +19,7 @@
  *   studio-migrate                                                      applies certified 0035 on exact schema 34
  *   studio-certification-migrate                                        applies certified 0036 on exact schema 35
  *   revenue-origins-migrate                                             applies certified 0037 on exact schema 36 (execution origins, fee ledger)
+ *   revenue-collection-migrate                                          applies certified 0038 on exact schema 37 (authorized fee basis)
  *   origin-backfill [--approvals-complete-since ISO] [--assert-approvals-never-purged] [--apply --approval-ref REF]
  *                                                                         dry run by default; --apply records only missing origins (audited)
  *   origin-correct --run <run id> --origin <origin> --reason-code <CODE> --approval-ref <ref>
@@ -84,7 +85,8 @@ async function main(): Promise<void> {
     'approvals-complete-since': { type: 'string' }, 'assert-approvals-never-purged': { type: 'boolean' } } });
   const migration = command === 'finops-migrate' || command === 'finops-sync-migrate' || command === 'position-purge-migrate'
     || command === 'single-step-runs-migrate' || command === 'workflow-run-purge-migrate' || command === 'developer-projects-migrate'
-    || command === 'studio-migrate' || command === 'studio-certification-migrate' || command === 'revenue-origins-migrate';
+    || command === 'studio-migrate' || command === 'studio-certification-migrate' || command === 'revenue-origins-migrate'
+    || command === 'revenue-collection-migrate';
   const connection = migration ? 'DATABASE_MIGRATION_URL' : 'DATABASE_ADMIN_OPERATIONS_URL';
   const tenantId = tenantOf(values), databaseUrl = process.env[connection] ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error(`${connection}_REQUIRED`);

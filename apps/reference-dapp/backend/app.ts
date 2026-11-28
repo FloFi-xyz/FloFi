@@ -36,6 +36,7 @@ import { investigateNonceConflict, NONCE_CONFLICT_CODE, nonceConflictPacing, non
   type NonceConflictPacing } from '../src/server/nonce-conflict.ts';
 import { loadNonceConflict, markNonceConflictEscalated, peerAttempts, peersByTransaction, previousScan, recordNonceConflict } from '../src/server/nonce-conflict-store.ts';
 import { reconcileDelayMs } from './reconcile-pacing.ts';
+import { createPlatformFeeApi, executionRefOf } from './platform-fee-api.ts';
 
 /** Methods that could put a transaction on any network. Observer (worker) transports reject them unconditionally. */
 const SUBMISSION_METHODS = new Set(['sendTransaction', 'eth_sendRawTransaction', 'eth_sendTransaction']);
@@ -267,6 +268,15 @@ export function createBackend(options: BackendOptions) {
     } catch { logger.warn('execution_origin.not_recorded', { flow, action: method, code: 'EXECUTION_ORIGIN_NOT_RECORDED' }); }
   }
 
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the platform fee's authorized basis, owner status, collection start and worker pass.
+  const platformFees = createPlatformFeeApi({ db: options.db, env, tenantId: options.tenantId, logger,
+    callFlow: (flow, method, args, principal, identity) => isFlowName(flow) ? callFlow(flow, method, args, options.tenantId, principal, identity as BetaRequestIdentity | null)
+      : Promise.resolve({ ok: false, code: 'FLOW_NOT_FOUND' }),
+    load: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId, true).load(runId) : Promise.reject(new Error('FLOW_NOT_FOUND')),
+    invalidate: (flow, runId) => isFlowName(flow) ? service(flow, options.tenantId).call('invalidate', [runId]).then(value => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, code: error instanceof Error && CODE.test(error.message) ? error.message : 'PLATFORM_FEE_SETTLEMENT_INVALIDATION_FAILED' }))
+      : Promise.resolve({ ok: false as const, code: 'FLOW_NOT_FOUND' }) });
+
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
     betaIdentity?: BetaRequestIdentity | null, developerLive = false, surface: ExecutionSurface | null = null): Promise<FlowResult> {
     const refused = await betaMethodRefusal(tenantId, method, betaIdentity, principal);
@@ -307,6 +317,7 @@ export function createBackend(options: BackendOptions) {
           const boundArgs = snapshot && args.length === 3 ? [...args, snapshot.review.commitment] : args;
           const value = await service(flow, tenantId).call(method, boundArgs);
           await recordCreatedOrigin(flow, method, value, tenantId, surface);
+          await platformFees.recordReviewedFee(flow, method, args, value, tenantId);
           return { ok: true, value } as const;
         }
         catch (error) {
@@ -629,6 +640,22 @@ export function createBackend(options: BackendOptions) {
       if (result.ok) await store.complete(scope, key, hash, result); else await store.release(scope, key, hash);
       return { status: 200, body: result };
     }) },
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): one execution's platform fee for its own wallet, and the start of its collection.
+    { method: 'POST', name: 'platform-fee.status', pattern: /^\/v1\/platform-fees\/status$/, handler: wrap(async request => {
+      const ref = executionRefOf((request.body as { execution?: unknown } | null)?.execution), principal = principalOf(request);
+      if (!ref) throw new HttpError(400, 'ARGUMENTS_INVALID');
+      if (!principal) throw new HttpError(401, 'WALLET_PRINCIPAL_REQUIRED');
+      return { status: 200, body: await platformFees.status(ref, principal) };
+    }) },
+    { method: 'POST', name: 'platform-fee.settle', pattern: /^\/v1\/platform-fees\/settle$/, handler: wrap(async request => {
+      const ref = executionRefOf((request.body as { execution?: unknown } | null)?.execution), principal = principalOf(request);
+      if (!ref) throw new HttpError(400, 'ARGUMENTS_INVALID');
+      if (!principal) throw new HttpError(401, 'WALLET_PRINCIPAL_REQUIRED');
+      const paused = executionRefusal(env);
+      if (paused) return { status: 403, body: { ok: false, code: paused } };
+      // Concurrent or repeated requests are safe without an idempotency key: the ledger's compare-and-set opens at most one attempt.
+      return { status: 200, body: await platformFees.settle(ref, principal, requestIdentity(request)) };
+    }) },
     // BUILD-MCP-001: read-only simulation previews (no run, no idempotency record: nothing durable happens).
     { method: 'POST', name: 'preview', pattern: /^\/v1\/previews\/([a-z-]{1,40})$/, handler: wrap(async (request, match) => {
       const flow = match[1]!;
@@ -792,7 +819,7 @@ export function createBackend(options: BackendOptions) {
   /** Shared with the optional API route families; service authentication stays in the HTTP server, user authorization stays here. */
   const protectRoutes = (extra: readonly Route[]): Route[] => extra.map(route => ({ ...route, handler: wrap(route.handler) }));
   const authorizeBeta = (identity: BetaRequestIdentity | null | undefined, principal?: string | null) => betaRefusal(options.tenantId, identity, principal);
-  return { routes, protectRoutes, authorizeBeta, callFlow, callWorkflows, callHistory, previewFlow, service, storage,
+  return { routes, protectRoutes, authorizeBeta, callFlow, callWorkflows, callHistory, previewFlow, service, storage, platformFees,
     handlers: { reconcile, 'evidence.archive': archive } as Record<string, WorkHandler> };
 }
 export type Backend = ReturnType<typeof createBackend>;

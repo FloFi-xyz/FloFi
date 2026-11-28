@@ -35,7 +35,7 @@ beforeAll(async () => {
   t = await createTestDatabase({ migrated: false }); db = t.db;
   const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
   const forward = await Promise.all(certificate.migrations.map(async m => ({ ...m, sql: await readFile(forwardMigrationSqlUrl(m), 'utf8') })));
-  expect(await migrate(db, [...await loadMigrations(), ...forward])).toHaveLength(37);
+  expect(await migrate(db, [...await loadMigrations(), ...forward])).toHaveLength(38);
   await db.query(`INSERT INTO mcp_accounts (tenant_id, account_id) VALUES ('default', $1)`, [accountId]);
   await db.query(`INSERT INTO mcp_oauth_grants (tenant_id, grant_id, account_id, client_id, client_name, scopes, resource)
     VALUES ('default', $3, $1, $2, 'Totally Claude', ARRAY['flofi.approval'], 'https://flofi.example/mcp')`, [accountId, CHATGPT, GRANT]);
@@ -184,18 +184,22 @@ describe('platform fee ledger (schema 37)', () => {
   const activation = platformFeeActivation({ FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: ago(3).toISOString() });
   const ETH = 'eip155:1/native:ETH';
 
-  it('F17/F18: accounting needs an explicit start, collection is never active, and an unmigrated database accrues nothing', async () => {
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): collection is implemented now (settlement.ts), so activation can become
+  // active once every condition holds; it still needs accounting first, and the database condition (0038) is checked by the collector.
+  it('F17/F18: accounting needs an explicit start, collection needs every activation condition, and an unmigrated database accrues nothing', async () => {
+    const from = { FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: ago(3).toISOString() };
     expect(platformFeeActivation({}).accounting).toEqual({ active: false, from: null, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' });
     expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_ACCOUNTING_FROM: 'tomorrow' }).accounting.code).toBe('PLATFORM_FEE_ACCOUNTING_FROM_INVALID');
-    expect(platformFeeActivation({}).collection).toEqual({ active: false, code: 'PLATFORM_FEE_COLLECTION_DISABLED' });
-    expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_COLLECTION: 'on' }).collection.code).toBe('PLATFORM_FEE_TREASURY_NOT_CONFIGURED');
-    expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x' + 'ab'.repeat(20).toUpperCase(),
-      FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '11111111111111111111111111111111' }).collection.code).toBe('PLATFORM_FEE_TREASURY_INVALID');
-    expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
-      FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '11111111111111111111111111111111' }).collection.code).toBe('PLATFORM_FEE_POLICY_NOT_APPROVED');
-    expect(platformFeeActivation({ FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
-      FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '11111111111111111111111111111111', FLOFI_PLATFORM_FEE_POLICY_APPROVAL: 'FIN-1' }).collection)
-      .toEqual({ active: false, code: 'PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED' });
+    expect(platformFeeActivation({}).collection).toEqual({ active: false, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' });
+    expect(platformFeeActivation(from).collection).toEqual({ active: false, code: 'PLATFORM_FEE_COLLECTION_DISABLED' });
+    expect(platformFeeActivation({ ...from, FLOFI_PLATFORM_FEE_COLLECTION: 'on' }).collection.code).toBe('PLATFORM_FEE_TREASURY_NOT_CONFIGURED');
+    expect(platformFeeActivation({ ...from, FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x' + 'ab'.repeat(20).toUpperCase(),
+      FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin' }).collection.code).toBe('PLATFORM_FEE_TREASURY_INVALID');
+    expect(platformFeeActivation({ ...from, FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
+      FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin' }).collection.code).toBe('PLATFORM_FEE_POLICY_NOT_APPROVED');
+    expect(platformFeeActivation({ ...from, FLOFI_PLATFORM_FEE_COLLECTION: 'on', FLOFI_PLATFORM_FEE_TREASURY_EVM: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
+      FLOFI_PLATFORM_FEE_TREASURY_SOLANA: '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', FLOFI_PLATFORM_FEE_POLICY_APPROVAL: 'FIN-1' }).collection)
+      .toEqual({ active: true, code: null });
     expect(await accruePlatformFees(dormant.db, 'default', activation, { apply: true, limit: 50 })).toMatchObject({ recorded: 0, code: 'PLATFORM_FEE_LEDGER_NOT_MIGRATED' });
     expect(await accruePlatformFees(db, 'default', platformFeeActivation({}), { apply: true, limit: 50 })).toMatchObject({ recorded: 0, code: 'PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED' });
   });
@@ -217,9 +221,13 @@ describe('platform fee ledger (schema 37)', () => {
     await recordExecutionOrigin(db, 'default', { workflowRunId: again }, 'mcp_chatgpt', 'CREATION', 'APPROVAL_REQUESTER');
     // Concurrent accruals (two workers, a restart mid-pass): one row per execution.
     const reports = await Promise.all([1, 2, 3].map(() => accruePlatformFees(db, 'default', activation, { apply: true, limit: 200 })));
-    expect(reports.reduce((n, r) => n + r.recorded, 0)).toBe(5);
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): direct single flows are accounted too. This file's single-flow fixtures
+    // have no durable log, so each is UNSUPPORTED (never charged) with a closed reason, once; the workflow runs keep their five rows.
+    const singles = await db.query<{ state: string; reason: string }>('SELECT state, reason FROM platform_fee_ledger WHERE run_id IS NOT NULL');
+    expect(singles.rows.every(r => r.state === 'UNSUPPORTED' && r.reason === 'PLATFORM_FEE_RECORD_UNREADABLE')).toBe(true);
+    expect(reports.reduce((n, r) => n + r.recorded, 0)).toBe(5 + singles.rows.length);
     const rows = new Map((await db.query<{ workflow_run_id: string; state: string; lines: { fee: string; principal: string; chainId: string }[]; reason: string | null; origin: string | null }>(
-      'SELECT workflow_run_id, state, lines, reason, origin FROM platform_fee_ledger')).rows.map(r => [r.workflow_run_id, r]));
+      'SELECT workflow_run_id, state, lines, reason, origin FROM platform_fee_ledger WHERE workflow_run_id IS NOT NULL')).rows.map(r => [r.workflow_run_id, r]));
     expect(rows.get(swapBridge)).toMatchObject({ state: 'DUE', lines: [{ chainId: 'eip155:1', principal: '100000000', fee: '800000' }] });
     expect(rows.get(again)).toMatchObject({ state: 'DUE', origin: 'mcp_chatgpt' }); // F14: a second execution of the same saved workflow
     expect(rows.get(batch)).toMatchObject({ state: 'DUE', lines: [{ chainId: 'eip155:8453', principal: '100000000', fee: '800000' }] });
@@ -230,7 +238,7 @@ describe('platform fee ledger (schema 37)', () => {
     // The ledger itself refuses a second row or a forged collection.
     await expect(db.query(`UPDATE platform_fee_ledger SET state = 'COLLECTED', version = version + 1 WHERE workflow_run_id = $1`, [swapBridge])).rejects.toThrow();
     const totals = await loadFeeTotals(db, 'default', { from: ago(30), to: new Date(Math.max(Date.now(), NOW.getTime()) + DAY) }, 'MAINNET');
-    expect(totals.byState).toMatchObject({ DUE: 3, WAIVED: 1, UNSUPPORTED: 1 });
+    expect(totals.byState).toMatchObject({ DUE: 3, WAIVED: 1, UNSUPPORTED: 1 + singles.rows.length });
     expect(totals.collectedByAsset).toEqual([]);
     expect(totals.dueByAsset).toEqual([
       { chainId: 'eip155:1', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6, fee: '1600000', executions: 2 },

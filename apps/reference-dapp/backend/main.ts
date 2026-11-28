@@ -222,6 +222,8 @@ async function main(): Promise<void> {
       const reconciliation = await sweep(db, { tenantId: config.tenantId }).then(() => null, (error: unknown) => ({ error }));
       const automation = await automations?.sweep().then(() => null, (error: unknown) => ({ error })) ?? null;
       await delegation?.sweep().catch((error: unknown) => logger.warn('delegation.sweep_failed', loadFailureFields(error)));
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): fee accrual (only while collection is active) and collection reconciliation.
+      await backend.platformFees.sweep().catch((error: unknown) => logger.warn('platform_fee.sweep_failed', loadFailureFields(error)));
       await workflowRuns?.sweep().then(
         ({ expired, rearmed }) => { if (expired || rearmed) logger.info('workflow_run.swept', { expired, rearmed }); },
         (error: unknown) => logger.warn('workflow_run.sweep_failed', loadFailureFields(error)));

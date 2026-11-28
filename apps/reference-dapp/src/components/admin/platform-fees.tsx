@@ -18,8 +18,7 @@ const COLLECTION_REASONS: Readonly<Record<string, string>> = {
   PLATFORM_FEE_TREASURY_NOT_CONFIGURED: 'No treasury is configured.',
   PLATFORM_FEE_TREASURY_INVALID: 'The configured treasury is invalid.',
   PLATFORM_FEE_POLICY_NOT_APPROVED: 'The financial accounting policy is not approved.',
-  PLATFORM_FEE_AUTHORIZED_BASIS_NOT_RECORDED: 'No Review records the fee basis the owner authorized yet.',
-  PLATFORM_FEE_COLLECTOR_NOT_IMPLEMENTED: 'No collection mechanism is implemented yet.',
+  PLATFORM_FEE_ACCOUNTING_NOT_ACTIVATED: 'Fee accounting is not activated.',
 };
 const ORIGIN_LABELS: Readonly<Record<string, string>> = { web: 'FloFi Web (Chat or Editor)', web_chat: 'FloFi Web (Chat or Editor)', web_editor: 'FloFi Web (Chat or Editor)',
   legacy_web: 'Legacy Web (recovered history)', mcp_chatgpt: 'ChatGPT MCP', mcp_claude: 'Claude MCP', mcp_other: 'Unidentified MCP client', telegram: 'Telegram',
@@ -43,8 +42,10 @@ export function PlatformFees({ totals, activation, period, environment, language
       <tr><th scope="row">{copy('Ledger period')}</th><td>{copy('Workflow runs completed in: {0}', period)} <span className="admin-badge">{environment}</span></td></tr>
       <tr><th scope="row">{copy('Fee accounting')}</th><td>{activation.accounting.active && accountingFrom
         ? copy('Active for executions created from {0} UTC', accountingFrom) : <span className="admin-badge" data-tone="warn">{copy('Not activated')}</span>}</td></tr>
-      <tr><th scope="row">{copy('Fee collection')}</th><td><span className="admin-badge" data-tone="warn">{copy('Not active')}</span>{' '}
-        {copy(COLLECTION_REASONS[activation.collection.code] ?? activation.collection.code)} <code>{activation.collection.code}</code></td></tr>
+      <tr><th scope="row">{copy('Fee collection')}</th><td>{activation.collection.code === null
+        ? <span className="admin-badge" data-tone="good">{copy('Active')}</span>
+        : <><span className="admin-badge" data-tone="warn">{copy('Not active')}</span>{' '}
+          {copy(COLLECTION_REASONS[activation.collection.code] ?? activation.collection.code)} <code>{activation.collection.code}</code></>}</td></tr>
       {!totals ? <tr><th scope="row">{copy('Fee ledger')}</th><td><span className="admin-badge" data-tone="bad">{copy('Unavailable')}</span></td></tr>
         : !totals.migrated ? <tr><th scope="row">{copy('Fee ledger')}</th><td><span className="admin-badge">{copy('Not installed (migration 0037)')}</span></td></tr>
           : STATES.map(state => <tr key={state}><th scope="row">{copy(STATE_LABELS[state])}</th><td className="num">{count(totals.byState[state] ?? 0)}</td></tr>)}

@@ -22,7 +22,9 @@ export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit
   'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate', 'position-purge-migrate',
   'single-step-runs-migrate', 'workflow-run-purge-migrate', 'developer-projects-migrate', 'studio-migrate', 'studio-certification-migrate', 'studio-queue', 'reconcile-history',
   // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: 0037 (execution origins, platform fee ledger), the origin backfill/correction and fee accrual.
-  'revenue-origins-migrate', 'origin-backfill', 'origin-correct', 'platform-fee-accrue'] as const;
+  'revenue-origins-migrate', 'origin-backfill', 'origin-correct', 'platform-fee-accrue',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): 0038 (the authorized platform fee basis).
+  'revenue-collection-migrate'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -71,14 +73,15 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'developer-projects-migrate':
     case 'studio-migrate':
     case 'studio-certification-migrate':
-    case 'revenue-origins-migrate': {
+    case 'revenue-origins-migrate':
+    case 'revenue-collection-migrate': {
       const activateSync = command === 'finops-sync-migrate', positionPurge = command === 'position-purge-migrate', singleStep = command === 'single-step-runs-migrate';
       const runPurge = command === 'workflow-run-purge-migrate';
       const projects = command === 'developer-projects-migrate';
       const studio = command === 'studio-migrate';
       const studioCertification = command === 'studio-certification-migrate';
-      const revenue = command === 'revenue-origins-migrate';
-      const count = revenue ? 9 : studioCertification ? 8 : studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
+      const revenue = command === 'revenue-origins-migrate', collection = command === 'revenue-collection-migrate';
+      const count = collection ? 10 : revenue ? 9 : studioCertification ? 8 : studio ? 7 : projects ? 6 : runPurge ? 5 : singleStep ? 4 : positionPurge ? 3 : activateSync ? 2 : 1;
       const target = await db.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1');
       if (activateSync && (target.rows[0]?.version ?? 0) < 29) throw new Error('FINOPS_LEDGER_NOT_MIGRATED');
       // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: 0031 follows the optional FinOps 0029/0030, which keep their own owner-run procedures; this
@@ -96,6 +99,8 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: 0037 follows 0029–0036, each activated by its own owner-run procedure; this command never applies
       // them implicitly. On exact schema 36 it applies only the certified 0037; on 37 a rerun applies nothing.
       if (revenue && (target.rows[0]?.version ?? 0) < 36) throw new Error('REVENUE_ORIGINS_REQUIRES_SCHEMA_36');
+      // 0038 follows 0037 (its own owner-run procedure): on exact schema 37 only 0038 is applied; on 38 a rerun applies nothing.
+      if (collection && (target.rows[0]?.version ?? 0) < 37) throw new Error('REVENUE_COLLECTION_REQUIRES_SCHEMA_37');
       const migrations = await loadMigrations();
       // A command whose last migration is already applied verifies a newer certified schema against the shipped history (and the base-28
       // certificate) and leaves it alone: e.g. `finops-sync-migrate` on schema 31, or `single-step-runs-migrate` on schema 33.
@@ -103,14 +108,15 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       const identities = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.slice(0, count);
       if (identities?.length !== count || (singleStep && identities[3]?.name !== 'single_step_runs') || (runPurge && identities[4]?.name !== 'workflow_run_purge')
         || (projects && identities[5]?.name !== 'developer_project_ownership') || (studio && identities[6]?.name !== 'studio_integrations')
-        || (studioCertification && identities[7]?.name !== 'studio_certification') || (revenue && identities[8]?.name !== 'execution_origins_platform_fees'))
-        throw new Error(revenue ? 'REVENUE_ORIGINS_MIGRATION_NOT_CERTIFIED' : studioCertification ? 'STUDIO_CERTIFICATION_MIGRATION_NOT_CERTIFIED' : studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
+        || (studioCertification && identities[7]?.name !== 'studio_certification') || (revenue && identities[8]?.name !== 'execution_origins_platform_fees')
+        || (collection && identities[9]?.name !== 'platform_fee_authorizations'))
+        throw new Error(collection ? 'REVENUE_COLLECTION_MIGRATION_NOT_CERTIFIED' : revenue ? 'REVENUE_ORIGINS_MIGRATION_NOT_CERTIFIED' : studioCertification ? 'STUDIO_CERTIFICATION_MIGRATION_NOT_CERTIFIED' : studio ? 'STUDIO_MIGRATION_NOT_CERTIFIED' : projects ? 'DEVELOPER_PROJECTS_MIGRATION_NOT_CERTIFIED' : runPurge ? 'WORKFLOW_RUN_PURGE_MIGRATION_NOT_CERTIFIED' : singleStep ? 'SINGLE_STEP_RUNS_MIGRATION_NOT_CERTIFIED'
           : positionPurge ? 'POSITION_PURGE_MIGRATION_NOT_CERTIFIED' : 'FINOPS_MIGRATION_NOT_CERTIFIED');
       // A later release that ships 0029/0030 in its own migration list applies them as ordinary migrations; never twice.
       const migrationsToApply = await Promise.all(identities.filter(identity => !migrations.some(shipped => shipped.version === identity.version)).map(async identity => {
         const sql = await readFile(forwardMigrationSqlUrl(identity), 'utf8');
         if (createHash('sha256').update(sql).digest('hex') !== identity.sha256)
-          throw new Error(identity.version === 37 ? 'REVENUE_ORIGINS_MIGRATION_DIGEST_MISMATCH' : identity.version === 36 ? 'STUDIO_CERTIFICATION_MIGRATION_DIGEST_MISMATCH' : identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
+          throw new Error(identity.version === 38 ? 'REVENUE_COLLECTION_MIGRATION_DIGEST_MISMATCH' : identity.version === 37 ? 'REVENUE_ORIGINS_MIGRATION_DIGEST_MISMATCH' : identity.version === 36 ? 'STUDIO_CERTIFICATION_MIGRATION_DIGEST_MISMATCH' : identity.version === 35 ? 'STUDIO_MIGRATION_DIGEST_MISMATCH' : identity.version === 34 ? 'DEVELOPER_PROJECTS_MIGRATION_DIGEST_MISMATCH' : identity.version === 33 ? 'WORKFLOW_RUN_PURGE_MIGRATION_DIGEST_MISMATCH' : identity.version === 32 ? 'SINGLE_STEP_RUNS_MIGRATION_DIGEST_MISMATCH'
             : identity.version === 31 ? 'POSITION_PURGE_MIGRATION_DIGEST_MISMATCH' : 'FINOPS_MIGRATION_DIGEST_MISMATCH');
         return { ...identity, sql };
       }));

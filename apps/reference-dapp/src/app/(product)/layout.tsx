@@ -34,6 +34,7 @@ import '../editor-workspace.css';
 import '../ux-refinement.css';
 import '../editor-fidelity.css';
 // UX-01/02/03/05 (owner guidelines of 21-11-2026): loaded last so it refines the earlier Editor layers.
+import { platformFeeActivation } from '../../platform-fee/activation';
 import '../ux-guidelines.css';
 
 /**
@@ -68,7 +69,8 @@ export default async function ProductLayout({ children }: { children: ReactNode 
     publishedIntegrations: account.publishedIntegrations,
     privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const,
     // BUILD-FLOFI-UX-FIX-003: what `learningAvailability()` returns, known with the page instead of asked when Settings first opens.
-    learningTier: learningConfig(process.env).enabled ? 'ENABLED' as const : sessionAdaptation(process.env) ? 'SESSION' as const : 'OFF' as const };
+    learningTier: learningConfig(process.env).enabled ? 'ENABLED' as const : sessionAdaptation(process.env) ? 'SESSION' as const : 'OFF' as const,
+    platformFeeCollection: platformFeeActivation(process.env).collection.active };
   // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy. The page
   // runs under the proxy's nonce policy (account-csp.ts productPagePolicy): Next.js puts the nonce on its own scripts.
   return <LocaleProvider initialLanguage={(await requestLanguage()).language}>

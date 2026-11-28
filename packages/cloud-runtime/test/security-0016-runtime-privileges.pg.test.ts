@@ -230,7 +230,7 @@ describe('BUILD-FLOFI-SECURITY-0016-WALLET-RECOVERY-001: 0016 runtime-role privi
 
     // Before: production's privileges, as read from its catalog.
     const before = await verification(m);
-    expect(before.identity).toEqual([expect.objectContaining({ version: 16, name: 'owner_history_purge', sha256: SHA_0016, certified: true, ledger_head: 37 })]);
+    expect(before.identity).toEqual([expect.objectContaining({ version: 16, name: 'owner_history_purge', sha256: SHA_0016, certified: true, ledger_head: 38 })]);
     expect(before.role).toEqual([expect.objectContaining({ rolname: m.runtime, rolsuper: false, member_of: '' })]);
     expect(before.summary).toEqual({ runtime_reads_tombstones: true, runtime_writes_tombstones: true, runtime_touches_permits: true, runtime_column_writes: true,
       runtime_member_writes: false, runtime_creates_in_public: false, runtime_execute: true, public_execute: false, public_touches_tables: false });

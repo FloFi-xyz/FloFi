@@ -22,6 +22,8 @@ import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import { runReconciled, type WorkflowProgressView } from './workflow-progress';
 import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
+import { semanticWorkflowFeeBasis } from '../platform-fee/semantic-basis';
+import { feeAmountText } from '../platform-fee/disclosure';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -31,6 +33,8 @@ export type ConversationPhase = 'AUTHORING' | 'AWAITING_MISSING_FIELDS' | 'READY
 export type LifecycleView = {
   readonly workflow: Workflow; readonly context: ReviewContext; readonly source: SimulationSource; readonly authorization: ReviewAuthorization;
   readonly wallet: ReviewWallet; readonly progress: ExecutionLifecycle | null | undefined; readonly invalidWorkflow: boolean;
+  /** BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): the canonical workflow the FloFi fee is disclosed for (all steps), and whether it is charged. */
+  readonly feeWorkflow?: Workflow; readonly feeCollection?: boolean;
   /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: a workflow of several independent owner-wallet actions. `workflow` (and so the Review, binding and execution
    * record) is then the CURRENT step alone; this lists every canonical action with its state, how a funded step is funded, and why a step
@@ -310,7 +314,7 @@ export type ConversationReview = {
   readonly totals: { readonly additional: readonly string[]; readonly ceilings: readonly string[];
     readonly excludes: readonly { readonly text: string; readonly parameters: readonly (string | number)[] }[] };
   /** FloFi's fee as this route actually accounts it: the recorded obligation line, or that nothing is charged or recorded. Never a guess. */
-  readonly flofiFee: { readonly value: string; readonly note: string; readonly recorded: boolean };
+  readonly flofiFee: { readonly value: string; readonly note: string; readonly recorded: boolean; readonly charged?: boolean };
 };
 /** Exact per-asset sums of decimal amounts written "<number> <symbol>"; a value that is not one is left out (and reported by the caller). */
 export function sumByAsset(values: readonly string[]): { readonly sums: readonly string[]; readonly unreadable: number } {
@@ -397,7 +401,11 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
       slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details, destination: step.destination ?? null,
       ...step.destinationOwned !== undefined ? { destinationOwned: step.destinationOwned } : {} };
   });
-  const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee } = payableCosts(fees);
+  const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee: obligation } = payableCosts(fees);
+  // One FloFi fee line for the whole execution, from the same basis the server records as the authorized cap (never a second, per-step fee).
+  const feeWorkflow = view.feeWorkflow ?? view.workflow, feeAmount = feeAmountText(semanticWorkflowFeeBasis(feeWorkflow as never), feeWorkflow);
+  const flofiFee = feeAmount ? { value: feeAmount, note: '', recorded: true, charged: view.feeCollection === true }
+    : obligation.recorded ? { ...obligation, note: '', charged: view.feeCollection === true } : { ...obligation, note: '' };
   const later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];
   const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...unclassified ? [{ text: 'Cost lines FloFi cannot classify', parameters: [] }] : [],
     ...later.length ? [{ text: later.length === 1 ? 'Step {0} (simulated after the steps before it)' : 'Steps {0} (simulated after the steps before them)', parameters: [later.join(', ')] }] : []];

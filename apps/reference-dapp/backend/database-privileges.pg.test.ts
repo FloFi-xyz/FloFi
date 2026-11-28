@@ -77,7 +77,7 @@ beforeAll(async () => {
     expect(createHash('sha256').update(body).digest('hex')).toBe(m.sha256);
     return { ...m, sql: body };
   }));
-  expect(await migrate(owner(), [...await loadMigrations(), ...optional])).toHaveLength(37);
+  expect(await migrate(owner(), [...await loadMigrations(), ...optional])).toHaveLength(38);
   await owner().query(`REVOKE ALL ON execution_purge_permits, workflow_run_purge_permits FROM ${name('runtime')};
     REVOKE INSERT, UPDATE, DELETE ON schema_migrations, execution_purge_audit, workflow_run_purge_audit FROM ${name('runtime')};
     GRANT EXECUTE ON FUNCTION purge_unstarted_execution(text, text, text), purge_unsubmitted_workflow_run(text, text, text) TO ${name('runtime')}`);
@@ -95,8 +95,8 @@ afterAll(async () => {
 it('reports the old ACL and preserves the protected ledger and runtime during additive preparation', async () => {
   const before = await ledger();
   const pre = await audit('audit');
-  expect(pre).toMatchObject({ existing_protections_intact: true, migration_ledger: { version: 37, entries: 37 } });
-  expect(pre.tables).toHaveLength(118 * roles.filter(r => r !== 'owner').length);
+  expect(pre).toMatchObject({ existing_protections_intact: true, migration_ledger: { version: 38, entries: 38 } });
+  expect(pre.tables).toHaveLength(119 * roles.filter(r => r !== 'owner').length);
   await audit('stage', { apply: true });
   await audit('stage');
   expect(await ledger()).toEqual(before);
@@ -144,7 +144,7 @@ it('applies once and on rerun, checks exact privileges and denies new implicit a
 });
 
 it('preserves runtime startup, account authentication, durable logs, the queue and both checked History functions', async () => {
-  expect(await assertSchemaCompatible(runtime())).toMatchObject({ version: 37, application: 28 });
+  expect(await assertSchemaCompatible(runtime())).toMatchObject({ version: 38, application: 28 });
   const runtimeEnv = { DATABASE_URL: url('runtime'), FLOFI_DEPLOYMENT: 'hosted' };
   const schema = await node('main.ts', ['check-schema'], runtimeEnv);
   expect(schema.stdout).toContain('schema.compatible');

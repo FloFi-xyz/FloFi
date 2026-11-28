@@ -601,10 +601,9 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         'The recipient’s Solana wallet has no {0} account yet. The bridge provider creates it at delivery; its one-time cost is part of the provider’s destination fee, already included in the quote.'
           .replace('{0}', route.outputToken.symbol));
       // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the rate this Review disclosed (80 bps; a Review made under the earlier policy keeps 10 bps).
-      if (reviewedFeeRate(q.feePolicy) === 10) fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount, 10), route.inputToken.decimals, route.inputToken.symbol,
-        '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
-      else fee('FloFi fee (0.80% obligation)', flofiFeeUnits(route.inputAmount, 80), route.inputToken.decimals, route.inputToken.symbol,
-        '0.80% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): one concise line; the Review's cost summary shows it once for the whole execution.
+      if (reviewedFeeRate(q.feePolicy) === 10) fee('FloFi fee (0.1%)', flofiFeeUnits(route.inputAmount, 10), route.inputToken.decimals, route.inputToken.symbol, '', 'OBLIGATION');
+      else fee('FloFi fee (0.80%)', flofiFeeUnits(route.inputAmount, 80), route.inputToken.decimals, route.inputToken.symbol, '', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
       // BUILD-FLOFI-MAINNET-EXEC-002: the owner's asset identity changes on the way (material, always visible): WETH is unwrapped 1:1 into ETH first.
       const unwrapping = route.source.ecosystem === 'EVM' && route.source.unwrap !== undefined;

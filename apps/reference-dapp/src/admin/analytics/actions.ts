@@ -50,7 +50,7 @@ function nodeAction(node: unknown, i: number): FactAction | null {
 }
 
 /** The canonical workflow a record executes, wherever the flow's record format keeps it. */
-function workflowOf(record: Record<string, unknown>): unknown {
+export function workflowOf(record: Record<string, unknown>): unknown {
   const review = object(record.review) ? record.review : null, reviews = Array.isArray(record.reviews) ? record.reviews : null;
   const prepared = object(record.prepared) ? record.prepared : null;
   const candidate = record.workflow ?? review?.workflow ?? (reviews && object(reviews.at(-1)) ? (reviews.at(-1) as Record<string, unknown>).workflow : undefined)

@@ -219,7 +219,7 @@ function PublishedStudioMetadata() {
 function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi,
   onExecutionPhase }: ProductNavigation) {
   const { t: tr, language } = useLocale();
-  const { conversationScope = null } = useProductBootstrap();
+  const { conversationScope = null, platformFeeCollection = false } = useProductBootstrap();
   // Server HTML is visible before handlers and initial canvas preferences are ready.
   const [interactive, setInteractive] = useState(false);
   useEffect(() => { setInteractive(true); }, []);
@@ -1025,7 +1025,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.
     persist: editorPersistencePath(pathname), accountScope: conversationScope,
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
-    bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
+    bridge: { workflow: runtimeWorkflow, feeWorkflow: state.workflow, feeCollection: platformFeeCollection, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),

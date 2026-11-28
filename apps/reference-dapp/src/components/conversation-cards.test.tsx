@@ -173,12 +173,16 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 compact chat Review', () => {
     expect(technical(html)).toContain('about 4 gwei per unit');
     expect(visible(renderToStaticMarkup(createElement(ConversationReviewCard, { review: review({ fees }), language: 'PT' })))).toContain('<dt>Taxa de rede</dt><dd>Veja os detalhes técnicos</dd>');
   });
-  it('shows FloFi\'s fee as a visible line when the route records it; the note and the whole breakdown stay under Technical details', () => {
-    const flofiFee = { value: '0.002000000000000001 USDC', note: 'FloFi records this 0.1% fee obligation on the completed workflow.', recorded: true };
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): one concise line, "FloFi fee (0.80%)" / "Taxa FloFi (0,80%)" and its
+  // amount, without explanatory text; while collection is off the same line ends with "not charged".
+  it('shows FloFi\'s fee as one concise line; "not charged" only while collection is off', () => {
+    const flofiFee = { value: '0.002000000000000001 USDC', note: '', recorded: true, charged: false };
     const html = renderToStaticMarkup(createElement(ConversationReviewCard, { review: review({ flofiFee }), language: 'EN' }));
-    expect(visible(html)).toContain('<div data-flofi-fee="obligation"><dt>FloFi fee</dt><dd title="0.002000000000000001 USDC">0.00200001 USDC</dd></div>');
-    expect(visible(html)).not.toContain('FloFi records this 0.1% fee obligation');
-    expect(technical(html)).toContain('<div data-treatment="OBLIGATION" data-flofi-fee="obligation"><dt>FloFi fee</dt><dd>0.002000000000000001 USDC<small>FloFi records this 0.1% fee obligation on the completed workflow.</small></dd></div>');
+    expect(visible(html)).toContain('<div data-flofi-fee="obligation"><dt>FloFi fee (0.80%)</dt><dd title="0.002000000000000001 USDC">0.00200001 USDC · not charged</dd></div>');
+    expect(technical(html)).toContain('<div data-treatment="OBLIGATION" data-flofi-fee="obligation"><dt>FloFi fee (0.80%)</dt><dd>0.002000000000000001 USDC · not charged</dd></div>');
+    const charged = renderToStaticMarkup(createElement(ConversationReviewCard, { review: review({ flofiFee: { ...flofiFee, charged: true } }), language: 'PT' }));
+    expect(visible(charged)).toContain('<dt>Taxa FloFi (0,80%)</dt>');
+    expect(visible(charged)).not.toContain('não cobrada');
   });
   it('a permission names its token once: the value\'s own symbol is not repeated; a value without it gets the symbol', () => {
     const top = visible(renderToStaticMarkup(createElement(ConversationReviewCard, { review: review(), language: 'EN' })));

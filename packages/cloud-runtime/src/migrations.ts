@@ -92,6 +92,8 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
     // 0035 adds Studio proposals. 0036 adds append-only decisions and publication events.
     // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: 0037 adds execution_origins, execution_origin_corrections and platform_fee_ledger (three new tables,
     // own non-SECURITY-DEFINER triggers; nothing pre-existing changes). Applied by an operator command on exact schema 36; never by default.
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion): 0038 adds platform_fee_authorizations (one new table, its own non-SECURITY-DEFINER
+    // trigger; nothing pre-existing changes). Applied by an operator command on exact schema 37; never by default.
     base: { version: 28, name: 'saved_recipients', sha256: 'ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f' },
     migrations: [{ version: 29, name: 'finops_ledger', sha256: '9c04f837b7409622b6b485a21facafb25ce1d579ea2bd492ae859e71795c8de7' },
       { version: 30, name: 'finops_sync', sha256: '63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b' },
@@ -101,8 +103,9 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
       { version: 34, name: 'developer_project_ownership', sha256: '7c698ed7779703abdd6110b39802aa0dad50c74798d6b1eb11a5e35bb4ea1485' },
       { version: 35, name: 'studio_integrations', sha256: '50d4b1c5f08af4ea0ab59e58cdab9e873c00110c9851e8ed1ddd4ff4714e19fb' },
       { version: 36, name: 'studio_certification', sha256: '47d9ab5d5c1736cdfcd2b1110433e5caba9055ec2e90dfd313b7ed1a4e429aa3' },
-      { version: 37, name: 'execution_origins_platform_fees', sha256: '03e82a3120d3d71c32f5315dcaf39d86bbc2266d00264a024884e0b4eecd7074' }],
-    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#29-certificate-0037_execution_origins_platform_fees',
+      { version: 37, name: 'execution_origins_platform_fees', sha256: '03e82a3120d3d71c32f5315dcaf39d86bbc2266d00264a024884e0b4eecd7074' },
+      { version: 38, name: 'platform_fee_authorizations', sha256: '1e6fe62635642fca5266c43e019193be6092fdba36d2e87abc3fae46438ee69f' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#30-certificate-0038_platform_fee_authorizations',
   },
   {
     // BUILD-FLOFI-UNIFIED-COPILOT-001 (Release A): the v27 build keeps working on a database with 0028 — one new table, flofi_account_recipients

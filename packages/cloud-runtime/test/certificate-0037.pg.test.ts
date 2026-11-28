@@ -63,8 +63,10 @@ const LINE = JSON.stringify([{ chainId: 'eip155:1', address: '0x' + 'a0'.repeat(
 
 describe('certificate 0037_execution_origins_platform_fees', () => {
   it('pins 0037 in the base-28 certificate; the v28 build serves schema 37 only through it', async () => {
-    expect(CERTIFICATE.migrations.map(m => [m.version, m.name]).at(-1)).toEqual([37, 'execution_origins_platform_fees']);
-    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#29-certificate-0037_execution_origins_platform_fees');
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (completion, intentional): the same certificate was extended with 0038 (its assessment anchor moved to
+    // §30, which keeps §29); 0037 keeps its exact identity and position (certificate-0038.pg.test.ts).
+    expect(CERTIFICATE.migrations.map(m => [m.version, m.name])[8]).toEqual([37, 'execution_origins_platform_fees']);
+    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#30-certificate-0038_platform_fee_authorizations');
     const { t, chain, m37 } = await schema36();
     const before = await catalog(t.db);
     expect(await migrate(t.db, [...chain, m37])).toEqual([37]);
