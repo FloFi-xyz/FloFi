@@ -67,15 +67,16 @@ export async function copilotStatus(): Promise<{ mode: CopilotMode }> {
 }
 const isV2 = (input: unknown) => !!input && typeof input === 'object' && (input as { version?: unknown }).version === '2';
 /**
- * P0 hotfix (locale contract): the reply language of a V2 turn is the person's interface language, resolved like every page and action
- * (`server/request-language.ts`): the language cookie wins over what the page sends; without a cookie, the page's own language; else the
- * default. An invalid value is left for the request validation to refuse, as before. Presentation only: it never changes what is interpreted.
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09, replaces the P0 locale-contract rule for this field): the reply language of a V2 turn is the
+ * person's conversational language, which the chat reads from their own words (or an explicit "reply in English") and sends; the server keeps it.
+ * Only a turn that names none gets the interface language, resolved like every page and action (`server/request-language.ts`). An invalid value is
+ * left for the request validation to refuse, as before. Presentation only: it never changes what is interpreted.
  */
 async function inInterfaceLanguage(input: unknown): Promise<unknown> {
   if (!isV2(input) || Array.isArray(input) || Object.getPrototypeOf(input) !== Object.prototype) return input;
-  const shown = (input as { replyLanguage?: unknown }).replyLanguage;
-  if (shown !== undefined && shown !== 'EN' && shown !== 'PT') return input;
-  return { ...(input as Record<string, unknown>), replyLanguage: await actionLanguage(shown ?? null) };
+  const sent = (input as { replyLanguage?: unknown }).replyLanguage;
+  if (sent !== undefined) return input;
+  return { ...(input as Record<string, unknown>), replyLanguage: await actionLanguage(null) };
 }
 /** Collect during interpretation; finish durable writes before the server action returns. No in-memory delivery queue. */
 async function interpretWithMetrics(input: unknown, deps: Parameters<typeof interpretCopilotV2>[1]): Promise<CopilotResultV2> {

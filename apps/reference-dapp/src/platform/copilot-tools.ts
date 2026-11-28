@@ -82,7 +82,9 @@ export const COPILOT_TOOL_DEFINITIONS: readonly Record<string, unknown>[] = Obje
     parameters: object({ sourceNetwork: SCHEMA_STRING(NETWORK_TEXT, 60), destinationNetwork: SCHEMA_STRING(NETWORK_TEXT, 60), inputAsset: SCHEMA_STRING('Asset spent, as written.'),
       outputAsset: NULLABLE('Asset received, as written; null for the same asset.'), amount: SCHEMA_STRING('Decimal amount the user wrote ("." separator).', 40) }) },
   { type: 'function', name: 'get_workflow_context', strict: true, description: 'The user\'s current FloFi workflow (steps in order with FloFi\'s own summaries, revision), the pending ' +
-    'proposal and the open request\'s validated, carried, corrected and missing fields. No addresses or identifiers.', parameters: object({}) },
+    'proposal, the open request\'s validated, carried, corrected and missing fields, and the current revision\'s simulation as FloFi verified it (status; ' +
+    'while CURRENT its quote expiry, expected and minimum outputs, cost lines and FloFi\'s fee, which is not charged at this time). No addresses or identifiers.',
+    parameters: object({}) },
   { type: 'function', name: 'get_wallet_context', strict: true, description: 'Whether an EVM and/or Solana wallet is connected and the EVM wallet\'s network. Never an address or balance.',
     parameters: object({}) },
   { type: 'function', name: 'validate_strategy', strict: true, description: 'Validate a FloFi strategy (the MCP strategy contract, version 1 or 2) deterministically: valid with its ' +
@@ -247,7 +249,9 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
       case 'get_workflow_context': {
         exactArgs(rawArguments, []);
         if (!ctx.card) return done({ ok: false, code: 'WORKFLOW_CONTEXT_UNAVAILABLE' });
-        return done({ ok: true, revision: ctx.card.revision, steps: ctx.card.steps, pending: ctx.card.pending, request: ctx.card.request });
+        // A05: the current revision's verified simulation facts, when the client sent them (status always; figures only while CURRENT).
+        return done({ ok: true, revision: ctx.card.revision, steps: ctx.card.steps, pending: ctx.card.pending, request: ctx.card.request,
+          ...ctx.card.simulation ? { simulation: ctx.card.simulation } : {} });
       }
       case 'get_wallet_context': {
         exactArgs(rawArguments, []);
