@@ -5,7 +5,7 @@ import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import type { SimulationSource } from './simulation-presentation';
-import { answerLanguage, bindingIssue, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps, reviewBinding, reviewChanges, workflowHash, type LifecycleView, sumByAsset } from './conversation-lifecycle';
+import { answerLanguage, bindingIssue, chatChangeDependents, chatChangedSteps, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps, reviewBinding, reviewChanges, workflowHash, type LifecycleView, sumByAsset } from './conversation-lifecycle';
 import { conversationCopy } from './conversation-copy';
 import { portuguese } from '../i18n/pt';
 import { reviewFixture, reviewNow, reviewOwner } from '../test-utils/review-fixture';
@@ -128,7 +128,10 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     expect(describeChatChange(empty.workflow, swap, context, 'PT')[0]).toMatch(/^Adicionado ao seu fluxo: /);
     const nodeId = swap.nodes.at(-1)!.nodeId;
     const edited = editorReducer({ workflow: swap, error: null }, { type: 'SET_SWAP_AMOUNT', nodeId, amount: '5', source: 'CHAT', baseRevision: swap.revision }, context).workflow;
-    expect(describeChatChange(swap, edited, context, 'EN')).toEqual([expect.stringMatching(/^Swap updated: 5 USDC/)]);
+    // P1-03: an edit is said before → after (Portuguese with its decimal comma).
+    expect(describeChatChange(swap, edited, context, 'EN')).toEqual(['Swap: 10 → 5 USDC.']);
+    const decimal = editorReducer({ workflow: edited, error: null }, { type: 'SET_SWAP_AMOUNT', nodeId, amount: '0.5', source: 'CHAT', baseRevision: edited.revision }, context).workflow;
+    expect(describeChatChange(edited, decimal, context, 'PT')).toEqual(['Trocar: 5 → 0,5 USDC.']);
     const removal = { type: 'REMOVE', nodeId, source: 'CHAT', baseRevision: edited.revision } as const;
     const removed = editorReducer({ workflow: edited, error: null }, removal, context).workflow;
     expect(describeChatChange(edited, removed, context, 'EN')).toEqual(['Swap removed from your workflow. The other steps are unchanged.']);
@@ -192,5 +195,41 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 (review round 2) re-quote changes', () =>
     expect(reviewChanges(review('BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3'), review('8xYk2PvDDaGkR9ZnAwzXeVGkXzW1sTdQfWw3mVdKk2P')))
       .toEqual([{ label: 'Destination', before: 'BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3', after: '8xYk2PvDDaGkR9ZnAwzXeVGkXzW1sTdQfWw3mVdKk2P' }]);
     expect(reviewChanges(review('BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3'), review('BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3'))).toEqual([]);
+  });
+});
+
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03, §5.6): after a chat edit FloFi names the cards it changed (highlighted, "View in plan") and the
+ * other steps the edit affects, telling an enforceable financial dependency (the step spends this step's output: recalculated at the next review)
+ * from a temporal connection (it only runs after it: its own values stay).
+ */
+describe('P1-03: Chat → Canvas synchronization of an applied chat edit', () => {
+  const context = reviewFixture().context;
+  const swap = (amount: string, editor = initialEditor()) => editorReducer(editor, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount, slippage: '100', source: 'CHAT',
+    baseRevision: editor.workflow.revision }, context);
+  it('names the changed cards in plan order, and each affected step as a financial dependency or a temporal connection, in both languages', () => {
+    const one = swap('10'), two = swap('3', one);
+    const [first, second] = two.workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+    const edited = editorReducer(two, { type: 'SET_SWAP_AMOUNT', nodeId: first!.nodeId, amount: '5', source: 'CHAT', baseRevision: two.workflow.revision }, context).workflow;
+    expect(chatChangedSteps(two.workflow, edited)).toEqual([first!.nodeId]);
+    expect(chatChangedSteps(one.workflow, two.workflow)).toEqual([second!.nodeId]);
+    // The editor orders the second swap after the first: a temporal connection only (its own values stay).
+    expect(chatChangeDependents(two.workflow, edited, context, 'EN')).toEqual(['Step 2 (Swap) only runs after this step; its own values stay as they are.']);
+    expect(chatChangeDependents(two.workflow, edited, context, 'PT')[0]).toMatch(/^A etapa 2 \(.+\) só é executada depois desta; os valores dela continuam os mesmos\.$/);
+    const relinked = (workflow: typeof edited, link: 'NONE' | 'OUTPUT') => ({ ...workflow, nodes: workflow.nodes.map(node => node.nodeId !== second!.nodeId ? node
+      : link === 'NONE' ? { ...node, dependencies: [] } : { ...node, inputs: [...node.inputs, { name: 'source', kind: 'OUTPUT_REFERENCE' as const, value: { nodeId: first!.nodeId, outputId: 'amount-out' } }] }) }) as typeof edited;
+    // Independent steps: nothing else is affected.
+    expect(chatChangeDependents(relinked(two.workflow, 'NONE'), relinked(edited, 'NONE'), context, 'EN')).toEqual([]);
+    // A step that spends the edited step's output is an enforceable financial dependency, recalculated at the next review.
+    const spends = 'Step 2 (Swap) uses this step’s output, so its amount is recalculated at the next review.';
+    expect(chatChangeDependents(relinked(two.workflow, 'OUTPUT'), relinked(edited, 'OUTPUT'), context, 'EN')).toEqual([spends]);
+    // A sequence step funded by the edited step's delivery is a financial dependency too.
+    expect(chatChangeDependents(relinked(two.workflow, 'NONE'), relinked(edited, 'NONE'), context, 'EN', new Map([[second!.nodeId, [first!.nodeId]]]))).toEqual([spends]);
+  });
+  it('the Batch Payment answers: "Add a recipient" asks who and how much; "revisar o pagamento" reviews', () => {
+    expect(lifecycleRequest('Add a recipient')).toBe('ADD_RECIPIENT');
+    expect(lifecycleRequest('Adicionar destinatário')).toBe('ADD_RECIPIENT');
+    expect(lifecycleRequest('revisar o pagamento')).toBe('REVIEW');
+    expect(lifecycleRequest('Review the payment')).toBe('REVIEW');
   });
 });

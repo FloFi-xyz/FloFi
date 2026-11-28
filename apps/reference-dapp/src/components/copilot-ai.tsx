@@ -163,6 +163,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     const list = savedRecipientsSnapshot();
     return { ...list.recipients.length ? { recipients: list.recipients } : {}, ...list.status === 'READY' ? { recipientWrites: true } : {} };
   }, []);
+  const savedRecipientsNow = useCallback(() => savedRecipientsSnapshot().recipients, []);
   /** The workflow, proposal, wallet and facts a message is written against (everything but the saved recipients). */
   const contextNow = useCallback((): CopilotEnvironment => {
     const now = latest.current, store = now.workflow, current = store.state.workflow;
@@ -423,7 +424,9 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
     reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining, automationCreated: automationCreatedNow,
-    awaitingAmount: awaitingAmountNow };
+    awaitingAmount: awaitingAmountNow,
+    // R09–R12: the account's saved recipients as this page holds them now (display only: the chat names a Batch Payment's recipients by label).
+    savedRecipients: savedRecipientsNow };
 }
 
 type Now = { readonly wallet: { readonly account: string | null }; readonly jupiter: { readonly session: { readonly chain: string; readonly account: { readonly address: string } } | null } };

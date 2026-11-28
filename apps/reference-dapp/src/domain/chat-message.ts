@@ -29,6 +29,11 @@ export type ChatMessage = {
    * written). The panel offers balance shortcuts under it only while it is the latest message and the engine still waits for exactly this.
    */
   readonly awaitingAmount?: AwaitingAmount;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): the Canvas step this confirmation is about; the panel offers "View in plan", which brings
+   * that card into view and focuses it (presentation only: nothing is edited). Not kept in history (the step may no longer exist).
+   */
+  readonly focus?: string;
 };
 /** One rendering of a FloFi message. */
 export type ChatContent = Pick<ChatMessage, 'text' | 'notes' | 'options' | 'question' | 'review'>;

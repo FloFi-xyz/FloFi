@@ -8,6 +8,15 @@ import type { BindingIssue, ConversationLanguage } from './conversation-lifecycl
 export type ConversationCopy = {
   readonly added: (action: string, detail: string) => string; readonly updated: (action: string, detail: string) => string; readonly removed: (action: string) => string;
   readonly changed: string; readonly nextQuestion: string; readonly addAnother: string; readonly review: string; readonly addPrompt: string; readonly undo: string;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03, §5.6): an edited step said as before → after ("Supply: 0.1 → 0.2 USDC"), and the steps it
+   * affects: one that spends this step's output (an enforceable financial dependency, recalculated at the next review) or one that only runs after it
+   * (a temporal connection: its own values do not change).
+   */
+  readonly edited: (action: string, change: string) => string; readonly spendsOutput: (step: number, action: string) => string;
+  readonly runsAfter: (step: number, action: string) => string;
+  /** R09–R12: the Batch Payment confirmation's answer that adds a recipient, and what FloFi asks then. */
+  readonly addRecipient: string; readonly addRecipientPrompt: string;
   /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after a final completed result, the next steps the side chat offers to keep building. */
   readonly afterExecution: string; readonly afterExecutionWhole: string; readonly modify: string; readonly modifyPrompt: string;
   /** Without the Copilot: the Canvas card is how a step changes. After a completed run, a "no" closes the question without claims about funds. */
@@ -90,6 +99,11 @@ const en: ConversationCopy = {
   nextQuestion: 'Would you like to add another action or review your workflow?',
   addAnother: 'Add another action', review: 'Review workflow',
   addPrompt: 'Describe the next action, for example “bridge 5 USDC from Base to Arbitrum”.',
+  edited: (action, change) => `${action}: ${change}.`,
+  spendsOutput: (step, action) => `Step ${step} (${action}) uses this step’s output, so its amount is recalculated at the next review.`,
+  runsAfter: (step, action) => `Step ${step} (${action}) only runs after this step; its own values stay as they are.`,
+  addRecipient: 'Add a recipient',
+  addRecipientPrompt: 'Tell me who to add and how much, for example “add 10 USDC for Pedro”.',
   afterExecution: 'What would you like to do next? Add another action to keep building this workflow (what already executed is not sent again), change it, or create a new workflow.',
   afterExecutionWhole: 'What would you like to do next? You can change this workflow, add an action or create a new workflow. This workflow runs as a whole, so after a change the next review covers everything in it again, including what already executed; nothing is sent until you confirm it in your wallet.',
   modify: 'Modify this workflow',
@@ -221,6 +235,11 @@ const pt: ConversationCopy = {
   nextQuestion: 'Quer adicionar outra ação ou revisar o seu fluxo?',
   addAnother: 'Adicionar outra ação', review: 'Revisar fluxo',
   addPrompt: 'Descreva a próxima ação, por exemplo “bridge 5 USDC from Base to Arbitrum”.',
+  edited: (action, change) => `${action}: ${change}.`,
+  spendsOutput: (step, action) => `A etapa ${step} (${action}) usa o resultado desta etapa, então o valor dela é recalculado na próxima revisão.`,
+  runsAfter: (step, action) => `A etapa ${step} (${action}) só é executada depois desta; os valores dela continuam os mesmos.`,
+  addRecipient: 'Adicionar destinatário',
+  addRecipientPrompt: 'Diga quem adicionar e quanto, por exemplo “adicione 10 USDC para Pedro”.',
   afterExecution: 'O que quer fazer agora? Adicione outra ação para continuar este fluxo (o que já foi executado não é reenviado), altere-o ou crie um novo fluxo.',
   afterExecutionWhole: 'O que quer fazer agora? Você pode alterar este fluxo, adicionar uma ação ou criar um novo fluxo. Este fluxo é executado como um todo, então depois de uma alteração a próxima revisão volta a incluir tudo, até o que já foi executado; nada é enviado sem a sua confirmação na carteira.',
   modify: 'Modificar este fluxo',

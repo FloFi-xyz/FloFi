@@ -633,6 +633,10 @@
 .composer-findings{border-left:2px solid var(--warning-line);padding:4px 12px;margin-bottom:14px;background:var(--amber-soft);color:var(--amber)}
 .composer-findings p{margin:4px 0}
 .build-flow-surface .react-flow__node:focus-visible .composer-card{outline:2px solid var(--blue);outline-offset:4px}
+/* BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): a card FloFi just added or edited from the chat is outlined for a moment; motion only when allowed. */
+.build-flow-surface .react-flow__node[data-chat-changed=true] .composer-card{outline:2px solid var(--blue);outline-offset:4px}
+@media(prefers-reduced-motion:no-preference){.build-flow-surface .react-flow__node[data-chat-changed=true] .composer-card{animation:chat-changed-pulse 2.4s ease-out both}}
+@keyframes chat-changed-pulse{0%{box-shadow:0 0 0 6px color-mix(in srgb,var(--blue) 28%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
 .build-flow-surface .react-flow__node.selected .composer-card:not(.active){border-style:dashed;background:var(--canvas-start)}
 
 /* UX-003A: shared composer language on the inspection surface only. */
@@ -1994,6 +1998,8 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .conversation-review-warnings [data-severity="blocking"]{color:var(--red)}
 .message p.conversation-review-note{margin-top:8px;color:var(--muted);font-size:12px}
 .message p.conversation-question{margin-top:10px}
+/* P1-03: the contextual "View in plan" of a chat change (the panel's quiet button style). */
+.message .chat-view-in-plan{display:inline-flex;margin-top:8px;min-height:32px;padding:0 10px;border-radius:6px;font-weight:700}
 
 /* BUILD0-UX-001: Build 0 (Chat) fills the workspace edge to edge (its own dotted field). */
 .main.build-entry-workspace{max-width:none;margin:0;padding:0}

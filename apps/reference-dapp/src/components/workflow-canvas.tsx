@@ -58,7 +58,7 @@ import { canDeleteCanvasEdge, canDeleteCanvasNode, isTextEntry } from '../domain
 import { CANVAS_CLEARANCE, defaultCanvasPosition, shownCanvasPositions, readToolboxMode, saveToolboxMode, type ToolboxMode } from '../domain/canvas-layout';
 import { canvasCardParams } from '../domain/canvas-card-summary';
 import { canvasCardStatus, editorStateDetail, hasCanvasDraft, EDITOR_STATE_LABEL, type EditorOverview } from '../domain/editor-overview';
-import { CANVAS_FOCUS_EVENT } from './editor-overview-panel';
+import { CANVAS_FOCUS_EVENT, CANVAS_HIGHLIGHT_EVENT } from './editor-overview-panel';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 import { canvasMarquee, marqueeIntersects } from '../domain/canvas-marquee';
 import { planCanvasDuplicate } from '../domain/editor-history';
@@ -284,6 +284,35 @@ function CanvasFocus({ onFocus }: { onFocus: (id: string) => void }) {
     window.addEventListener(CANVAS_FOCUS_EVENT, listener);
     return () => window.removeEventListener(CANVAS_FOCUS_EVENT, listener);
   }, [fitView, store]);
+  return null;
+}
+/** How long a card FloFi just changed from the chat stays marked on the Canvas. */
+const CHAT_CHANGE_HIGHLIGHT_MS = 2400;
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (P1-03): the cards a chat change added or edited are marked for a moment (`data-chat-changed`; the
+ * stylesheet outlines them, without motion when reduced motion is asked for). Presentation only: nothing is selected, moved or edited.
+ */
+function CanvasChatHighlight() {
+  useEffect(() => {
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const listener = (event: Event) => {
+      const ids = (event as CustomEvent<unknown>).detail;
+      if (!Array.isArray(ids)) return;
+      // The new revision's cards render first; then each changed one is marked.
+      requestAnimationFrame(() => {
+        for (const id of ids) {
+          if (typeof id !== 'string') continue;
+          const element = document.querySelector<HTMLElement>(`.build-flow-surface .react-flow__node[data-id="${CSS.escape(id)}"]`);
+          if (!element) continue;
+          element.dataset.chatChanged = 'true';
+          const timer = setTimeout(() => { delete element.dataset.chatChanged; timers.delete(timer); }, CHAT_CHANGE_HIGHLIGHT_MS);
+          timers.add(timer);
+        }
+      });
+    };
+    window.addEventListener(CANVAS_HIGHLIGHT_EVENT, listener);
+    return () => { window.removeEventListener(CANVAS_HIGHLIGHT_EVENT, listener); for (const timer of timers) clearTimeout(timer); };
+  }, []);
   return null;
 }
 type ViewportState = 'pending' | 'fitted';
@@ -1276,7 +1305,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onNodeDragStop={(_event, node, draggedNodes) => commitDrag(node, draggedNodes)}
         onEdgeClick={(_event, edge) => { selectNodes([], null); setSelectedEdge({ from: edge.source, to: edge.target }); }}
         onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => runActive ? undefined : connect(source, target, sourceHandle, targetHandle)}>
-        <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
+        <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/><CanvasChatHighlight/>
         <Background {...CANVAS_BACKGROUND}/><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right" onViewportChange={rememberView} onFit={forgetCanvasViewport}/><PanelRevealer/>
         {/* BUILD UX POLISH 004 (UXA-02): mouse wheel zooms at the cursor; lists in cards scroll; the page and chat keep their own scrolling. */}
         <CanvasWheelNavigation onViewportChange={rememberView}/>
