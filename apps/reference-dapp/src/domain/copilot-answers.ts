@@ -10,6 +10,7 @@ import { uniswapLiquidityProfileFor } from './uniswap-liquidity-authoring';
 import { copilotCopy, type CopilotLanguage } from './copilot-messages';
 import type { CopilotQuestionTopic } from './copilot-intent-v2';
 import { positionStepSentence, positionStepSummary, positionStepWallet } from './copilot-positions';
+import type { AssistantSimulation } from './assistant-answers';
 
 /**
  * BUILD-COPILOT-002: read-only answers written by Flofi, never by the model. The model only classifies the question;
@@ -26,8 +27,12 @@ export type CopilotFacts = {
   readonly reviewError: string | null;
   readonly capability: { readonly environment: string; readonly executionSupported: boolean; readonly executionReady: boolean; readonly evidenceCeiling: string | null;
     readonly blockers: readonly { readonly nodeId: string; readonly code: CapabilityBlockerCode | string }[] } | null;
-  /** The active flow's own record: whether a simulation/review exists for the current revision. Contents are not narrated. */
-  readonly simulation: { readonly flow: SimulationFlow; readonly status: 'CURRENT' | 'STALE' | 'NONE'; readonly reviewed: boolean };
+  /**
+   * The active flow's own record: whether a simulation/review exists for the current revision. BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A05):
+   * `details`, when the surface knows them, are that simulation's verified facts bound to this revision (`assistant-facts.ts`): its status, quote
+   * expiry, expected and minimum outputs, costs and FloFi's fee. A retired or expired simulation carries no figure.
+   */
+  readonly simulation: { readonly flow: SimulationFlow; readonly status: 'CURRENT' | 'STALE' | 'NONE'; readonly reviewed: boolean; readonly details?: AssistantSimulation };
   readonly walletConnected: boolean;
 };
 export type CopilotFactsInput = {
@@ -58,7 +63,8 @@ export function buildCopilotFacts(input: CopilotFactsInput): CopilotFacts {
   return { revision: input.workflow.revision, steps,
     pending: input.pending ? { commandType: input.pending.command.type, baseRevision: input.pending.command.baseRevision, diff: [...input.pending.diff] } : null,
     findings: input.findings ?? [], reviewError: input.reviewError ?? null, capability: input.capability ?? null,
-    simulation: { flow: input.simulation?.flow ?? simulationFlowOf(steps), status: input.simulation?.status ?? 'NONE', reviewed: input.simulation?.reviewed ?? false },
+    simulation: { flow: input.simulation?.flow ?? simulationFlowOf(steps), status: input.simulation?.status ?? 'NONE', reviewed: input.simulation?.reviewed ?? false,
+      ...input.simulation?.details ? { details: input.simulation.details } : {} },
     walletConnected: input.walletConnected ?? false };
 }
 
@@ -236,10 +242,14 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
     return real.length ? (pt ? `Usa fundos reais em: ${real.join(', ')}.` : `Uses real funds on: ${real.join(', ')}.`)
       : financial.every(item => item.testFunds === true) ? (pt ? 'Usa apenas tokens de teste.' : 'Uses test tokens only.') : (pt ? 'Confira a rede de cada passo.' : 'Check each step\'s network.');
   };
-  const pendingNote = facts.pending ? [pt ? `Há uma proposta pendente (${facts.pending.commandType}) ainda não aplicada; a resposta descreve o fluxo atual, sem ela.`
-    : `A proposal (${facts.pending.commandType}) is pending and not applied; this answer describes the current workflow without it.`] : [];
+  // A04: no internal command type, node id or failure-policy code in an answer.
+  const pendingNote = facts.pending ? [pt ? 'Há uma proposta pendente ainda não aplicada; a resposta descreve o fluxo atual, sem ela.'
+    : 'A proposal is pending and not applied; this answer describes the current workflow without it.'] : [];
   const answer = (text: string, notes: readonly string[] = []) => ({ text, notes: [...notes, readOnly] });
-  const blockers = () => uniq((facts.capability?.blockers ?? []).map(item => BLOCKER[item.code]?.[pt ? 1 : 0] ?? item.code));
+  /** The steps a step depends on, by their number in this workflow (never a node id). */
+  const dependsOn = (step: WorkflowStep) => step.dependencies.flatMap(id => steps.find(item => item.nodeId === id)?.index ?? []);
+  const blockers = () => uniq((facts.capability?.blockers ?? []).map(item => BLOCKER[item.code]?.[pt ? 1 : 0] ?? (pt ? 'Este passo não pode executar aqui.' : 'This step cannot execute here.')));
+  const invalid = pt ? 'O fluxo atual não é válido. Confira os passos no Canvas.' : 'The current workflow is not valid. Check its steps on the Canvas.';
   const simulationLine = () => {
     const s = facts.simulation;
     if (s.flow === 'MOCKED_CHAIN') return s.status === 'CURRENT' ? (pt ? 'Há artefatos simulados atuais (MOCKED): dados sintéticos de fixture, não uma cotação real nem uma simulação financeira.'
@@ -248,12 +258,13 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
       : (pt ? 'Ainda não há resultado de simulação para este fluxo. Rode Simulate primeiro.' : 'There is no simulation result for this workflow yet. Run Simulate first.');
     return s.status === 'CURRENT' ? (pt ? 'Existe uma simulação atual para esta revisão. Os números dela aparecem na simulação do Editor; o Copilot informa apenas o status.'
       : 'A current simulation exists for this revision. Its figures are in the Editor\'s simulation view; the Copilot reports only its status.')
-      : s.status === 'STALE' ? (pt ? 'A última simulação ficou desatualizada porque o fluxo mudou. Simule de novo.' : 'The last simulation is stale because the workflow changed. Simulate again.')
+      : s.status === 'STALE' ? s.details?.status === 'EXPIRED' ? (pt ? 'A última simulação expirou. Simule de novo.' : 'The last simulation expired. Simulate again.')
+        : (pt ? 'A última simulação ficou desatualizada porque o fluxo mudou. Simule de novo.' : 'The last simulation is stale because the workflow changed. Simulate again.')
       : (pt ? 'Ainda não há resultado de simulação para este fluxo. Rode Simulate primeiro.' : 'There is no simulation result for this workflow yet. Run Simulate first.');
   };
   switch (topic) {
     case 'WORKFLOW_OVERVIEW': case 'STEP_COUNT': {
-      const text = pt ? `Este fluxo (revisão ${facts.revision}) tem ${steps.length} passo${steps.length === 1 ? '' : 's'}.` : `This workflow (revision ${facts.revision}) has ${steps.length} step${steps.length === 1 ? '' : 's'}.`;
+      const text = pt ? `Este fluxo tem ${steps.length} passo${steps.length === 1 ? '' : 's'}.` : `This workflow has ${steps.length} step${steps.length === 1 ? '' : 's'}.`;
       return answer(text, [...(topic === 'STEP_COUNT' ? steps.map(item => `${item.index}. ${stepSummary(item, language)}`) : list(steps)), funds(), ...pendingNote,
         ...(topic === 'WORKFLOW_OVERVIEW' && financial.length ? [pt ? 'Cada transação é simulada e revisada, e sua carteira assina; nada roda automaticamente.'
           : 'Each transaction is simulated and reviewed, and your wallet signs it; nothing runs automatically.'] : [])]);
@@ -263,9 +274,9 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
       return answer(pt ? `Passo ${step.index}: ${stepSentence(step, language)}` : `Step ${step.index}: ${stepSentence(step, language)}`, [
         pt ? `Protocolo: ${step.protocol}. Rede: ${step.network}.` : `Protocol: ${step.protocol}. Network: ${step.network}.`,
         step.testFunds === false ? (pt ? 'Fundos reais.' : 'Real funds.') : step.testFunds ? (pt ? 'Tokens de teste.' : 'Test tokens.') : '',
-        pt ? `Política de falha: ${step.failurePolicy}. Autorização: ${step.authorization === 'MODE_A' ? 'sua carteira assina cada transação' : step.authorization}.`
-          : `Failure policy: ${step.failurePolicy}. Authorization: ${step.authorization === 'MODE_A' ? 'your wallet signs each transaction' : step.authorization}.`,
-        ...(step.dependencies.length ? [pt ? `Depende de: ${step.dependencies.join(', ')}.` : `Depends on: ${step.dependencies.join(', ')}.`] : []),
+        pt ? 'Se uma transação falhar, o Flofi para a execução; nada é tentado de novo automaticamente. Sua carteira assina cada transação.'
+          : 'If a transaction fails, Flofi stops the run; nothing retries automatically. Your wallet signs each transaction.',
+        ...(dependsOn(step).length ? [pt ? `Depende do passo ${dependsOn(step).join(', ')}.` : `Depends on step ${dependsOn(step).join(', ')}.`] : []),
       ].filter(Boolean));
     }
     case 'PROTOCOLS': return answer(financial.length ? (pt ? `Protocolos neste fluxo: ${uniq(financial.map(item => item.protocol)).join('; ')}.`
@@ -275,7 +286,7 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
       const subject = step ? [step] : financial;
       return answer(pt ? 'Aprovações e assinaturas que a Review vai pedir:' : 'Approvals and signatures the reviewed flow asks for:', [
         ...(subject.length ? subject.map(item => `${item.index}. ${approvalLine(item, pt)}`) : [funds()]),
-        pt ? 'Sua própria carteira assina cada transação (MODE_A); o Flofi não guarda chaves e o Copilot não pode assinar.' : 'Your own wallet signs each transaction (MODE_A); Flofi holds no keys and the Copilot cannot sign.']);
+        pt ? 'Sua própria carteira assina cada transação; o Flofi não guarda chaves e o Copilot não pode assinar.' : 'Your own wallet signs each transaction; Flofi holds no keys and the Copilot cannot sign.']);
     }
     case 'EXECUTION_FLOW': return answer(pt ? 'Ao executar, para cada passo: Simulate cria uma simulação nova, a Review mostra as transações exatas e o Strategy Manifest, sua carteira assina cada transação, e o Flofi registra, recupera e reconcilia o resultado.'
       : 'When you execute, for each step: Simulate creates a fresh simulation, Review shows the exact transactions and the Strategy Manifest, your wallet signs each transaction, and Flofi records, recovers and reconciles the result.',
@@ -283,7 +294,7 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
         : (pt ? 'A execução não está disponível neste ambiente; pergunte “por que não consigo executar?” para ver o motivo.' : 'Execution is not available in this environment; ask “why can\'t I execute?” for the reason.')] : []), ...pendingNote]);
     case 'EXECUTION_BLOCKERS': {
       const reasons = blockers(), blocks = facts.findings.filter(item => item.severity === 'BLOCK').map(item => item.message);
-      if (facts.reviewError) reasons.push(pt ? `O fluxo atual não é válido: ${facts.reviewError}` : `The current workflow is not valid: ${facts.reviewError}`);
+      if (facts.reviewError) reasons.push(invalid);
       if (!reasons.length && !blocks.length) return answer(facts.capability?.executionReady ? (pt ? 'O Flofi não vê bloqueio de execução para a revisão atual. Você ainda revisa e assina cada transação.'
         : 'Flofi reports no execution blocker for the current revision. You still review and sign each transaction.')
         : (pt ? 'O Flofi não tem um bloqueio específico para mostrar, mas a execução não está pronta. Siga Simulate e Review.' : 'Flofi has no specific blocker to show, but execution is not ready. Follow Simulate and Review.'), [simulationLine()]);
@@ -297,17 +308,16 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
     case 'SIMULATION': return answer(simulationLine(), facts.simulation.reviewed ? [pt ? 'A Review desta simulação foi aceita.' : 'The Review for this simulation was accepted.'] : []);
     case 'FAILURE': {
       const subject = step ? [step] : financial;
-      return answer(pt ? 'Política de falha ABORT: se uma transação falhar, o Flofi para essa execução; nada continua ou é tentado de novo automaticamente.'
-        : 'Failure policy ABORT: if a transaction fails, Flofi stops that run; nothing continues or retries automatically.', subject.map(item => `${item.index}. ${failureLine(item, pt)}`));
+      return answer(pt ? 'Se uma transação falhar, o Flofi para essa execução; nada continua ou é tentado de novo automaticamente.'
+        : 'If a transaction fails, Flofi stops that run; nothing continues or retries automatically.', subject.map(item => `${item.index}. ${failureLine(item, pt)}`));
     }
-    case 'PROPOSAL': return facts.pending ? answer(pt ? `A proposta pendente (${facts.pending.commandType}, da revisão ${facts.pending.baseRevision}) ainda não foi aplicada:`
-      : `The pending proposal (${facts.pending.commandType}, from revision ${facts.pending.baseRevision}) is not applied yet:`, [...facts.pending.diff,
+    case 'PROPOSAL': return facts.pending ? answer(pt ? 'A proposta pendente ainda não foi aplicada:' : 'The pending proposal is not applied yet:', [...facts.pending.diff,
       pt ? 'Ela só muda o fluxo quando você clica em Apply proposal.' : 'It changes the workflow only when you click Apply proposal.'])
       : answer(pt ? 'Não há proposta pendente.' : 'There is no pending proposal.');
     case 'REVIEW_FINDINGS': return answer(facts.findings.length ? (pt ? `A revisão automática tem ${facts.findings.length} apontamento(s):` : `The automatic review has ${facts.findings.length} finding(s):`)
-      : facts.reviewError ? (pt ? `O fluxo atual não é válido: ${facts.reviewError}` : `The current workflow is not valid: ${facts.reviewError}`)
+      : facts.reviewError ? invalid
       : (pt ? 'A revisão automática não tem apontamentos para a revisão atual.' : 'The automatic review has no findings for the current revision.'),
-      facts.findings.map(item => `${item.severity} · ${item.message}`));
+      facts.findings.map(item => `${item.severity === 'BLOCK' ? (pt ? 'Bloqueio' : 'Blocking') : (pt ? 'Aviso' : 'Warning')} · ${item.message}`));
     case 'CAPABILITIES': return answer(m.capabilities);
     case 'MARKET_DATA': return answer(pt ? 'O Flofi não tem preços ao vivo, APY, saldos, preço de gas, tempo de bridge nem health factor neste espaço de trabalho, e o Copilot nunca estima esses valores.'
       : 'Flofi has no live prices, APY, balances, gas prices, bridge times or health factors in this workspace, and the Copilot never estimates them.',

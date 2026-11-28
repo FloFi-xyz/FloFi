@@ -66,8 +66,10 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     expect(lifecycleRequest('Execute my workflow')).toBe('EXECUTE'); expect(lifecycleRequest('check status')).toBe('STATUS'); expect(lifecycleRequest('Desfazer')).toBe('UNDO');
     expect(lifecycleRequest('Undo this change')).toBe('UNDO'); expect(lifecycleRequest('Desfazer esta alteração')).toBe('UNDO');
     for (const text of ['Swap 10 USDC to ETH on Base.', 'review the swap amount and make it 5', 'bridge 5 USDC from Base to Arbitrum']) expect(lifecycleRequest(text), text).toBeNull();
-    // P0 approved UX (boards 01/02): FloFi replies in the interface language, whatever language was typed (the words are still understood).
-    expect(answerLanguage('Revisar workflow', 'EN')).toBe('EN'); expect(answerLanguage('Review my workflow', 'PT')).toBe('PT'); expect(answerLanguage('ok', 'PT')).toBe('PT');
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09, replaces the P0 interface-language rule): FloFi replies in the language the person writes
+    // in, whatever the interface shows; a message that tells nothing keeps the language already spoken, else the interface's.
+    expect(answerLanguage('Revisar workflow', 'EN')).toBe('PT'); expect(answerLanguage('Review my workflow', 'PT')).toBe('EN'); expect(answerLanguage('ok', 'PT')).toBe('PT');
+    expect(answerLanguage('ok', 'EN', 'PT')).toBe('PT'); expect(answerLanguage('0,2', 'PT', 'EN')).toBe('EN');
   });
   it('reads the phase from the open question and the existing records, execution first', () => {
     const v = view(), empty = { ...v, workflow: initialEditor().workflow };
@@ -155,7 +157,7 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat review additions', () => {
     for (const yes of ['Apply it', 'Aplicar']) expect(classifyAnswer(yes, 'RESOLVE_PROPOSAL')).toBe('YES');
     for (const no of ['Discard it', 'Descartar', 'não']) expect(classifyAnswer(no, 'RESOLVE_PROPOSAL')).toBe('NO');
     for (const unclear of ['maybe', 'swap 3 instead']) expect(classifyAnswer(unclear, 'RESOLVE_PROPOSAL')).toBe('UNCLEAR');
-    expect(answerLanguage('Descartar', 'EN')).toBe('EN');
+    expect(answerLanguage('Descartar', 'EN')).toBe('PT');
   });
   it('sums cost lines exactly per asset (no conversion, no rounding) and counts what it cannot read', () => {
     expect(sumByAsset(['0.0001 ETH', '0.00002 ETH', '0.25 USDC', '1 USDC', 'about 3 dollars'])).toEqual({ sums: ['0.00012 ETH', '1.25 USDC'], unreadable: 1 });

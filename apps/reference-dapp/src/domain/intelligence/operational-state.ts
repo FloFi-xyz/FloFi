@@ -35,7 +35,17 @@ export type OperationalState = {
   readonly steps: readonly { readonly index: number; readonly kind: string; readonly network: string | null; readonly summary: string }[];
   readonly wallet: { readonly evm: { readonly connected: boolean; readonly network: string | null }; readonly solana: { readonly connected: boolean } };
   readonly proposalsShown: number;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A05): the simulation of exactly this revision, as FloFi verified it — its status, and only while it is
+   * CURRENT the quote's expiry, each step's expected and minimum output and the cost lines, plus FloFi's fee (never charged at this time). Absent
+   * when the surface knows no simulation facts. Never an address, node id or chain id.
+   */
+  readonly simulation?: OperationalSimulation;
 };
+export type OperationalSimulation = { readonly status: string; readonly revision: number; readonly expiresAt: string | null;
+  readonly steps: readonly { readonly step: number; readonly action: string; readonly input: string; readonly output: string | null; readonly minimum: string | null }[];
+  readonly costs: readonly { readonly label: string; readonly value: string }[];
+  readonly platformFee: { readonly rate: string; readonly amounts: readonly string[]; readonly recorded: string | null; readonly charged: false } };
 /** Wallet addresses, Solana public keys, position ids and node ids never leave FloFi in a context card. */
 export const redactCard = (text: string): string => redactPositionIds(text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]')
   .replace(/node-\d+/g, 'step').replace(/eip155:\d+|solana:[A-Za-z0-9]+/g, '')).slice(0, CONTEXT_CARD_LIMITS.maxSummaryLength);
@@ -71,22 +81,31 @@ export function operationalState(conversation: CopilotConversation, env: Copilot
   });
   const pending = env.pending ? conversation.referents.find(referent => referent.command === env.pending!.command) : undefined;
   const evmNetwork = env.walletChainId ? networkIdentity(env.walletChainId)?.name ?? null : null;
+  const details = env.facts.simulation.details, bounded = (value: string) => redactCard(value).slice(0, CONTEXT_CARD_LIMITS.maxValueLength);
+  const simulation: OperationalSimulation | null = details ? { status: details.status, revision: details.revision,
+    expiresAt: details.status === 'CURRENT' && details.expiresAt !== null ? new Date(details.expiresAt).toISOString() : null,
+    steps: details.steps.slice(0, CONTEXT_CARD_LIMITS.maxSteps).map(step => ({ step: step.number, action: bounded(step.action), input: bounded(step.input),
+      output: step.output === null ? null : bounded(step.output), minimum: step.minimum === null ? null : bounded(step.minimum) })),
+    costs: details.costs.slice(0, CONTEXT_CARD_LIMITS.maxSteps).map(line => ({ label: bounded(line.label), value: bounded(line.value) })),
+    platformFee: { rate: details.platformFee.rate, amounts: details.platformFee.amounts.map(bounded), recorded: details.platformFee.recorded === null ? null : bounded(details.platformFee.recorded),
+      charged: false } } : null;
   return { version: CONTEXT_CARD_VERSION, revision: env.workflow.revision,
     request: { open: Boolean(draft) || conversation.segment.length > 0, kind: intent?.kind ?? null,
       operations: [...new Set(actions.map(action => OPERATION[action.type] ?? action.type.toLowerCase()))], fields, missing,
       asked, repeatedQuestions: conversation.ledger?.repeats ?? 0, clarifications: conversation.clarifications },
     pending: env.pending ? { summary: redactCard(pending?.sentence ?? env.pending.command.type) } : null,
     steps, wallet: { evm: { connected: Boolean(env.wallet), network: env.wallet ? evmNetwork : null }, solana: { connected: Boolean(env.verified?.solanaOwner) } },
-    proposalsShown: conversation.referents.length };
+    proposalsShown: conversation.referents.length, ...simulation ? { simulation } : {} };
 }
 
 /** The sanitized context a model may read through `get_workflow_context` / `get_wallet_context`: the operational state minus counters. */
-export type CopilotContextCard = Pick<OperationalState, 'version' | 'revision' | 'pending' | 'steps' | 'wallet'> & {
+export type CopilotContextCard = Pick<OperationalState, 'version' | 'revision' | 'pending' | 'steps' | 'wallet' | 'simulation'> & {
   readonly request: Pick<OperationalState['request'], 'open' | 'kind' | 'operations' | 'fields' | 'missing'> };
 export function contextCard(state: OperationalState): CopilotContextCard {
   const { open, kind, operations, fields, missing } = state.request;
   let card: CopilotContextCard = { version: state.version, revision: state.revision, pending: state.pending, steps: state.steps, wallet: state.wallet,
-    request: { open, kind, operations, fields: fields.map(field => ({ ...field, value: field.value === null ? null : redactCard(field.value) })), missing } };
+    request: { open, kind, operations, fields: fields.map(field => ({ ...field, value: field.value === null ? null : redactCard(field.value) })), missing },
+    ...state.simulation ? { simulation: state.simulation } : {} };
   // Bounded: past the size limit the oldest steps, then the open request's fields, are left out (never the revision, pending proposal or wallet).
   while (JSON.stringify(card).length > CONTEXT_CARD_LIMITS.maxBytes && (card.steps.length > 1 || card.request.fields.length))
     card = card.steps.length > 1 ? { ...card, steps: card.steps.slice(1) } : { ...card, request: { ...card.request, fields: card.request.fields.slice(0, -1) } };

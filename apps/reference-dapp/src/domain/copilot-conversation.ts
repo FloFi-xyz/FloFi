@@ -63,6 +63,10 @@ import { liquidityPositionChoiceValid, liquidityPositionKey, type LiquidityPosit
 import { assetNamed, closeNamed, describePosition, halfNamed, liquidityRemovalNamed, ordinalNamed, pairMatches, pairName, positionDetails, positionKey, positionLine,
   positionNetworksText, positionOptionLabel, positionSlippageBps, positionStepWallet, POSITION_FACT_LIMITS, protocolName, rangeFilterNamed, readPositionAnswer, shortPositionId,
   statedPercent, redactPositionIds, type CopilotLiquidityFacts } from './copilot-positions';
+import { readStepEdit, STEP_EDIT_COPY, type StepEdit } from './step-reference';
+import { detectLanguage } from './conversation-language';
+import { termAnswer, termQuestion } from './operation-terms';
+import { answerReadOnly, readOnlyQuestion, type ReadOnlyQuestion } from './assistant-answers';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
   NO_ADAPTATION, proposalReadings, type Adaptation, type AdaptationEvent, type LearningObservation, type ProposalReading, type ReadingField,
   type ReadingFields } from './copilot-adaptation';
@@ -202,6 +206,11 @@ export type CopilotEnvironment = {
    * (sent as the turn's reply language) — whatever language the person typed in; their words are still understood in either language.
    */
   readonly interfaceLanguage?: CopilotLanguage;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A09): the language this turn is answered in — the person's conversational language (their words,
+   * or the language they explicitly chose), which the web chat reads itself. It wins over `interfaceLanguage`, which is then only the screen's.
+   */
+  readonly replyLanguage?: CopilotLanguage;
   /**
    * BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients (public addresses with names), read by the surface from its verified
    * session. Absent: none are available here (signed out, unlinked channel, not migrated). A name selects an address only through the exact-name
@@ -393,9 +402,15 @@ const suppressedPair = (state: CopilotConversation, entry: LexiconEntry) => (sta
 export const lexiconOf = (state: CopilotConversation, env: CopilotEnvironment): LexiconEntry[] => !env.learning ? []
   : mergeLexicon(parseLexicon(state.aliases ?? [], 'SESSION'), parseLexicon(state.adapted ?? [], 'ADAPTED'), parseLexicon(env.learning.private, 'PRIVATE'),
     parseLexicon(env.learning.learned ?? [], 'LEARNED'), parseLexicon(env.learning.global, 'GLOBAL')).filter(entry => statedSource(entry.source) || !suppressedPair(state, entry));
-/** The reply language the user chose (in this conversation, else saved); null = the language of their message, as before. */
+/**
+ * The reply language: the turn's conversational language (A09), else the one the user chose in this conversation, else the interface's, else a
+ * saved preference; null = the language of their message, as before.
+ */
 export const preferredLanguage = (state: CopilotConversation, env: CopilotEnvironment): CopilotLanguage | null =>
-  env.interfaceLanguage ?? (!env.learning ? null : state.languageSet ?? env.learning.language ?? null);
+  env.replyLanguage ?? state.languageSet ?? env.interfaceLanguage ?? (!env.learning ? null : env.learning.language ?? null);
+/** The language every reply of this turn must be written in, model text included (null: the model's own reading, as before). */
+const forcedLanguage = (state: CopilotConversation, env: CopilotEnvironment): CopilotLanguage | null =>
+  env.replyLanguage ?? (env.interfaceLanguage ? state.languageSet ?? env.interfaceLanguage : null);
 function withLearning(result: Result, env: CopilotEnvironment, signals: readonly LearningSignal[], used: readonly LexiconEntry[] = []): Result {
   if (!env.learning || (!signals.length && !used.length)) return result;
   const prior = result.reply.learning;
@@ -1159,7 +1174,13 @@ function assistTurn(state: CopilotConversation, text: string, env: CopilotEnviro
   // buttons ("Across", a saved name, "Arbitrum One"), or a bare amount for an amount question.
   if (draft && (answerDraftField(draft.intent, draft.expected ?? [], text) || [...draft.shown ?? [], ...draft.options.map(option => option.label)].some(label => normalize(label) === normalize(text))
     || ((draft.amountFill || draft.depositFill) && bareAmount(text)) || (draft.intent.kind === 'POSITION' && readPositionAnswer(text) !== null))) return null;
-  const followUp = state.concept ? conceptFollowUp(text) : null, asked = followUp ? null : conceptQuestion(text);
+  const followUp = state.concept ? conceptFollowUp(text) : null, term = followUp ? null : termQuestion(text), asked = followUp || term ? null : conceptQuestion(text);
+  // A04: what one of FloFi's own operations means ("O que significa supply?"): FloFi's short definition; the related concept keeps the follow-ups.
+  if (term) {
+    const defined = termAnswer(term, language), options = defined.concept ? answerConcept(defined.concept, { language, workflowSteps: env.facts.steps }).options : [];
+    return { kind: 'LOCAL', reply: withDraftReminder(reply('ANSWER', defined.text, { options: [...options], topic: 'CONCEPT' }), state, language),
+      next: aside(state, text, a.explained(term.toLowerCase(), 'STANDARD'), { concept: defined.concept ? { id: defined.concept, level: 'STANDARD', protocol: null } : null }) };
+  }
   if (!followUp && !asked) {
     const automated = automationTurn(state, text, env, language);
     if (automated) return automated;
@@ -1200,6 +1221,42 @@ function answerRecipientOffer(state: CopilotConversation, offer: RecipientOffer,
     aside({ ...state, recipientOffer: null }, text, 'Flofi saved the address under a name the user chose.'));
 }
 
+/** No change: the base of an edit FloFi reads itself (only the fields the user named are set). */
+const NO_CHANGES: CopilotChanges = { amount: null, slippageBps: null, network: null, destinationNetwork: null, inputAsset: null, outputAsset: null, recipient: null, routing: null,
+  deposits: [], rangeUnit: null, lower: null, upper: null };
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A03): an amount edit of a step the user named in their own words, resolved by the engine exactly as an
+ * interpreted EDIT (the same target rules, grounding, exact grammar and refusals) without a model. An amount that reads two ways is asked about;
+ * a token written after the amount that is not the step's own is not an amount change, so the normal flow reads it (null).
+ */
+function stepEditTurn(state: CopilotConversation, text: string, edit: StepEdit, env: CopilotEnvironment): TurnStart | null {
+  const language = preferredLanguage(state, env) ?? detectLanguage(text) ?? state.language, m = copilotCopy(language);
+  const next = { ...withUser(state, text), language };
+  const intent: Extract<CopilotIntentV2, { kind: 'EDIT' }> = { version: '2', language, kind: 'EDIT', target: edit.target, changes: NO_CHANGES };
+  if (edit.kind === 'AMBIGUOUS_AMOUNT')
+    return { kind: 'LOCAL', ...question(next, m, STEP_EDIT_COPY[language].amountReadsTwoWays(edit.written, edit.readings), edit.readings,
+      { intent, amountFill: false, snapshot: snapshotOf(env), options: edit.readings.map(value => ({ label: value, fill: { kind: 'ACTION', patch: { amount: value } } })) }) };
+  if (edit.asset) {
+    const resolution = resolveTarget(edit.target, 'EDIT', intent, next, env), base = resolution.ok ? stepAction(resolution.resolved.step) : null;
+    const action = base && !base.composition ? base.actions[0] : null;
+    const spent = action && 'inputAsset' in action ? action.inputAsset : action && 'asset' in action ? action.asset : null;
+    if (resolution.ok && (!spent || spent.toLowerCase() !== edit.asset)) return null;
+  }
+  return { kind: 'LOCAL', ...tallied(resolveIntent({ ...intent, changes: { ...NO_CHANGES, amount: edit.amount } }, next, env, null, {}), env) };
+}
+/**
+ * A05: a question the model classified about the simulation (or a cost or market value) is answered from the current revision's verified simulation
+ * facts when the surface knows them (`facts.simulation.details`); null otherwise (FloFi's general answer stands).
+ */
+function simulationAnswer(topic: CopilotQuestionTopic, latest: string, env: CopilotEnvironment, language: CopilotLanguage): { readonly text: string; readonly notes: readonly string[] } | null {
+  const details = env.facts.simulation.details;
+  if (!details || !['SIMULATION', 'MARKET_DATA', 'OTHER', 'EXECUTION_FLOW'].includes(topic)) return null;
+  const read: ReadOnlyQuestion | null = readOnlyQuestion(latest) ?? (topic === 'SIMULATION' ? { kind: 'SIMULATION', target: null, amount: null } : null);
+  if (!read || read.kind === 'WORKFLOW' || read.kind === 'STEP') return null;
+  const answered = answerReadOnly(read, details, env.facts.steps, language, env.now);
+  return { text: answered.text, notes: [...answered.notes, language === 'PT' ? 'Somente leitura: nada foi proposto, alterado, assinado ou executado.' : 'Read only: nothing was proposed, changed, signed or executed.'] };
+}
+
 // ── Turns ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** Starts a user turn: a local answer (input refused, secret, or a reply to Flofi's own question) or a request for the model. */
 export function startTurn(current: CopilotConversation, raw: string, env: CopilotEnvironment): TurnStart {
@@ -1225,15 +1282,16 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     }
     const statement = parseMemoryStatement(text);
     // FloFi answers in the language the statement was written in, unless the user chose a reply language (a language statement: the new one).
-    // P0 approved UX: with an interface language, a reply-language statement is answered in that language and points to the language setting —
-    // nothing is promised, set or learned that the screen's language would then override.
-    if (statement?.kind === 'LANGUAGE' && env.interfaceLanguage)
-      return { kind: 'LOCAL', reply: reply('ANSWER', learningCopy(env.interfaceLanguage).languageFollowsScreen), next: { ...state, offer: null } };
+    // A09 (replaces the P0 "follows the screen" answer): with an interface language, "reply in English" holds for this conversation, whatever the
+    // screen shows; it is not saved as a preference.
+    if (statement?.kind === 'LANGUAGE' && (env.interfaceLanguage || env.replyLanguage))
+      return { kind: 'LOCAL', reply: reply('ANSWER', learningCopy(statement.language).language(statement.language)),
+        next: { ...state, offer: null, languageSet: statement.language, language: statement.language } };
     if (statement) return { kind: 'LOCAL', ...memoryTurn(state, statement, env.learning, statement.kind === 'LANGUAGE' ? statement.language
       : preferredLanguage(state, env) ?? statement.said) };
   }
   // BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi's optional offer to save a typed address is answered by its buttons or words; anything else drops it.
-  const assistLanguage = env.interfaceLanguage ?? preferredLanguage(state, env) ?? messageLanguage(text) ?? questionLanguage(text) ?? state.language;
+  const assistLanguage = preferredLanguage(state, env) ?? messageLanguage(text) ?? questionLanguage(text) ?? state.language;
   if (state.recipientOffer) {
     const offered = answerRecipientOffer(state, state.recipientOffer, text, assistLanguage, env);
     if (offered) return offered;
@@ -1312,6 +1370,10 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   if (!state.draft) {
     const followed = positionFollowUp(state, text, env);
     if (followed) return followed;
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A03): "Altere a segunda etapa para 0,2", "Mude o supply para 0,2", "change the last card to 5" are read
+    // by FloFi itself — the step by kind and ordinal, the amount exactly as written — and resolved like any edit, never by a model.
+    const edit = readStepEdit(text);
+    if (edit) { const local = stepEditTurn(state, text, edit, env); if (local) return local; }
   }
   let next = withUser(state, text);
   // BUILD-FLOFI-INTELLIGENCE-001: FloFi's sanitized context card travels with the request; the model reads it only through a read-only tool.
@@ -1324,7 +1386,8 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   const maskWith = [...live, ...masks.filter(mask => !live.some(recipient => recipient.id === mask.id))];
   const messages = maskWith.length ? next.transcript.map(entry => ({ ...entry, text: maskSavedRecipients(entry.text, maskWith) })) : next.transcript;
   if (masks.length) next = { ...next, recipientMasks: masks };
-  return { kind: 'REMOTE', request: { version: '2', messages, context: card, contextKey: key, ...env.interfaceLanguage ? { replyLanguage: env.interfaceLanguage } : {} },
+  const forced = forcedLanguage(state, env);
+  return { kind: 'REMOTE', request: { version: '2', messages, context: card, contextKey: key, ...forced ? { replyLanguage: forced } : {} },
     turn: { before: state, state: next, snapshot: snapshotOf(env), contextKey: key } };
 }
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
@@ -1351,7 +1414,8 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   // P0 approved UX: FloFi composes its reply in the interface language, not the language the model detected.
   // P0 hotfix (locale contract): a model text written in another language than the person's (a closed replay fixture, or a model that ignored the
   // reply-language note) is never shown; FloFi's own copy in the person's language stands instead. The values it offered (networks, assets) stay.
-  if (env.interfaceLanguage && 'language' in intent && intent.language !== env.interfaceLanguage) intent = { ...withoutForeignProse(intent), language: env.interfaceLanguage } as CopilotIntentV2;
+  const forced = forcedLanguage(turn.state, env);
+  if (forced && 'language' in intent && intent.language !== forced) intent = { ...withoutForeignProse(intent), language: forced } as CopilotIntentV2;
   // BUILD-FLOFI-INTELLIGENCE-001 (defense in depth): a model explanation shows only when every number in it is one of FloFi's facts — the user's words,
   // the workflow facts and context FloFi holds, and the numbers FloFi's tools returned this turn. Otherwise FloFi's own answer stands alone.
   if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) {
@@ -1363,7 +1427,7 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   // conversation; evidence for the identity's starting language only, never a setting, and only where persistent learning is permitted).
   // P0 approved UX: with an interface language the interpreter is told to answer in it, so its language is no independent evidence: nothing is
   // observed then (the screen's language governs, and a heuristic alone never becomes a learned preference).
-  const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
+  const said = !forced && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
     read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
   const answered = resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language, slots: progressed.slots, ...progressed.progress ? { clarifications: 0 } : {} }, env, null,
@@ -1499,6 +1563,7 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
       }
       const answer = (intent.topic === 'CAPABILITIES' || intent.topic === 'NETWORKS' ? scopedCapabilities(latest, language) : null)
         ?? (intent.topic === 'CONCEPT' ? conceptMenu(language) : null)
+        ?? simulationAnswer(intent.topic, latest, env, language)
         ?? answerQuestion(intent.topic, step, env.facts, language);
       const prose = intent.answer && intent.topic !== 'CONCEPT' ? publicText(safeCopilotProse(intent.answer)) : null;
       const value = withDraftReminder(reply('ANSWER', answer.text, { notes: [...prose ? [intelligenceCopy(language).explanation(prose)] : [], ...answer.notes],
@@ -1609,7 +1674,7 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
       const resolved = resolution.resolved, label = stepLabel(m, resolved.step, language);
       if (resolved.source === 'PENDING') return refused(state, m, m.pendingOnly);
       const plan = removeCommandFor(env.workflow, env.context, resolved.step.nodeId, env.workflow.revision);
-      if (!plan.ok) return refused(state, m, m.refusal[plan.code as keyof typeof m.refusal]?.(label) ?? m.rejectedCode(plan.code));
+      if (!plan.ok) return refused(state, m, m.refusal[plan.code as keyof typeof m.refusal]?.(label) ?? m.couldNotPrepare);
       return propose(state, env, plan.command, `remove ${stepLabel(copilotCopy('EN'), resolved.step, 'EN')}`, m.interpretedRemove(label), [], label);
     }
     case 'INSERT': {
@@ -2477,7 +2542,7 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   if (editNodeId) {
     const edit = editCommandFor(env.workflow, env.context, editNodeId, command);
     if (!edit.ok) { const label = workflowSteps(env.workflow, env.context).find(step => step.nodeId === editNodeId);
-      return refused(state, m, m.refusal[edit.code as keyof typeof m.refusal]?.(label ? stepLabel(m, label, language) : editNodeId) ?? m.rejectedCode(edit.code)); }
+      return refused(state, m, m.refusal[edit.code as keyof typeof m.refusal]?.(label ? stepLabel(m, label, language) : m.sourcePending) ?? m.couldNotPrepare); }
     command = edit.command;
   }
   // Every learned entry that made the difference is named in the proposal, so the user reviews how their words were read.

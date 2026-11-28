@@ -351,7 +351,8 @@ const EN = {
     ...BATCH_PAYMENT_REJECTION_EN,
   } as Record<string, string>,
   routerAmountRange: (ranges: string) => `The amount is outside the Cross-chain Router range: ${ranges}.`,
-  rejectedCode: (code: string) => `Flofi could not author this request (${code}). Nothing changed.`,
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A04): a refusal never shows its internal code (it stays in the reply's `code` for metrics).
+  couldNotPrepare: 'Flofi could not prepare this request. Nothing changed.',
   nothingChanged: 'Nothing changed.',
   // BUILD-COPILOT-002 conversation copy.
   interpreted: (sentence: string) => `Interpreted as “${sentence}”. Review the proposal below: nothing changes until you apply it.`,
@@ -629,7 +630,7 @@ const PT: CopilotCopy = {
     ...BATCH_PAYMENT_REJECTION_PT,
   },
   routerAmountRange: ranges => `O valor está fora da faixa do Cross-chain Router: ${ranges}.`,
-  rejectedCode: code => `O Flofi não conseguiu criar este pedido (${code}). Nada mudou.`,
+  couldNotPrepare: 'O Flofi não conseguiu preparar este pedido. Nada mudou.',
   nothingChanged: 'Nada mudou.',
   interpreted: sentence => `Interpretado como “${sentence}”. Revise a proposta abaixo: nada muda até você aplicá-la.`,
   interpretedRevision: sentence => `Interpretado como uma nova versão da proposta pendente: “${sentence}”. Revise abaixo: nada muda até você aplicá-la.`,
