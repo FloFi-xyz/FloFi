@@ -257,6 +257,11 @@ const FAMILIES: readonly (readonly [RegExp, Plain])[] = [
       'recipient\u2019s amount. Review the workflow again with amounts that fit.',
     PT: 'A etapa anterior entregou menos do que os pagamentos precisam, então nenhum pagamento foi feito: o FloFi nunca reduz o valor de um destinatário. Revise o fluxo ' +
       'de novo com valores que caibam.' }],
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: a fixed amount of an earlier step's output is never reduced, nor topped up from the wallet's balance.
+  [/^WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT$/, { EN: 'The earlier step delivered less than the fixed amount the next step spends, so that step was stopped before ' +
+      'anything was signed: FloFi never reduces a fixed amount or tops it up from your wallet. Review the workflow again with an amount that fits.',
+    PT: 'A etapa anterior entregou menos do que o valor fixo que a próxima etapa gasta, então essa etapa parou antes de qualquer assinatura: o FloFi nunca reduz um valor ' +
+      'fixo nem o completa com o saldo da sua carteira. Revise o fluxo de novo com um valor que caiba.' }],
   [/^BATCH_PAYMENT_(?:NETWORK|ASSET|TOKEN|RECIPIENT)_UNSUPPORTED$/, { EN: 'Batch Payments are available for native ETH and catalog tokens on Base, Arbitrum One, ' +
       'Ethereum and Robinhood Chain (never Stock Tokens), and for SOL, USDC and USDT on Solana.',
     PT: 'Pagamentos em lote estão disponíveis para ETH nativo e tokens do catálogo na Base, Arbitrum One, Ethereum e Robinhood Chain (nunca Stock Tokens), e para SOL, ' +

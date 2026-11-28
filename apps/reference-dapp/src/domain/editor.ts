@@ -32,8 +32,15 @@ import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-l
 import { createRouterNode, routerDetails } from './router-authoring';
 import { createUniversalBridgeFromInput, universalBridgeDetails } from './universal-bridge-authoring';
 import { createCryptoActionNode, canSelectCryptoAssets, cryptoSelectionOf, cryptoReviewContext } from './crypto-action-picker';
+import { nextDependencyBases, type DependencyBases } from './dependency-consistency';
 
-export interface EditorState { readonly workflow: Workflow; readonly error: string | null }
+export interface EditorState { readonly workflow: Workflow; readonly error: string | null;
+  /**
+   * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A01/A07): which earlier step each dependent amount was set against (`dependency-consistency.ts`),
+   * kept in step by this reducer. Editor bookkeeping only (never part of the canonical workflow): it lets the Canvas hold Simulation and Review
+   * back when an earlier step changed after a dependent amount was set. Absent: nothing recorded yet.
+   */
+  readonly dependencyBases?: DependencyBases }
 export const initialEditor = (): EditorState => ({ workflow: initialWorkflow(), error: null });
 /** Engineering fixture editor that starts with the protected mock template at `node-001` (not the product empty canvas). */
 export const templateEditor = (): EditorState => ({ workflow: templateWorkflow(), error: null });
@@ -53,8 +60,16 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   // reach this reducer). A change that would put another step beside it is refused with the existing "use a separate workflow" reason; a
   // workflow that already mixes them (restored from elsewhere) can still be edited, e.g. to remove a step.
   if (!next.error && next.workflow !== state.workflow && workflowMixesPositionManagement(next.workflow) && !workflowMixesPositionManagement(state.workflow))
-    return { workflow: state.workflow, error: 'POSITION_WORKFLOW_HAS_OTHER_STEPS' };
-  return next;
+    return withBases({ workflow: state.workflow, error: 'POSITION_WORKFLOW_HAS_OTHER_STEPS' }, state.dependencyBases);
+  // A refused or empty change keeps the record; an accepted one updates it (a dependent step edited by hand follows its earlier step again).
+  return withBases(next, next.error || next.workflow === state.workflow ? state.dependencyBases : nextDependencyBases(state.workflow, next.workflow, state.dependencyBases));
+}
+function withBases(state: EditorState, bases: DependencyBases | undefined): EditorState {
+  if (bases) return { ...state, dependencyBases: bases };
+  if (!state.dependencyBases) return state;
+  const rest = { ...state };
+  delete (rest as { dependencyBases?: DependencyBases }).dependencyBases;
+  return rest;
 }
 function autoConnect(before: Workflow, after: EditorState, context?: ReviewContext): EditorState {
   if (after.error || after.workflow === before) return after;

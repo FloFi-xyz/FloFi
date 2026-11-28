@@ -1028,9 +1028,12 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   // A wallet answer (or report) for a group FloFi had already stopped while its batch was unanswered: never recorded, never "nothing was sent".
   WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
   WORKFLOW_RUN_EXPIRED: RUN_WINDOW_CLOSED,
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: a fixed amount of an earlier step's output is never reduced, nor topped up from the wallet.
+  WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT: 'The earlier step does not deliver the fixed amount the next step spends, so your wallet was not asked. Nothing was sent; lower the fixed amount or review the workflow again.',
   // P0 hotfix (E1): a bridge in the batch was refused before your wallet was asked (nothing was sent).
   BRIDGE_QUOTE_UNAVAILABLE: 'The bridge provider did not answer with a route just now, so your wallet was not asked. Nothing was sent; try again.',
-  BRIDGE_FEE_ABOVE_LIMIT: 'The bridge fee is above your slippage limit for this amount, so your wallet was not asked. Nothing was sent; raise the limit or bridge more.',
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E08): the constraint is the minimum the owner accepted to receive (amount − its slippage share), not a price move.
+  BRIDGE_FEE_ABOVE_LIMIT: 'The bridge fee would leave less than the minimum you accepted to receive for this amount, so your wallet was not asked. Nothing was sent; bridge a larger amount or accept a lower minimum.',
   BRIDGE_QUOTE_VALIDITY_SHORT: 'The bridge quote would expire before the batch could execute, so your wallet was not asked. Nothing was sent; try again.',
   BRIDGE_FILL_DEADLINE_SHORT: 'The bridge deadline leaves too little time for the delivery, so your wallet was not asked. Nothing was sent; try again.',
   BRIDGE_EXCLUSIVITY_INVALID: 'The bridge quote reserves its delivery past its own deadline, so your wallet was not asked. Nothing was sent; try again.',

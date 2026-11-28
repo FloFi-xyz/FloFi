@@ -22,6 +22,7 @@ import { stepCapability, type CapabilityMode, type TemplateNeed } from './capabi
 import type { ChainTransport } from './chains.ts';
 import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
 import { assetKey, type WorkflowRequirement } from './steps.ts';
+import { consumption } from '../engine/workflow-bindings';
 
 const D = erc7710;
 const fail = (code: string): never => { throw new Error(code); };
@@ -97,6 +98,8 @@ export async function planWorkflowGrants(requirement: WorkflowRequirement, deps:
   const chains = new Map<string, { calls: SerialWorkflowCall[]; steps: { stepIndex: number; calls: number[] }[] }>();
   /** Each step's on-chain guaranteed output (asset key → amount), for the steps bound to it. */
   const guaranteed = new Map<number, { readonly asset: string; readonly amount: bigint }>();
+  // What each producer guaranteed in total (a PERCENT share is a share of it; earlier consumers only reduce what is left).
+  const total = new Map<number, bigint>();
   for (const step of requirement.steps) {
     const refuse = (code: string) => ({ ok: false as const, stepIndex: step.index, code });
     if (step.namespace !== 'eip155') return refuse('WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED');
@@ -112,8 +115,9 @@ export async function planWorkflowGrants(requirement: WorkflowRequirement, deps:
       const producer = requirement.steps[binding.amountFrom], produced = guaranteed.get(binding.amountFrom);
       const key = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
       if (!producer || producer.chain !== step.chain || !produced || produced.asset !== key || key !== assetKey(input)) return refuse('WORKFLOW_BINDING_NOT_EXACT');
-      amount = produced.amount < BigInt(binding.cap) ? produced.amount : BigInt(binding.cap);
-      if (amount <= 0n) return refuse('WORKFLOW_BINDING_NOT_EXACT');
+      const taken = consumption(binding, total.get(binding.amountFrom) ?? produced.amount, produced.amount);
+      if (!taken.ok) return refuse('WORKFLOW_BINDING_NOT_EXACT');
+      amount = taken.amount;
       // Several consumers of one producer share its guarantee: each takes what the earlier ones left.
       guaranteed.set(binding.amountFrom, { asset: produced.asset, amount: produced.amount - amount });
     }
@@ -133,7 +137,7 @@ export async function planWorkflowGrants(requirement: WorkflowRequirement, deps:
       push({ kind: 'ERC20_APPROVE', token: need.tokenIn, spender: profile.router, amount: amount.toString() },
         { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', router: profile.router, tokenIn: need.tokenIn, tokenOut: need.tokenOut, fee: profile.fee, amountIn: amount.toString(),
           amountOutMinimum: minimum.toString(), quotedAmountOut: quoted.toString() });
-      guaranteed.set(step.index, { asset: assetKey({ chain: step.chain, address: need.tokenOut }), amount: minimum });
+      guaranteed.set(step.index, { asset: assetKey({ chain: step.chain, address: need.tokenOut }), amount: minimum }); total.set(step.index, minimum);
     } else if (need.kind === 'EVM_AAVE_V3_SUPPLY' || need.kind === 'EVM_AAVE_V3_BORROW') {
       const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
       if (beneficiary !== wallet) return refuse('AAVE_BENEFICIARY_NOT_CREDENTIAL_WALLET');
@@ -143,7 +147,7 @@ export async function planWorkflowGrants(requirement: WorkflowRequirement, deps:
         // A Borrow's amount is the workflow's own, fixed when the owner authorizes (Borrow never consumes a binding).
         if (binding) return refuse('WORKFLOW_BINDING_NOT_EXACT');
         push({ kind: 'AAVE_V3_BORROW', pool: need.pool, asset: need.asset, amount: amount.toString() });
-        guaranteed.set(step.index, { asset: assetKey({ chain: step.chain, address: need.asset }), amount });
+        guaranteed.set(step.index, { asset: assetKey({ chain: step.chain, address: need.asset }), amount }); total.set(step.index, amount);
       }
     } else return refuse('DELEGATION_TEMPLATE_NOT_IMPLEMENTED');
     if (entry.calls.length > D.WORKFLOW_GRANT_MAX_CALLS) return refuse('WORKFLOW_GRANT_TOO_MANY_CALLS');
@@ -173,6 +177,9 @@ export function workflowScopeProblem(requirement: WorkflowRequirement, scope: Ev
     const binding = requirement.bindings.find(b => b.step === s.stepIndex);
     const amountOk = (amount: string) => binding ? BigInt(amount) > 0n && BigInt(amount) <= BigInt(binding.cap)
       && BigInt(amount) + consumedBefore(requirement, scope, binding.amountFrom, s.stepIndex) <= producerGuarantee(scope, binding.amountFrom)
+      // A FIXED consumer is exactly its amount; a PERCENT one never more than its share of the producer's guarantee.
+      && (binding.consume !== 'FIXED' || BigInt(amount) === BigInt(binding.cap))
+      && (binding.consume !== 'PERCENT' || BigInt(amount) <= producerGuarantee(scope, binding.amountFrom) * BigInt(binding.bps!) / 10_000n)
       : BigInt(amount) === input.amount;
     const need = capability.need;
     if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {

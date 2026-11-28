@@ -158,6 +158,9 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
     ? 'A dependent step in the same group spends the earlier step\'s signed guaranteed minimum, fixed when you sign (anything above it stays in your wallet); '
       + 'a dependent step in a later group spends what was actually delivered after reconciliation, capped by its own amount, and is signed when it becomes due.'
     : 'A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.');
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: a share or a fixed amount of an earlier step's output is said as such (never "up to its amount" alone).
+  if (workflow.bindings.some(b => !b.exact && (b.consume === 'PERCENT' || b.consume === 'FIXED'))) notes.push('A dependent step set to a share spends that share of '
+    + 'what the earlier step delivered; one set to a fixed amount spends exactly that amount and stops before anything is signed when the earlier step delivered less.');
   return { stepCount: workflow.steps.length,
     confirmEachStep: { available: confirmAvailable, reason: confirmReason, walletConfirmationsAtLeast: workflow.steps.length, walletNamespaces: namespaces },
     delegatedSingleAuthorization: { available: delegatedAvailable, reason: delegatedReason, walletSignatures: Math.max(1, enrollments.length), passkeyAssertions: 0, enrollments,

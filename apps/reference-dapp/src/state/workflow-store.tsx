@@ -24,6 +24,8 @@ import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, t
 import { compositionWorkflow, fundingAllocations, sequenceCursor, sequenceOrder, stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 import { proveCompletions, SEQUENCE_RUN_STORAGE_KEY, storedCompletions, type StoredCompletion } from '../domain/sequence-restore';
 import { editorStorage, persistEditor, readPersistedEditor } from '../domain/editor-persistence';
+import { dependencyStates, firstDependencyIssue } from '../domain/dependency-consistency';
+import { knownLiveEstimate, useKnownEstimateVersion } from './build-estimate';
 import { publicStatus } from '../app/public-testnet-action';
 import { editorSingleRunRecord } from '../app/editor-workflow-execution-action';
 import { supplyStatus } from '../app/supply-action';
@@ -275,9 +277,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const batchRef = useRef({ setup: batchSetup, entries: batchEntries }); batchRef.current = { setup: batchSetup, entries: batchEntries };
   const clearBatchDrafts = useCallback(() => { setBatchSetupRaw(null); setBatchEntries({}); }, []);
   // The same gate every other unapplied Canvas draft uses: Simulate, Execute and saving wait while a Batch Payment draft exists.
-  const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs) || batchSetup !== null || Object.keys(batchDrafts).length > 0;
-  const incompleteRef = useRef(authoringIncomplete);
-  incompleteRef.current = authoringIncomplete;
+  const draftsIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs) || batchSetup !== null || Object.keys(batchDrafts).length > 0;
   // A public testnet swap's own chain selects the trusted context (Base Sepolia or Ethereum Sepolia); anything else keeps the initial one.
   const contextOf = useCallback((workflow: Workflow) => {
     const swapChain = workflow.nodes.find(n => n.actionType === 'asset.swap.exact-input' && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
@@ -370,6 +370,15 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   // BUILD-FLOFI-CHAT-E2E-FIX-002: several independent owner-wallet actions form a sequence; each step must lint alone (its runtime's own rule).
   // Each step is linted with its own network's trusted context, exactly as its runtime receives it alone.
   const sequence = useMemo(() => state.workflow.nodes.length ? workflowSequence(state.workflow, workflow => lintWorkflow(workflow, contextOf(workflow))) : null, [state.workflow, contextOf]);
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (A01/A07): a dependent amount set against an earlier step that changed since, or above what that step
+  // is now estimated to deliver, is not a consistent workflow: like an unapplied draft, it holds Simulate, Execute and saving back until the
+  // dependent step's amount is set again on the Canvas.
+  const knownEstimates = useKnownEstimateVersion();
+  const dependencyIssue = useMemo(() => firstDependencyIssue(dependencyStates(state.workflow, sequence, state.dependencyBases,
+    nodeId => knownLiveEstimate(state.workflow, nodeId))), [state.workflow, sequence, state.dependencyBases, knownEstimates]);
+  const authoringIncomplete = draftsIncomplete || dependencyIssue !== null;
+  const incompleteRef = useRef(authoringIncomplete);
+  incompleteRef.current = authoringIncomplete;
   const reviewState = useMemo(() => {
     // BUILD-FLOFI-PRODUCT-UX-001: the empty draft has no canonical form yet (the IR needs a node), so there is nothing to review and nothing invalid.
     if (!state.workflow.nodes.length) return { review: null, reviewError: null };
