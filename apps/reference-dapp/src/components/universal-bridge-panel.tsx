@@ -19,7 +19,8 @@ import { useUniversalRouter } from '../state/universal-router-store';
 import { createUniversalBridgeFromInput, resolveUniversalAsset, universalAssetResolves, universalBridgeDetails,
   universalFeaturedAssets, universalInputOf, UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, UNIVERSAL_BRIDGE_NETWORKS, UNIVERSAL_BRIDGE_ROUTING_LABEL,
   type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
-import { formatTokenAmount } from '../domain/jupiter-authoring';
+import { TokenUnitsText } from './token-amount-text';
+import type { DisplayRounding } from '../domain/token-amount-display';
 import { TokenAmountInput } from './token-amount-input';
 import { AppliedSlippageControls, appliedSlippageMessage, PriceDifferenceInput, SlippageChoices } from './price-difference-input';
 import { appliedSlippageCommand } from '../domain/applied-slippage';
@@ -38,7 +39,12 @@ import { walletNonceMessage } from '../domain/wallet-nonce';
  * BUILD-FLOFI-PRODUCT-UX-001: source and destination assets are independent searchable selectors over FloFi's catalogs (parity with Swap), not a
  * three-token hard-coded list. Selecting a catalog asset never invents a route — discovery still reports executable, quote-only, no liquidity, or provider failure.
  */
-const amountOf = (units: string | null | undefined, decimals: number, symbol: string) => units ? `${formatTokenAmount(units, decimals)} ${symbol}` : '--';
+/**
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): every amount at six significant digits, rounded by purpose (a minimum down, a fee or a
+ * ceiling up, anything else to the nearest, marked "≈"), with the exact amount one tap away. Presentation only: the record keeps base units.
+ */
+const amountOf = (units: string | null | undefined, decimals: number, symbol: string, rounding: DisplayRounding = 'nearest'): ReactNode => units
+  ? <TokenUnitsText units={units} decimals={decimals} symbol={symbol} rounding={rounding}/> : '--';
 const short = (account: string) => account.length > 14 ? `${account.slice(0, 6)}…${account.slice(-4)}` : account;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
 /** A provider still pending when the discovery window closed was not compared: its availability is unknown, never "temporarily unavailable". */
@@ -326,9 +332,9 @@ function RouteDiscovery() {
         <th>{tr('Time')}</th><th>{tr('Fees')}</th><th>{tr('Note')}</th><th/></tr></thead>
         <tbody>{result.candidates.map((c, i) => <tr key={`${c.provider}-${c.bridge}-${i}`} aria-current={i === result.recommended ? 'true' : undefined}>
           <td>{PROVIDER_LABEL[c.provider] ?? c.provider}</td><td>{c.bridge}</td><td>{tr(notCompared(result, c.provider) ? 'Not compared in time' : STATUS_LABEL[c.status])}{i === result.recommended ? tr(' · recommended') : ''}</td>
-          <td>{amountOf(c.expectedOutput, d.outputDecimals, d.outputSymbol)}</td><td>{amountOf(c.minimumOutput, d.outputDecimals, d.outputSymbol)}</td>
+          <td>{amountOf(c.expectedOutput, d.outputDecimals, d.outputSymbol)}</td><td>{amountOf(c.minimumOutput, d.outputDecimals, d.outputSymbol, 'down')}</td>
           <td>{c.estimatedDurationSeconds === null ? '--' : `${c.estimatedDurationSeconds}s`}</td>
-          <td>{c.fees.map(f => `${f.label}: ${formatTokenAmount(f.amount, f.decimals)} ${f.symbol}${f.included ? '' : ' (separate)'}`).join('; ') || '--'}</td>
+          <td>{c.fees.length ? c.fees.map((f, i) => <span key={i}>{i > 0 ? '; ' : ''}{f.label}: {amountOf(f.amount, f.decimals, f.symbol, 'up')}{f.included ? '' : ' (separate)'}</span>) : '--'}</td>
           <td>{c.reason ? tr(REASONS[c.reason] ?? bridgeFailureMessage(c.reason) ?? c.reason) : c.executableBy === 'CERTIFIED_ROUTER' ? tr('Executes on the certified Router bridge for this pair.') : ''}</td>
           <td>{c.executableBy === 'UNIVERSAL_ROUTER' && c.provider === 'relay' && d.routing !== 'RELAY' &&
             <button type="button" className="quiet" disabled={router.busy} onClick={() => choose('RELAY')}>{tr('Use this route')}</button>}</td></tr>)}</tbody></table>
@@ -365,11 +371,11 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
     ?? slippageRangeMessage(code, UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS) ?? bridgeFailureMessage(code) : null;
   const info = router.error ?? record?.error;
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
-  const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';
+  const outp = route ? (u: string | null | undefined, rounding: DisplayRounding = 'nearest') => amountOf(u, route.outputToken.decimals, route.outputToken.symbol, rounding) : () => '--';
   const net = (chain: string | undefined) => Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === chain)?.name ?? chain ?? '';
   const refundAsset = record?.refund?.token === 'native' ? Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === record.refund?.chainId)?.native
     : record?.refund?.chainId === route?.sourceChain ? route?.inputToken : route?.outputToken;
-  const src = r?.source, nativeFee = r ? amountOf(r.feePolicy.networkFeeUpperBound, r.feePolicy.networkFeeDecimals, r.feePolicy.networkFeeSymbol) : '--';
+  const src = r?.source, nativeFee = r ? amountOf(r.feePolicy.networkFeeUpperBound, r.feePolicy.networkFeeDecimals, r.feePolicy.networkFeeSymbol, 'up') : '--';
   const explorer = (chain: string, hash: string) => (Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === chain)?.explorer ?? '') + 'tx/' + hash;
   return <section className="panel" aria-label={tr('Universal cross-chain bridge')}>
     <h2>{tr(view === 'simulate' ? 'Simulate universal bridge' : 'Review universal bridge')}</h2>
@@ -399,8 +405,8 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
         : c.outcome === 'NOT_EXECUTABLE' ? 'not executable' : c.outcome === 'UNAVAILABLE' ? 'unavailable' : 'refused')}${c.code ? ` (${tr(REASONS[c.code] ?? c.code)})` : ''}`).join('; ')}</dd>
       <dt>{tr('You send')}</dt><dd>{inp(route.inputAmount)} {tr('on')} {net(route.sourceChain)}</dd>
       <dt>{tr(record?.evidence ? 'Actual received' : 'Expected to receive')}</dt><dd>{outp(record?.evidence?.received ?? route.expectedOutput)} {tr('on')} {net(route.destinationChain)}</dd>
-      <dt>{tr('Guaranteed minimum')}</dt><dd>{outp(route.minimumOutput)} {tr('— fixed in the provider order; a smaller delivery is a mismatch')}</dd>
-      <dt>{tr('Provider fees')}</dt><dd>{route.fees.length ? route.fees.map((f, i) => <span key={i}>{f.label}: {amountOf(f.amount, f.decimals, f.symbol)}{tr(f.included ? ' (included in the quote)' : ' (paid separately)')}. </span>) : tr('none listed')}</dd>
+      <dt>{tr('Guaranteed minimum')}</dt><dd>{outp(route.minimumOutput, 'down')} {tr('— fixed in the provider order; a smaller delivery is a mismatch')}</dd>
+      <dt>{tr('Provider fees')}</dt><dd>{route.fees.length ? route.fees.map((f, i) => <span key={i}>{f.label}: {amountOf(f.amount, f.decimals, f.symbol, 'up')}{tr(f.included ? ' (included in the quote)' : ' (paid separately)')}. </span>) : tr('none listed')}</dd>
       {/* BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the rate THIS Review disclosed (a run reviewed under the earlier policy keeps 0.1%). */}
       <dt>{tr('FloFi fee')}</dt><dd>{tr(reviewedFeeRate(r.feePolicy) === 10 ? '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.'
         : '0.80% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.')}</dd>
@@ -436,7 +442,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       {record.destination && <p>{tr('Delivery observed on')} {net(record.destination.chainId)}{tr(record.destination.final ? ' (final)' : '')}: {outp(record.destination.amount)} {tr('to')} <code>{record.destination.recipient}</code> ·
         {' '}<a href={explorer(record.destination.chainId, record.destination.transactionHash)} target="_blank" rel="noreferrer">{tr('view transaction')}</a></p>}
       {record.evidence && <section aria-label={tr('Bridge result')} className="swap-result"><h3>{tr('Bridge reconciled')}</h3>
-        <p>{outp(record.evidence.received)} {tr('arrived (guaranteed minimum')} {outp(record.evidence.minimumOutput)}{tr('). Verified on both chains.')}</p>
+        <p>{outp(record.evidence.received)} {tr('arrived (guaranteed minimum')} {outp(record.evidence.minimumOutput, 'down')}{tr('). Verified on both chains.')}</p>
         <p>{tr('Evidence:')} {record.evidence.evidenceClass} · {record.evidence.bundleHash}</p>
         <ul aria-label={tr('Evidence transactions')}>{record.evidence.transactions.map(t => <li key={t.transactionHash}>{t.step.toLowerCase()} · <a href={t.explorer} target="_blank" rel="noreferrer">{t.transactionHash}</a></li>)}</ul>
         <a download="flofi-crosschain-universal-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr('Download Evidence Bundle')}</a></section>}

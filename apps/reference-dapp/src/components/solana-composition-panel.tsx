@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 import { useJupiter } from '../state/jupiter-store';
 import { useSolanaComposition } from '../state/solana-composition-store';
-import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { solanaNotSubmittedReason } from '../domain/solana-refusal';
 
-const sol = (raw: string | null | undefined) => raw == null ? '—' : `${formatTokenAmount(raw, 9)} SOL`;
-const usdc = (raw: string | null | undefined) => raw == null ? '—' : `${formatTokenAmount(raw, 6)} devUSDC`;
-const amountOf = (token: 0 | 1, raw: string | null | undefined) => token === 0 ? sol(raw) : usdc(raw);
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): amounts at six significant digits in the reader's separators, rounded by purpose
+// (a minimum down, a fee or a maximum up, anything else to the nearest, marked "≈"). Presentation only: the record keeps base units.
+const amounts = (language: DisplayLanguage) => {
+  const shown = (raw: string | null | undefined, decimals: number, symbol: string, rounding: DisplayRounding) =>
+    formatDisplayTokenAmount(raw == null ? null : { units: raw, decimals }, { rounding, language, symbol });
+  const sol = (raw: string | null | undefined, rounding: DisplayRounding = 'nearest') => shown(raw, 9, 'SOL', rounding);
+  const usdc = (raw: string | null | undefined, rounding: DisplayRounding = 'nearest') => shown(raw, 6, 'devUSDC', rounding);
+  return { sol, usdc, amountOf: (token: 0 | 1, raw: string | null | undefined, rounding: DisplayRounding = 'nearest') => token === 0 ? sol(raw, rounding) : usdc(raw, rounding) };
+};
 const MESSAGES: Readonly<Record<string, string>> = {
   SOLANA_COMPOSITION_CONTINUE_EXISTING_RUN: 'An earlier composition swapped tokens and still owes its position. Continue it, or end it to keep the tokens, before starting another.',
   SOLANA_COMPOSITION_PREFLIGHT_POSITION_ALREADY_OPEN: 'You already have a Flofi position on this pool. Nothing was swapped; manage that position first.',
@@ -31,7 +37,8 @@ const phases: Readonly<Record<string, string>> = { SIMULATED: 'Simulated — acc
   FAILED: 'The swap did not execute — no position was attempted', ATTENTION: 'Needs attention — observing only; nothing is retried', EXPIRED: 'Review expired or replaced — simulate again' };
 
 export function SolanaCompositionPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
+  const { sol, usdc, amountOf } = amounts(language === 'PT' ? 'PT' : 'EN');
   const jupiter = useJupiter(), c = useSolanaComposition();
   const v = c.record, q = v?.record.review, lp = q?.liquidity, binding = v?.record.binding, position = v?.liquidity;
   const info = c.error ?? v?.record.error ?? null;
@@ -52,9 +59,9 @@ export function SolanaCompositionPanel({ view }: { view: 'simulate' | 'execute' 
       : 'The workflow changed after authorization. The position uses exactly the authorized workflow: restore it, or end the run and keep the swapped tokens.')}</p>}
     {v && q && lp && <dl className="swap-summary" aria-label={tr('Composition plan')}>
       <dt>{tr('Status')}</dt><dd data-composition-phase={v.phase}>{tr(phases[v.phase] ?? v.phase)}</dd>
-      <dt>{tr('1. Swap')}</dt><dd>{tr('{0} → expected {1}, at least {2} ({3} bps)', amountOf(q.swap.input.symbol === 'SOL' ? 0 : 1, q.swap.amount), amountOf(lp.boundToken, q.swap.expectedOutput), amountOf(lp.boundToken, q.swap.minimumOutput), q.swap.slippageBps)}</dd>
-      <dt>{tr('2. Position')}</dt><dd>{tr('{0} at most, plus {1} · range {2}–{3} devUSDC per SOL (ticks {4} to {5}) · {6} bps', lp.boundToken === 1 ? sol(lp.otherMaximum) : usdc(lp.otherMaximum),
-        lp.capIsFullOutput ? tr('100% of the swap’s reconciled output') : tr('the swap’s reconciled output up to {0}', amountOf(lp.boundToken, lp.cap)), lp.lowerPrice, lp.upperPrice, lp.tickLower, lp.tickUpper, lp.slippageBps)}</dd>
+      <dt>{tr('1. Swap')}</dt><dd>{tr('{0} → expected {1}, at least {2} ({3} bps)', amountOf(q.swap.input.symbol === 'SOL' ? 0 : 1, q.swap.amount), amountOf(lp.boundToken, q.swap.expectedOutput), amountOf(lp.boundToken, q.swap.minimumOutput, 'down'), q.swap.slippageBps)}</dd>
+      <dt>{tr('2. Position')}</dt><dd>{tr('{0} at most, plus {1} · range {2}–{3} devUSDC per SOL (ticks {4} to {5}) · {6} bps', lp.boundToken === 1 ? sol(lp.otherMaximum, 'up') : usdc(lp.otherMaximum, 'up'),
+        lp.capIsFullOutput ? tr('100% of the swap’s reconciled output') : tr('the swap’s reconciled output up to {0}', amountOf(lp.boundToken, lp.cap, 'up')), lp.lowerPrice, lp.upperPrice, lp.tickLower, lp.tickUpper, lp.slippageBps)}</dd>
       <dt>{tr('Projected position')}</dt><dd>{tr('{0} + {1} with the expected swap output; {2} + {3} with the minimum. Projection only: the position is simulated and reviewed again after the swap.',
         sol(lp.expected.amount0), usdc(lp.expected.amount1), sol(lp.adverse.amount0), usdc(lp.adverse.amount1))}</dd>
       <dt>{tr('Pool price')}</dt><dd>{tr('{0} devUSDC per SOL now; {1} after the simulated swap (slot {2})', lp.pool.price, lp.pool.postSwapPrice, lp.pool.slot)}</dd>
@@ -65,7 +72,7 @@ export function SolanaCompositionPanel({ view }: { view: 'simulate' | 'execute' 
       {position && <><dt>{tr('Position transaction')}</dt><dd>{position.attempt ? tr(stateText(position.attempt.state, position.verdict)) : tr(position.authorization ? 'review accepted' : 'review prepared')} · {tr('preparation {0}', v.record.consumerRunIds.length)}</dd></>}
     </dl>}
     {position && v?.phase === 'CONSUMING' && !position.attempt && <dl className="swap-summary" aria-label={tr('Position review')}>
-      <dt>{tr('Deposit at most')}</dt><dd>{sol(position.review.operationPlan.tokenA)} + {usdc(position.review.operationPlan.tokenB)}</dd>
+      <dt>{tr('Deposit at most')}</dt><dd>{sol(position.review.operationPlan.tokenA, 'up')} + {usdc(position.review.operationPlan.tokenB, 'up')}</dd>
       <dt>{tr('Expected deposit')}</dt><dd>{sol(position.review.expected.amountA)} + {usdc(position.review.expected.amountB)} {tr('(fresh simulation)')}</dd>
       <dt>{tr('Range state')}</dt><dd>{tr(stateText(position.review.range.state))}</dd>
       <dt>{tr('Signers')}</dt><dd>{tr('your wallet, then a one-time position-mint key created in this browser')}</dd>

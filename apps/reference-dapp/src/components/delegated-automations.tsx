@@ -14,6 +14,8 @@ import type { WorkflowOwner } from '../domain/saved-workflow';
 import { useLocale } from '../i18n/locale';
 import { assertPasskey, passkeysSupported } from './delegation-browser';
 import { useWalletAuthorityEpoch } from './wallet-authority-epoch';
+import { displayTokenAmount, signedAmountExpression } from '../domain/token-amount-display';
+import { ShortAmount } from './token-amount-text';
 
 type Run = (work: () => Promise<{ ok: boolean; code?: string }>, done?: string) => Promise<boolean>;
 export const DELEGATION_ERROR_TEXT: Readonly<Record<string, string>> = {
@@ -264,13 +266,19 @@ export function ScheduleFields({ value, onChange }: { value: ScheduleDraft; onCh
   </div>;
 }
 
-function ExecutionRow({ e }: { e: ExecutionView }) {
+/** R06/R07: a spent or received amount at six significant digits ("≈" before the sign when shortened), the exact amount one tap away. */
+function Moved({ sign, amount, symbol }: { sign: '+' | '−'; amount: string; symbol: string }) {
+  const { language } = useLocale();
+  const shown = displayTokenAmount(amount, { language: language === 'PT' ? 'PT' : 'EN', symbol, marker: false });
+  return <> · {shown ? <ShortAmount shown={signedAmountExpression(shown, sign, symbol)}/> : `${sign}${amount} ${symbol}`}</>;
+}
+export function ExecutionRow({ e }: { e: ExecutionView }) {
   const { t } = useLocale();
   return <li className="delegation-execution" data-state={e.state}>
     <span>{new Date(e.createdAt).toLocaleString()} · <strong>{t(STATE_TEXT[e.state] ?? e.state)}</strong>{e.code && e.state !== 'SETTLED' ? ` (${e.code})` : ''}
       {e.evidenceLevel ? ` · ${t('evidence {0}', e.evidenceLevel)}` : ''}</span>
     <ul>{e.steps.map(s => <li key={s.step}>{t('Step {0}', String(s.step + 1))} · {s.network} · {t(STATE_TEXT[s.state] ?? s.state)} · {t('Credential {0}, grant {1}', short(s.credentialId), short(s.grantId))}
-      {s.spent.map(x => ` · −${x.amount} ${x.symbol}`).join('')}{s.received.map(x => ` · +${x.amount} ${x.symbol}`).join('')}
+      {s.spent.map((x, i) => <Moved key={`spent-${i}`} sign="−" amount={x.amount} symbol={x.symbol}/>)}{s.received.map((x, i) => <Moved key={`received-${i}`} sign="+" amount={x.amount} symbol={x.symbol}/>)}
       {s.submissions.length > 0 && <> · <code title={s.submissions.join(' ')}>{short(s.submissions.at(-1)!)}</code></>}</li>)}</ul>
     {/* BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: FloFi's executor is retired, so a halted execution is never resumed by FloFi. */}
     {e.state === 'HALTED' && <p className="muted" role="note">{t('Automatic execution is retired: finish any remaining step from your own wallet; FloFi will not continue this execution.')}</p>}

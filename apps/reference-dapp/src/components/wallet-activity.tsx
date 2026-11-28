@@ -9,11 +9,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale } from '../i18n/locale';
 import { walletActivity } from '../app/wallet-activity-reads';
-import { activityRows, mergeCoverage, shortAddress, signedAmount, type ActivityCoverage, type ActivityFilter, type CoverageState, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
+import { activityRows, mergeCoverage, shortAddress, signedAmount, signedDisplayAmount, type ActivityCoverage, type ActivityFilter, type CoverageState, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 import { dateLabel } from './dashboard/dashboard-view';
 import { StatusTag } from './dashboard/dashboard-status';
+import { ShortAmount } from './token-amount-text';
 
 /** `hiddenMoves`: every hidden movement of every page loaded, once each (a movement read again on a later page is not counted twice). */
 type Loaded = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: CoverageState; readonly cursor: string | null;
@@ -55,6 +56,8 @@ function Row({ transfer, flofi }: { transfer: WalletTransfer; flofi: boolean }) 
     : transfer.counterparty ? t(transfer.direction === 'IN' ? 'From {0}' : 'To {0}', shortAddress(transfer.counterparty))
     : t(transfer.direction === 'IN' ? 'Sender not shown by the network data' : 'Recipient not shown by the network data');
   const title = kind ? t(kind) : t(transfer.direction === 'IN' ? 'Received' : transfer.direction === 'OUT' ? 'Sent' : 'Self-transfer');
+  // R06/R07: six significant digits, the exact amount one tap away.
+  const amount = signedDisplayAmount(transfer, language === 'PT' ? 'PT' : 'EN');
   return <li className="wallet-activity-row" data-direction={transfer.direction} data-kind={transfer.kind}>
     <span className="wallet-activity-icon" aria-hidden="true"><DirectionIcon direction={transfer.direction}/></span>
     <div className="wallet-activity-main">
@@ -72,7 +75,7 @@ function Row({ transfer, flofi }: { transfer: WalletTransfer; flofi: boolean }) 
     </div>
     <p className="wallet-activity-amount numeric" data-direction={transfer.direction}>
       <TokenBrandIcon symbol={transfer.asset.symbol} network={transfer.networkName} address={transfer.asset.address}/>
-      <span>{signedAmount(transfer)}</span>
+      <span>{amount ? <ShortAmount shown={amount}/> : signedAmount(transfer)}</span>
       <span className="sr-only">{t(transfer.direction === 'IN' ? 'received' : transfer.direction === 'OUT' ? 'sent' : 'moved between your accounts')}</span>
     </p>
   </li>;

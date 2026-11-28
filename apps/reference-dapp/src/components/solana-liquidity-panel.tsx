@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { createSolanaLiquidityNode, solanaLiquidityDetails, solanaLiquidityInputOf, SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, type SolanaLiquidityInput } from '../domain/solana-liquidity-authoring';
 import { poolPriceBounds, usePoolPriceRange } from './pool-price-range';
 import { usePoolContributionInputs } from './canvas-card-inputs';
 import { TokenAmountInput } from './token-amount-input';
-import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { liquidityPositionOperationPhrase } from '../domain/simulation-presentation';
 import { useJupiter } from '../state/jupiter-store';
@@ -120,15 +120,21 @@ const mainnetMessages: Record<string, string> = {
 };
 const message = (code: string | null | undefined, devnet = true) => !code ? null : (devnet ? undefined : mainnetMessages[code.replace(/^ORCA_LIQUIDITY_/, '')] ?? mainnetMessages[code])
   ?? messages[code.replace(/^ORCA_LIQUIDITY_/, '')] ?? messages[code] ?? null;
-const amounts = (devnet: boolean) => ({ sol: (lamports: string | null | undefined) => lamports ? `${formatTokenAmount(lamports, 9)} ${devnet ? 'Devnet SOL' : 'SOL'}` : '--',
-  usdc: (units: string | null | undefined) => units ? `${formatTokenAmount(units, 6)} ${devnet ? 'devUSDC' : 'USDC'}` : '--' });
+// BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): amounts at six significant digits in the reader's separators, rounded by purpose
+// (a minimum down, a fee or a maximum up, anything else to the nearest, marked "≈"). Presentation only: the record keeps base units.
+const amounts = (devnet: boolean, language: DisplayLanguage) => {
+  const shown = (units: string | null | undefined, decimals: number, symbol: string, rounding: DisplayRounding) =>
+    formatDisplayTokenAmount(units ? { units, decimals } : null, { rounding, language, symbol, unavailable: '--' });
+  return { sol: (lamports: string | null | undefined, rounding: DisplayRounding = 'nearest') => shown(lamports, 9, devnet ? 'Devnet SOL' : 'SOL', rounding),
+    usdc: (units: string | null | undefined, rounding: DisplayRounding = 'nearest') => shown(units, 6, devnet ? 'devUSDC' : 'USDC', rounding) };
+};
 const labels: Record<LiquidityOperation, string> = { OPEN: 'Open position and add liquidity', DECREASE_PARTIAL: 'Partially remove liquidity and collect fees',
   EXIT: 'Remove all liquidity, collect fees and close the position', COLLECT: 'Collect fees (liquidity unchanged)' };
 /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: what an operation's simulate and execute buttons name. */
 const subject = (operation: string) => operation === 'OPEN' ? 'position' : operation === 'COLLECT' ? 'collection' : 'removal';
 
 export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   const { state, stagedPosition: staged } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
   // Only an Orca operation (the Devnet engineering command or an Orca mainnet choice) is staged here; a Uniswap choice never is.
   const stagedPosition = staged && (!staged.choice || staged.choice.position.protocol === 'ORCA') ? staged : null;
@@ -154,7 +160,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
   const created = review?.accounts.mayBeCreated ?? [];
   // BUILD-SOLANA-MAINNET-001: the position's own cluster names every value. BUILD-SOLANA-TRANSFER-UX-001: mainnet-beta real funds are stated in the
   // review and confirmed in the wallet; there is no separate acknowledgement step.
-  const devnet = liquidity.network === 'Solana Devnet', { sol, usdc } = amounts(devnet);
+  const devnet = liquidity.network === 'Solana Devnet', { sol, usdc } = amounts(devnet, language === 'PT' ? 'PT' : 'EN');
   const canExecuteNow = canExecute;
   return <section className="panel" aria-label={tr(devnet ? "Solana Devnet liquidity" : "Solana liquidity")}><h2>{tr(view === 'simulate' ? 'Simulate liquidity position' : 'Review liquidity position')}</h2>
     {fields && (devnet ? <p>{tr("Concentrated liquidity on Solana Devnet via Orca Whirlpools: up to ")}{tr(fields.maxSol)}{tr(" Devnet SOL and ")}{tr(fields.maxDevUsdc)}{tr(" devUSDC between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" devUSDC per SOL.")}</p>
@@ -191,24 +197,24 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
         <dt>{tr("Token mints")}</dt><dd>{tr(devnet ? "Devnet SOL " : "SOL ")}<code>{tr(review.token0.mint)}</code>{tr(devnet ? " / devUSDC (test) " : " / USDC ")}<code>{tr(review.token1.mint)}</code></dd>
         <dt>{tr("Pool price")}</dt><dd>{tr(review.pool.price)}{tr(devnet ? " devUSDC per SOL · current tick " : " USDC per SOL · current tick ")}{tr(review.pool.tickCurrentIndex)}{tr(" · tick spacing ")}{tr(review.pool.tickSpacing)}{tr(" · fee ")}{tr(review.pool.feeRate / 10_000)}{tr("% · slot ")}{tr(review.pool.slot)}</dd>
         <dt>{tr("Range")}</dt><dd>{tr(review.range.lowerPrice)}–{tr(review.range.upperPrice)}{tr(devnet ? " devUSDC per SOL · aligned ticks " : " USDC per SOL · aligned ticks ")}{tr(review.range.tickLower)}{tr(" to ")}{tr(review.range.tickUpper)} · {tr(review.range.state.toLowerCase().replace('_', ' '))}</dd>
-        <dt>{tr("Maximum inputs")}</dt><dd>{tr(sol(review.intent.amount0Max))} · {tr(usdc(review.intent.amount1Max))}</dd>
+        <dt>{tr("Maximum inputs")}</dt><dd>{tr(sol(review.intent.amount0Max, 'up'))} · {tr(usdc(review.intent.amount1Max, 'up'))}</dd>
         {review.operation === 'OPEN' ? <>
           <dt>{tr("Expected contribution")}</dt><dd>{tr(sol(review.expected.amountA))} + {tr(usdc(review.expected.amountB))}{tr(" (simulated, not executed)")}</dd>
           <dt>{tr("Expected liquidity")}</dt><dd>{tr(review.expected.liquidity)}</dd>
-          <dt>{tr("Slippage bounds")}</dt><dd>{tr(review.intent.slippageBps)}{tr(" bps → at most ")}{tr(sol(review.operationPlan.tokenA))}{tr(" and ")}{tr(usdc(review.operationPlan.tokenB))}{tr(", never above your maxima")}</dd>
+          <dt>{tr("Slippage bounds")}</dt><dd>{tr(review.intent.slippageBps)}{tr(" bps → at most ")}{tr(sol(review.operationPlan.tokenA, 'up'))}{tr(" and ")}{tr(usdc(review.operationPlan.tokenB, 'up'))}{tr(", never above your maxima")}</dd>
           <dt>{tr("Expected residual")}</dt><dd>{tr(sol(sim.residualTokenA))}{tr(devnet ? " not deposited (stays in your wallet) · devUSDC balance after " : " not deposited (stays in your wallet) · USDC balance after ")}{tr(usdc(sim.residualTokenB))}</dd>
         </> : <>
           <dt>{tr("What happens")}</dt><dd>{tr(liquidityPositionOperationPhrase('ORCA', review.operation, review.operation === 'EXIT'))}</dd>
           <dt>{tr("Liquidity removed")}</dt><dd>{tr(review.expected.liquidity)}{tr(" of the position (remaining ")}{tr(review.expected.positionLiquidityAfter)})</dd>
-          <dt>{tr("Expected principal returned")}</dt><dd>{tr(sol(review.expected.amountA))} + {tr(usdc(review.expected.amountB))}{tr("; minimum ")}{tr(sol(review.operationPlan.tokenA))} + {tr(usdc(review.operationPlan.tokenB))} ({tr(review.intent.slippageBps)}{tr(" bps)")}</dd>
+          <dt>{tr("Expected principal returned")}</dt><dd>{tr(sol(review.expected.amountA))} + {tr(usdc(review.expected.amountB))}{tr("; minimum ")}{tr(sol(review.operationPlan.tokenA, 'down'))} + {tr(usdc(review.operationPlan.tokenB, 'down'))} ({tr(review.intent.slippageBps)}{tr(" bps)")}</dd>
           <dt>{tr("Fees collected (simulated)")}</dt><dd>{tr(sol(sim.collectedFeesA))} + {tr(usdc(sim.collectedFeesB))}{tr(" (separate from principal)")}</dd>
           <dt>{tr("Fees collected, at least")}</dt><dd>{tr("At least the simulated amount; fees accrued until execution are also collected. Tokens return as the pool's own tokens.")}</dd>
         </>}
-        <dt>{tr("Owner balances")}</dt><dd>{tr(sol(review.ownerBalances.lamports))} · {tr(usdc(review.ownerBalances.tokenB ?? '0'))}</dd>
+        <dt>{tr("Owner balances")}</dt><dd>{tr(sol(review.ownerBalances.lamports, 'down'))} · {tr(usdc(review.ownerBalances.tokenB ?? '0', 'down'))}</dd>
         <dt>{tr("Token accounts")}</dt><dd>{tr("wrapped SOL (temporary, closed in the same transaction) ")}<code>{tr(review.accounts.ownerTokenA)}</code>{tr(devnet ? " · devUSDC " : " · USDC ")}<code>{tr(review.accounts.ownerTokenB)}</code>{tr(" · position token (Token-2022) ")}<code>{tr(review.accounts.positionTokenAccount)}</code></dd>
         <dt>{tr("Position")}</dt><dd>{tr(review.operation === 'OPEN' ? 'new' : 'existing')}{tr(" position mint ")}<code>{tr(review.accounts.positionMint)}</code>{tr(" · position account ")}<code>{tr(review.accounts.position)}</code>{tr(" · owner: your wallet")}</dd>
         <dt>{tr("Accounts that may be created")}</dt><dd>{created.length ? created.map(a => <code key={a}>{tr(a)} </code>) : 'none'}</dd>
-        <dt>{tr("Estimated network fee")}</dt><dd>{tr(sol(review.estimatedFeeLamports))} ({tr(review.signers.length)}{tr(" signature")}{tr(review.signers.length > 1 ? 's' : '')})</dd>
+        <dt>{tr("Estimated network fee")}</dt><dd>{tr(sol(review.estimatedFeeLamports, 'up'))} ({tr(review.signers.length)}{tr(" signature")}{tr(review.signers.length > 1 ? 's' : '')})</dd>
         <dt>{tr("Account deposits")}</dt><dd>{tr(review.operation === 'OPEN' ? `${sol(sim.rentPaidLamports)} refundable when the position is closed` : sim.rentRefundedLamports !== '0' ? `${sol(sim.rentRefundedLamports)} refunded on close` : 'none')}</dd>
         <dt>{tr("Programs")}</dt><dd>{review.programs.map(p => <code key={p}>{tr(p)} </code>)}</dd>
         <dt>{tr("Review freshness")}</dt><dd>{tr(fresh > 0 ? `Valid for ${fresh}s` : 'Expired — simulate again')}</dd>
@@ -217,7 +223,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
       {review && <dl className="swap-summary" aria-label={tr("Liquidity review")}>
         <dt>{tr("Owner and position authority")}</dt><dd>{tr(review.owner)}</dd><dt>{tr("Operation")}</dt><dd>{tr(labels[review.operation])}</dd>
         <dt>{tr("Range")}</dt><dd>{tr("ticks ")}{tr(review.range.tickLower)}{tr(" to ")}{tr(review.range.tickUpper)} ({tr(review.range.lowerPrice)}–{tr(review.range.upperPrice)}{tr(devnet ? " devUSDC per SOL)" : " USDC per SOL)")}</dd>
-        <dt>{tr(review.operation === 'OPEN' ? 'Deposit at most' : 'Receive at least')}</dt><dd>{tr(sol(review.operationPlan.tokenA))} + {tr(usdc(review.operationPlan.tokenB))}{tr(" · liquidity ")}{tr(review.operationPlan.liquidityDelta)}</dd>
+        <dt>{tr(review.operation === 'OPEN' ? 'Deposit at most' : 'Receive at least')}</dt><dd>{tr(sol(review.operationPlan.tokenA, review.operation === 'OPEN' ? 'up' : 'down'))} + {tr(usdc(review.operationPlan.tokenB, review.operation === 'OPEN' ? 'up' : 'down'))}{tr(" · liquidity ")}{tr(review.operationPlan.liquidityDelta)}</dd>
         <dt>{tr("Signers")}</dt><dd>{review.signers.length === 2 ? <>{tr("your wallet, then a one-time position-mint key created in this browser (")}<code>{tr(review.signers[1])}</code>{tr("; no authority after creation)")}</> : 'your wallet only'}</dd>
         <dt>{tr("Exact message")}</dt><dd><code>{tr(review.messageHash)}</code>{tr(" · blockhash ")}<code>{tr(review.blockhash)}</code>{tr(" · valid to block height ")}{tr(review.lastValidBlockHeight)}</dd>
         {!attempt && <><dt>{tr("Review freshness")}</dt><dd>{tr(fresh > 0 ? `Valid for ${fresh}s` : 'Expired')}</dd></>}

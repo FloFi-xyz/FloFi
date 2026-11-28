@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
+import { formatDisplayTokenAmount, type DisplayLanguage, type DisplayRounding } from '../domain/token-amount-display';
 
 import { useState, type FormEvent } from 'react';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
@@ -116,7 +117,14 @@ const messages: Record<string, string> = {
   TRANSFER_RPC_RATE_LIMITED: 'The public Robinhood Testnet provider is busy. Try again.',
 };
 export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (R06/R07): balances, costs and fee budgets at six significant digits in the reader's separators,
+  // rounded by purpose (a balance or worst case down, a cost or budget up, an observed figure to the nearest); the rows labelled "Exact" keep
+  // every digit. The unit stays where the sentence writes it. Presentation only.
+  const lang: DisplayLanguage = language === 'PT' ? 'PT' : 'EN';
+  const shortAmount = (units: string | null | undefined, decimals: number, rounding: DisplayRounding) =>
+    formatDisplayTokenAmount(units ? { units, decimals } : null, { rounding, language: lang });
+  const ethShort = (wei: string | null | undefined, rounding: DisplayRounding) => shortAmount(wei, 18, rounding);
   const { state } = useWorkflow(), run = useRobinhoodTransfer(), wallet = useBuild009Wallet(), record = run.record, review = record?.review;
   const node = state.workflow.nodes.find(n => n.actionType === 'asset.transfer'), fields = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
   // The reviewed chain (else the authored one) names the network; Robinhood Testnet before anything is authored, as before.
@@ -142,18 +150,18 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
         <div><dt>{tr("Asset")}</dt><dd>{tr(symbol)} · <span className="numeric">{tr(review.asset.token)}</span></dd></div>
         <div><dt>{tr("Exact amount")}</dt><dd className="numeric">{tr(amountText)} {tr(symbol)}{tr(" (")}{tr(review.value)}{tr(" units)")}</dd></div>
         {review.asset.multiplierWad && <div><dt>{tr("Shares per token")}</dt><dd className="numeric">{tr(formatAssetAmount(review.asset.multiplierWad, 18))}</dd></div>}
-        <div><dt>{tr("Asset balance")}</dt><dd className="numeric">{tr(formatAssetAmount(review.asset.balanceBefore, review.asset.decimals))} → {tr(formatAssetAmount(review.asset.expectedBalanceAfter, review.asset.decimals))} {tr(symbol)}</dd></div>
+        <div><dt>{tr("Asset balance")}</dt><dd className="numeric">{tr(shortAmount(review.asset.balanceBefore, review.asset.decimals, 'down'))} → {tr(shortAmount(review.asset.expectedBalanceAfter, review.asset.decimals, 'down'))} {tr(symbol)}</dd></div>
         <div><dt>{tr("Calldata")}</dt><dd><code>{tr(review.transaction.data)}</code>{tr(" (token transfer)")}</dd></div>
       </> : <>
         <div><dt>{tr("Exact value")}</dt><dd className="numeric">{tr(formatEth(review.value))}{tr(" ETH (")}{tr(review.value)}{tr(" wei)")}</dd></div>
         <div><dt>{tr("Calldata")}</dt><dd><code>{tr(review.transaction.data)}</code>{tr(" (none: native transfer)")}</dd></div>
       </>}
-      <div><dt>{tr("Current balance")}</dt><dd className="numeric">{tr(formatEth(review.balanceBefore))}{tr(" ETH")}</dd></div>
-      <div><dt>{tr("Expected balance after")}</dt><dd className="numeric">{tr(formatEth(review.expectedBalanceAfter))}{tr(selfTransfer && !review.asset ? ' ETH (value returns to the owner; only the fee is spent)' : ' ETH')}</dd></div>
+      <div><dt>{tr("Current balance")}</dt><dd className="numeric">{tr(ethShort(review.balanceBefore, 'down'))}{tr(" ETH")}</dd></div>
+      <div><dt>{tr("Expected balance after")}</dt><dd className="numeric">{tr(ethShort(review.expectedBalanceAfter, 'down'))}{tr(selfTransfer && !review.asset ? ' ETH (value returns to the owner; only the fee is spent)' : ' ETH')}</dd></div>
       <div><dt>{tr("Gas estimate")}</dt><dd className="numeric">{tr(review.gasEstimate)}{tr(" gas (limit ")}{tr(review.gasLimit)})</dd></div>
-      <div><dt>{tr("Expected network cost")}</dt><dd className="numeric">{tr(formatEth(review.expectedFee))}{tr(" ETH")}</dd></div>
-      <div><dt>{tr("Maximum fee budget")}</dt><dd className="numeric">{tr(formatEth(review.feeBudget))}{tr(" ETH (")}{tr(review.gasLimit)}{tr(" gas × ")}{tr(review.maxFeePerGas)}{tr(" wei)")}</dd></div>
-      <div><dt>{tr("Worst-case balance after")}</dt><dd className="numeric">{tr(formatEth(review.minimumBalanceAfter))}{tr(" ETH")}</dd></div>
+      <div><dt>{tr("Expected network cost")}</dt><dd className="numeric">{tr(ethShort(review.expectedFee, 'up'))}{tr(" ETH")}</dd></div>
+      <div><dt>{tr("Maximum fee budget")}</dt><dd className="numeric">{tr(ethShort(review.feeBudget, 'up'))}{tr(" ETH (")}{tr(review.gasLimit)}{tr(" gas × ")}{tr(review.maxFeePerGas)}{tr(" wei)")}</dd></div>
+      <div><dt>{tr("Worst-case balance after")}</dt><dd className="numeric">{tr(ethShort(review.minimumBalanceAfter, 'down'))}{tr(" ETH")}</dd></div>
       <div><dt>{tr("Nonce")}</dt><dd className="numeric">{tr(review.nonce)}</dd></div>
       <div><dt>{tr("Reviewed state")}</dt><dd className="numeric">{tr("block ")}{tr(review.state.block)} · {tr(review.state.blockHash)}</dd></div>
       <div><dt>{tr("Review expires")}</dt><dd>{tr(review.expiresAt)}</dd></div>
@@ -174,8 +182,8 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
       {attempt && !record?.evidence && <a download="flofi-rh-demo-001-execution-record.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record, null, 2))}>{tr("Download execution record")}</a>}
       {/* BUILD-FLOFI-7702-TRANSFER-001: a relayed transfer was sent and paid for by MetaMask's relayer; the owner paid no network fee. */}
       {record?.evidence && observation?.facts?.submission === 'RELAYED' && <p>{tr("Transfer reconciled. MetaMask relayed it for your Smart Account: the relayer {0} paid the network fee ({1} ETH); you paid no network fee and this transfer did not use your nonce.",
-        observation.facts.gasPayer ?? '', formatEth(observation.facts.networkFee ?? '0'))}</p>}
-      {record?.evidence && observation?.facts && observation.facts.submission !== 'RELAYED' && <p>{tr("Transfer reconciled. Exactly one owner-signed transaction, nonce ")}{tr(observation.facts.nonceBefore)} → {tr(observation.facts.nonceAfter)}{tr(", block ")}{tr(observation.facts.blockNumber)}{tr("; network cost ")}{tr(formatEth(observation.facts.fee))}{tr(" ETH; balance ")}{tr(formatEth(observation.facts.balanceBefore))} → {tr(formatEth(observation.facts.balanceAfter))}{tr(" ETH.")}</p>}
+        observation.facts.gasPayer ?? '', ethShort(observation.facts.networkFee ?? '0', 'nearest'))}</p>}
+      {record?.evidence && observation?.facts && observation.facts.submission !== 'RELAYED' && <p>{tr("Transfer reconciled. Exactly one owner-signed transaction, nonce ")}{tr(observation.facts.nonceBefore)} → {tr(observation.facts.nonceAfter)}{tr(", block ")}{tr(observation.facts.blockNumber)}{tr("; network cost ")}{tr(ethShort(observation.facts.fee, 'nearest'))}{tr(" ETH; balance ")}{tr(ethShort(observation.facts.balanceBefore, 'nearest'))} → {tr(ethShort(observation.facts.balanceAfter, 'nearest'))}{tr(" ETH.")}</p>}
       {/* Every reconciled transfer, direct or relayed, offers its Evidence Bundle. */}
       {record?.evidence && observation?.facts && <a download="flofi-rh-demo-001-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a>}
     </>}
