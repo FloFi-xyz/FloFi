@@ -14,13 +14,32 @@
  *              recipient), withdraw and borrow (the asset itself)
  *
  * Bindings are part of the canonical workflow: the sequence hash covers them, and a workflow without bindings keeps its existing hash.
+ *
+ * BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E02/E05): an optional consumption mode says how much of the producer's ACTUAL output the consumer
+ * takes. It is canonical and hashed only when present, so every binding written before it keeps its exact form and hash:
+ *
+ *   (none)   min(cap, delivered): what the earlier step delivers, up to the consumer's own amount (the original rule)
+ *   ALL      min(cap, delivered) as well: all of that step's output, never the wallet's balance; the cap is the upstream's current estimate, which
+ *            authoring keeps in step with the upstream (a stale cap is recalculated or refused before Simulation and Review)
+ *   PERCENT  min(cap, floor(delivered × bps / 10 000)), 1 ≤ bps ≤ 10 000: a share of that step's output, never of the wallet's balance
+ *   FIXED    exactly the cap, taken from that step's output: less delivered than the cap stops the step before anything is signed (never topped
+ *            up from unrelated funds), the rule a Batch Payment leg already applies
+ *
+ * `delivered` is always the producer step's own reconciled (or, for a batch built before signing, guaranteed) output of exactly the bound
+ * asset; an earlier consumer of the same delivery reduces what is left, never what a share is computed from.
  */
 import type { Composition } from './strategy-engine';
 import type { SchemaIssue, StrategyAction, StrategySpec } from './strategy-spec';
 import { orcaLiquidityProfile, uniswapLiquidityProfile, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 import { resolveNetworkAsset } from '../domain/asset-catalogs';
 
-export type WorkflowBindingInput = { readonly step: number; readonly amountFrom: number };
+export type ConsumptionMode = 'ALL' | 'PERCENT' | 'FIXED';
+export const CONSUMPTION_MODES: readonly ConsumptionMode[] = Object.freeze(['ALL', 'PERCENT', 'FIXED']);
+export type WorkflowBindingInput = { readonly step: number; readonly amountFrom: number;
+  /** How much of the producer's actual output the consumer takes (absent: min(cap, delivered), the original rule). */
+  readonly consume?: ConsumptionMode;
+  /** PERCENT only: the share of the producer's actual output, in basis points (1..10 000). */
+  readonly bps?: number };
 export type AssetIdentity = { readonly chainId: string; readonly address: string; readonly decimals: number };
 /** A validated binding with the bound asset's identity and the consumer's cap (native units of that asset). */
 export type WorkflowBinding = WorkflowBindingInput & { readonly asset: AssetIdentity; readonly cap: string;
@@ -38,6 +57,34 @@ export function exactBoundAmount(cap: string | bigint, available: string | bigin
   if (a < c) throw new Error('WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
   return c;
 }
+/** Whether a binding's consumption fields are well formed: `bps` exactly with PERCENT (1..10 000), nothing else. */
+export function consumptionValid(b: Pick<WorkflowBindingInput, 'consume' | 'bps'>): boolean {
+  if (b.consume === undefined) return b.bps === undefined;
+  if (!CONSUMPTION_MODES.includes(b.consume)) return false;
+  return b.consume === 'PERCENT' ? Number.isInteger(b.bps) && b.bps! >= 1 && b.bps! <= 10_000 : b.bps === undefined;
+}
+export type ConsumptionRefusal = 'WORKFLOW_BINDING_NOTHING_RECEIVED' | 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT' | 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT';
+export type Consumption = { readonly ok: true; readonly amount: bigint } | { readonly ok: false; readonly code: ConsumptionRefusal };
+/**
+ * The one consumption rule every resolver applies (confirm runs, user-funded groups and their wallet batches, delegated runs, the Editor's
+ * sequence). `delivered` is what the producer step itself delivered of the bound asset (its reconciled amount, or a batch's guaranteed minimum),
+ * `remaining` what earlier consumers of that same delivery left. Never more than the cap, never more than what is left, never anything else.
+ */
+export function consumption(rule: Pick<WorkflowBinding, 'cap' | 'exact' | 'consume' | 'bps'>, delivered: bigint, remaining: bigint = delivered): Consumption {
+  const cap = BigInt(rule.cap);
+  if (cap <= 0n || delivered < 0n || !consumptionValid(rule)) throw new Error('WORKFLOW_BINDING_AMOUNT_INVALID');
+  const left = remaining < 0n ? 0n : remaining > delivered ? delivered : remaining;
+  if (left <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
+  // A Batch Payment leg and a FIXED consumer spend exactly their amount or nothing: a payment or a fixed amount is never silently reduced.
+  if (rule.exact || rule.consume === 'FIXED') return left < cap ? { ok: false, code: rule.exact ? 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT'
+    : 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT' } : { ok: true, amount: cap };
+  const share = rule.consume === 'PERCENT' ? delivered * BigInt(rule.bps!) / 10_000n : delivered;
+  const amount = [cap, share, left].reduce((a, b) => b < a ? b : a);
+  return amount > 0n ? { ok: true, amount } : { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
+}
+/** The consumption fields of a binding, exactly as the canonical form carries them (nothing when absent). */
+export const consumptionOf = (b: Pick<WorkflowBindingInput, 'consume' | 'bps'>): Pick<WorkflowBindingInput, 'consume' | 'bps'> =>
+  b.consume === undefined ? {} : b.consume === 'PERCENT' ? { consume: b.consume, bps: b.bps! } : { consume: b.consume };
 type Node = Composition['workflow']['nodes'][number];
 type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly nativeId?: string; readonly decimals: number }; readonly amount: string };
 
@@ -102,6 +149,7 @@ export function validateBindings(steps: readonly Composition[], raw: readonly Wo
     const fail = (code: string, field = ''): BindingCheck => ({ ok: false, code, issues: [{ path: `/bindings/${i}${field}`, rule: code }] });
     if (!Number.isInteger(b.step) || !Number.isInteger(b.amountFrom) || b.step < 1 || b.step >= steps.length || b.amountFrom < 0 || b.amountFrom >= b.step)
       return fail('WORKFLOW_BINDING_INVALID');
+    if (!consumptionValid(b)) return fail('WORKFLOW_BINDING_CONSUMPTION_INVALID', b.consume === 'PERCENT' || b.bps !== undefined ? '/bps' : '/consume');
     const consumer = steps[b.step]!, producer = steps[b.amountFrom]!;
     const inputs = stepInputs(consumer);
     if (!inputs.length) return fail('WORKFLOW_BINDING_CONSUMER_UNSUPPORTED', '/step');
@@ -112,14 +160,14 @@ export function validateBindings(steps: readonly Composition[], raw: readonly Wo
     const key = `${b.step}:${input.chainId}:${input.address}`;
     if (seen.has(key)) return fail('WORKFLOW_BINDING_INVALID');
     seen.add(key);
-    out.push({ step: b.step, amountFrom: b.amountFrom, asset: { chainId: input.chainId, address: input.address, decimals: input.decimals }, cap: input.amount,
+    out.push({ step: b.step, amountFrom: b.amountFrom, ...consumptionOf(b), asset: { chainId: input.chainId, address: input.address, decimals: input.decimals }, cap: input.amount,
       ...input.inputAsset ? { inputAsset: input.inputAsset } : {} });
   }
   return { ok: true, bindings: out.sort((a, b) => a.step - b.step || a.amountFrom - b.amountFrom) };
 }
-/** The canonical form a strategy and the sequence hash carry: `{step, amountFrom}` by consumer step. */
+/** The canonical form a strategy and the sequence hash carry: `{step, amountFrom}` (plus its consumption mode, only when set) by consumer step. */
 export const canonicalBindings = (bindings: readonly WorkflowBindingInput[]): WorkflowBindingInput[] =>
-  [...bindings].map(b => ({ step: b.step, amountFrom: b.amountFrom })).sort((a, b) => a.step - b.step || a.amountFrom - b.amountFrom);
+  [...bindings].map(b => ({ step: b.step, amountFrom: b.amountFrom, ...consumptionOf(b) })).sort((a, b) => a.step - b.step || a.amountFrom - b.amountFrom);
 
 /** min(cap, received): the amount a bound step actually uses (native units). Zero means there is nothing to spend. */
 export function boundAmount(cap: string | bigint, received: string | bigint): bigint {

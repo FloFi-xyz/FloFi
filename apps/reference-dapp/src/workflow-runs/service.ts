@@ -40,7 +40,7 @@ import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, earlierSolanaBatchRequestOutcome, EVM_PREPARED_TTL_MS, hasEarlierSolanaBatchRequest, isKoraGroup, isSolanaBatchPrepared, koraGroupNativeCovers,
   prepareGroup, sameSolanaBatchAnswer, settleExpiredSolanaBatch, solanaBatchView, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared,
   type SolanaBatchGroupView } from '../user-funded/groups.ts';
-import { boundStrategy } from '../engine/workflow-bindings';
+import { boundStrategy, consumption } from '../engine/workflow-bindings';
 import { circleFactsOf, circleUpgradeState, consentCircleUpgrade, finalizeCircleAuthorization, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
 import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, expireTokenGasPreparation as expireTokenGas, ownerStepsUnloaded, plannedCodeAfterCircle,
   switchOwnerStepsToCircle } from './owner-step-circle.ts';
@@ -373,7 +373,7 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord, g: GroupR
  * flow) or ends it — instead of the run staying RUNNING (up to its expiry) while every attempt fails again.
  */
 export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BINDING_NOTHING_RECEIVED', 'WORKFLOW_BINDING_NOTHING_GUARANTEED', 'WORKFLOW_BINDING_NOT_EXACT',
-  'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT', 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE',
+  'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT', 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT', 'BATCH_PAYMENT_ATOMIC_EXECUTION_UNAVAILABLE',
   'USER_FUNDED_SIMULATION_UNAVAILABLE', 'AAVE_BENEFICIARY_NOT_OWNER', 'WORKFLOW_SLIPPAGE_UNSUPPORTED', 'USER_FUNDED_GROUP_TOO_MANY_CALLS', 'USER_FUNDED_CHAIN_DISABLED',
   'USER_FUNDED_ACTION_NOT_BUILDABLE', 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED', 'DELEGATION_ASSET_NOT_SUPPORTED', 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED',
   // A transfer or swap of an asset no batch may move (a Stock Token, a token outside the catalog or with other decimals): a run grouped before
@@ -742,15 +742,22 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
     // confirm pass stops the step exactly as before.
     if (available <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
     // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: every exact leg bound to this delivery must be covered in full (their caps together), or none is paid.
-    const exactNeed = composed.bindings.filter(x => x.exact && x.amountFrom === b.amountFrom && x.step >= g.stepFrom && x.step <= g.stepTo
-      && assetKey({ chain: x.asset.chainId, address: x.asset.address }) === asset).reduce((sum, x) => sum + BigInt(x.cap), 0n);
+    // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: so must every FIXED consumer of it (exactly its amount, never topped up from other funds).
+    const sameDelivery = (x: typeof b) => x.amountFrom === b.amountFrom && x.step >= g.stepFrom && x.step <= g.stepTo
+      && assetKey({ chain: x.asset.chainId, address: x.asset.address }) === asset;
+    const exactNeed = composed.bindings.filter(x => x.exact && sameDelivery(x)).reduce((sum, x) => sum + BigInt(x.cap), 0n);
     if (exactNeed > available) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT')
       : refuse('WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
-    if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
+    const fixedNeed = composed.bindings.filter(x => !x.exact && x.consume === 'FIXED' && sameDelivery(x)).reduce((sum, x) => sum + BigInt(x.cap), 0n);
+    if (exactNeed + fixedNeed > available) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT')
+      : refuse('WORKFLOW_BINDING_INSUFFICIENT_FOR_FIXED_AMOUNT');
+    // A share (PERCENT) is computed from what the producer itself delivered, never from what earlier consumers left (that only bounds it).
+    const delivered = amountsAvailable(steps[b.amountFrom]?.outcome, asset).reduce((sum, r) => sum + BigInt(r.amount), 0n);
+    if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString(), delivered: delivered.toString() });
     if (g.namespace === 'solana') {
-      const left = available - (allocated.get(share) ?? 0n);
-      if (left <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
-      const used = left < BigInt(b.cap) ? left : BigInt(b.cap);
+      const taken = consumption(b, delivered, available - (allocated.get(share) ?? 0n));
+      if (!taken.ok) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, taken.code) : refuse(taken.code);
+      const used = taken.amount;
       allocated.set(share, (allocated.get(share) ?? 0n) + used);
       const alone = composeWorkflowBound(boundStrategy(composed.steps[b.step]!.strategy, used, b.asset.decimals, b.inputAsset), undefined);
       if (!alone.ok || alone.steps.length !== 1) return refuse('WORKFLOW_STEP_STALE');

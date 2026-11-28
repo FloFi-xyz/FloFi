@@ -32,7 +32,8 @@
  *
  * A step bound to an earlier step spends min(its cap, the producer's GUARANTEED output): a same-group swap's signed minimum, a borrow's exact
  * amount, or — for a group that waits for a bridge delivery — the bridge's signed minimum delivery on this chain (`guaranteed` seed). It is
- * never an estimate; anything received above it stays in the owner's account. Anything else is refused with a closed code.
+ * never an estimate; anything received above it stays in the owner's account. Anything else is refused with a closed code. Its consumption mode
+ * (`engine/workflow-bindings.ts` `consumption`) applies to that guarantee: a share of it, or a fixed amount it must cover before signing.
  */
 import { uniswapV3PoolAddress } from '@defi-workflow-engine/action-registry';
 import { encodeSwap, erc7710 } from '@defi-workflow-engine/reference-compiler';
@@ -44,6 +45,7 @@ import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from
 import { assetKey, type StepRequirement, type WorkflowRequirement } from '../delegation/steps.ts';
 import { quoteExactInputSingle } from '../delegation/workflow-grants.ts';
 import { acrossDepositCalldata, bridgeRouteKey, bridgeStepRefusal, buildAcrossDeposit, type AcrossDepositUserCall, type AcrossRoutes } from './bridge-calls.ts';
+import { consumption } from '../engine/workflow-bindings';
 
 const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
@@ -81,7 +83,9 @@ export type UserCall =
   | { readonly kind: 'DEADLINE_GUARD'; readonly router: string; readonly deadline: string }
   /** P0 hotfix (E1): a certified Router bridge's Across deposit (`bridge-calls.ts`); the owner is depositor and recipient, its delivery is reconciled. */
   | AcrossDepositUserCall;
-export type AssetAmountFact = { readonly asset: string; readonly amount: string };
+export type AssetAmountFact = { readonly asset: string; readonly amount: string;
+  /** A `guaranteed` seed only: what the producer itself delivered (a PERCENT share's base), when earlier consumers already took part of `amount`. */
+  readonly delivered?: string };
 /** One step of a group: its calls (indices), what it spends exactly, and its guaranteed / quoted output (when it produces one). */
 export type GroupStepCalls = { readonly stepIndex: number; readonly calls: readonly number[]; readonly spend: AssetAmountFact;
   readonly guaranteed: AssetAmountFact | null; readonly quoted: AssetAmountFact | null;
@@ -305,6 +309,8 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
   if (!EVM_ADDRESS.test(owner)) return { ok: false, stepIndex: from, code: 'GAS_PAYER_UNKNOWN' };
   const calls: UserCall[] = [], out: GroupStepCalls[] = [];
   const guaranteed = new Map<number, AssetAmountFact>(deps.guaranteed ?? []);
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: what each producer guaranteed in total (a PERCENT share is a share of it, never of what is left).
+  const delivered = new Map<number, bigint>([...guaranteed].map(([step, fact]) => [step, BigInt(fact.delivered ?? fact.amount)]));
   // What the owner's existing allowances still cover as the batch spends them, per (token, spender): read once from the chain, then drawn down in
   // call order. A spend it covers needs no approval; one it does not gets an exact approval (preceded by a reset to 0 when the current allowance
   // is non-zero), after which the remaining allowance is what that approval leaves (zero once spent).
@@ -383,11 +389,13 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const produced = guaranteed.get(binding.amountFrom);
       const key = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
       if (!produced || produced.asset !== key || key !== inKey) return refuse('WORKFLOW_BINDING_NOT_EXACT');
-      const available = BigInt(produced.amount), cap = BigInt(binding.cap);
-      amount = available < cap ? available : cap;
-      if (amount <= 0n) return refuse('WORKFLOW_BINDING_NOTHING_GUARANTEED');
+      const available = BigInt(produced.amount);
       // BUILD-FLOFI-BATCH-PAYMENT-AND-MCP-HARDENING-001: a Batch Payment leg is paid exactly or not at all (the whole atomic batch is then refused).
-      if (binding.exact && amount < cap) return refuse('WORKFLOW_BINDING_INSUFFICIENT_FOR_EXACT_PAYMENT');
+      // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001: the binding's consumption mode, against the GUARANTEED output only (a FIXED amount the
+      // producer does not guarantee is refused before signing; the owner's other balance never tops it up).
+      const taken = consumption(binding, delivered.get(binding.amountFrom) ?? available, available);
+      if (!taken.ok) return refuse(taken.code === 'WORKFLOW_BINDING_NOTHING_RECEIVED' ? 'WORKFLOW_BINDING_NOTHING_GUARANTEED' : taken.code);
+      amount = taken.amount;
       // Several consumers of one guarantee share it: each spends what the earlier ones left.
       guaranteed.set(binding.amountFrom, { asset: produced.asset, amount: (available - amount).toString() });
     }
@@ -479,7 +487,7 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
         { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', router: profile.router, tokenIn: need.tokenIn, tokenOut: need.tokenOut, fee: profile.fee, amountIn: amount.toString(),
           amountOutMinimum: minimum.toString(), quotedAmountOut: quoted.toString(), ...deps.deadline !== undefined ? { deadline: String(deps.deadline) } : {} });
       const outKey = assetKey({ chain: step.chain, address: need.tokenOut });
-      guaranteed.set(step.index, { asset: outKey, amount: minimum.toString() });
+      guaranteed.set(step.index, { asset: outKey, amount: minimum.toString() }); delivered.set(step.index, minimum);
       out.push({ stepIndex: step.index, calls: indices, spend, guaranteed: { asset: outKey, amount: minimum.toString() }, quoted: { asset: outKey, amount: quoted.toString() }, recipient: null });
     } else if (need.kind === 'EVM_AAVE_V3_SUPPLY' || need.kind === 'EVM_AAVE_V3_BORROW') {
       const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
@@ -494,7 +502,7 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
         if (binding) return refuse('WORKFLOW_BINDING_NOT_EXACT');
         const indices = push({ kind: 'AAVE_V3_BORROW', pool: need.pool, asset: need.asset, amount: amount.toString() });
         const outKey = assetKey({ chain: step.chain, address: need.asset });
-        guaranteed.set(step.index, { asset: outKey, amount: amount.toString() });
+        guaranteed.set(step.index, { asset: outKey, amount: amount.toString() }); delivered.set(step.index, amount);
         // A borrow spends nothing from the wallet; it delivers exactly `amount` of debt-backed asset to the owner.
         out.push({ stepIndex: step.index, calls: indices, spend: { asset: outKey, amount: '0' }, guaranteed: { asset: outKey, amount: amount.toString() }, quoted: null, recipient: null });
         const debtKey = need.asset.toLowerCase();
@@ -523,7 +531,7 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const indices = push({ kind: 'AAVE_V3_WITHDRAW', pool: need.pool, asset: need.asset, amount: amount.toString(), aToken: need.aToken,
         variableDebtToken: need.variableDebtToken });
       const outKey = assetKey({ chain: step.chain, address: need.asset });
-      guaranteed.set(step.index, { asset: outKey, amount: amount.toString() });
+      guaranteed.set(step.index, { asset: outKey, amount: amount.toString() }); delivered.set(step.index, amount);
       // Like a borrow, a withdrawal spends nothing from the wallet: it delivers exactly `amount` of the underlying to the owner.
       out.push({ stepIndex: step.index, calls: indices, spend: { asset: outKey, amount: '0' }, guaranteed: { asset: outKey, amount: amount.toString() }, quoted: null, recipient: null });
     } else return refuse('USER_FUNDED_ACTION_NOT_BUILDABLE');

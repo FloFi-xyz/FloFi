@@ -194,6 +194,11 @@ export const WorkflowBindingSchema = Type.Object({
     'the person stated. A cross-chain change of asset is never a binding: it is one bridge step with `outputAsset`.' }),
   amountFrom: Type.Integer({ minimum: 0, maximum: MAX_WORKFLOW_STEPS - 2, description: 'An earlier step (0-based index) whose actual reconciled output of the ' +
     'dependent step\'s input asset funds it: min(cap, received). Never an estimate.' }),
+  consume: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('PERCENT'), Type.Literal('FIXED')], { description: 'Optional: how much of the earlier ' +
+    'step\'s actual output the dependent step spends. ALL: all of it, up to the step\'s amount. PERCENT: `bps` of it, up to the step\'s amount. FIXED: exactly ' +
+    'the step\'s amount, refused before signing when the earlier step delivered less. Never the wallet\'s other balance. Absent: up to the step\'s amount.' })),
+  bps: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000, description: 'With `consume: PERCENT` only: the share of the earlier step\'s actual output, ' +
+    'in basis points (5000 = half).' })),
 }, strict);
 export const StrategyWorkflowSchema = Type.Object({
   version: Type.Literal(2, { description: 'Step-list workflow contract.' }),
