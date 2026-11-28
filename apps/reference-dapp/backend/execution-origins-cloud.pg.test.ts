@@ -46,7 +46,7 @@ beforeAll(async () => {
   t = await createTestDatabase({ migrated: false }); db = t.db;
   const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
   const forward = await Promise.all(certificate.migrations.map(async m => ({ ...m, sql: await readFile(forwardMigrationSqlUrl(m), 'utf8') })));
-  expect(await migrate(db, [...await loadMigrations(), ...forward])).toHaveLength(37);
+  expect(await migrate(db, [...await loadMigrations(), ...forward])).toHaveLength(38);
   await db.query(`INSERT INTO mcp_accounts (tenant_id, account_id) VALUES ('default', $1)`, [accountId]);
   await db.query(`INSERT INTO mcp_oauth_grants (tenant_id, grant_id, account_id, client_id, client_name, scopes, resource)
     VALUES ('default', $3, $1, $2, 'Totally Claude', ARRAY['flofi.approval'], 'https://flofi.example/mcp')`, [accountId, CHATGPT, GRANT]);
