@@ -30,6 +30,7 @@ import { SolanaTransferPanel } from './solana-transfer-panel';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import type { ToolboxMode } from '../domain/canvas-layout';
 import { CowPanel } from './cow-panel';
 import { useCow } from '../state/cow-store';
@@ -59,7 +60,7 @@ import { CanvasLifecycleAction } from './canvas-lifecycle-action';
 import { ActionSettingsPopover } from './artifact-inspector';
 import { CopilotPanel } from './copilot-panel';
 import { useFlofiConversation } from '../state/flofi-conversation';
-import { MobileBuildNavigation } from './mobile-build-navigation';
+import { MobileBuildNavigation, useMobilePane } from './mobile-build-navigation';
 import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace, executeActionPlacement } from './execute-workspace';
@@ -1066,7 +1067,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   [overviewShown, state.workflow, state.error, reviewError, context, workflowReview, actionSetup, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs, batchSetup, batchDrafts]);
   // UX-02: the Simulate and Execute headers name the same networks as the Create header (the configured steps' own networks; presentation only).
   const headNetworks = useMemo(() => overviewShown ? overview.networks : editorOverview(state.workflow, context, null).networks, [overviewShown, overview, state.workflow, context]);
-  const showStep = (nodeId: string) => { selectAction(nodeId); focusCanvasStep(nodeId); };
+  // BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10): on a phone-width screen, one pane at a time (the stage's Plan or the
+  // Conversation), both mounted. A stage change shows its Plan; a reply that arrives while the Plan is shown marks the Conversation tab.
+  const mobile = useMobilePane(tab, conversation.messages.reduce((count, message) => message.role === 'you' ? count : count + 1, 0));
+  // "Show step" (the Assistant's plan overview) brings the card into view: the Plan pane is shown first, synchronously, so the Canvas can focus it.
+  const showStep = (nodeId: string) => { if (mobile.pane !== 'plan') flushSync(() => mobile.show('plan')); selectAction(nodeId); focusCanvasStep(nodeId); };
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): the Review's validity ends at a known time; the Editor re-renders then, so Execute, its footer and the
   // Assistant say "expired" at once (the panels keep their own timers too). Never a request: only this render.
   const reviewUntil = groupedPrimary ? workflowRunHere.review?.validUntil ? Date.parse(workflowRunHere.review.validUntil) : null : lifecycleControls.view.expiresAt;
@@ -1252,7 +1257,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const footerAction = tab === 'Execute' ? chatFirst ? executeFooterAction : reviewBlock ? reviewFooterAction : undefined
     : tab === 'Build' ? createAction : undefined;
   const footerStatusSource = !chatFirst ? undefined : tab === 'Execute' ? executeSimulation : tab === 'Simulate' && groupedPrimary ? groupedSimulationFooter : footerSimulation;
-  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
+  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive} data-mobile-pane={mobile.pane}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     {/* Execution UX regression fixes: no previous-workflow banner here. Previous and ongoing executions are in My Workflows (and the Dashboard);
         their records keep being reconciled server-side, and a run of the shown workflow is followed in place. */}
@@ -1279,7 +1284,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
             invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason} sequenceNote={sequenceNote} technical={technical}/> : undefined}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
-      <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
+      <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'} pane={mobile.pane} onPane={mobile.show} unread={mobile.unread}/>
       {state.error && <div className="error-banner" role="alert"><strong>{tr("Edit not applied")}</strong><span>{tr(tab !== 'Build' ? 'Review the workflow configuration on the Canvas before simulating again.' : state.error)}</span></div>}
     </main>)}{/* BUILD-FLOFI-UX-EDITOR-FINOPS-001: one contextual footer on every stage of the public Editor (step count, the stage's status, ONE primary action). */}
     {(chatFirst || tab !== 'Execute' || reviewBlock) && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction primaryAction={footerAction ?? undefined} overview={overview} showStep={showStep}

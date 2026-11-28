@@ -1752,6 +1752,17 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
   .canvas-head .canvas-utility-tools button { width: 44px; padding-inline: 0; }
   .canvas-head .canvas-utility-tools button span { display: none; }
 }
+/* BUILD-FLOFI-PRODUCT-RELIABILITY-REVENUE-001 (E11, P2-04, A10): where the existing phone navigation is shown (up to 800 px) its two shortcuts
+   become a Plan / Conversation switch that shows one pane at a time; both stay mounted, the other is only hidden. Wider screens are unchanged. */
+.mobile-pane-tabs { display: flex; gap: 8px; flex: 2 1 0; min-width: 0; }
+.mobile-build-navigation .mobile-pane-tabs [role="tab"][aria-selected="true"] { border-color: var(--accent-line); background: var(--blue-soft); color: var(--accent-ink); font-weight: 600; }
+.mobile-pane-unread { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--blue); vertical-align: middle; }
+@media (max-width: 800px) {
+  .app-shell[data-mobile-pane="conversation"] .build-workspace .build-grid > .canvas { display: none; }
+  .app-shell[data-mobile-pane="plan"] .build-workspace .build-grid > .copilot { display: none; }
+  .app-shell[data-mobile-pane="conversation"] .stage-with-chat > .main > :not(.mobile-build-navigation) { display: none; }
+  .app-shell[data-mobile-pane="plan"] .stage-with-chat > .copilot { display: none; }
+}
 
 /* BUILD-AUTOMATION-001: the Automations workspace (secondary workspace) and its in-app notice on the product stages. */
 .automation-list{display:grid;gap:16px}
